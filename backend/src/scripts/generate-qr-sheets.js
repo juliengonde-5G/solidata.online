@@ -56,10 +56,85 @@ async function generateQRBuffer(data, size) {
 }
 
 /**
+ * Étiquette en PAYSAGE, pour planche pré-découpée (AVERY 105 × 74,25 mm).
+ * Composition en deux colonnes : QR à gauche, informations à droite.
+ *
+ * Toutes les écritures de texte sont bornées en largeur ET en hauteur, avec
+ * `lineBreak: false` ou `ellipsis` : un libellé trop long est tronqué et ne
+ * peut JAMAIS pousser PDFKit à créer une page supplémentaire.
+ */
+function drawLabelPaysage(doc, cav, qrBuffer, x, y, labelW, labelH) {
+  const pad = 4 * MM;
+  const barH = 9 * MM;
+
+  // Cadre + barre de titre
+  doc.save();
+  doc.roundedRect(x + 2, y + 2, labelW - 4, labelH - 4, 8)
+     .lineWidth(1.2).strokeColor(GREEN).stroke();
+  doc.roundedRect(x + 3, y + 3, labelW - 6, barH, 6).fill(GREEN);
+  doc.font('Helvetica-Bold').fontSize(12).fillColor('#FFFFFF')
+     .text('SOLIDATA', x + pad, y + 6, { width: labelW - 2 * pad, align: 'left', lineBreak: false });
+  doc.font('Helvetica').fontSize(6).fillColor('#FFFFFF')
+     .text('Solidarité Textiles — Collecte & Valorisation', x + pad, y + 7.5,
+       { width: labelW - 2 * pad, align: 'right', lineBreak: false });
+
+  // Colonne gauche : QR, aussi grand que la hauteur utile le permet.
+  const zoneH = labelH - barH - 2 * pad - 3;
+  const qrSize = Math.min(zoneH, 46 * MM);
+  const qrX = x + pad;
+  const qrY = y + barH + pad;
+  doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
+
+  // Colonne droite : informations, alignées sur le haut du QR.
+  const txtX = qrX + qrSize + 4 * MM;
+  const txtW = x + labelW - pad - txtX;
+  let ty = qrY + 1 * MM;
+
+  doc.font('Helvetica-Bold').fontSize(13).fillColor(DARK)
+     .text(`CAV #${cav.id}`, txtX, ty, { width: txtW, lineBreak: false });
+  ty += 16;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(GREEN)
+     .text((cav.commune || '').toUpperCase(), txtX, ty,
+       { width: txtW, height: 22, ellipsis: true });
+  ty += 20;
+
+  // Adresse : le nom de commune est retiré s'il ouvre déjà l'adresse, et le
+  // texte est borné à deux lignes (au-delà, il serait tronqué proprement).
+  let address = cav.address || '';
+  if (cav.commune && address.toLowerCase().startsWith(cav.commune.toLowerCase())) {
+    address = address.substring(cav.commune.length).replace(/^\s*[-–—]\s*/, '').trim();
+  }
+  doc.font('Helvetica').fontSize(7).fillColor(GRAY)
+     .text(address, txtX, ty, { width: txtW, height: 24, ellipsis: true });
+  ty += 26;
+
+  const nb = cav.nb_containers || 1;
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(DARK)
+     .text(`${nb} conteneur${nb > 1 ? 's' : ''}`, txtX, ty, { width: txtW, lineBreak: false });
+
+  // Pied de page discret, ancré au bas de l'étiquette.
+  doc.font('Helvetica').fontSize(5).fillColor(GRAY)
+     .text('solidata.online — Ne pas retirer cette étiquette',
+       x + pad, y + labelH - pad - 6,
+       { width: labelW - 2 * pad, align: 'center', lineBreak: false });
+
+  doc.restore();
+}
+
+/**
  * Dessine une étiquette CAV sur le PDF à la position (x, y)
  * Format adaptatif selon la taille (A7 ou A8)
  */
 function drawLabel(doc, cav, qrBuffer, x, y, labelW, labelH, format) {
+  // Les planches pré-découpées AVERY sont en PAYSAGE (105 × 74,25 mm) : la
+  // mise en page verticale des formats A7/A8 (barre + QR 42 mm + 4 lignes de
+  // texte + pied ≈ 86 mm) n'y tient pas. Elle débordait de l'étiquette — et
+  // un texte qui déborde fait AJOUTER une page à PDFKit, d'où les pages
+  // blanches constatées. Le paysage a donc sa propre composition : QR à
+  // gauche, informations à droite.
+  if (format === 'AVERY') return drawLabelPaysage(doc, cav, qrBuffer, x, y, labelW, labelH);
+
   const margin = 6 * MM;
   const innerW = labelW - 2 * margin;
 
