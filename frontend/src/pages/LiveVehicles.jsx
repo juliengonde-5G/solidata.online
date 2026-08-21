@@ -546,7 +546,7 @@ function ProgressBar({ pct, color = '#0D9488' }) {
   );
 }
 
-function ExpandedDetail({ tour, color }) {
+function ExpandedDetail({ tour, color, onRefresh }) {
   return (
     <div>
       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2">
@@ -599,6 +599,12 @@ function ExpandedDetail({ tour, color }) {
           </tbody>
         </table>
       </div>
+
+      {/* Reprendre la main sur la tournée : programme (ordre, ajout/retrait de
+          points), équipe (chauffeur/suiveurs) — panneau dédié, source de
+          vérité propre (GET /tours/:id/programme), sans toucher au tableau
+          ci-dessus ni au reste de la page. */}
+      <TourProgrammePanel tourId={tour.id} onChanged={onRefresh} />
 
       {/* Canal manager → chauffeur (item 62) */}
       <TourMessagePanel tour={tour} />

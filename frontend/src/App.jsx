@@ -42,6 +42,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const AdminPredictive = lazy(() => import('./pages/AdminPredictive'));
 const CollectionProposals = lazy(() => import('./pages/CollectionProposals'));
 const RouteTemplates = lazy(() => import('./pages/RouteTemplates'));
+const AdminLieuxTechniques = lazy(() => import('./pages/AdminLieuxTechniques'));
 const InsertionParcours = lazy(() => import('./pages/InsertionParcours'));
 const ActionsCIP = lazy(() => import('./pages/ActionsCIP'));
 const AuditInsertion = lazy(() => import('./pages/AuditInsertion'));
@@ -204,6 +205,7 @@ function App() {
               <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />
               <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CollectionProposals /></ProtectedRoute>} />
               <Route path="/route-templates" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><RouteTemplates /></ProtectedRoute>} />
+              <Route path="/admin-lieux-techniques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminLieuxTechniques /></ProtectedRoute>} />
               <Route path="/cav-map" element={<Navigate to="/fill-rate" replace />} />
               <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><FillRateMap /></ProtectedRoute>} />
               <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Vehicles /></ProtectedRoute>} />
