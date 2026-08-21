@@ -7,6 +7,7 @@
  *
  * SUPPRIMÉ (cascade FK) avec chaque tournée :
  *   - tour_cav / tour_association_point   (points de passage)
+ *   - tour_arret_technique                (arrêts techniques du programme)
  *   - tour_weights                        (pesées de tournée)
  *   - gps_positions                       (trace GPS)
  *   - tour_reoptimizations                (ré-optimisations)
@@ -30,9 +31,11 @@
  * dashboard, listes) et l'onglet « passages » de l'historique AdminCAV se vide
  * pour ces tournées ; les tonnages, incidents et mouvements de stock restent.
  *
- * Seules les tournées `completed` sont touchées — jamais les planifiées, en
- * cours ou annulées. Transactionnel ; l'opération est journalisée dans
- * `rgpd_audit_log` (action TOURS_PURGE).
+ * PÉRIMÈTRE PAR DÉFAUT : seules les tournées `completed` sont touchées — jamais
+ * les planifiées, en cours ou annulées. Les options --planifiees / --annulees
+ * l'élargissent statut par statut, et --anterieures prend TOUT ce qui précède
+ * aujourd'hui (voir ci-dessous). Transactionnel ; l'opération est journalisée
+ * dans `rgpd_audit_log` (action TOURS_PURGE).
  *
  * USAGE (dans le conteneur backend) :
  *   node src/scripts/purge-tournees-realisees.js                     # simulation
@@ -47,6 +50,20 @@
  *                                    #   Le jour même et les jours à venir sont
  *                                    #   TOUJOURS préservés.
  *   node src/scripts/purge-tournees-realisees.js --planifiees --annulees --apply
+ *
+ *   node src/scripts/purge-tournees-realisees.js --anterieures --apply
+ *                                    # TOUTES les tournées datées d'AVANT
+ *                                    #   aujourd'hui, quel que soit leur statut
+ *                                    #   (réalisées, planifiées, annulées, et
+ *                                    #   même restées « en cours » d'un jour
+ *                                    #   passé — une tournée abandonnée la
+ *                                    #   veille n'a plus de raison d'être).
+ *                                    #   Le jour même et les jours à venir sont
+ *                                    #   TOUJOURS préservés : on ne détruit
+ *                                    #   jamais le travail en cours ni le
+ *                                    #   planning à venir.
+ *                                    #   Le récapitulatif détaille la
+ *                                    #   répartition par statut AVANT d'écrire.
  */
 
 const pool = require('../config/database');
@@ -73,6 +90,7 @@ const DETACH_PAR_FK = [
 const CASCADE = [
   'tour_cav',
   'tour_association_point',
+  'tour_arret_technique',
   'tour_weights',
   'gps_positions',
   'tour_reoptimizations',
@@ -87,6 +105,7 @@ function parseArgs(argv) {
   const apply = argv.includes('--apply');
   const planifiees = argv.includes('--planifiees');
   const annulees = argv.includes('--annulees');
+  const anterieures = argv.includes('--anterieures');
   let avant = null;
   for (const a of argv) {
     if (a.startsWith('--avant=')) {
@@ -97,7 +116,7 @@ function parseArgs(argv) {
       avant = v;
     }
   }
-  return { apply, avant, planifiees, annulees };
+  return { apply, avant, planifiees, annulees, anterieures };
 }
 
 /**
@@ -111,17 +130,33 @@ function parseArgs(argv) {
  *                 PASSÉES et JAMAIS DÉMARRÉES (`started_at IS NULL`). Une
  *                 tournée planifiée pour aujourd'hui ou pour les jours à venir
  *                 n'est JAMAIS purgée : elle est encore attendue ;
- * - `cancelled` : incluses avec --annulees.
+ * - `cancelled`    : incluses avec --annulees ;
+ * - `--anterieures`: TOUT ce qui est daté d'avant aujourd'hui, quel que soit le
+ *                    statut — y compris une tournée restée « en cours » d'un
+ *                    jour passé, qui n'a plus d'existence opérationnelle.
+ *                    Superset des trois cas ci-dessus : les autres options
+ *                    n'ajoutent alors plus rien. Le jour même et les jours à
+ *                    venir restent hors périmètre dans TOUS les cas — une
+ *                    tournée du jour peut être en cours de réalisation, et le
+ *                    planning à venir est du travail attendu.
+ *
+ * Une tournée sans date (`date IS NULL`) n'est jamais purgée par --anterieures :
+ * on ne détruit pas ce qu'on ne sait pas situer dans le temps.
  */
-function buildWhere({ avant = null, planifiees = false, annulees = false } = {}) {
+function buildWhere({ avant = null, planifiees = false, annulees = false, anterieures = false } = {}) {
   const TODAY_PARIS = "(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date";
-  const blocs = ["status = 'completed'"];
-  if (planifiees) {
-    blocs.push(`(status = 'planned' AND started_at IS NULL AND date < ${TODAY_PARIS})`);
-  }
-  if (annulees) blocs.push("status = 'cancelled'");
-  let sql = blocs.length === 1 ? blocs[0] : `(${blocs.join(' OR ')})`;
   const params = [];
+  let sql;
+  if (anterieures) {
+    sql = `date < ${TODAY_PARIS}`;
+  } else {
+    const blocs = ["status = 'completed'"];
+    if (planifiees) {
+      blocs.push(`(status = 'planned' AND started_at IS NULL AND date < ${TODAY_PARIS})`);
+    }
+    if (annulees) blocs.push("status = 'cancelled'");
+    sql = blocs.length === 1 ? blocs[0] : `(${blocs.join(' OR ')})`;
+  }
   if (avant) {
     params.push(avant);
     sql += ` AND date < $${params.length}`;
@@ -139,25 +174,45 @@ async function main() {
     await pool.end().catch(() => {});
     return;
   }
-  const { apply, avant, planifiees, annulees } = args;
+  const { apply, avant, planifiees, annulees, anterieures } = args;
 
   const client = await pool.connect();
   try {
-    const where = buildWhere({ avant, planifiees, annulees });
+    const where = buildWhere({ avant, planifiees, annulees, anterieures });
 
     const cible = (await client.query(
       `SELECT COUNT(*)::int AS n, MIN(date) AS premiere, MAX(date) AS derniere
          FROM tours WHERE ${where.sql}`, where.params
     )).rows[0];
 
-    const perimetre = ['réalisées']
-      .concat(planifiees ? ['planifiées passées jamais démarrées'] : [])
-      .concat(annulees ? ['annulées'] : [])
-      .join(' + ');
-    console.log(`Périmètre : tournées ${perimetre}.`);
+    if (anterieures) {
+      console.log('Périmètre : TOUTES les tournées datées d\'AVANT aujourd\'hui, quel que soit');
+      console.log('leur statut. Le jour même et les jours à venir sont préservés.');
+      if (planifiees || annulees) {
+        console.log('(--planifiees / --annulees sont sans effet ici : --anterieures les englobe.)');
+      }
+    } else {
+      const perimetre = ['réalisées']
+        .concat(planifiees ? ['planifiées passées jamais démarrées'] : [])
+        .concat(annulees ? ['annulées'] : [])
+        .join(' + ');
+      console.log(`Périmètre : tournées ${perimetre}.`);
+    }
     console.log(`Tournées ciblées : ${cible.n}`
       + (cible.n ? ` (du ${String(cible.premiere).slice(0, 10)} au ${String(cible.derniere).slice(0, 10)})` : '')
       + (avant ? ` — filtre : date < ${avant}` : ' — toutes'));
+
+    // Répartition par statut : le gestionnaire doit voir NOIR SUR BLANC ce qu'il
+    // s'apprête à supprimer — en particulier d'éventuelles tournées restées
+    // « en cours » d'un jour passé, qu'un périmètre large emporte aussi.
+    if (cible.n) {
+      const parStatut = (await client.query(
+        `SELECT status, COUNT(*)::int AS n FROM tours WHERE ${where.sql}
+          GROUP BY status ORDER BY 2 DESC`, where.params
+      )).rows;
+      console.log('  Répartition par statut :');
+      for (const r of parStatut) console.log(`    - ${r.status} : ${r.n}`);
+    }
     if (!apply) console.log('MODE SIMULATION (aucune écriture) — relancer avec --apply pour purger.\n');
     if (cible.n === 0) {
       console.log('Rien à purger.');
@@ -199,7 +254,13 @@ async function main() {
     await client.query(
       `INSERT INTO rgpd_audit_log (user_id, action, entity_type, details)
        VALUES (NULL, 'TOURS_PURGE', 'tours', $1)`,
-      [JSON.stringify({ nb_tournees: del.rowCount, filtre_avant: avant, script: 'purge-tournees-realisees.js' })]
+      [JSON.stringify({
+        nb_tournees: del.rowCount,
+        filtre_avant: avant,
+        mode: anterieures ? 'anterieures_a_aujourdhui' : 'par_statut',
+        statuts: anterieures ? 'tous' : ['completed'].concat(planifiees ? ['planned'] : []).concat(annulees ? ['cancelled'] : []),
+        script: 'purge-tournees-realisees.js',
+      })]
     ).catch((err) => console.warn(`  journal rgpd_audit_log ignoré : ${err.message}`));
     await client.query('COMMIT');
     console.log(`\nPurge appliquée (COMMIT) : ${del.rowCount} tournée(s) supprimée(s). Ré-exécutable (re-run = 0).`);

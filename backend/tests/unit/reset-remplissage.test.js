@@ -72,6 +72,51 @@ describe('purge des tournées — périmètre', () => {
   });
 });
 
+describe('purge de tout ce qui précède aujourd’hui (--anterieures)', () => {
+  const purge = require('../../src/scripts/purge-tournees-realisees');
+  const JOUR_PARIS = /date < \(CURRENT_TIMESTAMP AT TIME ZONE 'Europe\/Paris'\)::date/;
+
+  test('le drapeau est reconnu et n’est JAMAIS actif par défaut', () => {
+    expect(purge.parseArgs([]).anterieures).toBe(false);
+    expect(purge.parseArgs(['--anterieures']).anterieures).toBe(true);
+    // Sans --apply, aucune suppression : la simulation reste la porte d'entrée.
+    expect(purge.parseArgs(['--anterieures']).apply).toBe(false);
+  });
+
+  test('le filtre ne retient QUE la date, sans condition de statut', () => {
+    const w = purge.buildWhere({ anterieures: true });
+    expect(w.sql).toMatch(JOUR_PARIS);
+    // Aucun statut n'est nommé : tout ce qui précède aujourd'hui est emporté,
+    // y compris une tournée restée « en cours » d'un jour passé.
+    expect(w.sql).not.toMatch(/status/);
+    expect(w.params).toEqual([]);
+  });
+
+  test('le jour même et les jours à venir restent hors périmètre', () => {
+    // La comparaison est STRICTEMENT « < aujourd'hui » : jamais `<=`, jamais
+    // `>`. C'est la seule garde qui protège le travail en cours et le planning.
+    const sql = purge.buildWhere({ anterieures: true }).sql;
+    expect(sql).toMatch(/date < /);
+    expect(sql).not.toMatch(/date <= /);
+  });
+
+  test('--anterieures prime sur --planifiees / --annulees (il les englobe)', () => {
+    const seul = purge.buildWhere({ anterieures: true }).sql;
+    const cumule = purge.buildWhere({ anterieures: true, planifiees: true, annulees: true }).sql;
+    expect(cumule).toBe(seul);
+  });
+
+  test('le filtre --avant se cumule et reste paramétré', () => {
+    const w = purge.buildWhere({ anterieures: true, avant: '2026-08-01' });
+    expect(w.sql).toMatch(/AND date < \$1$/);
+    expect(w.params).toEqual(['2026-08-01']);
+  });
+
+  test('sans le drapeau, le périmètre historique est inchangé (non-régression)', () => {
+    expect(purge.buildWhere({}).sql).toBe("status = 'completed'");
+  });
+});
+
 describe('purge de l’historique (--purger-historique)', () => {
   const { parseArgs, TABLES_HISTORIQUE } = require('../../src/scripts/reset-remplissage-cav');
 
