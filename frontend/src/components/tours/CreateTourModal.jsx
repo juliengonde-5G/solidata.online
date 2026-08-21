@@ -283,7 +283,16 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
             {mode === 'manual' && (
               <div>
                 <p className="text-xs font-medium text-slate-500 uppercase mb-2">Bornes à collecter (dans l'ordre) *</p>
-                <CavPicker value={cavIds} onChange={setCavIds} mode="cav" onOptimize={optimizeOrder} optimizing={optimizing} />
+                <CavPicker
+                  value={cavIds}
+                  onChange={setCavIds}
+                  mode="cav"
+                  onOptimize={optimizeOrder}
+                  optimizing={optimizing}
+                  estimation={estimation}
+                  estimating={estimating}
+                  estimationHint={!vehicleId ? 'Choisissez un véhicule pour calculer la durée prévisionnelle.' : null}
+                />
               </div>
             )}
 
