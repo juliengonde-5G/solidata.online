@@ -47,6 +47,8 @@ Concrètement, un stagiaire peut se tromper, recommencer, tout casser sans risqu
 - Les incidents et anomalies déclarés pendant la démo ne remontent **pas** dans le registre réel d'incidents consulté par les managers.
 - Le véhicule « DÉMO FORMATION » n'est pas un vrai camion de la tournée du jour — il n'entre dans aucun planning réel.
 
+**La formation se fait en salle, pas devant les conteneurs.** Sur une vraie tournée, l'application refuse de valider un point si le téléphone n'est pas à moins de 50 mètres du conteneur — c'est une sécurité contre les validations à distance. En mode démo, ce contrôle est **levé** : le stagiaire peut identifier et « collecter » n'importe quel point du scénario depuis la salle de formation. La règle reste entière sur les vraies tournées.
+
 C'est le serveur qui garantit cette neutralisation : vous n'avez rien à vérifier ni à « annuler » après coup. Une fois la session terminée, il suffit de réinitialiser la démo (§4) pour que le stagiaire suivant reparte d'un état propre.
 
 ## Ce que la démo permet de pratiquer

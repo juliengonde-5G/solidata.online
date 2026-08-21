@@ -5,6 +5,7 @@ import { vibrateSuccess, vibrateError } from '../services/haptic';
 import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
 import { getCurrentPosition, distanceMeters } from '../services/geo';
+import { isDemoModeActive } from '../services/demoMode';
 
 // Sécurité anti-fraude : impossible de valider un point sans être physiquement
 // à proximité du CAV concerné (scan QR, sélection dans la liste, ou code
@@ -42,6 +43,12 @@ export default function IdentifyCav() {
   // inutilisable dès que le GPS est mauvais. Renvoie true si le passage est
   // autorisé (à proximité, coordonnées inconnues, ou géoloc indisponible).
   const ensureNearCav = async (cav) => {
+    // MODE DÉMO (formations) : le stagiaire s'entraîne en salle, à des
+    // kilomètres des vrais CAV du scénario. Le contrôle de présence n'a aucun
+    // sens ici et rendrait l'exercice impossible — il est donc levé. La règle
+    // reste ENTIÈRE sur les vraies tournées : le mode démo ne s'active que par
+    // le lien du véhicule de formation, jamais sur un véhicule d'exploitation.
+    if (isDemoModeActive()) return true;
     const lat = cav?.latitude, lng = cav?.longitude;
     if (lat == null || lng == null) return true; // CAV sans coordonnées connues
     setCheckingProximity(true);
