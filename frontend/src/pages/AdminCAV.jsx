@@ -622,6 +622,7 @@ export default function AdminCAV() {
                       <th className="px-4 py-3">Nom</th>
                       <th className="px-4 py-3">Commune</th>
                       <th className="px-4 py-3 text-center">Cont.</th>
+                      <th className="px-4 py-3">Modèle</th>
                       <th className="px-4 py-3 text-center">QR</th>
                       <th className="px-4 py-3 text-center">Statut</th>
                       <th className="px-4 py-3 text-right">Actions</th>
@@ -651,6 +652,23 @@ export default function AdminCAV() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">{cav.nb_containers || 1}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {(cav.modeles_tournees || []).length > 0 ? (
+                            <span
+                              className="inline-flex items-center gap-1"
+                              title={cav.modeles_tournees.map((m) => m.name).join(', ')}
+                            >
+                              <span className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap max-w-[140px] truncate inline-block align-middle">
+                                {cav.modeles_tournees[0].name}
+                              </span>
+                              {cav.modeles_tournees.length > 1 && (
+                                <span className="text-teal-600 font-medium">+{cav.modeles_tournees.length - 1}</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300" title="Ce CAV n'appartient à aucune tournée modèle active">—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-center">
                           {cav.qr_code_data ? (
                             <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" title="QR généré" />
@@ -676,7 +694,7 @@ export default function AdminCAV() {
                       </tr>
                     ))}
                     {displayedCav.length === 0 && (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Aucun CAV trouvé</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Aucun CAV trouvé</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -712,6 +730,20 @@ export default function AdminCAV() {
                   <div className="flex gap-2">
                     <span className="text-gray-400 w-24 shrink-0">Conteneurs</span>
                     <span className="text-gray-700">{detailCav.nb_containers || 1}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-gray-400 w-24 shrink-0">Modèles</span>
+                    {(detailCav.modeles_tournees || []).length > 0 ? (
+                      <span className="inline-flex flex-wrap gap-1">
+                        {detailCav.modeles_tournees.map((m) => (
+                          <span key={m.id} className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200 text-xs">
+                            {m.name}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">Aucune tournée modèle</span>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <span className="text-gray-400 w-24 shrink-0">GPS</span>

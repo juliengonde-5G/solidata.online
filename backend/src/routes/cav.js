@@ -72,11 +72,22 @@ router.use(autoLogActivity('cav'));
 const minuteBucket = () => new Date().toISOString().slice(0, 16);
 const cavCacheKey = (suffix) => () => `cav:${suffix}:${minuteBucket()}`;
 
+// Appartenance aux modèles de tournées (standard_routes ACTIFS uniquement :
+// un modèle désactivé n'engage plus de passage — il reste visible dans
+// /route-templates). Sous-requête scalaire JSON : pas de GROUP BY à maintenir
+// sur le SELECT * existant, `[]` pour un CAV hors de tout modèle.
+const MODELES_TOURNEES_SUBQUERY = `(
+      SELECT COALESCE(json_agg(json_build_object('id', sr.id, 'name', sr.name) ORDER BY sr.name), '[]'::json)
+        FROM standard_route_cav src
+        JOIN standard_routes sr ON sr.id = src.route_id AND sr.is_active = true
+       WHERE src.cav_id = cav.id
+    ) AS modeles_tournees`;
+
 // GET /api/cav — Liste avec filtres
 router.get('/', async (req, res) => {
   try {
     const { status, commune, search } = req.query;
-    let query = 'SELECT * FROM cav WHERE 1=1';
+    let query = `SELECT *, ${MODELES_TOURNEES_SUBQUERY} FROM cav WHERE 1=1`;
     const params = [];
 
     if (status) { params.push(status); query += ` AND status = $${params.length}`; }
@@ -938,7 +949,9 @@ router.get('/:id/sensor-status', async (req, res) => {
 // GET /api/cav/:id
 router.get('/:id', async (req, res) => {
   try {
-    const cav = await pool.query('SELECT * FROM cav WHERE id = $1', [req.params.id]);
+    const cav = await pool.query(
+      `SELECT *, ${MODELES_TOURNEES_SUBQUERY} FROM cav WHERE id = $1`, [req.params.id]
+    );
     if (cav.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
 
     // Historique de collecte

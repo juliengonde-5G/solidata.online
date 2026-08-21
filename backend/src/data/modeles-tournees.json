@@ -1,0 +1,1354 @@
+{
+  "_source": "Feuille_de_collecte.xlsm — feuille « Listes » (transmise le 21/08/2026)",
+  "_note": "cav_name = nom du CAV en base (référentiel des 209 CAV). source_label conservé quand le libellé du fichier différait (4 rapprochements arbitrés le 21/08/2026). nb_conteneurs_fichier est informatif (le nb de conteneurs de référence reste cav.nb_containers).",
+  "modeles": [
+    {
+      "name": "Rouen Rive Droite 1",
+      "jour": "Lundi",
+      "points": [
+        {
+          "cav_name": "ROUEN - 19 rue du Général Giraud",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 25 rue de la Poterne (Entrée escalier Parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 35 rue Orbe (Près de Franprix)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 72 rue de Martainville",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 Rue François Couperin (Parking Eglise Sainte-Claire)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - Rue du Chanoine Maubec (Angle Ferdinand Marrou - Derrière le Coccinelle)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 41 Rue des Canadiens",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BIHOREL - 15 Rue Philibert Caux (En face de l'école Ste Victrice)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BIHOREL - 34 Rue de Verdun (Parking de la Piscine Transat)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 11 Rue Antheaume (Résidence Vallon Saint Hilaire)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 137 Route de Darnétal",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 37 Rue de l'Enseigne Renaud (Angle Chemin de l'école Jules Ferry)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 5 place Saint Hilaire (Rond point Saint Hilaire)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 49 Boulevard de Verdun (Au pied du Monumental)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 14 Place du Boulingrin (Angle Rampe Beauvoisine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 49 Rue de Bihorel (Angle rue Jouvenet)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 19 rue Charles de Beaurepaire (Angle Côte de Neufchâtel)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 44 Boulevard de la Marne (Angle Rampe Bouvreuil)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 27 Rue Verte (Gare)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 86 Boulevard de l'Yser",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 65 Rue Saint Maur (Angle rue Maladrerie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 3 Place Eglise Saint Gervais",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 43 Rue Stanislas Girardin (Angle rue A. Flaubert)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 23 rue Guillaume d'Estouteville",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 84 Rue du Renard (Ecole Achille Lefort)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 1 Place de la Madeleine (Angle rue Constantine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 29 Rue George d'Ambroise (Angle rue Duguay Trouin)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 79 Rue Amédée Dormoy (A coté de l'entrée Intermarché)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 10 Rue Moise",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 145 Boulevard Jean Jaurès (Face au n°306)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 rue du Loup",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Rouen Rive Droite 2",
+      "jour": "Vendredi",
+      "points": [
+        {
+          "cav_name": "ROUEN - 19 rue du Général Giraud",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 25 rue de la Poterne (Entrée escalier Parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 35 rue Orbe (Près de Franprix)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 72 rue de Martainville",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 Rue François Couperin (Parking Eglise Sainte-Claire)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - Rue du Chanoine Maubec (Angle Ferdinand Marrou - Derrière le Coccinelle)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 41 Rue des Canadiens",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BIHOREL - 15 Rue Philibert Caux (En face de l'école Ste Victrice)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BIHOREL - 34 Rue de Verdun (Parking de la Piscine Transat)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 11 Rue Antheaume (Résidence Vallon Saint Hilaire)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 137 Route de Darnétal",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 37 Rue de l'Enseigne Renaud (Angle Chemin de l'école Jules Ferry)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 5 place Saint Hilaire (Rond point Saint Hilaire)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 49 Boulevard de Verdun (Au pied du Monumental)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 14 Place du Boulingrin (Angle Rampe Beauvoisine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 49 Rue de Bihorel (Angle rue Jouvenet)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 19 rue Charles de Beaurepaire (Angle Côte de Neufchâtel)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 44 Boulevard de la Marne (Angle Rampe Bouvreuil)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 27 Rue Verte (Gare)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 86 Boulevard de l'Yser",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 59 Rue Crevier (Angle rue d'Herbouville)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 15 Rue Tabouret (Angle rue de la Cavée St Gervais)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 29 Rue George d'Ambroise (Angle rue Duguay Trouin)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 65 Rue Saint Maur (Angle rue Maladrerie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 3 Place Eglise Saint Gervais",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 43 Rue Stanislas Girardin (Angle rue A. Flaubert)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 84 Rue du Renard (Ecole Achille Lefort)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 1 Place de la Madeleine (Angle rue Constantine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 79 Rue Amédée Dormoy (A coté de l'entrée Intermarché)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 145 Boulevard Jean Jaurès (Face au n°306)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 rue du Loup",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Rive Gauche Ouest 1",
+      "jour": "Lundi",
+      "points": [
+        {
+          "cav_name": "ROUEN - 9 rue Pierre Forfait (Angle Place de Lattre de Tassigny)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 rue Blaise Pascal (Angle rue d'Elbeuf)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 132 rue du Président Kennedy (Croisement rue de la République)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 87 rue Jean Macé (Croisement rue Francois Mitterand)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 152 rue Gambetta (Croisement rue Paul Langevin - Près école de musique)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 229 Rue Saint Julien (Angle rue Parmentier)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 Rue Roger Bésus (Centre Charlotte Delbo)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 438 Chemin du Gord (Déchetterie - 9h / 12h - 14h 17h00)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 132 Rue de la République (Centre Marx Dormoy)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 41 Avenue J. F. Kennedy",
+          "source_label": "LE GRAND-QUEVILLY - 41 Avenue J. F. Kennedy (Place des Anciens Combattant d'Indochine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 18 Rue Maryse Bastié (Parking école Maryse Bastié)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 1 Rue Joseph-Jérome De Lalande (Parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 26 Rue Michel Corroy (Place Du Québec)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 106 rue Paul Cezanne",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "PETIT-COURONNE - 220 Rue Du 14 Juillet (Croisement rue du Pommeret)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "PETIT-COURONNE - 44 Place Pierre Mendès France (Parking Coccinelle)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "GRAND-COURONNE - 5 Allée de la Côté Mutel (Déchetterie - 9h / 12h - 14h - 17h30)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Rive Gauche Ouest 2",
+      "jour": "Jeudi",
+      "points": [
+        {
+          "cav_name": "ROUEN - 9 rue Pierre Forfait (Angle Place de Lattre de Tassigny)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 rue Blaise Pascal (Angle rue d'Elbeuf)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 132 rue du Président Kennedy (Croisement rue de la République)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 87 rue Jean Macé (Croisement rue Francois Mitterand)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 152 rue Gambetta (Croisement rue Paul Langevin - Près école de musique)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE PETIT-QUEVILLY - 438 Chemin du Gord (Déchetterie - 9h / 12h - 14h 17h00)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "ROUEN - 229 Rue Saint Julien (Angle rue Parmentier)",
+          "source_label": "ROUEN - 221 Rue Saint Julien (Angle allée de la Pépinière)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 Rue Roger Bésus (Centre Charlotte Delbo)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 132 Rue de la République (Centre Marx Dormoy)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 18 Rue Maryse Bastié (Parking école Maryse Bastié)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 1 Rue Joseph-Jérome De Lalande (Parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "PETIT-COURONNE - 220 Rue Du 14 Juillet (Croisement rue du Pommeret)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "PETIT-COURONNE - 44 Place Pierre Mendès France (Parking Coccinelle)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Rive Gauche Est 1",
+      "jour": "Mardi",
+      "points": [
+        {
+          "cav_name": "ROUEN - 46 Rue Desseaux (Proche bac verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 53 rue Desseaux (Resto du Cœur)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 Rue du Mail (Angle Boulevard de l'Europe)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 77 rue Méridienne (Angle Rue Octave Crutel)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 30 avenue du 14 juillet (Parking Stade Sottevillais)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 4 rue du Docteur Galouen",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 103 rue Pierre Mendès-France (Parking Immeuble Habitat 76)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 36 rue Léon Salva (Angle rue Garibaldi)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - Centre Commercial La Vatine (Parking Carrefour)",
+          "nb_conteneurs_fichier": 6
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Rive Gauche Est 2",
+      "jour": "Vendredi",
+      "points": [
+        {
+          "cav_name": "SAINT-ÉTIENNE-DU-ROUVRAY - 47 Rue de Seine (Déchetterie - 9h / 12h - 14h / 17h)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 4 Rue Paul Eluard (Hôpital Psychiatrique)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 30 avenue du 14 juillet (Parking Stade Sottevillais)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 4 rue du Docteur Galouen",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 103 rue Pierre Mendès-France (Parking Immeuble Habitat 76)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 36 rue Léon Salva (Angle rue Garibaldi)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-LÈS-ROUEN - 59 Rue Pierre Bérégovoy (A coté de la colonne à verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 77 rue Méridienne (Angle Rue Octave Crutel)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 26 Rue Michel Corroy (Place Du Québec)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 106 rue Paul Cezanne",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 41 Avenue J. F. Kennedy",
+          "source_label": "LE GRAND-QUEVILLY - 41 Avenue J. F. Kennedy (Place des Anciens Combattant d'Indochine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 46 Rue Desseaux (Proche bac verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 53 rue Desseaux (Resto du Cœur)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 2 Rue du Mail (Angle Boulevard de l'Europe)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Bords de Seine",
+      "jour": "Mardi",
+      "points": [
+        {
+          "cav_name": "VAL-DE-LA-HAYE - 2 Rue Henri Chivé",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "HAUTOT-SUR-SEINE - 8 rue de l'Eglise (Place Poullard)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAHURS - 3 Rue du Bas (Parking Place Maurice Alexandre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-PIERRE-DE-MANNEVILLE - 15 Route de Sahurs (Parking près de la mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "QUEVILLON - 31 Route de Belaitre (Parking Verger et Gite de Belaitre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-MARTIN-DE-BOSCHERVILLE - 17 Chaussée Saint-Georges (Dechetterie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-MARTIN-DE-BOSCHERVILLE - 62 Route de l'Abbaye (Au fond du parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE TRAIT - Boulevard Industriel (Déchetterie LE TRAIT)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE TRAIT - 365 Rue Denis Papin (Parking Carrefour Market)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "HÉNOUVILLE - 9 rue du Stade (Salle polyvalente - Ecole)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "JUMIÈGES - 752 Rue Alphonse Calais (Parking Camping-car)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "YAINVILLE - 1 Rue de la République (Allée derrière la pharmacie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINTE-MARGUERITE-SUR-DUCLAIR - 14 Route de Saint Paër (Parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-PAËR - 119 Route de Duclair (Après le croisement Rue de l'église à coté des bacs à verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-PIERRE-DE-VARENGEVILLE - 240 Rue de la Paix (Parking du Cimetière)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LA VAUPALIÈRE - 133 rue de l'Eglise (Parking en face de l'Espace WAPALLERIA)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Boos 1",
+      "jour": "Lundi",
+      "points": [
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - Centre Commercial La Vatine (Parking Carrefour)",
+          "nb_conteneurs_fichier": 6
+        },
+        {
+          "cav_name": "BOOS - 60 Impasse de la Grande Mare",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "FRANQUEVILLE-SAINT-PIERRE - 962 Rue Pierre Curie (Cimetière)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LE MESNIL-ESNARD - 3 Rue Gontran Pailhès (Carrefour Market)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "BONSECOURS - 23 Rue Camille Saint Saens (Parking du Stade des Hautes Haies)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE MESNIL-ESNARD - 5 Rue des Perets (Parking de l'école)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "AMFREVILLE-LA-MI-VOIE - 25 rue François Mitterrand",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "AMFREVILLE-LA-MI-VOIE - 541 Chemin du Mesnil-Esnard (Parking de la crèche - Ecole Maternelle)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 1 Quai du Pré aux loups (Dechetterie - 8h30 / 18h30)",
+          "nb_conteneurs_fichier": 3
+        },
+        {
+          "cav_name": "SAINT-LÉGER-DU-BOURG-DENIS - 76 rue des Sources (Parking Mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-LÉGER-DU-BOURG-DENIS - 321 Rue des broches",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-JACQUES-SUR-DARNÉTAL - 35 Rue de Verdun (Entre la Mairie et l'Eglise)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 98 Rue Sadi Carnot (Face à la Mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 37 Rue Edouard Branly",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 1 Rue de Préaux (Rond Point de la Girafe - Face à boulangerie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 2 rue Edouard Branly",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 33 Rue du Roule",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Boos 2",
+      "jour": "Vendredi",
+      "points": [
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - Centre Commercial La Vatine (Parking Carrefour)",
+          "nb_conteneurs_fichier": 6
+        },
+        {
+          "cav_name": "BOOS - 60 Impasse de la Grande Mare",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "FRANQUEVILLE-SAINT-PIERRE - 962 Rue Pierre Curie (Cimetière)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LE MESNIL-ESNARD - 3 Rue Gontran Pailhès (Carrefour Market)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "BONSECOURS - 23 Rue Camille Saint Saens (Parking du Stade des Hautes Haies)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE MESNIL-ESNARD - 5 Rue des Perets (Parking de l'école)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "AMFREVILLE-LA-MI-VOIE - 25 rue François Mitterrand",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "AMFREVILLE-LA-MI-VOIE - 541 Chemin du Mesnil-Esnard (Parking de la crèche - Ecole Maternelle)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 1 Quai du Pré aux loups (Dechetterie - 8h30 / 18h30)",
+          "nb_conteneurs_fichier": 3
+        },
+        {
+          "cav_name": "SAINT-LÉGER-DU-BOURG-DENIS - 76 rue des Sources (Parking Mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-LÉGER-DU-BOURG-DENIS - 321 Rue des broches",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-EPINAY - 127 Rue de l'Eglise (Parking de l'école)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-JACQUES-SUR-DARNÉTAL - 35 Rue de Verdun (Entre la Mairie et l'Eglise)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 98 Rue Sadi Carnot (Face à la Mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 1 Rue de Préaux (Rond Point de la Girafe - Face à boulangerie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 8 Sente de la Ravine (Déchetterie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DARNÉTAL - 10 rue aux Juifs",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Darnétal",
+      "jour": "Mercredi",
+      "points": [
+        {
+          "cav_name": "FRANQUEVILLE-SAINT-PIERRE - 962 Rue Pierre Curie (Cimetière)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LE MESNIL-ESNARD - 3 Rue Gontran Pailhès (Carrefour Market)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LE MESNIL-ESNARD - 5 Rue des Perets (Parking de l'école)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "BONSECOURS - 23 Rue Camille Saint Saens (Parking du Stade des Hautes Haies)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 1 Avenue Jacques Chastellain (Ile Lacroix)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROUEN - 1 Quai du Pré aux loups (Dechetterie - 8h30 / 18h30)",
+          "nb_conteneurs_fichier": 3
+        },
+        {
+          "cav_name": "FONTAINE-SOUS-PRÉAUX - 81 Route de la Fontaine (Parking Salle des fêtes)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BOIS-GUILLAUME - 2001 rue Herbeuse (Déchetterie - 9h / 12h - 14h / 17h30)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-MARTIN-DU-VIVIER - 1377 Route de la Vallée (Parking a coté de la Mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-JEAN-DU-CARDONNAY - Côte de la Valette (Déchetterie de Maromme - 8h30 /18h30)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "RONCHEROLLES-SUR-LE-VIVIER - 20 Impasse Des Prés Verts (Parking Centre De Loisirs Les Pépinières)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BIHOREL - 212 Rue du Sansonnet (Parking derrière Centre Commercial du Chapitre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - 27 Boulevard André Siegfried",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - Centre Commercial La Vatine (Parking Carrefour)",
+          "nb_conteneurs_fichier": 6
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Anneville-Ambourville",
+      "jour": "Mercredi",
+      "points": [
+        {
+          "cav_name": "DUCLAIR - 28 rue de Ronnenberg (Face au Relais Dellard - Parking de droite)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "DUCLAIR - 5 impasse du Maupas (Déchetterie Hameau les Monts 9h-12h / 13h30-17h30)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "BERVILLE-SUR-SEINE - 1061 rue du Village (Près de l'église)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BARDOUVILLE - 300 rue de l’Ecole (En face du cimetière)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ANNEVILLE-AMBOURVILLE - 2701 route de Bourg Achard (Déchetterie)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "BOURG-ACHARD - 510 Rue du Dr Duvrac (Parking Loic Gréaume)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LA BOUILLE - 111 Allée des Lauriers",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MOULINEAUX - 79 Chemin des Coquelicots",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 26 Rue Michel Corroy (Place Du Québec)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 106 rue Paul Cezanne",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE GRAND-QUEVILLY - 41 Avenue J. F. Kennedy",
+          "source_label": "LE GRAND-QUEVILLY - 41 Avenue J. F. Kennedy (Place des Anciens Combattant d'Indochine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CANTELEU - 1 Avenue Charles Gounod (En face du collège)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CANTELEU - 7 Rue Alexandre Dumas",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CANTELEU - 36 Avenue de Versailles",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MAROMME - 13 Route de Duclair (Parking Signa)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MAROMME - 2 Rue de Binche (Parking école Delbos)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Barentin 1",
+      "jour": "Lundi",
+      "points": [
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - Centre Commercial La Vatine (Parking Carrefour)",
+          "nb_conteneurs_fichier": 6
+        },
+        {
+          "cav_name": "BARENTIN - Centre commercial du Mesnil Roux (Parking Carrefour en face du Feu Vert)",
+          "nb_conteneurs_fichier": 4
+        },
+        {
+          "cav_name": "MALAUNAY - 10 Rue Louis Lesouef (Parking face à Renault)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MONTVILLE - 1 Sentier des Jumelles (Parking Intermarché)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "MONTVILLE - 693 rue des Reservoirs (Déchetterie - 9h30 / 11h45)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "FONTAINE LE BOURG - 318 rue Delamare Deboutteville",
+          "source_label": "FONTAINE LE BOURG - Sente aux Mulets ((Impasse))",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "QUINCAMPOIX - 11 Rue de Cailly (Parking du Cimetière)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ISNEAUVILLE - 3 Route de Dieppe (Parking Intermarché)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "ISNEAUVILLE - 31 Rue André Le Nosle",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "HOUPPEVILLE - 140 Rue Louis Pasteur (Près des Jardins ouvriers)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "HOUPPEVILLE - 86 rue de la Voix Maline (A coté de la colonne à verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DÉVILLE-LÈS-ROUEN - 51 Rue de la République (Devant Créapolis)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DÉVILLE-LÈS-ROUEN - 18 Impasse Barbet (Déchetterie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BAPEAUME-LÈS-ROUEN - 9021 Rue du Canal (Derrière la Station Service)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "NOTRE-DAME-DE-BONDEVILLE - Rue des Bernardines (Devant les ateliers municipaux)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "NOTRE-DAME-DE-BONDEVILLE - 90 rue des longs Vallons",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Barentin 2",
+      "jour": "Vendredi",
+      "points": [
+        {
+          "cav_name": "MONT-SAINT-AIGNAN - Centre Commercial La Vatine (Parking Carrefour)",
+          "nb_conteneurs_fichier": 6
+        },
+        {
+          "cav_name": "BARENTIN - Centre commercial du Mesnil Roux (Parking Carrefour en face du Feu Vert)",
+          "nb_conteneurs_fichier": 4
+        },
+        {
+          "cav_name": "MALAUNAY - 10 Rue Louis Lesouef (Parking face à Renault)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MONTVILLE - 1 Sentier des Jumelles (Parking Intermarché)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "MONTVILLE - 693 rue des Reservoirs (Déchetterie - 9h30 / 11h45)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "QUINCAMPOIX - 11 Rue de Cailly (Parking du Cimetière)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ISNEAUVILLE - 3 Route de Dieppe (Parking Intermarché)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "ISNEAUVILLE - 31 Rue André Le Nosle",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "HOUPPEVILLE - 86 rue de la Voix Maline (A coté de la colonne à verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "HOUPPEVILLE - 140 Rue Louis Pasteur (Près des Jardins ouvriers)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "NOTRE-DAME-DE-BONDEVILLE - 90 rue des longs Vallons",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "NOTRE-DAME-DE-BONDEVILLE - Rue des Bernardines (Devant les ateliers municipaux)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-JEAN-DU-CARDONNAY - Côte de la Valette (Déchetterie de Maromme - 8h30 /18h30)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DÉVILLE-LÈS-ROUEN - 51 Rue de la République (Devant Créapolis)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BAPEAUME-LÈS-ROUEN - 9021 Rue du Canal (Derrière la Station Service)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "DÉVILLE-LÈS-ROUEN - 8 Rue De Fontenelle",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Yerville",
+      "jour": "Jeudi",
+      "points": [
+        {
+          "cav_name": "YERVILLE - 3 Place Bernard Alexandre",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "VIBEUF - 25 rue de la Mare des Champs (Entrée parking communal)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ETOUTTEVILLE - 520 rue du Prieuré (Parking)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "FLAMANVILLE - 1 Rue de l'Eglise (Intersection Rue de l'Ecole)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "MOTTEVILLE - 156 Rue de la Gare (Face à la gare)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CIDEVILLE - 55 rue du Centre (A côté du garage et bacs verre)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Neufchatel",
+      "jour": "Jeudi",
+      "points": [
+        {
+          "cav_name": "ROCQUEMONT - 709 Grande Rue (Côté Eglise)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "MONTEROLIER - 1 Rue du Mesnil (Devant le terrain de tennis)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOMMERY - 479 rue de la Gare (Parking Gare)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "NEUFCHATEL-EN-BRAY - 29 Impasse de la Gare (Face crèperie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "POMMEREVAL - 989 Route de l'Eglise",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ARDOUVAL - 4 Rue des Bouleaux (Suivre panneau \"Foyer des Jeunes\")",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BELLENCOMBRE - 2 bis Chemin du Cimetière",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "COTTEVRARD - 77 Place de l'Eglise (En face de l'église - Parking au fond)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BOSC LE HARD - 159 Rue des Forges",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Lions Club Louviers",
+      "jour": "Mercredi",
+      "points": [
+        {
+          "cav_name": "INCARVILLE - 19 Rue des Prés (Parking Leclerc)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LOUVIERS - 2 rue Saint-Jean (CHU - Dans l'enceinte de l'Hôpital - Parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "QUATREMARE - 3 route de Louviers",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "PITRES - 30 Rue de l'Eglise (Salle des fêtes)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ROMILLY-SUR-ANDELLE - 1674 rue Blingue",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "PONT-SAINT-PIERRE - 2 rue du Collège (Parking de la Piscine)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LA NEUVILLE-CHANT-D'OISEL - Rue du Froc aux Moines (Stade de Foot)",
+          "source_label": "LA NEUVILLE-CHANT-D'OISEL - Rue Georges Brassens (Stade / Service Technique)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "QUÉVREVILLE-LA-POTERIE - Chemin du Vaudin (Parking Salle des fêtes)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BOOS - Rue des Canadiens (Déchetterie Boos - D91 vers Saint-Aubin-Celloville)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LES AUTHIEUX-SUR-LE-PORT-SAINT-OUEN - 260 rue du Docteur Gallouen (Parking de la salle des fêtes)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "GOUY - 28 rue du Poste (Suivre \"Résidence Perelles\" - Sur le parking)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-CELLOVILLE - 12 Rue de la Mairie (Ruelle Atelier Municipal - Salle des Fêtes)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "YMARE - Mairie (Pôle Déchets)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "BELBEUF - 8 rue des canadiens (Parking Salle Jacques Anquetil)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Lions Club 1",
+      "jour": "Mardi",
+      "points": [
+        {
+          "cav_name": "ELBEUF - 26 Rue Leveillé",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ELBEUF - 7 Rue du Neubourg (Carrefour Market - Station Service)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CAUDEBEC-LÈS-ELBEUF - 8 Rue Lenormand",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CAUDEBEC-LÈS-ELBEUF - 856 Rue Emile Zola",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CAUDEBEC-LÈS-ELBEUF - 67 Rue de Strasbourg (Place de l'Assemblée)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "SAINT-PIERRE-LÈS-ELBEUF - 67 rue Galbois (Parking à coté des écoles)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-PIERRE-LÈS-ELBEUF - 625 rue du Puits Mérot (Parking Leader Price / Face à la mairie)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CAUDEBEC-LÈS-ELBEUF - 318 Rue Antoine de Saint Exupery",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CAUDEBEC-LÈS-ELBEUF - 1049 Rue de la Villette",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CAUDEBEC-LÈS-ELBEUF - 627 Rue de la Chaussée (Déchetterie)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Lions Club 2",
+      "jour": "Mardi",
+      "points": [
+        {
+          "cav_name": "LA LONDE - 30 rue des Fusillés (Croisement rue Frete)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LA LONDE - 590 rue Adolphe Marie (Stade de Foot)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-OUEN-DU-TILLEUL - 40 rue des Canadiens (Face à la Mairie)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "LA SAUSSAYE - 22 Route du Neubourg (Derrière le Manoir Saint-Nicolas)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ELBEUF - 2 rue Jean Jaures (Sous le pont Jean Jaurès)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ELBEUF - 13 Rue de Rouen (D 938 sortie ELBEUF)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "ORIVAL - 26 Rue de Rouen",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-PIERRE-LÈS-ELBEUF - Route de Pont de l'Arche (En face L'Auto E.Leclerc)",
+          "nb_conteneurs_fichier": 2
+        },
+        {
+          "cav_name": "MARTOT - 2 rue de l'Eure (Parking Eglise)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    },
+    {
+      "name": "Lions Club 3",
+      "jour": "Mercredi",
+      "points": [
+        {
+          "cav_name": "OISSEL - 6 Avenue Du Général De Gaulle (Centre Commercial Saint Julien)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "OISSEL - Rue Masson (Place de la république)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "TOURVILLE-LA-RIVIÈRE - Avenue Gustave Picard (Parking Carrefour)",
+          "nb_conteneurs_fichier": 4
+        },
+        {
+          "cav_name": "TOURVILLE-LA-RIVIÈRE - Rue Jean Jaures (Place de la Poste)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "FRENEUSE - 4 rue Côte aux Blancs",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SOTTEVILLE-SOUS-LE-VAL - 2 Chemin des devises (Croisement avec Rue des canadiens)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CLÉON - Rue Marie-Louise et Raymond Boucher (Déchetterie de Cléon - 10h / 18h)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "CLÉON - 83 rue Alain Colas (Parking Leader Price)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-LÈS-ELBEUF - Rue du Docteur Villers (CHI - Parking usagers)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-LÈS-ELBEUF - Rue du Docteur Villers (Entrée EHPAD)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-LÈS-ELBEUF - 20 Espace Foudriots (Derrière La Poste)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-LÈS-ELBEUF - 5 rue Pierre Saint Georges (Gare de Saint Aubin)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "SAINT-AUBIN-LÈS-ELBEUF - 26 Rue de Freneuse (Croisement ruelle Arthus)",
+          "nb_conteneurs_fichier": 1
+        },
+        {
+          "cav_name": "LE HOULME - 73 A rue du Général de Gaulle (Devant l'Association)",
+          "nb_conteneurs_fichier": 1
+        }
+      ]
+    }
+  ]
+}
