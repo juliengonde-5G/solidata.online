@@ -268,3 +268,80 @@ poste (avant/après météo, article de presse avec et sans vignette).
 paramétrage (`frontend/src/components/badgeuse/badgeuseShared.jsx`) ne propose pas encore
 `presse` — les deux nouveaux jobs ne figurent pas non plus au registre de cadence
 `JOB_SCHEDULE` (`routes/monitoring.js`). Voir le rapport de lot.
+
+---
+
+## Lot « carte des tournées » — écran de veille `tournees_carte` (21/08/2026)
+
+**Demande** : « écran position de la tournée → une carte avec la position des véhicules ».
+Le §5 de l'**ADR-0004** avait écarté toute carte sur le kiosque ; son **addendum du
+19/08/2026** révise cette position sans lever les deux motifs d'origine, qui dictent la
+forme livrée : position **approchée** (commune, jamais le point GPS) et fond **dessiné
+localement** (aucune tuile, la CSP du poste reste `'self'`).
+
+**Position affichée : la commune du DERNIER POINT DE COLLECTE relevé.** C'est le choix
+de conception central, et il n'est pas un détail d'implémentation. La piste évidente —
+prendre la dernière position GPS du véhicule et la rattacher à une commune — a été
+**écartée** : elle aurait fait transiter une position fine de salarié dans le code de
+l'écran, où une inattention future aurait suffi à la laisser descendre vers le poste. Le
+dernier point collecté est un **événement de travail** (un conteneur vidé), déjà exposé
+par l'écran `tournees` sous forme de progression. `gps_positions` n'est donc **pas lue du
+tout**, et un test le verrouille : ce qui n'est pas lu ne peut pas fuir.
+
+Conséquence assumée et dite à l'écran : on montre **où la tournée a collecté en dernier**,
+pas où le camion roule à la seconde. Une position qui retarde et qui l'annonce vaut mieux
+qu'une position exacte qu'on n'a pas le droit d'afficher.
+
+**Écran AJOUTÉ, pas remplacé.** `tournees_carte` vient **à côté** de `tournees` (la liste
+des progressions), comme `presse` était venu à côté d'`actus` : ce sont deux écrans, et un
+exploitant qui a configuré la liste ne doit pas la voir se transformer en carte. La liste
+reste utile là où la carte est impossible — une base sans point de collecte géolocalisé.
+
+**Fond de carte** : communes placées au **barycentre de leurs points de collecte** (CAV et
+points d'association), contour = **enveloppe convexe** de ces communes, soit l'emprise
+réelle du réseau de collecte — pas une frontière administrative, que nous n'avons pas en
+base et que nous n'irons pas chercher chez un tiers. La projection est faite **côté
+serveur** (`utils/badgeuse-carte.js`, module PUR) et **détruit la coordonnée** : le poste
+reçoit des points déjà exprimés dans un repère abstrait, et un véhicule ne porte qu'une
+**référence de secteur**. Contrat d'API device en **v1.6** (§3quinquies).
+
+**Deux défauts trouvés par les tests, pas par la relecture** : une coordonnée `NULL`
+devenait l'équateur (`Number(null) === 0`, donc le garde-fou « (0,0) » ne la voyait pas) ;
+et l'enveloppe convexe de points alignés renvoyait un polygone d'aire nulle au lieu d'un
+segment. Deux défauts trouvés par **PostgreSQL réel**, pas par le mock : la jointure par
+nom de commune dupliquait un CAV dès que le référentiel contenait un **homonyme** dans un
+autre EPCI (le référentiel couvre plusieurs EPCI depuis 2.20.0) — d'où une sous-requête
+scalaire ; et `tours.collection_type` vaut `'pav'`, pas `'cav'`.
+
+**Deux défauts trouvés par le RENDU, pas par les tests** : le cadre `overflow: hidden`
+rognait le titre **et la mention « position inconnue »** — l'aveu d'ignorance disparaissait
+de l'écran, exactement ce qu'on ne veut pas ; et sur un territoire compact comme
+l'agglomération, les étiquettes de deux tournées voisines se chevauchaient, illisibles.
+D'où l'espacement vertical global des étiquettes avec amorce vers leur marqueur, et le
+dessin en deux passes (marqueurs puis textes).
+
+**Point de conformité tranché en passant** : la garde « aucune ressource externe » du poste
+(`test_interface_sans_ressource_externe`) refusait la chaîne `http://www.w3.org/2000/svg`,
+que `createElementNS` **exige** pour produire un élément SVG. Un espace de noms XML est un
+**identifiant**, jamais une requête sortante. La garde a été **amendée nominativement**
+(deux espaces de noms W3C, liste close) plutôt que contournée, et **doublée d'une
+contre-épreuve** : une adresse de tuiles OpenStreetMap glissée dans l'interface fait
+toujours tomber le test.
+
+**Tests** : jest badgeuse 625 → 659 (+34 : géométrie pure, contrat du générateur, chaîne
+complète sur PostgreSQL réel), suite backend complète 2254 → 2290 verte, pytest poste
+469 → 470. Migration de la CHECK `badgeuse_contenus.type` **rejouée deux fois** sur une
+base réellement déployée : refus reproduit avant, acceptation après, une seule contrainte
+au terme des deux passes. Captures de recette produites depuis l'interface réelle du poste
+(nominal et deux tournées dans la même commune), typographie mesurée dans le navigateur :
+immatriculation 54 px, au-delà du plancher de 48 px du CDC.
+
+**Reste à la charge de la Direction avant mise en service** (ADR-0004, addendum) :
+**information du CSE** — un écran d'atelier qui montre l'avancement des tournées reste une
+information sur l'activité de salariés identifiables par leur véhicule, même sans position
+fine. À joindre au dossier de consultation déjà prévu (NOTE_JURIDIQUE §9).
+
+**Reste à faire, hors périmètre de ce lot** : `presse` ne figure toujours pas au sélecteur
+de type de l'écran de paramétrage (dette déjà consignée au lot précédent) ; la recette
+matérielle sur le poste réel (lisibilité à 3 m sur le téléviseur, rendu SVG sur Pi 3)
+n'a pas pu être exécutée ici.

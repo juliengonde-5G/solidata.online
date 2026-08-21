@@ -32,8 +32,10 @@ export const TYPE_CONTENU_LABELS = {
   message: 'Message', image: 'Image', planning: 'Planning',
   compte_a_rebours: 'Compte à rebours', meteo: 'Météo',
   annonces: 'Annonces du jour (anniversaires)',
-  actus: "Fil d'actualités",
+  actus: "Fil d'actualités (interne)",
+  presse: 'Actualité nationale (presse)',
   tournees: 'Tournées en cours',
+  tournees_carte: 'Position des tournées (carte)',
   social: 'Réseaux sociaux',
   vak_live: 'Écran VAK (jours de VAK)',
   media: 'Média (image/vidéo)',
@@ -47,10 +49,12 @@ export const TYPE_CONTENU_HINTS = {
   image: "Chemin d'un fichier déjà déployé sur le poste (V1, CSP img-src 'self').",
   planning: 'Planning affiché en texte libre (corps du message).',
   compte_a_rebours: 'Décompte affiché en texte libre (corps du message).',
-  meteo: 'Bloc météo affiché en texte libre (corps du message).',
+  meteo: "Météo du lieu du poste, générée côté serveur (rien à saisir). Le corps du message reste un repli : il ne s'affiche que si aucune prévision n'est disponible.",
   annonces: "Anniversaires du jour (naissance et/ou entrée dans la structure) — prénom + initiale, salariés ayant donné leur accord uniquement. Généré côté serveur, rien à saisir ici.",
   actus: "Dernières brèves du fil d'actualités SOLIDATA (titre + résumé + source). Généré côté serveur.",
+  presse: "Actualité nationale issue de flux de presse — UN ÉCRAN PAR ARTICLE (titre, chapô, source, date). Vignettes rapatriées par le serveur : le poste ne contacte jamais un site de presse. Les vidéos ne sont pas rediffusées (droits d'auteur, ADR-0006).",
   tournees: 'Tournées en cours (véhicule, progression X/Y CAV) — jamais le nom du chauffeur. Généré côté serveur.',
+  tournees_carte: "Véhicules situés à la COMMUNE sur un fond dessiné localement (aucune carte en ligne, aucun point GPS exact, jamais le nom du chauffeur). Nécessite des points de collecte géolocalisés en base. Généré côté serveur.",
   social: "Derniers posts des comptes Instagram/Facebook de la structure (réglage dans « Réseaux sociaux »). Généré côté serveur.",
   vak_live: 'Écran promotionnel injecté automatiquement les jours de VAK active (poids cumulé, jauge objectif). Généré côté serveur.',
   media: 'Image ou vidéo téléversée dans SOLIDATA — servie en local par le poste (hors ligne préservé).',
@@ -59,7 +63,7 @@ export const TYPE_CONTENU_HINTS = {
 
 // Catégories de types (CDC_AFFICHAGE_V2.md §4) — pilotent le formulaire.
 export const TYPES_LEGACY = ['message', 'image', 'planning', 'compte_a_rebours', 'meteo'];
-export const TYPES_GENERATEURS = ['annonces', 'actus', 'tournees', 'social', 'vak_live'];
+export const TYPES_GENERATEURS = ['annonces', 'actus', 'presse', 'tournees', 'tournees_carte', 'social', 'vak_live'];
 // Créés uniquement via les boutons dédiés (upload / partage de lien) — jamais
 // depuis le sélecteur de type générique, jamais de corps/media_url saisis à la main.
 export const TYPES_MEDIA_SERVEUR = ['media', 'lien'];
@@ -73,7 +77,9 @@ export const isMediaServeurType = (type) => TYPES_MEDIA_SERVEUR.includes(type);
 export const TYPE_CONTENU_CONFIG_FIELDS = {
   annonces: [],
   actus: [{ key: 'nb_actus', label: 'Nombre de brèves affichées', min: 1, max: 10, default: 3 }],
+  presse: [{ key: 'nb_articles', label: "Nombre d'articles (un écran chacun)", min: 1, max: 8, default: 3 }],
   tournees: [],
+  tournees_carte: [],
   social: [{ key: 'nb_posts', label: 'Nombre de posts affichés', min: 1, max: 20, default: 5 }],
   vak_live: [],
 };

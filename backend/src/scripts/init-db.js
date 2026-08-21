@@ -7072,7 +7072,7 @@ async function initDatabase() {
         ALTER TABLE badgeuse_contenus ADD CONSTRAINT badgeuse_contenus_type_check
           CHECK (type IN ('message', 'image', 'planning', 'compte_a_rebours', 'meteo',
                           'annonces', 'actus', 'tournees', 'social', 'media', 'lien', 'vak_live',
-                          'presse'));
+                          'presse', 'tournees_carte'));
       END $$;
     `);
 
