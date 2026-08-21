@@ -139,7 +139,6 @@ const JOB_SCHEDULE = {
   syncPennylaneDaily:             { label: 'Sync Pennylane (GL + transactions)', cadence: 'quotidien 2h',      maxAgeHours: DAILY },
   syncPennylaneInvoicesDaily:     { label: 'Sync factures clients Pennylane',    cadence: 'quotidien 4h',      maxAgeHours: DAILY },
   generateDailyPredictions:       { label: 'Prédictions remplissage J..J+7',     cadence: 'quotidien 5h',      maxAgeHours: DAILY },
-  generateNextDayDispatchProposals:{ label: 'Dispatch auto J-1',                 cadence: 'quotidien 18h',     maxAgeHours: DAILY },
   // ── hebdo / mensuel / annuel ──
   // Sauvegarde auto BDD (Lot 11) : mardi & vendredi 4h heure de Paris (évaluée
   // en Europe/Paris via Intl, cf. services/db-backup.js) → plus grand intervalle

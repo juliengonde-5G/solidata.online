@@ -1739,13 +1739,12 @@ async function hourlyTick() {
         return generateDailyPredictions({ horizonDays: 7 });
       });
     }
-    // Niveau 3.1 — Dispatch auto J-1 chaque soir à 18h
-    if (now.getHours() === 18) {
-      await runInstrumented('generateNextDayDispatchProposals', async () => {
-        const { generateNextDayDispatchProposals } = require('./dispatch-optimizer');
-        return generateNextDayDispatchProposals();
-      });
-    }
+    // Dispatch auto J-1 (18h) RETIRÉ à la demande du client (08/2026) : plus
+    // AUCUNE tournée n'est créée sans action humaine. La planification passe
+    // par le gestionnaire — Planning tournées (« Créer une tournée » : IA /
+    // modèle / manuelle) ou Propositions IA (création à la demande). Le
+    // déclenchement manuel POST /tours/dashboard/dispatch-next-day reste
+    // disponible côté API (dispatch-optimizer.js conservé).
     // Import quotidien Logic'S à 20h : scan du dossier CSV
     // (les CSV sont déposés en temps réel via le webhook Power Automate
     //  POST /api/boutique-ventes/webhook ; ce scan capture les fichiers
