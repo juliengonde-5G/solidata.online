@@ -329,7 +329,7 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
         regles: [
           {
             titre: "Champs sensibles du diagnostic d'insertion",
-            description: "Les champs texte relatifs à la santé (art. 9) et au judiciaire (art. 10) — commentaire_sante, frein_sante_detail, frein_sante_causes, frein_judiciaire_detail — sont chiffrés en base (préfixe encv1:), déchiffrés uniquement en couche route.",
+            description: "Les champs texte relatifs à la santé (art. 9) et au judiciaire (art. 10) — commentaire_sante, frein_sante_detail, frein_sante_causes, frein_judiciaire_detail — sont chiffrés en base (préfixe encv2:, format encv1: encore lu), déchiffrés uniquement en couche route.",
             valeur: 'AES (crypto-js), clé PCM_ENCRYPTION_KEY',
             source: 'code',
             reference: 'backend/src/utils/field-crypto.js',

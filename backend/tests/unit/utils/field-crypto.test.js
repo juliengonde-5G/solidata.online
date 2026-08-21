@@ -13,8 +13,10 @@
  * Le module lit process.env À L'APPEL → on manipule l'env par test puis on
  * restaure tout.
  */
+const CryptoJS = require('crypto-js');
 const {
   ENC_PREFIX,
+  ENC_PREFIX_LEGACY,
   SENSITIVE_DIAG_FIELDS,
   encryptField,
   decryptField,
@@ -58,7 +60,7 @@ describe('field-crypto — chiffrement/déchiffrement', () => {
     expect(decryptField(b)).toBe(clair);
   });
 
-  test('anti double chiffrement : une valeur déjà encv1: est retournée telle quelle', () => {
+  test('anti double chiffrement : une valeur déjà chiffrée est retournée telle quelle', () => {
     const chiffre = encryptField('texte');
     expect(encryptField(chiffre)).toBe(chiffre);
     expect(decryptField(chiffre)).toBe('texte');
@@ -116,5 +118,54 @@ describe('field-crypto — liste centrale des champs sensibles', () => {
       'frein_sante_causes',
       'frein_judiciaire_detail',
     ]);
+  });
+});
+
+describe('field-crypto — la mauvaise clé ne produit JAMAIS de faux texte', () => {
+  // DÉFAUT CORRIGÉ (21/08/2026) : un déchiffrement AES avec la mauvaise clé
+  // n'échoue pas de façon fiable — il rend des octets aléatoires qui forment
+  // par hasard de l'UTF-8 valide dans ~0,5 % des cas. Sans la sentinelle, la
+  // chaîne « clé primaire puis clé legacy » affichait donc parfois du charabia
+  // (« ,\f », « K ») au lieu de basculer sur la clé legacy, et un
+  // réenregistrement de la fiche aurait rechiffré ce charabia en DÉTRUISANT la
+  // donnée. À 0,5 %, un seul essai passerait 199 fois sur 200 : la boucle est
+  // le test, pas une précaution décorative.
+  const ESSAIS = 400;
+
+  test(`mauvaise clé → null, ${ESSAIS} fois sur ${ESSAIS}`, () => {
+    for (let i = 0; i < ESSAIS; i++) {
+      setEnv('cle-primaire', 'cle-primaire');
+      const chiffre = encryptField('secret médical');
+      setEnv('autre-cle-primaire', 'autre-cle-legacy');
+      expect(decryptField(chiffre)).toBeNull();
+    }
+  });
+
+  test(`le repli legacy aboutit ${ESSAIS} fois sur ${ESSAIS}`, () => {
+    for (let i = 0; i < ESSAIS; i++) {
+      setEnv(undefined, 'ancien-jwt-secret');
+      const chiffre = encryptField('texte historique');
+      setEnv('nouvelle-cle-pcm', 'ancien-jwt-secret');
+      expect(decryptField(chiffre)).toBe('texte historique');
+    }
+  });
+});
+
+describe('field-crypto — lecture du format historique encv1:', () => {
+  test('une valeur encv1: écrite avant le correctif reste lisible', () => {
+    // Ces valeurs sont en base depuis juillet 2026 : cesser de les lire les
+    // rendrait définitivement inaccessibles.
+    const chiffre = ENC_PREFIX_LEGACY + CryptoJS.AES.encrypt('note santé v1', 'cle-pcm-de-test').toString();
+    expect(decryptField(chiffre)).toBe('note santé v1');
+  });
+
+  test('une valeur encv1: n’est jamais re-chiffrée par-dessus', () => {
+    const chiffre = ENC_PREFIX_LEGACY + CryptoJS.AES.encrypt('note santé v1', 'cle-pcm-de-test').toString();
+    expect(encryptField(chiffre)).toBe(chiffre);
+  });
+
+  test('les nouvelles écritures utilisent le format encv2:', () => {
+    expect(ENC_PREFIX).toBe('encv2:');
+    expect(encryptField('x').startsWith('encv2:')).toBe(true);
   });
 });
