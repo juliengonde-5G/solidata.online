@@ -179,6 +179,12 @@ verifier_contient "x11 : lance le lanceur via xinit" "/usr/bin/xinit /opt/badgeu
 verifier_contient "x11 : navigateur resolu transmis en environnement" "NAVIGATEUR_BIN=/usr/bin/chromium-browser" "$LANCEMENT_X11"
 verifier_contient "x11 : session x11" "XDG_SESSION_TYPE=x11" "$LANCEMENT_X11"
 verifier_contient "x11 : vt1 sans ecoute TCP" "-- :0 vt1 -nolisten tcp" "$LANCEMENT_X11"
+# Un kiosque ne recoit JAMAIS de frappe : sans ces deux options, l'economiseur
+# du serveur X noircit l'ecran au bout de 10 min et le DPMS met le moniteur en
+# veille — en pleine journee, indiscernable d'une panne pour l'atelier.
+verifier_contient "x11 : economiseur X desactive" "-s off" "$LANCEMENT_X11"
+verifier_contient "x11 : mise en veille DPMS desactivee" "-dpms" "$LANCEMENT_X11"
+verifier_absent  "cage : aucune option X (Wayland n'a pas d'economiseur)" "-dpms" "$LANCEMENT_CAGE"
 # X11 ne peut PAS demarrer sous les durcissements de l'unite de base :
 # NoNewPrivileges neutralise le setuid d'Xorg.wrap, ProtectHome empeche xinit
 # d'ecrire .Xauthority. Ces levees sont donc load-bearing — et strictement
