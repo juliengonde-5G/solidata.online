@@ -244,11 +244,22 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Chauffeur (facultatif)</label>
+                {/* Équipes Collecte/Logistique d'abord ; les autres restent
+                    sélectionnables (renfort exceptionnel) dans un groupe à part. */}
                 <select value={driverId} onChange={e => setDriverId(e.target.value)} className="input-modern text-sm">
                   <option value="">— À affecter plus tard —</option>
-                  {freeDrivers.map(d => (
+                  {freeDrivers.filter(d => d.is_equipe_collecte).map(d => (
                     <option key={d.id} value={d.id}>{d.first_name} {d.last_name}</option>
                   ))}
+                  {freeDrivers.some(d => !d.is_equipe_collecte) && (
+                    <optgroup label="Autres équipes — renfort exceptionnel">
+                      {freeDrivers.filter(d => !d.is_equipe_collecte).map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.first_name} {d.last_name}{d.team_name ? ` (${d.team_name})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <p className="text-[10px] text-slate-400 mt-1">Les suiveurs s'affectent par glisser-déposer après création.</p>
               </div>

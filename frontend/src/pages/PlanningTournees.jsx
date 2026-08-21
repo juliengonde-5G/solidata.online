@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Calendar, Truck, User, AlertTriangle, X, Users, Car,
-  ChevronLeft, ChevronRight, Plus, UserPlus,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
@@ -130,6 +130,9 @@ export default function PlanningTournees() {
   const [conflictModal, setConflictModal] = useState(null); // { tourId, payload, conflicts }
   const [toast, setToast] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  // Les équipes hors Collecte/Logistique sont un renfort exceptionnel : repliées
+  // par défaut, dépliables d'un clic (l'affectation elle-même reste autorisée).
+  const [showAutresEquipes, setShowAutresEquipes] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,6 +196,12 @@ export default function PlanningTournees() {
   const tours = data?.tours || [];
   const drivers = data?.drivers || [];
   const vehicles = data?.vehicles || [];
+  // La collecte se fait normalement avec les équipes Collecte et Logistique :
+  // elles sont affichées en premier. Les autres équipes restent affectables
+  // (renfort ponctuel) mais dans un bloc distinct, replié par défaut.
+  const equipesPrioritaires = data?.equipes_prioritaires || ['Collecte', 'Logistique'];
+  const driversCollecte = drivers.filter(d => d.is_equipe_collecte);
+  const driversAutres = drivers.filter(d => !d.is_equipe_collecte);
 
   return (
     <Layout>
@@ -253,11 +262,14 @@ export default function PlanningTournees() {
                 <Users className="w-4 h-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-700">Équipe collecte</h3>
                 <span className="text-[11px] text-slate-400 ml-auto">
-                  {drivers.filter(d => !d.is_day_off).length} dispo
+                  {driversCollecte.filter(d => !d.is_day_off).length} dispo
                 </span>
               </div>
+              <p className="text-[11px] text-slate-400 mb-1.5">
+                {equipesPrioritaires.join(' · ')}
+              </p>
               <div className="space-y-1.5 max-h-[35vh] overflow-y-auto pr-1">
-                {drivers.map(d => (
+                {driversCollecte.map(d => (
                   <DriverCard
                     key={d.id}
                     d={d}
@@ -265,10 +277,38 @@ export default function PlanningTournees() {
                     isAssignedElsewhere={d.assigned_tour_id !== null}
                   />
                 ))}
-                {drivers.length === 0 && (
-                  <p className="text-xs text-slate-400 text-center py-4">Aucun chauffeur</p>
+                {driversCollecte.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-4">
+                    Aucun collaborateur des équipes {equipesPrioritaires.join(' / ')}
+                  </p>
                 )}
               </div>
+
+              {/* Renfort : autres équipes — affectation exceptionnelle, donc
+                  repliée par défaut mais pleinement fonctionnelle (glisser-déposer). */}
+              {driversAutres.length > 0 && (
+                <div className="mt-3 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => setShowAutresEquipes(v => !v)}
+                    className="w-full flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-700"
+                  >
+                    {showAutresEquipes ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    <span>Autres équipes ({driversAutres.length}) — renfort exceptionnel</span>
+                  </button>
+                  {showAutresEquipes && (
+                    <div className="space-y-1.5 max-h-[25vh] overflow-y-auto pr-1 mt-1.5">
+                      {driversAutres.map(d => (
+                        <DriverCard
+                          key={d.id}
+                          d={d}
+                          onDragStart={handleDragStart}
+                          isAssignedElsewhere={d.assigned_tour_id !== null}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Véhicules */}

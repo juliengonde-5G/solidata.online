@@ -156,9 +156,14 @@ estimation}`) si le travail estimé dépasse 6 h, sauf `force:true` (tracé dans
 **Modèles historiques seedés (21/08/2026)** : les 19 tournées de la feuille de
 collecte papier (fichier Excel client) sont versionnées dans
 `backend/src/data/modeles-tournees.json` (307 points ordonnés, jour de tournée en
-description, 4 libellés arbitrés avec le client) et créées par
-`node src/scripts/seed-route-templates.js` (dry-run par défaut, `--apply`,
-`--force` pour remplacer une composition retouchée). Rapprochement par nom
+description, 4 libellés arbitrés avec le client). Elles sont créées
+**automatiquement au premier démarrage** qui trouve un référentiel CAV
+(`init-db.js`), puis un **verrou** (`settings` clé
+`collecte.modeles_tournees_seed`) empêche toute recréation : un modèle supprimé
+volontairement ne réapparaît jamais. L'auto-seed ne calcule pas les estimations
+(coût réseau au boot) ; `node src/scripts/seed-route-templates.js --apply` les
+complète (dry-run par défaut, `--force` pour remplacer une composition
+retouchée). Rapprochement par nom
 normalisé contre `cav.name` — un point sans correspondance est signalé, jamais
 inventé ; script idempotent (re-run = 0 écriture). L'appartenance d'un CAV aux
 modèles **actifs** est exposée par `GET /cav` et `GET /cav/:id`
@@ -190,6 +195,28 @@ date ?). Consommé par CollectionProposals (bandeau) et DashboardCollecte (widge
 L'alerte « CAV pleins » du dashboard général lit désormais les mêmes sources réelles
 (l'ancienne requête sur `avg_fill_rate`, colonne jamais alimentée, renvoyait
 toujours 0).
+
+### 5.6 Affectation des équipes (planning)
+`GET /api/tours/planning/resources` marque chaque collaborateur
+`is_equipe_collecte` et renvoie **les équipes Collecte et Logistique en tête**
+(puis tri NOM/Prénom), en exposant la liste effective dans
+`equipes_prioritaires`. Les **autres équipes restent présentes et affectables**
+(renfort exceptionnel) : la page les regroupe dans un bloc repliable et le
+sélecteur de chauffeur dans un `optgroup` dédié. Liste paramétrable —
+`settings` clé `collecte.equipes_prioritaires` (JSON, défaut
+`["Collecte", "Logistique"]`), comparaison sur nom d'équipe normalisé (jamais
+d'identifiant d'équipe en dur : les ids diffèrent d'une base à l'autre).
+
+### 5.7 Purge des tournées réalisées
+`node src/scripts/purge-tournees-realisees.js` (dry-run par défaut, `--apply`,
+`--avant=YYYY-MM-DD`) supprime les tournées `completed` et leurs données
+d'**exécution** (points de passage, pesées de tournée, trace GPS,
+ré-optimisations). Sont **détachées mais conservées** : incidents, checklists,
+déclarations de fin de journée, mouvements de stock et stock original
+(`tour_id → NULL`). **`tonnage_history` n'est pas touché** — il est rattaché au
+CAV et à la date, donc le moteur prédictif, la carte de remplissage et les KPI
+survivent à la purge. Transactionnel, journalisé dans `rgpd_audit_log`
+(`TOURS_PURGE`), ré-exécutable sans effet.
 
 ---
 

@@ -7470,6 +7470,48 @@ async function initDatabase() {
     }
     console.log(`[INIT-DB] Séquences SERIAL resynchronisées (${resyncCount} tables) ✓`);
 
+    // ══════════════════════════════════════════
+    // v2.26.4 — Auto-seed des modèles de tournées (feuille de collecte)
+    // ──────────────────────────────────────────
+    // Les 19 tournées modèles historiques sont versionnées dans
+    // src/data/modeles-tournees.json. Elles étaient jusqu'ici créées par une
+    // commande manuelle (`seed-route-templates.js --apply`) — étape facile à
+    // oublier au déploiement, la page « Modèles de tournées » restant alors
+    // vide. Elles sont désormais créées AU PREMIER DÉMARRAGE qui trouve un
+    // référentiel CAV, puis un VERROU (settings) empêche toute recréation :
+    // un modèle supprimé volontairement dans /route-templates ne réapparaît
+    // jamais. L'estimation durée/distance est volontairement NON calculée ici
+    // (elle interroge OSRM segment par segment et ralentirait le démarrage) :
+    // les colonnes restent NULL et sont complétées au prochain passage du
+    // script manuel, ou à la première édition du modèle.
+    try {
+      const { seedRouteTemplates, SEED_LOCK_KEY } = require('./seed-route-templates');
+      const verrou = await client.query('SELECT value FROM settings WHERE key = $1', [SEED_LOCK_KEY]);
+      if (verrou.rows.length > 0) {
+        console.log('[INIT-DB] Modèles de tournées : déjà seedés (verrou posé) — ignoré ✓');
+      } else {
+        const bilan = await seedRouteTemplates(client, {
+          apply: true, force: false, estimate: false, log: (m) => console.log(`[INIT-DB]   ${m}`),
+        });
+        if (bilan.crees > 0) {
+          await client.query(
+            `INSERT INTO settings (key, value, category) VALUES ($1, $2, 'collecte')
+             ON CONFLICT (key) DO NOTHING`,
+            [SEED_LOCK_KEY, new Date().toISOString()]
+          );
+          console.log(`[INIT-DB] Modèles de tournées : ${bilan.crees} créé(s), verrou posé ✓`);
+        } else {
+          // Aucun modèle créé (référentiel CAV absent sur une base neuve, ou
+          // modèles déjà présents sous d'autres compositions) : PAS de verrou,
+          // la tentative sera refaite au prochain démarrage.
+          console.log('[INIT-DB] Modèles de tournées : rien à créer — verrou NON posé (nouvelle tentative au prochain démarrage)');
+        }
+      }
+    } catch (e) {
+      // Jamais bloquant pour le démarrage : le script manuel reste disponible.
+      console.warn(`[INIT-DB] Auto-seed des modèles de tournées ignoré : ${e.message}`);
+    }
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');
