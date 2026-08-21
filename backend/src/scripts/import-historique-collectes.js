@@ -48,6 +48,7 @@
  *        # retire la reprise (tournées + véhicule support) ; les tonnages restent
  */
 
+const fs = require('fs');
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { normalizeCavName } = require('./seed-route-templates');
@@ -278,6 +279,28 @@ async function main() {
     args = parseArgs(process.argv.slice(2));
   } catch (err) {
     console.error(`ERREUR : ${err.message}`);
+    process.exitCode = 1;
+    await pool.end().catch(() => {});
+    return;
+  }
+
+  // Contrôle explicite AVANT exceljs : son « File not found » en anglais, au
+  // milieu d'une sortie française, ne dit pas quoi faire. Le cas courant est
+  // que le fichier est resté sur le poste de travail et n'a jamais été copié
+  // dans le conteneur.
+  if (!args.supprimer && !fs.existsSync(args.file)) {
+    console.error(`ERREUR : fichier introuvable — ${args.file}`);
+    console.error('');
+    console.error('Le script s\'exécute DANS le conteneur backend : le fichier doit y avoir été');
+    console.error('copié au préalable. Depuis le serveur, à la racine du projet :');
+    console.error('  docker compose -f docker-compose.prod.yml cp <fichier.xlsx> backend:/tmp/import.xlsx');
+    console.error('  docker compose -f docker-compose.prod.yml exec backend \\');
+    console.error('    node src/scripts/import-historique-collectes.js --file=/tmp/import.xlsx');
+    console.error('');
+    console.error('Et si le fichier n\'est pas encore sur le serveur, depuis votre poste :');
+    console.error('  scp <fichier.xlsx> <utilisateur>@<serveur>:/opt/solidata.online/');
+    console.error('');
+    console.error('Un nom comportant des espaces ou des accents doit être entre guillemets.');
     process.exitCode = 1;
     await pool.end().catch(() => {});
     return;
