@@ -40,6 +40,16 @@ if [ "${XDG_SESSION_TYPE:-}" = "x11" ]; then
     GESTIONNAIRE=$!
     sleep 1
     dire "gestionnaire de fenetres openbox demarre (plein ecran honore)"
+  fi
+  # CEINTURE. « -s off -dpms » est deja passe au serveur X ; on le redit ici
+  # parce qu'une configuration Xorg du systeme peut reactiver l'economiseur
+  # apres coup, et parce qu'un ecran de pointage qui noircit en pleine journee
+  # est indiscernable d'une panne pour l'atelier. xset fait partie de
+  # x11-xserver-utils, installe par la voie X11.
+  if command -v xset >/dev/null 2>&1; then
+    xset s off -dpms s noblank 2>/dev/null \
+      && dire "economiseur et mise en veille X desactives (ecran toujours allume)" \
+      || dire "avertissement : xset n'a pas pu desactiver l'economiseur"
   else
     dire "avertissement : openbox absent — la fenetre risque de ne pas occuper tout l'ecran"
   fi
