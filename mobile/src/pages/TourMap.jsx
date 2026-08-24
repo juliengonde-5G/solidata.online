@@ -54,6 +54,10 @@ export default function TourMap() {
   const [cavs, setCavs] = useState([]);
   const [currentCavIndex, setCurrentCavIndex] = useState(0);
   const [myPosition, setMyPosition] = useState(null);
+  // Tracé ROUTIER du reste de la tournée (suit les rues au lieu de relier les
+  // bornes en ligne droite). Hors ligne, il reste simplement absent : la carte
+  // retombe sur le trait pointillé, et rien n'est bloqué.
+  const [trace, setTrace] = useState(null);
   const [reoptProposal, setReoptProposal] = useState(null);
   const [reoptProcessing, setReoptProcessing] = useState(false);
   const socketRef = useRef(null);
@@ -100,7 +104,20 @@ export default function TourMap() {
       setCavs(data.cavs || []);
       const visitedCount = (data.cavs || []).filter(c => c.status === 'collected').length;
       setCurrentCavIndex(visitedCount);
+      loadTrace();
     } catch (err) { console.error(err); }
+  };
+
+  // Itinéraire routier restant. Best effort : un échec (hors ligne, routeur
+  // injoignable) laisse `trace` à null — la carte reste utilisable.
+  const loadTrace = async () => {
+    try {
+      const pos = positionRef.current;
+      const q = pos ? `?lat=${pos.lat}&lng=${pos.lng}` : '';
+      const res = await authedFetch(`/api/tours/${tourId}/itineraire-public${q}`);
+      const data = await res.json();
+      setTrace(data && data.source === 'routier' ? data : null);
+    } catch (_) { setTrace(null); }
   };
 
   const startGPS = () => {
@@ -411,7 +428,12 @@ export default function TourMap() {
             );
           })}
 
-          {cavs.filter(c => c.latitude && c.longitude).length > 1 && (
+          {trace?.geometry?.length >= 2 ? (
+            <Polyline
+              positions={trace.geometry}
+              pathOptions={{ color: '#0D9488', weight: 5, opacity: 0.85 }}
+            />
+          ) : cavs.filter(c => c.latitude && c.longitude).length > 1 && (
             <Polyline
               positions={cavs.filter(c => c.latitude && c.longitude).map(c => [c.latitude, c.longitude])}
               pathOptions={{ color: '#0D9488', weight: 3, dashArray: '10,6' }}

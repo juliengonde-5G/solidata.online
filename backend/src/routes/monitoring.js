@@ -148,6 +148,7 @@ const JOB_SCHEDULE = {
   discoverEvents:                 { label: 'Découverte événements locaux',       cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
   recalcSeasonalFactors:          { label: 'Recalcul facteurs saisonniers',      cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
   recalcWeatherFactors:           { label: 'Apprentissage météo des dépôts',     cadence: 'mensuel (1er 4h)',  maxAgeHours: MONTHLY },
+  measureTrafficFactor:           { label: 'Relevé de la circulation (TomTom)',  cadence: '3×/jour ouvré',     maxAgeHours: DAILY },
   syncAllHolidays:                { label: 'Sync jours fériés / vacances',       cadence: 'annuel (1er janv.)', maxAgeHours: YEARLY },
 };
 

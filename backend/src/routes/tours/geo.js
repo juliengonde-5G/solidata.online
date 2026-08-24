@@ -66,6 +66,7 @@ async function osrmRouteSegment(lat1, lon1, lat2, lon2) {
       return {
         distance_km: data.routes[0].distance / 1000,
         duration_min: data.routes[0].duration / 60,
+        source: 'osrm',
       };
     }
   } catch (err) {
@@ -73,8 +74,43 @@ async function osrmRouteSegment(lat1, lon1, lat2, lon2) {
   }
   // Fallback : Haversine × 1.3 (coefficient route/vol d'oiseau) + vitesse
   // moyenne EFFECTIVE (config prédictive `scoring.avgSpeed`, défaut 30 km/h).
+  // `source` distingue la MESURE routière du repli approché : le cache de
+  // tronçons (services/route-cache.js) ne persiste que la mesure réelle.
   const dist = haversineDistance(lat1, lon1, lat2, lon2) * ROAD_FACTOR;
-  return { distance_km: dist, duration_min: (dist / resolveAvgSpeedKmh()) * 60 };
+  return {
+    distance_km: dist,
+    duration_min: (dist / resolveAvgSpeedKmh()) * 60,
+    source: 'haversine',
+  };
+}
+
+// ── OSRM : GÉOMÉTRIE du tracé routier (affichage cartographique) ──
+// Renvoie la polyligne SUIVANT LES ROUTES entre les waypoints, pour remplacer
+// le trait « à vol d'oiseau » de la carte. `overview=full` demande le tracé
+// complet, `geometries=geojson` le livre en [lng, lat] — on le retourne en
+// [lat, lng], convention Leaflet.
+// Retourne null si le routeur est injoignable : l'appelant retombe alors sur
+// le trait droit en le SIGNALANT (jamais une distance approchée présentée
+// comme routière).
+async function osrmRouteGeometry(waypoints) {
+  if (!Array.isArray(waypoints) || waypoints.length < 2) return null;
+  try {
+    const coords = waypoints.map((w) => `${w.lng},${w.lat}`).join(';');
+    const url = `${OSRM_BASE_URL}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`;
+    const response = await fetchWithTimeout(url);
+    const data = await response.json();
+    if (data.code === 'Ok' && data.routes?.[0]?.geometry?.coordinates) {
+      return {
+        geometry: data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+        distance_km: data.routes[0].distance / 1000,
+        duration_min: data.routes[0].duration / 60,
+        source: 'osrm',
+      };
+    }
+  } catch (err) {
+    console.warn('[GEO] OSRM geometry error:', err.message);
+  }
+  return null;
 }
 
 // ── OSRM : Matrice de distances entre N points ──────────────
@@ -218,6 +254,7 @@ module.exports = {
   twoOptImprove,
   calculateTotalDistance,
   osrmRouteSegment,
+  osrmRouteGeometry,
   osrmDistanceMatrix,
   osrmOptimizedTrip,
   resolveAvgSpeedKmh,

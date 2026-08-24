@@ -68,6 +68,9 @@ function TrafficLayer({ onStatusChange }) {
   const pendingRef = useRef(null);
 
   const fetchTraffic = useCallback(async () => {
+    // Onglet en arrière-plan : personne ne regarde la carte, et chaque appel
+    // consomme le forfait TomTom. On ne relève rien tant qu'il est masqué.
+    if (typeof document !== 'undefined' && document.hidden) return;
     lastFetchRef.current = Date.now();
     const b = map.getBounds();
     const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
@@ -160,6 +163,10 @@ export default function CollectionsLive() {
   const [expandedTour, setExpandedTour] = useState(null);
   const [livePositions, setLivePositions] = useState({}); // vehicle_id → {lat, lng, speed, ts}
   const [trafficInfo, setTrafficInfo] = useState(null); // { disponible, message?, incidents? }
+  // Tracés ROUTIERS des tournées : tour_id → { geometry, distance_restante_km, … }
+  // La carte suivait jusqu'ici des segments à vol d'oiseau, et la « distance
+  // restante » n'était qu'un prorata du kilométrage total estimé.
+  const [itineraires, setItineraires] = useState({});
   const socketRef = useRef(null);
 
   const loadActive = useCallback(async () => {
@@ -185,10 +192,28 @@ export default function CollectionsLive() {
     setLoading(false);
   }, []);
 
+  // Tracés routiers : appel séparé pour ne pas ralentir le rafraîchissement
+  // principal. Un échec laisse la carte en trait droit (signalé), jamais une
+  // distance approchée présentée comme routière.
+  const loadItineraires = useCallback(async () => {
+    try {
+      const res = await api.get('/tours/active-summary/itineraires');
+      const parTournee = {};
+      (res.data?.itineraires || []).forEach((it) => { parTournee[it.tour_id] = it; });
+      setItineraires(parTournee);
+    } catch (err) {
+      console.error('[CollectionsLive] itineraires:', err);
+    }
+  }, []);
+
   // Initial load + polling 30s + Socket.IO pour positions GPS temps réel
   useEffect(() => {
     loadActive();
+    loadItineraires();
     const interval = setInterval(loadActive, 30000);
+    // Le tracé ne bouge qu'à chaque point collecté : 2 min suffisent, et cela
+    // évite de solliciter le routeur toutes les 30 secondes.
+    const intervalTrace = setInterval(loadItineraires, 120000);
 
     const token = localStorage.getItem('accessToken');
     const socket = io(window.location.origin, { auth: { token } });
@@ -204,14 +229,18 @@ export default function CollectionsLive() {
         [vId]: { lat, lng, speed: d.speed, ts: d.timestamp || new Date().toISOString() },
       }));
     });
-    socket.on('cav-status-update', loadActive);
-    socket.on('tour-status-update', loadActive);
+    // Un point collecté change l'itinéraire restant : on le recalcule aussitôt
+    // plutôt que d'attendre le prochain cycle (le CAV vidé sortait du tracé
+    // avec jusqu'à deux minutes de retard).
+    socket.on('cav-status-update', () => { loadActive(); loadItineraires(); });
+    socket.on('tour-status-update', () => { loadActive(); loadItineraires(); });
 
     return () => {
       clearInterval(interval);
+      clearInterval(intervalTrace);
       socket.disconnect();
     };
-  }, [loadActive]);
+  }, [loadActive, loadItineraires]);
 
   const tours = data?.tours || [];
   const kpis = data?.kpis || { vehicules_actifs: 0, cav_a_vider: 0, avancement_pct: 0, distance_restante_km: 0 };
@@ -304,11 +333,21 @@ export default function CollectionsLive() {
                   const linePoints = validPoints
                     .filter((p) => p.status === 'pending' || p.status === 'in_progress')
                     .map((p) => [p.latitude, p.longitude]);
+                  // Tracé suivant les rues quand le routeur a répondu ; sinon
+                  // repli en trait droit, VISIBLEMENT pointillé (l'utilisateur
+                  // doit voir que ce n'est pas un itinéraire réel).
+                  const trace = itineraires[tour.id];
+                  const routier = trace?.source === 'routier' && trace.geometry?.length >= 2;
 
                   return (
                     <FragmentBlock key={tour.id}>
                       {/* Itinéraire restant */}
-                      {linePoints.length >= 2 && (
+                      {routier ? (
+                        <Polyline
+                          positions={trace.geometry}
+                          pathOptions={{ color, weight: 4, opacity: 0.75 }}
+                        />
+                      ) : linePoints.length >= 2 && (
                         <Polyline
                           positions={linePoints}
                           pathOptions={{ color, weight: 3, opacity: 0.6, dashArray: '6 4' }}
@@ -473,7 +512,11 @@ export default function CollectionsLive() {
                               <span className="text-slate-400">/{tour.nb_points}</span>
                             </td>
                             <td className="py-2 px-3 text-right text-xs tabular-nums">
-                              {tour.distance_remaining_km != null ? `${tour.distance_remaining_km}/${tour.distance_km || '—'} km` : '—'}
+                              {itineraires[tour.id]?.source === 'routier'
+                                ? `${itineraires[tour.id].distance_restante_km}/${tour.distance_km || '—'} km`
+                                : tour.distance_remaining_km != null
+                                  ? `${tour.distance_remaining_km}/${tour.distance_km || '—'} km`
+                                  : '—'}
                             </td>
                             <td className="py-2 px-3 text-right text-xs tabular-nums">
                               {fmtDuration(tour.elapsed_min)} / {fmtDuration(tour.estimated_duration_min)}

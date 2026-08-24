@@ -1,6 +1,9 @@
 const pool = require('../../config/database');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate, getLocalEventsForDate } = require('./context');
 const { nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip } = require('./geo');
+// Cache des tronçons routiers : le réseau entre deux bornes fixes ne change
+// pas, seul le trafic varie (appliqué APRÈS, en multipliant la durée).
+const { cachedRouteSegment } = require('../../services/route-cache');
 const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('./predictions');
 const fillFactors = require('../../utils/fill-factors');
 const timeEngine = require('../../services/tour-time-engine');
@@ -120,7 +123,10 @@ function makeRouteLeg(trafficFactor = 1) {
   const factor = Number.isFinite(parseFloat(trafficFactor)) && parseFloat(trafficFactor) > 0
     ? parseFloat(trafficFactor) : 1;
   return async (from, to) => {
-    const seg = await osrmRouteSegment(from.lat, from.lng, to.lat, to.lng);
+    // Distance/durée « à vide » servies par le cache dès le 2e passage sur le
+    // tronçon ; le facteur de circulation du jour est appliqué ensuite, il
+    // n'est donc JAMAIS figé par le cache.
+    const seg = await cachedRouteSegment(from.lat, from.lng, to.lat, to.lng);
     return { km: seg.distance_km, minutes: seg.duration_min * factor };
   };
 }

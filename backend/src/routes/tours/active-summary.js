@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
+const { osrmRouteGeometry } = require('./geo');
+const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
 
 // GET /api/tours/active-summary?date=YYYY-MM-DD
 // Synthèse de TOUTES les tournées actives du jour pour la vue "Collecte en direct"
@@ -201,4 +203,255 @@ router.get('/active-summary', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// GET /api/tours/active-summary/itineraires?date=YYYY-MM-DD
+// ══════════════════════════════════════════════════════════════════════════
+// Tracé ROUTIER restant de chaque tournée active, pour la carte « Collecte en
+// direct ». Remplace le trait à vol d'oiseau reliant les points : la
+// polyligne suit les rues, et la distance renvoyée est la distance RÉELLE à
+// parcourir (et non un prorata du kilométrage total estimé).
+//
+// Départ du tracé = dernière position GPS connue du véhicule si elle est
+// fraîche, sinon le centre de tri. Arrivée = retour au centre de tri.
+//
+// HONNÊTETÉ : si le routeur est injoignable, la géométrie vaut `null` et
+// `source` vaut 'indisponible'. Le front retombe alors sur le trait droit EN
+// LE SIGNALANT — jamais une distance approchée présentée comme routière.
+
+// Fraîcheur maxi d'une position GPS pour servir de point de départ (minutes).
+const GPS_FRAICHEUR_MIN = 15;
+// Plafond de waypoints par appel au routeur (protection du service public).
+const MAX_WAYPOINTS = 80;
+// Durée de vie du tracé mémorisé : il ne change qu'au fil des collectes.
+const TRACE_TTL_MS = 3 * 60 * 1000;
+
+const traceMemo = new Map();
+
+function memoKey(tourId, depart, pointIds) {
+  const d = depart ? `${depart.lat.toFixed(4)},${depart.lng.toFixed(4)}` : 'centre';
+  return `${tourId}|${d}|${pointIds.join('-')}`;
+}
+
+/**
+ * Tracé routier depuis `depart` (ou le centre de tri), passant par les points
+ * restants dans l'ordre, et revenant au centre de tri.
+ * Renvoie toujours un objet : `source = 'indisponible'` si le routeur n'a pas
+ * répondu — la carte retombe alors sur le trait droit EN LE SIGNALANT.
+ */
+async function calculerTrace(points, depart, tronque = false) {
+  const commun = {
+    nb_points: points.length,
+    depart: depart ? 'position_vehicule' : 'centre_tri',
+    tronque,
+  };
+  const waypoints = [
+    depart || { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
+    ...points.map((p) => ({ lat: parseFloat(p.latitude), lng: parseFloat(p.longitude) })),
+    { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
+  ];
+  const trace = await osrmRouteGeometry(waypoints);
+  if (!trace) {
+    return {
+      ...commun, geometry: null, distance_restante_km: null,
+      duree_restante_min: null, source: 'indisponible',
+    };
+  }
+  return {
+    ...commun,
+    geometry: trace.geometry,
+    distance_restante_km: Math.round(trace.distance_km * 10) / 10,
+    duree_restante_min: Math.round(trace.duration_min),
+    source: 'routier',
+  };
+}
+
+router.get('/active-summary/itineraires', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+
+    const toursRes = await pool.query(
+      `SELECT t.id, t.collection_type, t.vehicle_id
+         FROM tours t
+        WHERE t.date = $1
+          AND t.status IN ('planned', 'in_progress', 'returning')
+        ORDER BY t.id`,
+      [date]
+    );
+    if (toursRes.rows.length === 0) return res.json({ date, itineraires: [] });
+
+    const tourIds = toursRes.rows.map((t) => t.id);
+
+    // Points restants (CAV et points association), dans l'ordre de passage
+    const cavRes = await pool.query(
+      `SELECT tc.tour_id, tc.id AS point_id, tc.position,
+              c.latitude, c.longitude
+         FROM tour_cav tc
+         JOIN cav c ON c.id = tc.cav_id
+        WHERE tc.tour_id = ANY($1::int[])
+          AND tc.status IN ('pending', 'in_progress')
+          AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+        ORDER BY tc.tour_id, tc.position`,
+      [tourIds]
+    );
+    const assoRes = await pool.query(
+      `SELECT tap.tour_id, tap.id AS point_id, tap.position,
+              ap.latitude, ap.longitude
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+        WHERE tap.tour_id = ANY($1::int[])
+          AND tap.status IN ('pending', 'in_progress')
+          AND ap.latitude IS NOT NULL AND ap.longitude IS NOT NULL
+        ORDER BY tap.tour_id, tap.position`,
+      [tourIds]
+    );
+    const pointsParTournee = {};
+    [...cavRes.rows, ...assoRes.rows].forEach((r) => {
+      (pointsParTournee[r.tour_id] = pointsParTournee[r.tour_id] || []).push(r);
+    });
+    Object.values(pointsParTournee).forEach((arr) => arr.sort((a, b) => a.position - b.position));
+
+    // Dernière position GPS fraîche par véhicule
+    const vehicleIds = [...new Set(toursRes.rows.map((t) => t.vehicle_id).filter(Boolean))];
+    const posParVehicule = {};
+    if (vehicleIds.length > 0) {
+      const posRes = await pool.query(
+        `SELECT DISTINCT ON (vehicle_id) vehicle_id, latitude, longitude, recorded_at
+           FROM gps_positions
+          WHERE vehicle_id = ANY($1::int[])
+            AND recorded_at > CURRENT_TIMESTAMP - ($2 || ' minutes')::interval
+          ORDER BY vehicle_id, recorded_at DESC`,
+        [vehicleIds, String(GPS_FRAICHEUR_MIN)]
+      );
+      posRes.rows.forEach((r) => {
+        posParVehicule[r.vehicle_id] = { lat: parseFloat(r.latitude), lng: parseFloat(r.longitude) };
+      });
+    }
+
+    const itineraires = [];
+    for (const t of toursRes.rows) {
+      const points = pointsParTournee[t.id] || [];
+      if (points.length === 0) {
+        itineraires.push({
+          tour_id: t.id, geometry: null, distance_restante_km: null,
+          duree_restante_min: null, source: 'aucun_point_restant',
+          nb_points: 0, tronque: false,
+        });
+        continue;
+      }
+
+      const depart = posParVehicule[t.vehicle_id] || null;
+      const retenus = points.slice(0, MAX_WAYPOINTS);
+      const tronque = points.length > retenus.length;
+      const pointIds = retenus.map((p) => p.point_id);
+
+      const cle = memoKey(t.id, depart, pointIds);
+      const memo = traceMemo.get(cle);
+      if (memo && Date.now() - memo.at < TRACE_TTL_MS) {
+        itineraires.push({ ...memo.valeur, tour_id: t.id });
+        continue;
+      }
+
+      const valeur = await calculerTrace(retenus, depart, tronque);
+
+      // Un échec de routeur n'est pas mémorisé : le tracé sera retenté.
+      if (valeur.source === 'routier') {
+        if (traceMemo.size > 200) traceMemo.clear();
+        traceMemo.set(cle, { at: Date.now(), valeur });
+      }
+      itineraires.push({ ...valeur, tour_id: t.id });
+    }
+
+    res.json({ date, itineraires });
+  } catch (err) {
+    console.error('[TOURS] Erreur active-summary/itineraires :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/tours/:id/itineraire-public
+// Même tracé routier, côté chauffeur : la carte de l'application mobile suit
+// les rues au lieu de relier les bornes en ligne droite, et affiche la
+// distance/durée RÉELLES jusqu'au retour au centre.
+// Auth : JWT chauffeur (suffixe « -public » → garde de périmètre véhicule
+// appliquée en amont par tours/index.js, aucune tournée d'un autre véhicule).
+router.get('/:id/itineraire-public', async (req, res) => {
+  try {
+    const tourId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Tournée invalide' });
+
+    const tourRes = await pool.query(
+      'SELECT id, vehicle_id FROM tours WHERE id = $1', [tourId]
+    );
+    if (tourRes.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+
+    const cavRes = await pool.query(
+      `SELECT tc.id AS point_id, tc.position, c.latitude, c.longitude
+         FROM tour_cav tc
+         JOIN cav c ON c.id = tc.cav_id
+        WHERE tc.tour_id = $1
+          AND tc.status IN ('pending', 'in_progress')
+          AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+        ORDER BY tc.position`,
+      [tourId]
+    );
+    const assoRes = await pool.query(
+      `SELECT tap.id AS point_id, tap.position, ap.latitude, ap.longitude
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+        WHERE tap.tour_id = $1
+          AND tap.status IN ('pending', 'in_progress')
+          AND ap.latitude IS NOT NULL AND ap.longitude IS NOT NULL
+        ORDER BY tap.position`,
+      [tourId]
+    );
+    const points = [...cavRes.rows, ...assoRes.rows].sort((a, b) => a.position - b.position);
+    if (points.length === 0) {
+      return res.json({
+        tour_id: tourId, geometry: null, distance_restante_km: null,
+        duree_restante_min: null, source: 'aucun_point_restant', nb_points: 0, tronque: false,
+      });
+    }
+
+    // Position du chauffeur : transmise par le mobile (GPS du téléphone), à
+    // défaut dernière position GPS fraîche du véhicule, à défaut le centre.
+    let depart = null;
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      depart = { lat, lng };
+    } else if (tourRes.rows[0].vehicle_id) {
+      const posRes = await pool.query(
+        `SELECT latitude, longitude FROM gps_positions
+          WHERE vehicle_id = $1
+            AND recorded_at > CURRENT_TIMESTAMP - ($2 || ' minutes')::interval
+          ORDER BY recorded_at DESC LIMIT 1`,
+        [tourRes.rows[0].vehicle_id, String(GPS_FRAICHEUR_MIN)]
+      );
+      if (posRes.rows.length > 0) {
+        depart = { lat: parseFloat(posRes.rows[0].latitude), lng: parseFloat(posRes.rows[0].longitude) };
+      }
+    }
+
+    const retenus = points.slice(0, MAX_WAYPOINTS);
+    const cle = memoKey(tourId, depart, retenus.map((p) => p.point_id));
+    const memo = traceMemo.get(cle);
+    if (memo && Date.now() - memo.at < TRACE_TTL_MS) {
+      return res.json({ ...memo.valeur, tour_id: tourId });
+    }
+
+    const valeur = await calculerTrace(retenus, depart, points.length > retenus.length);
+    if (valeur.source === 'routier') {
+      if (traceMemo.size > 200) traceMemo.clear();
+      traceMemo.set(cle, { at: Date.now(), valeur });
+    }
+    res.json({ ...valeur, tour_id: tourId });
+  } catch (err) {
+    console.error('[TOURS] Erreur itineraire-public :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
+// Vidage du tracé mémorisé — utilisé par les tests, et disponible en
+// exploitation si un tracé devait être forcé à se recalculer.
+module.exports.resetTraceMemo = () => traceMemo.clear();

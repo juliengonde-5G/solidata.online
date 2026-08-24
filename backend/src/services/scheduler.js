@@ -1729,6 +1729,20 @@ async function hourlyTick() {
         await runInstrumented('autoDatabaseBackup', () => runAutoBackup(now));
       }
     }
+    // Facteur de circulation du jour (TomTom Traffic Flow Segment Data) :
+    // 3 relevés par jour ouvré en HEURE DE PARIS. Alimente
+    // collection_context.traffic_factor, seul canal par lequel le moteur de
+    // temps de travail tient compte du trafic — sans lui il calcule toujours
+    // en circulation fluide. Sans clé TomTom, le job ne fait rien (il ne pose
+    // JAMAIS un facteur inventé). Coût : ~470 appels/mois sur un forfait
+    // gratuit de 20 000.
+    {
+      const { shouldMeasureTraffic, measureTrafficFactor } = require('./traffic');
+      if (shouldMeasureTraffic(now)) {
+        console.log('[SCHEDULER] Relevé de la circulation du jour (TomTom)...');
+        await runInstrumented('measureTrafficFactor', measureTrafficFactor);
+      }
+    }
     // Génération quotidienne des prédictions de remplissage J..J+7 à 5h (résidu 8).
     // Calcul LOCAL (heuristique, sans appel LLM). Alimente ml_fill_predictions pour
     // que la boucle de feedback capteur (liveobjects-processor) puisse se refermer.

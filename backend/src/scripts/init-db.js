@@ -1146,6 +1146,15 @@ async function initDatabase() {
       );
     `);
 
+    // Provenance du facteur de circulation : mesuré (TomTom) ou laissé au
+    // défaut. Sans cette trace, un facteur de 1 « fluide mesuré » serait
+    // indiscernable d'un facteur de 1 « jamais renseigné ».
+    await client.query(`
+      ALTER TABLE collection_context
+        ADD COLUMN IF NOT EXISTS traffic_source VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS traffic_measured_at TIMESTAMP;
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS evenements_locaux (
         id SERIAL PRIMARY KEY,
@@ -1287,6 +1296,36 @@ async function initDatabase() {
         computed_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // ── Cache des tronçons routiers (services/route-cache.js) ────────────
+    // Le moteur de temps demande une distance/durée ROUTIÈRE par tronçon ; une
+    // estimation de tournée en enchaîne une vingtaine, et l'écran de création
+    // recalcule à chaque point ajouté. Le réseau routier entre deux bornes
+    // fixes étant stable, chaque tronçon n'est mesuré qu'UNE fois puis relu.
+    // Le trafic est appliqué APRÈS (multiplicateur de durée) : le cache ne fige
+    // jamais une condition de circulation.
+    // Seule une MESURE réelle est stockée (`source = 'osrm'`) : un repli
+    // Haversine n'est jamais persisté — il serait figé à la place d'une mesure.
+    // Table purgeable sans perte : elle se reconstruit à l'usage.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS route_legs_cache (
+        cle VARCHAR(64) PRIMARY KEY,
+        from_lat DOUBLE PRECISION NOT NULL,
+        from_lng DOUBLE PRECISION NOT NULL,
+        to_lat DOUBLE PRECISION NOT NULL,
+        to_lng DOUBLE PRECISION NOT NULL,
+        distance_km DOUBLE PRECISION NOT NULL,
+        duration_min DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'osrm',
+        hits INTEGER NOT NULL DEFAULT 0,
+        computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_route_legs_cache_used
+        ON route_legs_cache(last_used_at);
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS collection_learning_feedback (
         id SERIAL PRIMARY KEY,
