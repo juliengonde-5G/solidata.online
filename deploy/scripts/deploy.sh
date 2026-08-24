@@ -313,15 +313,15 @@ case "${ACTION}" in
     log "=== MISE À JOUR SOLIDATA ==="
 
     # Backup avant update
-    log "Étape 1/6 — Sauvegarde base de données..."
+    log "Étape 1/7 — Sauvegarde base de données..."
     bash deploy/scripts/backup.sh
 
     # Pull dernières modifications
-    log "Étape 2/6 — Récupération du code..."
+    log "Étape 2/7 — Récupération du code..."
     git pull origin main
 
     # Rebuild séquentiel sans cache (économise le disque sur DEV1-S)
-    log "Étape 3/6 — Reconstruction des images (sans cache)..."
+    log "Étape 3/7 — Reconstruction des images (sans cache)..."
     log "  Build backend..."
     docker compose -f ${COMPOSE_FILE} build --no-cache backend
     docker image prune -f 2>/dev/null || true
@@ -332,11 +332,11 @@ case "${ACTION}" in
     docker compose -f ${COMPOSE_FILE} build --no-cache mobile
     docker image prune -f 2>/dev/null || true
 
-    log "Étape 4/6 — Redémarrage des services..."
+    log "Étape 4/7 — Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
 
     # Migrations base de données
-    log "Étape 5/6 — Migrations base de données..."
+    log "Étape 5/7 — Migrations base de données..."
     sleep 5
     if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/init-db.js; then
         log "init-db.js exécuté (tables + migrations)."
@@ -391,11 +391,44 @@ case "${ACTION}" in
     # On tape solidata.online (et pas localhost) pour matcher le bon vhost nginx :
     # https://localhost atterrit sur le default_server (potentiellement un autre projet) → 502.
     # Le cert est valide pour solidata.online, donc pas besoin de TLS-insecure.
-    if BASE_URL=https://solidata.online API_USER="${API_USER:-}" API_PASSWORD="${API_PASSWORD:-}" \
-       node scripts/tests/api-smoke.js; then
+    #
+    # Le test ne dépend d'aucun paquet npm (que des primitives Node). Il tourne
+    # donc soit avec le Node de la machine, soit — quand il n'y en a pas, ce qui
+    # est le cas d'un serveur installé par init-server.sh, qui ne pose que
+    # Docker — dans un conteneur jetable partageant le réseau de l'hôte.
+    #
+    # Les identifiants sont exportés puis passés par « -e NOM » sans valeur :
+    # Docker les lit dans son environnement, ils n'apparaissent jamais dans la
+    # ligne de commande, donc jamais dans « ps ».
+    export BASE_URL="https://solidata.online"
+    export API_USER API_PASSWORD
+
+    run_smoke_test() {
+        if command -v node >/dev/null 2>&1; then
+            node scripts/tests/api-smoke.js
+        elif command -v docker >/dev/null 2>&1; then
+            docker run --rm --network host \
+                -e BASE_URL -e API_USER -e API_PASSWORD \
+                -v "${APP_DIR}:/work" -w /work \
+                node:20-alpine node scripts/tests/api-smoke.js
+        else
+            return 2
+        fi
+    }
+
+    smoke_status=0
+    run_smoke_test || smoke_status=$?
+
+    if [ "${smoke_status}" -eq 0 ]; then
         log "Smoke test : tous les endpoints critiques répondent ✓"
+    elif [ "${smoke_status}" -eq 2 ]; then
+        # Distinction essentielle : un test qu'on n'a PAS PU exécuter n'est pas
+        # un test qui échoue. Confondre les deux ferait annuler par un rollback
+        # un déploiement parfaitement sain.
+        warn "Smoke test NON EXÉCUTÉ : ni Node sur la machine, ni Docker pour le lancer."
+        warn "Le déploiement est allé à son terme — il n'a simplement pas été vérifié."
     else
-        error "Smoke test ÉCHOUÉ — un endpoint critique retourne 5xx. Inspecter la sortie ci-dessus + logs backend. Rollback à envisager : git reset --hard HEAD~1 && bash deploy/scripts/deploy.sh update"
+        error "Smoke test ÉCHOUÉ — un ou plusieurs endpoints critiques n'ont pas répondu correctement. Inspecter la sortie ci-dessus + les journaux du backend. Rollback à envisager : git reset --hard HEAD~1 && bash deploy/scripts/deploy.sh update"
     fi
 
     # Cleanup
