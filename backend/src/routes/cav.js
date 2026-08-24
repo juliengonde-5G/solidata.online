@@ -122,6 +122,19 @@ router.get('/map', cacheMiddleware(cavCacheKey('map'), 60), async (req, res) => 
           AVG(weight_kg) FILTER (WHERE date >= NOW() - INTERVAL '90 days') AS avg_weight_90d
         FROM tonnage_history
         GROUP BY cav_id
+      ),
+      -- Points DÉJÀ collectés d'une tournée EN COURS. tonnage_history n'est
+      -- écrit qu'à la CLÔTURE de la tournée : sans ce complément, un conteneur
+      -- vidé le matin resterait affiché « plein, collecte urgente » jusqu'au
+      -- soir. Les tournées de démonstration (formation) sont exclues — elles ne
+      -- doivent jamais déplacer une donnée réelle.
+      encours AS (
+        SELECT tc.cav_id, MAX(tc.collected_at)::date AS last_collection
+          FROM tour_cav tc
+          JOIN tours t ON t.id = tc.tour_id
+         WHERE tc.status = 'collected' AND tc.collected_at IS NOT NULL
+           AND t.status <> 'completed' AND t.is_demo IS NOT TRUE
+         GROUP BY tc.cav_id
       )
       SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
         c.nb_containers, c.avg_fill_rate, c.status, c.unavailable_reason,
@@ -129,10 +142,13 @@ router.get('/map', cacheMiddleware(cavCacheKey('map'), 60), async (req, res) => 
         c.lora_deveui, c.sensor_reference,
         c.sensor_last_reading, c.sensor_last_reading_at,
         c.sensor_battery_level, c.sensor_last_rssi, c.sensor_status,
-        agg.last_collection,
+        -- GREATEST ignore les NULL en PostgreSQL : un CAV sans historique mais
+        -- collecté ce matin sort bien la date du jour.
+        GREATEST(agg.last_collection, encours.last_collection) AS last_collection,
         agg.avg_weight_90d
       FROM cav c
       LEFT JOIN agg ON agg.cav_id = c.id
+      LEFT JOIN encours ON encours.cav_id = c.id
       WHERE c.status = 'active'
       ORDER BY c.name
     `);
@@ -217,6 +233,19 @@ router.get('/fill-rate', cacheMiddleware(cavCacheKey('fill-rate'), 60), async (r
         ) g
         WHERE gap_days IS NOT NULL
         GROUP BY cav_id
+      ),
+      -- Points DÉJÀ collectés d'une tournée EN COURS. tonnage_history n'est
+      -- écrit qu'à la CLÔTURE de la tournée : sans ce complément, un conteneur
+      -- vidé le matin resterait affiché « plein, collecte urgente » jusqu'au
+      -- soir. Les tournées de démonstration (formation) sont exclues — elles ne
+      -- doivent jamais déplacer une donnée réelle.
+      encours AS (
+        SELECT tc.cav_id, MAX(tc.collected_at)::date AS last_collection
+          FROM tour_cav tc
+          JOIN tours t ON t.id = tc.tour_id
+         WHERE tc.status = 'collected' AND tc.collected_at IS NOT NULL
+           AND t.status <> 'completed' AND t.is_demo IS NOT TRUE
+         GROUP BY tc.cav_id
       )
       SELECT c.id, c.name, c.address, c.commune, c.latitude, c.longitude,
         c.nb_containers, c.status, c.tournee, c.jours_collecte, c.freq_passage,
@@ -224,13 +253,14 @@ router.get('/fill-rate', cacheMiddleware(cavCacheKey('fill-rate'), 60), async (r
         c.lora_deveui, c.sensor_reference,
         c.sensor_last_reading, c.sensor_last_reading_at,
         c.sensor_battery_level, c.sensor_last_rssi, c.sensor_status,
-        agg.last_collection,
+        GREATEST(agg.last_collection, encours.last_collection) AS last_collection,
         agg.avg_weight_90d,
         agg.nb_collectes_90d,
         gaps.avg_days_between_collections
       FROM cav c
       LEFT JOIN agg ON agg.cav_id = c.id
       LEFT JOIN gaps ON gaps.cav_id = c.id
+      LEFT JOIN encours ON encours.cav_id = c.id
       WHERE c.status = 'active' AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
       ORDER BY c.name
     `);
