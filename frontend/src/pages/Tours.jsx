@@ -870,13 +870,30 @@ function fmtDur(min) {
 
 function TourDetailPanel({ tour, onClose }) {
   const summary = tour.summary || {};
+  // Les indicateurs mesurés vivent dans `summary.kpis` (GET /tours/:id/live-summary).
+  // Ils étaient lus à la racine de `summary` : introuvables, ils retombaient
+  // SILENCIEUSEMENT sur les estimations de planification — un écran qui
+  // affichait « 6h20 » et « 110 km » pour une tournée réellement partie à 7h49
+  // et rentrée à 16h49, et « — » au lieu des kilos pesés.
+  const kpis = summary.kpis || {};
   const points = summary.points || tour.cavs || [];
   const incidents = summary.incidents || [];
   const weights = summary.weights || [];
-  const distance = summary.distance_actual_km ?? summary.distance_km ?? tour.estimated_distance_km;
-  const duration = summary.elapsed_minutes ?? summary.duration_min ?? tour.estimated_duration_min;
-  const totalWeight = summary.total_weight_kg ?? tour.total_weight_kg ?? 0;
-  const avgFill = summary.avg_fill_percent ?? null;
+
+  // Réel d'abord, estimation en repli — et l'écran DIT lequel il montre.
+  const distanceReelle = Number.isFinite(parseFloat(kpis.distance_km)) && parseFloat(kpis.distance_km) > 0
+    ? parseFloat(kpis.distance_km) : null;
+  const distanceEstimee = tour.estimated_distance_km != null ? parseFloat(tour.estimated_distance_km) : null;
+  const dureeReelle = Number.isFinite(parseFloat(kpis.elapsed_min)) ? parseFloat(kpis.elapsed_min) : null;
+  const dureeEstimee = tour.estimated_duration_min != null ? parseFloat(tour.estimated_duration_min) : null;
+  const totalWeight = kpis.total_weight_kg ?? tour.total_weight_kg ?? null;
+  const avgFill = kpis.fill_cumulated_percent ?? null;
+  const nbCollected = kpis.nb_cav_collected ?? points.filter(p => p.status === 'collected').length;
+
+  // Un point peut porter un poids individuel (collectes association) ; sur une
+  // tournée CAV le poids est pesé au centre, pas borne par borne. On masque
+  // alors la colonne plutôt que d'aligner des tirets sans explication.
+  const colonnePoids = points.some(p => p.weight_kg != null || p.collected_weight_kg != null);
 
   return (
     <>
@@ -909,12 +926,27 @@ function TourDetailPanel({ tour, onClose }) {
         </div>
       </div>
 
-      {/* KPI globaux */}
+      {/* KPI globaux — réel mesuré, estimation en second */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-        <MiniStat label="Durée" value={fmtDur(duration)} />
-        <MiniStat label="Distance" value={distance ? `${Math.round(distance * 10) / 10} km` : '—'} />
-        <MiniStat label="Points" value={`${(summary.nb_collected ?? points.filter(p => p.status === 'collected').length)}/${points.length}`} />
-        <MiniStat label="Poids total" value={totalWeight ? `${Math.round(totalWeight)} kg` : '—'} />
+        <MiniStat
+          label={dureeReelle != null ? 'Durée réelle' : 'Durée estimée'}
+          value={fmtDur(dureeReelle != null ? dureeReelle : dureeEstimee)}
+          note={dureeReelle != null && dureeEstimee != null ? `estimée ${fmtDur(dureeEstimee)}` : null}
+        />
+        <MiniStat
+          label={distanceReelle != null ? 'Distance parcourue' : 'Distance estimée'}
+          value={(distanceReelle ?? distanceEstimee) != null
+            ? `${Math.round((distanceReelle ?? distanceEstimee) * 10) / 10} km` : '—'}
+          note={distanceReelle != null && distanceEstimee != null
+            ? `estimée ${Math.round(distanceEstimee * 10) / 10} km`
+            : (distanceReelle == null ? 'aucun relevé GPS' : null)}
+        />
+        <MiniStat label="Points" value={`${nbCollected}/${points.length}`} />
+        <MiniStat
+          label="Poids total"
+          value={totalWeight != null ? `${Math.round(totalWeight)} kg` : '—'}
+          note={weights.length > 1 ? `${weights.length} pesées` : null}
+        />
         {avgFill != null && <MiniStat label="Remplissage moy." value={`${avgFill}%`} />}
         {incidents.length > 0 && <MiniStat label="Incidents" value={incidents.length} highlight />}
       </div>
@@ -937,19 +969,29 @@ function TourDetailPanel({ tour, onClose }) {
                   <th className="text-right py-1.5 px-2">Prévu</th>
                   <th className="text-right py-1.5 px-2">Réel</th>
                   <th className="text-right py-1.5 px-2">Remplissage</th>
-                  <th className="text-right py-1.5 px-2">Poids</th>
+                  {colonnePoids && <th className="text-right py-1.5 px-2">Poids</th>}
                   <th className="text-center py-1.5 px-2">⚠</th>
                 </tr>
               </thead>
               <tbody>
                 {points.map((p, i) => (
                   <tr key={p.id || i} className="border-b border-slate-100">
-                    <td className="py-1.5 px-2 font-mono text-slate-400">{p.position || i + 1}</td>
+                    {/* Rang de passage, et non la valeur brute de `position` :
+                        retirer un point d'une tournée y laisse un trou, et la
+                        liste affichait « 1, 2, 3, 4, 6, 7 » pour six points. */}
+                    <td className="py-1.5 px-2 font-mono text-slate-400">{i + 1}</td>
                     <td className="py-1.5 px-2">
                       <p className="font-medium text-slate-700">{p.cav_name || p.name || p.nom}</p>
                       {p.commune && <p className="text-[10px] text-slate-400">{p.commune}</p>}
                     </td>
-                    <td className="py-1.5 px-2 text-right text-slate-500">{fmtTime(p.planned_passage_at || p.planned_passage_time)}</td>
+                    {/* « ≈ » quand l'heure vient de la répartition linéaire et
+                        non du calcul d'itinéraire : les deux méthodes cohabitent
+                        dans la même colonne et ne se comparent pas au réel de la
+                        même façon. */}
+                    <td className="py-1.5 px-2 text-right text-slate-500 whitespace-nowrap">
+                      {p.planned_source === 'estime' && <span className="text-slate-400" title="Heure estimée par répartition, non calculée sur l'itinéraire">≈ </span>}
+                      {fmtTime(p.planned_passage_at || p.planned_passage_time)}
+                    </td>
                     <td className="py-1.5 px-2 text-right text-slate-700">{fmtTime(p.collected_at)}</td>
                     <td className="py-1.5 px-2 text-right">
                       {p.status === 'skipped' ? (
@@ -961,9 +1003,11 @@ function TourDetailPanel({ tour, onClose }) {
                         <span className="font-semibold">{p.fill_level}/5</span>
                       ) : <span className="text-slate-400">—</span>}
                     </td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">
-                      {p.weight_kg != null ? <span className="font-semibold">{Math.round(p.weight_kg)} kg</span> : (p.collected_weight_kg ? <span className="font-semibold">{Math.round(p.collected_weight_kg)} kg</span> : <span className="text-slate-400">—</span>)}
-                    </td>
+                    {colonnePoids && (
+                      <td className="py-1.5 px-2 text-right tabular-nums">
+                        {p.weight_kg != null ? <span className="font-semibold">{Math.round(p.weight_kg)} kg</span> : (p.collected_weight_kg ? <span className="font-semibold">{Math.round(p.collected_weight_kg)} kg</span> : <span className="text-slate-400">—</span>)}
+                      </td>
+                    )}
                     <td className="py-1.5 px-2 text-center">
                       {p.has_incident && <span className="text-red-500" title="Incident">!</span>}
                     </td>
@@ -974,6 +1018,13 @@ function TourDetailPanel({ tour, onClose }) {
           </div>
         )}
       </div>
+
+      {!colonnePoids && weights.length > 0 && (
+        <p className="text-[10px] text-slate-400 -mt-3 mb-4">
+          Le poids n'est pas relevé borne par borne sur une tournée de conteneurs :
+          il est pesé au centre de tri, ci-dessous.
+        </p>
+      )}
 
       {/* Pesées centre de tri */}
       {weights.length > 0 && (
@@ -1028,11 +1079,12 @@ function SummaryTile({ label, value }) {
   );
 }
 
-function MiniStat({ label, value, highlight }) {
+function MiniStat({ label, value, highlight, note }) {
   return (
     <div className={`rounded-lg p-2 ${highlight ? 'bg-red-50 border border-red-100' : 'bg-slate-50'}`}>
       <p className="text-[10px] text-slate-500 uppercase">{label}</p>
       <p className={`text-sm font-bold ${highlight ? 'text-red-700' : 'text-slate-800'}`}>{value}</p>
+      {note && <p className="text-[10px] text-slate-400 mt-0.5">{note}</p>}
     </div>
   );
 }

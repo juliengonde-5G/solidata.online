@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, MapSizeFix } from '../components';
 import api from '../services/api';
+import Modal from '../components/Modal';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import io from 'socket.io-client';
@@ -36,6 +37,47 @@ function truckIcon(color) {
 // ── Événements de circulation (item « reprendre la main » — GET /tours/trafic) ──
 // Icône ET couleur distinctes par type d'incident (accident/bouchon/fermeture/
 // travaux/autre) via un DivIcon (même technique que truckIcon ci-dessus).
+// Statuts de tournée en clair. L'écran affichait la valeur brute de la base
+// (« returning »), donc le « camion plein, retour au centre » déclaré par le
+// chauffeur passait inaperçu — c'est pourtant l'information la plus utile de
+// la fin de journée.
+// Motifs de déclenchement du recalcul d'ordre, en clair.
+const MOTIFS_REOPT = {
+  arret: 'après un arrêt',
+  recurrent: 'recalcul périodique',
+  incident: 'suite à un incident',
+  manual: 'demande manuelle',
+};
+
+// Provenance des chiffres annoncés : mesure réelle ou estimation. Un gain
+// « estimé » et un gain mesuré ne se décident pas de la même façon.
+const SOURCES_REOPT = {
+  tomtom_trafic: 'mesuré avec le trafic',
+  osrm_facteur_jour: 'mesuré (trafic moyen du jour)',
+  estimation: 'estimation — routeur indisponible',
+};
+
+const TOUR_STATUS_META = {
+  planned: { label: 'Planifiée', classe: 'bg-slate-100 text-slate-600' },
+  in_progress: { label: 'En cours', classe: 'bg-emerald-100 text-emerald-700' },
+  paused: { label: 'En pause', classe: 'bg-amber-100 text-amber-700' },
+  returning: { label: '🔄 Retour au centre', classe: 'bg-blue-100 text-blue-700 font-semibold' },
+  completed: { label: 'Terminée', classe: 'bg-slate-100 text-slate-500' },
+  cancelled: { label: 'Annulée', classe: 'bg-red-100 text-red-700' },
+};
+
+function statutTournee(status) {
+  return TOUR_STATUS_META[status] || { label: status || '—', classe: 'bg-slate-100 text-slate-600' };
+}
+
+/** Coordonnées GPS lisibles et copiables (5 décimales ≈ 1 m). */
+function fmtGps(lat, lng) {
+  const a = Number(lat);
+  const b = Number(lng);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return `${a.toFixed(5)}, ${b.toFixed(5)}`;
+}
+
 const TRAFFIC_TYPE_META = {
   accident: { emoji: '🚨', color: '#DC2626', label: 'Accident' },
   bouchon: { emoji: '🚗', color: '#F97316', label: 'Bouchon' },
@@ -68,6 +110,9 @@ function TrafficLayer({ onStatusChange }) {
   const pendingRef = useRef(null);
 
   const fetchTraffic = useCallback(async () => {
+    // Onglet en arrière-plan : personne ne regarde la carte, et chaque appel
+    // consomme le forfait TomTom. On ne relève rien tant qu'il est masqué.
+    if (typeof document !== 'undefined' && document.hidden) return;
     lastFetchRef.current = Date.now();
     const b = map.getBounds();
     const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
@@ -160,6 +205,19 @@ export default function CollectionsLive() {
   const [expandedTour, setExpandedTour] = useState(null);
   const [livePositions, setLivePositions] = useState({}); // vehicle_id → {lat, lng, speed, ts}
   const [trafficInfo, setTrafficInfo] = useState(null); // { disponible, message?, incidents? }
+  // Tracés ROUTIERS des tournées : tour_id → { geometry, distance_restante_km, … }
+  // La carte suivait jusqu'ici des segments à vol d'oiseau, et la « distance
+  // restante » n'était qu'un prorata du kilométrage total estimé.
+  const [itineraires, setItineraires] = useState({});
+  // Propositions de ré-optimisation en attente. Elles étaient jusqu'ici
+  // produites et notifiées, mais jamais listées ici : le gestionnaire qui
+  // décide ne les voyait pas.
+  const [reoptims, setReoptims] = useState([]);
+  const [reoptEnCours, setReoptEnCours] = useState(null);
+  // Clôture d'une tournée depuis le bureau : { tour, nbRestants } tant que la
+  // confirmation n'est pas donnée.
+  const [clotureDemandee, setClotureDemandee] = useState(null);
+  const [clotureEnCours, setClotureEnCours] = useState(false);
   const socketRef = useRef(null);
 
   const loadActive = useCallback(async () => {
@@ -185,10 +243,64 @@ export default function CollectionsLive() {
     setLoading(false);
   }, []);
 
+  const loadReoptims = useCallback(async () => {
+    try {
+      const res = await api.get('/tours/reoptimizations/pending');
+      setReoptims(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error('[CollectionsLive] reoptimizations:', err);
+    }
+  }, []);
+
+  const deciderReopt = useCallback(async (reopt, action) => {
+    setReoptEnCours(reopt.id);
+    try {
+      await api.post(`/tours/${reopt.tour_id}/reoptimize/${reopt.id}/${action}`);
+      await Promise.all([loadReoptims(), loadActive()]);
+    } catch (err) {
+      console.error('[CollectionsLive] décision ré-optim:', err);
+    }
+    setReoptEnCours(null);
+  }, [loadReoptims]);
+
+  // Tracés routiers : appel séparé pour ne pas ralentir le rafraîchissement
+  // principal. Un échec laisse la carte en trait droit (signalé), jamais une
+  // distance approchée présentée comme routière.
+  const loadItineraires = useCallback(async () => {
+    try {
+      const res = await api.get('/tours/active-summary/itineraires');
+      const parTournee = {};
+      (res.data?.itineraires || []).forEach((it) => { parTournee[it.tour_id] = it; });
+      setItineraires(parTournee);
+    } catch (err) {
+      console.error('[CollectionsLive] itineraires:', err);
+    }
+  }, []);
+
+  // Clôture d'une tournée par le gestionnaire. Passe par la MÊME route que la
+  // clôture chauffeur (`PUT /tours/:id/status`) : mêmes effets de fin de
+  // tournée (tonnage, stock, apprentissage), même idempotence.
+  const cloturerTournee = useCallback(async (tour) => {
+    setClotureEnCours(true);
+    try {
+      await api.put(`/tours/${tour.id}/status`, { status: 'completed' });
+      setClotureDemandee(null);
+      await Promise.all([loadActive(), loadItineraires(), loadReoptims()]);
+    } catch (err) {
+      console.error('[CollectionsLive] clôture:', err);
+    }
+    setClotureEnCours(false);
+  }, [loadActive, loadItineraires, loadReoptims]);
+
   // Initial load + polling 30s + Socket.IO pour positions GPS temps réel
   useEffect(() => {
     loadActive();
-    const interval = setInterval(loadActive, 30000);
+    loadItineraires();
+    loadReoptims();
+    const interval = setInterval(() => { loadActive(); loadReoptims(); }, 30000);
+    // Le tracé ne bouge qu'à chaque point collecté : 2 min suffisent, et cela
+    // évite de solliciter le routeur toutes les 30 secondes.
+    const intervalTrace = setInterval(loadItineraires, 120000);
 
     const token = localStorage.getItem('accessToken');
     const socket = io(window.location.origin, { auth: { token } });
@@ -204,14 +316,18 @@ export default function CollectionsLive() {
         [vId]: { lat, lng, speed: d.speed, ts: d.timestamp || new Date().toISOString() },
       }));
     });
-    socket.on('cav-status-update', loadActive);
-    socket.on('tour-status-update', loadActive);
+    // Un point collecté change l'itinéraire restant : on le recalcule aussitôt
+    // plutôt que d'attendre le prochain cycle (le CAV vidé sortait du tracé
+    // avec jusqu'à deux minutes de retard).
+    socket.on('cav-status-update', () => { loadActive(); loadItineraires(); });
+    socket.on('tour-status-update', () => { loadActive(); loadItineraires(); });
 
     return () => {
       clearInterval(interval);
+      clearInterval(intervalTrace);
       socket.disconnect();
     };
-  }, [loadActive]);
+  }, [loadActive, loadItineraires, loadReoptims]);
 
   const tours = data?.tours || [];
   const kpis = data?.kpis || { vehicules_actifs: 0, cav_a_vider: 0, avancement_pct: 0, distance_restante_km: 0 };
@@ -278,6 +394,113 @@ export default function CollectionsLive() {
           />
         </div>
 
+        {/* Confirmation de clôture — la clôture n'est pas un simple changement
+            d'étiquette : elle enregistre le tonnage, alimente le stock et
+            nourrit le moteur prédictif. Elle se confirme donc explicitement,
+            et l'écran rappelle ce qui reste non collecté. */}
+        {clotureDemandee && (
+          <Modal
+            isOpen
+            onClose={() => !clotureEnCours && setClotureDemandee(null)}
+            title={`Terminer la tournée #${clotureDemandee.tour.id} ?`}
+            size="sm"
+          >
+            <div className="space-y-3 text-sm text-slate-700">
+              <p>
+                Véhicule <strong>{clotureDemandee.tour.vehicle_registration || clotureDemandee.tour.vehicle_name || '—'}</strong>
+                {clotureDemandee.tour.driver_name ? <> — {clotureDemandee.tour.driver_name}</> : null}
+              </p>
+              {clotureDemandee.nbRestants > 0 && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs">
+                  <strong>{clotureDemandee.nbRestants} point{clotureDemandee.nbRestants > 1 ? 's' : ''}</strong>
+                  {clotureDemandee.nbRestants > 1 ? ' ne sont pas collectés' : " n'est pas collecté"} :
+                  {clotureDemandee.nbRestants > 1 ? ' ils resteront' : ' il restera'} en attente dans l'historique.
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                La clôture enregistre le tonnage pesé, crée l'entrée de stock et alimente
+                le moteur prédictif. Elle ne peut pas être annulée d'un clic.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={clotureEnCours}
+                  onClick={() => setClotureDemandee(null)}
+                  className="px-3 py-1.5 rounded-lg text-sm bg-white border border-slate-300 text-slate-600 disabled:opacity-50"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={clotureEnCours}
+                  onClick={() => cloturerTournee(clotureDemandee.tour)}
+                  className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white disabled:opacity-50"
+                >
+                  {clotureEnCours ? 'Clôture…' : 'Terminer la tournée'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* ── Propositions de ré-optimisation en attente ─────────────────
+            Le recalcul tourne après chaque arrêt et à intervalle régulier ;
+            c'est ici que le gestionnaire tranche. Le CO2 n'est affiché que
+            s'il est CALCULABLE (consommation du véhicule saisie) — sinon la
+            ligne dit pourquoi, plutôt que d'annoncer « 0 kg évité ». */}
+        {reoptims.length > 0 && (
+          <div className="card-modern p-4 mb-5 border-l-4 border-emerald-500">
+            <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2 mb-3">
+              <RouteIcon className="w-4 h-4 text-emerald-600" />
+              Ordre de passage : {reoptims.length} proposition{reoptims.length > 1 ? 's' : ''} à valider
+            </h2>
+            <div className="space-y-2">
+              {reoptims.map((r) => {
+                const gainKm = Math.round(((r.old_distance_km || 0) - (r.new_distance_km || 0)) * 10) / 10;
+                const gainMin = Math.round((r.old_duration_min || 0) - (r.new_duration_min || 0));
+                return (
+                  <div key={r.id} className="flex flex-wrap items-center gap-3 bg-slate-50 rounded-lg px-3 py-2 text-xs">
+                    <span className="font-bold text-slate-700">
+                      🚛 {r.registration || r.vehicle_name || `Tournée #${r.tour_id}`}
+                    </span>
+                    <span className="text-slate-500">{MOTIFS_REOPT[r.trigger_reason] || r.trigger_reason}</span>
+                    <span className="text-emerald-700 font-semibold">−{gainKm} km</span>
+                    <span className="text-emerald-700 font-semibold">−{gainMin} min</span>
+                    {r.co2_evite_kg != null ? (
+                      <span className="text-emerald-700 font-semibold">
+                        −{Math.round(r.co2_evite_kg * 100) / 100} kg CO2
+                      </span>
+                    ) : (
+                      <span className="text-slate-400" title="Saisir des pleins de carburant dans Énergie &amp; GES pour chiffrer le CO2">
+                        CO2 non calculable
+                      </span>
+                    )}
+                    <span className="text-slate-400">{SOURCES_REOPT[r.source_calcul] || r.source_calcul || ''}</span>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        type="button"
+                        disabled={reoptEnCours === r.id}
+                        onClick={() => deciderReopt(r, 'accept')}
+                        className="px-3 py-1 rounded-md bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                      >
+                        Appliquer
+                      </button>
+                      <button
+                        type="button"
+                        disabled={reoptEnCours === r.id}
+                        onClick={() => deciderReopt(r, 'reject')}
+                        className="px-3 py-1 rounded-md bg-white border border-slate-300 text-slate-600 disabled:opacity-50"
+                      >
+                        Ignorer
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {tours.length === 0 ? (
           <div className="card-modern p-12 text-center">
             <Truck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
@@ -304,11 +527,21 @@ export default function CollectionsLive() {
                   const linePoints = validPoints
                     .filter((p) => p.status === 'pending' || p.status === 'in_progress')
                     .map((p) => [p.latitude, p.longitude]);
+                  // Tracé suivant les rues quand le routeur a répondu ; sinon
+                  // repli en trait droit, VISIBLEMENT pointillé (l'utilisateur
+                  // doit voir que ce n'est pas un itinéraire réel).
+                  const trace = itineraires[tour.id];
+                  const routier = trace?.source === 'routier' && trace.geometry?.length >= 2;
 
                   return (
                     <FragmentBlock key={tour.id}>
                       {/* Itinéraire restant */}
-                      {linePoints.length >= 2 && (
+                      {routier ? (
+                        <Polyline
+                          positions={trace.geometry}
+                          pathOptions={{ color, weight: 4, opacity: 0.75 }}
+                        />
+                      ) : linePoints.length >= 2 && (
                         <Polyline
                           positions={linePoints}
                           pathOptions={{ color, weight: 3, opacity: 0.6, dashArray: '6 4' }}
@@ -342,6 +575,9 @@ export default function CollectionsLive() {
                                 {p.planned_passage_time && !isCollected && (
                                   <p className="text-slate-400">Passage prévu : {fmtTime(p.planned_passage_time)}</p>
                                 )}
+                                {/* Coordonnées exactes du point, copiables d'un
+                                    clic pour les dicter à un chauffeur. */}
+                                <p className="text-slate-400 select-all">📍 {fmtGps(p.latitude, p.longitude) || '—'}</p>
                                 <p className="mt-1 text-[10px] uppercase tracking-wider" style={{ color }}>
                                   Tournée #{tour.id} — {tour.driver_name || '—'}
                                 </p>
@@ -364,6 +600,14 @@ export default function CollectionsLive() {
                               <p>Vitesse : {livePositions[tour.vehicle_id].speed != null ? `${Math.round(livePositions[tour.vehicle_id].speed)} km/h` : '—'}</p>
                               <p>Maj : {fmtTime(livePositions[tour.vehicle_id].ts)}</p>
                               <p className="text-slate-500">{tour.nb_collected}/{tour.nb_points} collectés</p>
+                              <p className={`px-1.5 py-0.5 rounded inline-block ${statutTournee(tour.status).classe}`}>
+                                {statutTournee(tour.status).label}
+                              </p>
+                              {/* Coordonnées exactes : à recopier dans un GPS ou
+                                  à transmettre par téléphone en cas d'incident. */}
+                              <p className="text-slate-400 select-all">
+                                📍 {fmtGps(livePositions[tour.vehicle_id].lat, livePositions[tour.vehicle_id].lng) || '—'}
+                              </p>
                             </div>
                           </Popup>
                         </Marker>
@@ -434,6 +678,7 @@ export default function CollectionsLive() {
                       <th className="text-right py-2 px-3">Temps</th>
                       <th className="text-center py-2 px-3">Alerte</th>
                       <th className="text-right py-2 px-3">Poids</th>
+                      <th className="text-right py-2 px-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -454,7 +699,12 @@ export default function CollectionsLive() {
                             </td>
                             <td className="py-2 px-3">
                               <p className="font-semibold text-slate-800">#{tour.id}</p>
-                              <p className="text-[10px] text-slate-500">{tour.collection_type === 'association' ? 'Associations' : 'CAV'} · {tour.status}</p>
+                              <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                                {tour.collection_type === 'association' ? 'Associations' : 'CAV'}
+                                <span className={`px-1.5 py-0.5 rounded ${statutTournee(tour.status).classe}`}>
+                                  {statutTournee(tour.status).label}
+                                </span>
+                              </p>
                             </td>
                             <td className="py-2 px-3">
                               <p className="font-medium text-slate-700">{tour.driver_name || '—'}</p>
@@ -473,7 +723,11 @@ export default function CollectionsLive() {
                               <span className="text-slate-400">/{tour.nb_points}</span>
                             </td>
                             <td className="py-2 px-3 text-right text-xs tabular-nums">
-                              {tour.distance_remaining_km != null ? `${tour.distance_remaining_km}/${tour.distance_km || '—'} km` : '—'}
+                              {itineraires[tour.id]?.source === 'routier'
+                                ? `${itineraires[tour.id].distance_restante_km}/${tour.distance_km || '—'} km`
+                                : tour.distance_remaining_km != null
+                                  ? `${tour.distance_remaining_km}/${tour.distance_km || '—'} km`
+                                  : '—'}
                             </td>
                             <td className="py-2 px-3 text-right text-xs tabular-nums">
                               {fmtDuration(tour.elapsed_min)} / {fmtDuration(tour.estimated_duration_min)}
@@ -489,11 +743,26 @@ export default function CollectionsLive() {
                             <td className="py-2 px-3 text-right text-xs font-semibold tabular-nums">
                               {tour.weight_collected_kg > 0 ? `${tour.weight_collected_kg} kg` : '—'}
                             </td>
+                            {/* Clôture depuis le bureau : un chauffeur peut avoir
+                                terminé sans clôturer (batterie, oubli, perte de
+                                réseau). Confirmation obligatoire — la clôture
+                                déclenche le tonnage et les entrées de stock. */}
+                            <td className="py-2 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                              {['planned', 'in_progress', 'paused', 'returning'].includes(tour.status) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClotureDemandee({ tour, nbRestants: tour.nb_remaining ?? 0 })}
+                                  className="px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+                                >
+                                  Terminer
+                                </button>
+                              ) : <span className="text-xs text-slate-300">—</span>}
+                            </td>
                           </tr>
 
                           {isExpanded && (
                             <tr>
-                              <td colSpan={9} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+                              <td colSpan={10} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
                                 <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} />
                               </td>
                             </tr>

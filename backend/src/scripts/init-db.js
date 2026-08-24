@@ -634,6 +634,18 @@ async function initDatabase() {
       );
     `);
 
+    // Détail du questionnaire de début de journée. Jusqu'ici seul le booléen
+    // global `exterior_ok` était conservé — et comme le chauffeur ne peut pas
+    // partir sans avoir tout coché, il valait TOUJOURS vrai : le contenu du
+    // questionnaire était donc intégralement perdu, et le manager n'avait rien
+    // à consulter. `reponses` conserve chaque point vérifié, avec son libellé
+    // au moment de la saisie (un référentiel qui évolue ne doit pas réécrire
+    // l'histoire).
+    await client.query(`
+      ALTER TABLE vehicle_checklists
+        ADD COLUMN IF NOT EXISTS reponses JSONB;
+    `);
+
     // Déclarations de fin de journée (chauffeur / suiveur / binôme) — pendant
     // mobile de vehicle_checklists (départ), posée au retour au centre de tri
     // (TourSummary.jsx « Terminer la journée »). Les 6 booléens sont NOT NULL :
@@ -1146,6 +1158,15 @@ async function initDatabase() {
       );
     `);
 
+    // Provenance du facteur de circulation : mesuré (TomTom) ou laissé au
+    // défaut. Sans cette trace, un facteur de 1 « fluide mesuré » serait
+    // indiscernable d'un facteur de 1 « jamais renseigné ».
+    await client.query(`
+      ALTER TABLE collection_context
+        ADD COLUMN IF NOT EXISTS traffic_source VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS traffic_measured_at TIMESTAMP;
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS evenements_locaux (
         id SERIAL PRIMARY KEY,
@@ -1204,6 +1225,38 @@ async function initDatabase() {
         notes TEXT,
         triggered_at TIMESTAMP DEFAULT NOW()
       );
+    `);
+
+    // Ré-optimisation en cours de tournée : objectif retenu (CO2 / efficacité
+    // / mixte), provenance des chiffres publiés (mesure TomTom avec trafic,
+    // OSRM, ou estimation), CO2 évité et application automatique.
+    await client.query(`
+      ALTER TABLE tour_reoptimizations
+        ADD COLUMN IF NOT EXISTS objectif VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS source_calcul VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS co2_evite_kg DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS decision_auto BOOLEAN NOT NULL DEFAULT FALSE;
+    `);
+    // Le recalcul devient RÉCURRENT (après chaque arrêt et à intervalle
+    // régulier) : deux nouveaux motifs de déclenchement, que la contrainte
+    // d'origine refusait. Reconstruite par DO-scan de pg_constraint pour
+    // rester idempotente et ne pas dépendre du nom exact de la contrainte.
+    await client.query(`
+      DO $$
+      DECLARE nom text;
+      BEGIN
+        SELECT conname INTO nom FROM pg_constraint
+         WHERE conrelid = 'tour_reoptimizations'::regclass
+           AND contype = 'c'
+           AND pg_get_constraintdef(oid) LIKE '%trigger_reason%';
+        IF nom IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE tour_reoptimizations DROP CONSTRAINT %I', nom);
+        END IF;
+        ALTER TABLE tour_reoptimizations
+          ADD CONSTRAINT tour_reoptimizations_trigger_reason_check
+          CHECK (trigger_reason IN ('manual','incident','skipped','full','delay',
+                                    'inaccessible','arret','recurrent'));
+      END $$;
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_tour ON tour_reoptimizations(tour_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_status ON tour_reoptimizations(status);`);
@@ -1287,6 +1340,36 @@ async function initDatabase() {
         computed_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // ── Cache des tronçons routiers (services/route-cache.js) ────────────
+    // Le moteur de temps demande une distance/durée ROUTIÈRE par tronçon ; une
+    // estimation de tournée en enchaîne une vingtaine, et l'écran de création
+    // recalcule à chaque point ajouté. Le réseau routier entre deux bornes
+    // fixes étant stable, chaque tronçon n'est mesuré qu'UNE fois puis relu.
+    // Le trafic est appliqué APRÈS (multiplicateur de durée) : le cache ne fige
+    // jamais une condition de circulation.
+    // Seule une MESURE réelle est stockée (`source = 'osrm'`) : un repli
+    // Haversine n'est jamais persisté — il serait figé à la place d'une mesure.
+    // Table purgeable sans perte : elle se reconstruit à l'usage.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS route_legs_cache (
+        cle VARCHAR(64) PRIMARY KEY,
+        from_lat DOUBLE PRECISION NOT NULL,
+        from_lng DOUBLE PRECISION NOT NULL,
+        to_lat DOUBLE PRECISION NOT NULL,
+        to_lng DOUBLE PRECISION NOT NULL,
+        distance_km DOUBLE PRECISION NOT NULL,
+        duration_min DOUBLE PRECISION NOT NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'osrm',
+        hits INTEGER NOT NULL DEFAULT 0,
+        computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_route_legs_cache_used
+        ON route_legs_cache(last_used_at);
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS collection_learning_feedback (
         id SERIAL PRIMARY KEY,

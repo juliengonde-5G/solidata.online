@@ -8,6 +8,15 @@ import { addPendingChecklist, deleteItem, newClientId, STORES } from '../service
 import { sendChecklist, getPendingCount } from '../services/sync';
 import { toApiPayload } from '../services/vehicleDamage';
 
+// Niveaux de carburant proposés au chauffeur. Quatre choix suffisent : la
+// jauge d'un utilitaire ne se lit pas plus finement d'un coup d'œil.
+const NIVEAUX_CARBURANT = [
+  { valeur: '1/4', libelle: '¼' },
+  { valeur: '1/2', libelle: '½' },
+  { valeur: '3/4', libelle: '¾' },
+  { valeur: 'plein', libelle: 'Plein' },
+];
+
 const CHECKLIST_ITEMS = [
   { id: 'papiers', label: 'Papiers du véhicule', sub: 'carte grise, assurance', icon: '📄' },
   { id: 'permis', label: 'Permis de conduire', sub: 'sur toi', icon: '🪪' },
@@ -77,6 +86,10 @@ export default function Checklist() {
   const [kmStart, setKmStart] = useState('');
   const [tour, setTour] = useState(null);
   const [damages, setDamages] = useState([]);
+  // Le niveau de carburant était CODÉ EN DUR à « 1/2 » dans l'envoi : la fiche
+  // véhicule affichait donc une valeur qui n'avait jamais été constatée. Il est
+  // désormais demandé au chauffeur.
+  const [fuelLevel, setFuelLevel] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   // Écran d'information après validation :
@@ -116,7 +129,7 @@ export default function Checklist() {
   };
 
   const submit = async () => {
-    if (!allChecked || loading) return;
+    if (!allChecked || !fuelLevel || loading) return;
     setLoading(true);
     setError('');
 
@@ -125,10 +138,15 @@ export default function Checklist() {
       tourId,
       vehicleId: tour?.vehicle_id,
       exteriorOk: allChecked,
-      fuelLevel: '1/2',
+      fuelLevel,
       kmStart: parseInt(kmStart, 10) || 0,
       notes,
       degats: toApiPayload(damages),
+      // Détail du questionnaire, avec le libellé tel qu'affiché au chauffeur :
+      // le manager doit pouvoir consulter ce qui a réellement été vérifié.
+      reponses: CHECKLIST_ITEMS.map((item) => ({
+        id: item.id, libelle: item.label, ok: !!checked[item.id],
+      })),
     };
 
     // Toujours écrire dans la file offline d'abord — aucune perte possible,
@@ -243,7 +261,7 @@ export default function Checklist() {
           <button
             type="button"
             onClick={submit}
-            disabled={!allChecked || loading}
+            disabled={!allChecked || !fuelLevel || loading}
             className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               minHeight: 84,
@@ -253,9 +271,11 @@ export default function Checklist() {
           >
             {loading
               ? 'Enregistrement…'
-              : allChecked
-                ? <>▶ Démarrer la navigation</>
-                : `Coche les ${CHECKLIST_ITEMS.length - checkedCount} dernier${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''} point${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''}`}
+              : !allChecked
+                ? `Coche les ${CHECKLIST_ITEMS.length - checkedCount} dernier${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''} point${CHECKLIST_ITEMS.length - checkedCount > 1 ? 's' : ''}`
+                : !fuelLevel
+                  ? 'Indique le niveau de carburant'
+                  : <>▶ Démarrer la navigation</>}
           </button>
         </div>
       }
@@ -354,6 +374,38 @@ export default function Checklist() {
             className="input-mobile"
           />
         </div>
+        {/* Niveau de carburant — gros boutons, un seul geste. */}
+        <div
+          className="bg-white"
+          style={{ borderRadius: 16, padding: 14, border: '1px solid #E2E8F0' }}
+        >
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Niveau de carburant
+          </label>
+          <div className="grid grid-cols-4 gap-2">
+            {NIVEAUX_CARBURANT.map((n) => (
+              <button
+                key={n.valeur}
+                type="button"
+                onClick={() => setFuelLevel(n.valeur)}
+                className="font-extrabold transition-transform active:scale-95"
+                style={{
+                  minHeight: 56,
+                  borderRadius: 14,
+                  border: fuelLevel === n.valeur ? '2px solid var(--color-primary)' : '1px solid #E2E8F0',
+                  background: fuelLevel === n.valeur ? 'var(--color-primary)' : '#fff',
+                  color: fuelLevel === n.valeur ? '#fff' : '#334155',
+                }}
+              >
+                {n.libelle}
+              </button>
+            ))}
+          </div>
+          {!fuelLevel && (
+            <p className="text-xs text-slate-500 mt-2">Choisis un niveau pour pouvoir partir.</p>
+          )}
+        </div>
+
         <div
           className="bg-white"
           style={{ borderRadius: 16, padding: 14, border: '1px solid #E2E8F0' }}

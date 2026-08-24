@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { PageHeader, Section, DataTable, StatusBadge, ErrorState, Modal } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
+import AdresseGeocodee from '../components/AdresseGeocodee';
 import { ARRET_CATEGORIES, getArretCategoryMeta } from '../components/tours/arretCategories';
 
 const EMPTY_FORM = {
@@ -280,24 +281,19 @@ export default function AdminLieuxTechniques() {
               </div>
             </div>
 
-            <div>
-              <label className="text-xs text-slate-500">Adresse</label>
-              <input type="text" value={form.adresse} onChange={(e) => setForm({ ...form, adresse: e.target.value })} className="input-modern" />
-            </div>
+            {/* Adresse et coordonnées : reconnaissance automatique dans les
+                deux sens (Base Adresse Nationale, repli TomTom). La saisie
+                manuelle reste possible si le service ne répond pas. */}
+            <AdresseGeocodee
+              adresse={form.adresse}
+              latitude={form.latitude}
+              longitude={form.longitude}
+              onChange={(champs) => setForm((f) => ({ ...f, ...champs }))}
+            />
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-slate-500">Latitude</label>
-                <input type="number" step="any" value={form.latitude} onChange={(e) => setForm({ ...form, latitude: e.target.value })} className="input-modern" />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Longitude</label>
-                <input type="number" step="any" value={form.longitude} onChange={(e) => setForm({ ...form, longitude: e.target.value })} className="input-modern" />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Durée (minutes)</label>
-                <input type="number" min="0" value={form.duree_min} onChange={(e) => setForm({ ...form, duree_min: e.target.value })} className="input-modern" placeholder="Ex. 15" />
-              </div>
+            <div>
+              <label className="text-xs text-slate-500">Durée (minutes)</label>
+              <input type="number" min="0" value={form.duree_min} onChange={(e) => setForm({ ...form, duree_min: e.target.value })} className="input-modern" placeholder="Ex. 15" />
             </div>
 
             <div>

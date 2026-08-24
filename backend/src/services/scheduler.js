@@ -1729,6 +1729,20 @@ async function hourlyTick() {
         await runInstrumented('autoDatabaseBackup', () => runAutoBackup(now));
       }
     }
+    // Facteur de circulation du jour (TomTom Traffic Flow Segment Data) :
+    // 3 relevés par jour ouvré en HEURE DE PARIS. Alimente
+    // collection_context.traffic_factor, seul canal par lequel le moteur de
+    // temps de travail tient compte du trafic — sans lui il calcule toujours
+    // en circulation fluide. Sans clé TomTom, le job ne fait rien (il ne pose
+    // JAMAIS un facteur inventé). Coût : ~470 appels/mois sur un forfait
+    // gratuit de 20 000.
+    {
+      const { shouldMeasureTraffic, measureTrafficFactor } = require('./traffic');
+      if (shouldMeasureTraffic(now)) {
+        console.log('[SCHEDULER] Relevé de la circulation du jour (TomTom)...');
+        await runInstrumented('measureTrafficFactor', measureTrafficFactor);
+      }
+    }
     // Génération quotidienne des prédictions de remplissage J..J+7 à 5h (résidu 8).
     // Calcul LOCAL (heuristique, sans appel LLM). Alimente ml_fill_predictions pour
     // que la boucle de feedback capteur (liveobjects-processor) puisse se refermer.
@@ -1829,6 +1843,48 @@ function scheduleNextTick() {
   if (schedulerTimeout && schedulerTimeout.unref) schedulerTimeout.unref();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// RÉ-OPTIMISATION DES TOURNÉES EN COURS — DÉCLENCHÉE PAR LES ARRÊTS
+// ══════════════════════════════════════════════════════════════════════════
+// ARBITRAGE CLIENT (août 2026) : le recalcul se fait APRÈS CHAQUE BORNE, et
+// JAMAIS pendant un trajet entre deux points. Réordonner la suite du parcours
+// alors que le chauffeur roule vers un point précis n'a pas de sens : il est
+// déjà engagé, et un changement d'ordre en pleine route est perturbant.
+// Le déclenchement vit donc dans le handler de collecte
+// (routes/tours/index.js, collect-public), pas dans un minuteur.
+//
+// Ne subsiste ici que le suivi du dernier recalcul par tournée, utilisé pour
+// éviter deux calculs coup sur coup quand deux bornes se suivent de très près.
+/** Dernier recalcul par tournée (en mémoire : un redémarrage relance, sans dommage). */
+const dernierRecalcul = new Map();
+
+/** Tournées à recalculer maintenant (fonction PURE, testée). */
+function tourneesARecalculer(tournees, dernier, maintenantMs, intervalleMin) {
+  // parseFloat et non Number : Number(null) vaut 0, ce qui transformerait un
+  // réglage absent en « recalculer sans arrêt ».
+  const brut = parseFloat(intervalleMin);
+  const seuil = Math.max(1, Number.isFinite(brut) ? brut : 15) * 60 * 1000;
+  return (tournees || [])
+    .filter((t) => {
+      const precedent = dernier.get(t.id);
+      return precedent === undefined || (maintenantMs - precedent) >= seuil;
+    })
+    .map((t) => t.id);
+}
+
+/**
+ * Signale qu'une tournée vient d'être recalculée (déclenchement après borne).
+ */
+function noterRecalcul(tourId) {
+  if (Number.isInteger(Number(tourId))) dernierRecalcul.set(Number(tourId), Date.now());
+}
+
+/** Dernier recalcul connu d'une tournée (null si jamais recalculée). */
+function dernierRecalculDe(tourId) {
+  const v = dernierRecalcul.get(Number(tourId));
+  return v === undefined ? null : v;
+}
+
 function startScheduler() {
   console.log('[SCHEDULER] Demarrage du scheduler (tick aligné sur le top d\'heure, verrou distribué + journal job_runs)');
 
@@ -1848,6 +1904,7 @@ function startScheduler() {
   }, VAK_LIVE_SYNC_INTERVAL_MS);
   if (vakLiveSyncTimer && vakLiveSyncTimer.unref) vakLiveSyncTimer.unref();
   console.log(`[SCHEDULER] Sync SumUp live armée (toutes les ${Math.round(VAK_LIVE_SYNC_INTERVAL_MS / 60000)} min les jours de VAK)`);
+
 }
 
 // ══════════════════════════════════════════
@@ -2057,5 +2114,8 @@ module.exports = {
   syncBadgeuseMeteo,
   // Sync SumUp live 5 min (jours de VAK) — exposés pour les tests.
   vakLiveSyncTick,
+  tourneesARecalculer,
+  noterRecalcul,
+  dernierRecalculDe,
   isVakActiveToday,
 };

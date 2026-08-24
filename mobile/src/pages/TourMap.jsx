@@ -49,17 +49,61 @@ const INCIDENT_ICON = (
   </svg>
 );
 
+// Événements de circulation : gros pictogrammes, lisibles d'un coup d'œil
+// depuis la cabine (mêmes catégories que la carte du bureau).
+const TRAFIC_LABELS = {
+  accident: 'Accident',
+  bouchon: 'Bouchon',
+  fermeture: 'Route fermée',
+  travaux: 'Travaux',
+  autre: 'Perturbation',
+};
+const TRAFIC_COULEURS = {
+  accident: '#DC2626',
+  bouchon: '#F97316',
+  fermeture: '#7C3AED',
+  travaux: '#F59E0B',
+  autre: '#64748B',
+};
+const TRAFIC_EMOJIS = {
+  accident: '🚨', bouchon: '🚗', fermeture: '⛔', travaux: '🚧', autre: 'ℹ️',
+};
+
+function traficIcon(type) {
+  const couleur = TRAFIC_COULEURS[type] || TRAFIC_COULEURS.autre;
+  const emoji = TRAFIC_EMOJIS[type] || TRAFIC_EMOJIS.autre;
+  return new L.DivIcon({
+    html: `<div style="background:${couleur};color:#fff;border-radius:50%;width:32px;height:32px;`
+      + `display:flex;align-items:center;justify-content:center;font-size:16px;`
+      + `border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.45)">${emoji}</div>`,
+    className: '',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+}
+
 export default function TourMap() {
   const [tour, setTour] = useState(null);
   const [cavs, setCavs] = useState([]);
   const [currentCavIndex, setCurrentCavIndex] = useState(0);
   const [myPosition, setMyPosition] = useState(null);
+  // Tracé ROUTIER du reste de la tournée (suit les rues au lieu de relier les
+  // bornes en ligne droite). Hors ligne, il reste simplement absent : la carte
+  // retombe sur le trait pointillé, et rien n'est bloqué.
+  const [trace, setTrace] = useState(null);
+  // Événements de circulation (mêmes données que la carte du bureau).
+  // `null` = pas encore d'information ; un tableau VIDE = « aucun bouchon
+  // signalé ». Les deux ne se ressemblent pas et ne s'affichent pas pareil.
+  const [trafic, setTrafic] = useState(null);
   const [reoptProposal, setReoptProposal] = useState(null);
   const [reoptProcessing, setReoptProcessing] = useState(false);
   const socketRef = useRef(null);
   const watchRef = useRef(null);
   const intervalRef = useRef(null);
   const reoptPollRef = useRef(null);
+  const traficPollRef = useRef(null);
+  // Copie des points, lisible depuis les minuteurs (qui capturent l'état initial).
+  const cavsRef = useRef([]);
   const positionRef = useRef(null);
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
@@ -84,9 +128,15 @@ export default function TourMap() {
     };
     pollReopt();
     reoptPollRef.current = setInterval(pollReopt, 15000);
+    // Circulation : rafraîchie toutes les 5 minutes. Les bouchons ne changent
+    // pas à la minute, et le forfait TomTom est partagé avec le bureau.
+    traficPollRef.current = setInterval(() => {
+      loadTrafic(cavsRef.current);
+    }, 5 * 60 * 1000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (reoptPollRef.current) clearInterval(reoptPollRef.current);
+      if (traficPollRef.current) clearInterval(traficPollRef.current);
       if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
       if (socketRef.current) socketRef.current.disconnect();
     };
@@ -98,9 +148,48 @@ export default function TourMap() {
       const data = await res.json();
       setTour(data);
       setCavs(data.cavs || []);
+      cavsRef.current = data.cavs || [];
       const visitedCount = (data.cavs || []).filter(c => c.status === 'collected').length;
       setCurrentCavIndex(visitedCount);
+      loadTrace();
+      loadTrafic(data.cavs || []);
     } catch (err) { console.error(err); }
+  };
+
+  // Circulation autour de la tournée. Emprise calculée sur les points restants
+  // (le serveur l'arrondit et met en cache : quatre camions sur le même
+  // territoire coûtent à peine plus qu'un seul appel).
+  // Hors ligne, l'appel échoue et l'on reste sur `null` : aucun bouchon
+  // affiché, mais rien qui laisse croire que la route est dégagée.
+  const loadTrafic = async (points) => {
+    try {
+      const pts = (points || []).filter((c) => c.latitude && c.longitude);
+      const pos = positionRef.current;
+      const lats = pts.map((c) => Number(c.latitude));
+      const lngs = pts.map((c) => Number(c.longitude));
+      if (pos) { lats.push(pos.lat); lngs.push(pos.lng); }
+      if (lats.length === 0) return;
+      const marge = 0.02;
+      const bbox = [
+        Math.min(...lats) - marge, Math.min(...lngs) - marge,
+        Math.max(...lats) + marge, Math.max(...lngs) + marge,
+      ].join(',');
+      const res = await authedFetch(`/api/tours/trafic-public?bbox=${encodeURIComponent(bbox)}`);
+      const data = await res.json();
+      setTrafic(data && data.disponible ? (data.incidents || []) : null);
+    } catch (_) { setTrafic(null); }
+  };
+
+  // Itinéraire routier restant. Best effort : un échec (hors ligne, routeur
+  // injoignable) laisse `trace` à null — la carte reste utilisable.
+  const loadTrace = async () => {
+    try {
+      const pos = positionRef.current;
+      const q = pos ? `?lat=${pos.lat}&lng=${pos.lng}` : '';
+      const res = await authedFetch(`/api/tours/${tourId}/itineraire-public${q}`);
+      const data = await res.json();
+      setTrace(data && data.source === 'routier' ? data : null);
+    } catch (_) { setTrace(null); }
   };
 
   const startGPS = () => {
@@ -411,7 +500,33 @@ export default function TourMap() {
             );
           })}
 
-          {cavs.filter(c => c.latitude && c.longitude).length > 1 && (
+          {/* Événements de circulation — mêmes données que la carte du bureau */}
+          {(trafic || []).map((inc) => (
+            inc.latitude && inc.longitude ? (
+              <Marker
+                key={`trafic-${inc.id}`}
+                position={[inc.latitude, inc.longitude]}
+                icon={traficIcon(inc.type)}
+              >
+                <Popup>
+                  <div className="text-xs">
+                    <p className="font-bold">{TRAFIC_LABELS[inc.type] || 'Perturbation'}</p>
+                    {inc.description && <p>{inc.description}</p>}
+                    {inc.retard_sec > 0 && (
+                      <p className="font-bold">Retard : {Math.round(inc.retard_sec / 60)} min</p>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            ) : null
+          ))}
+
+          {trace?.geometry?.length >= 2 ? (
+            <Polyline
+              positions={trace.geometry}
+              pathOptions={{ color: '#0D9488', weight: 5, opacity: 0.85 }}
+            />
+          ) : cavs.filter(c => c.latitude && c.longitude).length > 1 && (
             <Polyline
               positions={cavs.filter(c => c.latitude && c.longitude).map(c => [c.latitude, c.longitude])}
               pathOptions={{ color: '#0D9488', weight: 3, dashArray: '10,6' }}

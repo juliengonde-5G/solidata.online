@@ -4,24 +4,62 @@ import { LoadingSpinner, PageHeader } from '../components';
 import { ScrollText } from 'lucide-react';
 import api from '../services/api';
 
+// Libellés du journal d'activité.
+//
+// Ces tables DOIVENT couvrir tout ce que le backend écrit réellement dans
+// `user_activity_log` — via autoLogActivity('<entité>') ou logActivity({ action }).
+// Une entrée manquante n'est pas silencieuse à l'écran (le code brut s'affiche
+// en repli) mais elle disparaît du filtre par entité, donc de la recherche.
+// Le test backend `tests/unit/activity-log-libelles.test.js` compare ces tables
+// au code source et échoue si un nouveau module s'ajoute sans son libellé.
 const ACTION_LABELS = {
-  login: 'Connexion', logout: 'Déconnexion', create: 'Création', update: 'Modification',
-  delete: 'Suppression', password_change: 'Changement MDP', login_failed: 'Échec connexion',
+  // Authentification
+  login: 'Connexion', logout: 'Déconnexion', login_failed: 'Échec connexion',
+  password_change: 'Changement MDP',
+  // Mutations génériques (autoLogActivity)
+  create: 'Création', update: 'Modification', delete: 'Suppression',
+  // Administration des habilitations
+  role_create: 'Création de rôle', role_delete: 'Suppression de rôle',
+  permissions_matrix_update: 'Matrice d\'habilitations',
+  // Clés API
+  api_key_create: 'Clé API créée', api_key_update: 'Clé API modifiée',
+  api_key_delete: 'Clé API supprimée',
 };
 const ACTION_COLORS = {
   login: 'bg-blue-100 text-blue-700', logout: 'bg-purple-100 text-purple-700',
   create: 'bg-green-100 text-green-700', update: 'bg-yellow-100 text-yellow-700',
   delete: 'bg-red-100 text-red-700', password_change: 'bg-orange-100 text-orange-700',
   login_failed: 'bg-red-200 text-red-800',
+  role_create: 'bg-indigo-100 text-indigo-700', role_delete: 'bg-indigo-100 text-indigo-700',
+  permissions_matrix_update: 'bg-indigo-100 text-indigo-700',
+  api_key_create: 'bg-amber-100 text-amber-800', api_key_update: 'bg-amber-100 text-amber-800',
+  api_key_delete: 'bg-amber-200 text-amber-900',
 };
 const ENTITY_LABELS = {
-  vehicle: 'Véhicule', user: 'Utilisateur', employee: 'Collaborateur',
-  candidate: 'Candidat', tour: 'Tournée', cav: 'CAV', team: 'Équipe',
-  stock: 'Stock', production: 'Production', billing: 'Facturation',
-  tri: 'Tri', expedition: 'Expédition', setting: 'Paramètre',
-  referentiel: 'Référentiel', insertion: 'Insertion', pointage: 'Pointage',
-  finance: 'Finance', newsfeed: 'Actualité', client_exutoire: 'Client exutoire',
-  commande_exutoire: 'Commande exutoire', pennylane: 'Pennylane',
+  // Collecte & logistique
+  vehicle: 'Véhicule', cav: 'CAV', tour: 'Tournée', expedition: 'Expédition',
+  client_exutoire: 'Client exutoire', commande_exutoire: 'Commande exutoire',
+  commandes_exutoires: 'Commandes exutoires',
+  // Tri, production, stock
+  tri: 'Tri', production: 'Production', stock: 'Stock',
+  stock_original: 'Stock original (Refashion)',
+  // RH, recrutement, insertion
+  employee: 'Collaborateur', candidate: 'Candidat', team: 'Équipe',
+  insertion: 'Insertion', pointage: 'Pointage', effectifs: 'Effectifs ETP',
+  badgeuse: 'Temps & Présence',
+  // Frip
+  boutique: 'Boutique', boutique_vente: 'Ventes boutique',
+  boutique_commande: 'Commande boutique', boutique_commandes: 'Commandes boutique',
+  vak: 'Vente au Kilo',
+  // Finance
+  finance: 'Finance', billing: 'Facturation', pennylane: 'Pennylane',
+  // RSE & conformité
+  rse: 'Pilotage RSE', energie: 'Énergie & GES', enquetes: 'Enquêtes',
+  achats: 'Achats responsables',
+  // Administration
+  user: 'Utilisateur', setting: 'Paramètre', referentiel: 'Référentiel',
+  newsfeed: 'Actualité', custom_role: 'Rôle personnalisé',
+  role_module_access: 'Habilitations par module', api_key: 'Clé API',
 };
 
 const TABS = [

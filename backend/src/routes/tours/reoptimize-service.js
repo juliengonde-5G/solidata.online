@@ -1,49 +1,144 @@
-// ══════════════════════════════════════════════════════════════
-// Service interne de ré-optimisation (Niveau 2.6)
-// ══════════════════════════════════════════════════════════════
-// Logique découplée du router pour être importable depuis les
-// endpoints d'auto-déclenchement (incident, skip, delay, etc.).
+// ══════════════════════════════════════════════════════════════════════════
+// RÉ-OPTIMISATION D'UNE TOURNÉE EN COURS — CO2 & efficacité
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Recalcule l'ordre des points RESTANTS d'une tournée en cours, en tenant
+// compte de la circulation du moment, et chiffre le gain en kilomètres, en
+// minutes ET en CO2.
+//
+// S'APPLIQUE À TOUS LES MODES — moteur IA, modèle de tournée, saisie
+// manuelle — et à tous les points restants, y compris ceux AJOUTÉS en cours
+// de route par le gestionnaire (ce sont des lignes `tour_cav` en attente
+// comme les autres : rien ne les distingue ici, c'est voulu).
+//
+// ARCHITECTURE EN TROIS TEMPS, dictée par le coût des appels externes :
+//   1. RECHERCHE — locale, sans réseau. L'optimiseur (services/tour-optimizer)
+//      évalue des milliers de séquences ; il lit une matrice préchargée depuis
+//      le cache de tronçons, complétée par une approximation là où rien n'a
+//      encore été mesuré. Aucun appel au routeur dans la boucle.
+//   2. MESURE — la séquence retenue ET la séquence actuelle sont mesurées
+//      pour de bon, dans les MÊMES conditions de circulation (TomTom trafic +
+//      mode poids lourd si une clé est configurée, sinon OSRM). Deux appels,
+//      pas davantage : c'est ce qui rend le dispositif tenable sur un forfait
+//      gratuit à 4 véhicules × 20 jours.
+//   3. DÉCISION — le gain est comparé au seuil ; en dessous, on ne dérange
+//      personne.
+//
+// DOCTRINE : les chiffres publiés viennent toujours de l'étape 2. Si aucun
+// routeur ne répond, la proposition porte `source: 'estimation'` et le dit —
+// on ne présente jamais une approximation comme une mesure.
 
 const pool = require('../../config/database');
-const {
-  OSRM_BASE_URL,
-  haversineDistance,
-  nearestNeighborTSP,
-  osrmOptimizedTrip,
-  calculateTotalDistance,
-  resolveAvgSpeedKmh,
-} = require('./geo');
-const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
+const { haversineDistance, ROAD_FACTOR, resolveAvgSpeedKmh } = require('./geo');
+const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate } = require('./context');
+const { getScoringConfig } = require('./predictions');
 const { computeAndStorePlannedPassages } = require('./planned-passage');
 const { sendPushToRoles } = require('../../services/push-notifications');
+const { prefetchLegs, cachedRouteSegment } = require('../../services/route-cache');
+const { tomtomRouteSequence } = require('../../services/routing-tomtom');
+const { emissionsVehicule } = require('../../services/vehicle-emissions');
+const optimizer = require('../../services/tour-optimizer');
+const { DEPART, ARRIVEE } = optimizer;
 
-// Vitesse de repli quand OSRM est indisponible. ULTIME repli codé : la valeur
-// effective vient de la config prédictive (`scoring.avgSpeed`) — harmonisation
-// des trois vitesses divergentes (août 2026).
+/** Vitesse de repli si ni le cache ni la config ne renseignent mieux. */
 const REOPT_AVG_SPEED_KMH = 28;
 const reoptSpeed = () => resolveAvgSpeedKmh(REOPT_AVG_SPEED_KMH);
-const MIN_GAIN_PERCENT = 5; // seuil en % pour proposer une ré-optim
 
-async function osrmRouteTotal(waypoints) {
-  try {
-    const coords = waypoints.map(w => `${w.lng},${w.lat}`).join(';');
-    const url = `${OSRM_BASE_URL}/route/v1/driving/${coords}?overview=false&steps=false`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === 'Ok' && data.routes?.[0]) {
-      return {
-        distance_km: data.routes[0].distance / 1000,
-        duration_min: data.routes[0].duration / 60,
-      };
-    }
-  } catch (_) { /* fallback */ }
-  let dist = 0;
-  for (let i = 1; i < waypoints.length; i++) {
-    dist += haversineDistance(waypoints[i - 1].lat, waypoints[i - 1].lng, waypoints[i].lat, waypoints[i].lng) * 1.3;
-  }
-  return { distance_km: dist, duration_min: (dist / reoptSpeed()) * 60 };
+/** Nombre maximal de points restants réordonnés en une passe. */
+const MAX_POINTS = 60;
+
+function num(v, defaut) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : defaut;
 }
 
+/** Paramètres d'optimisation effectifs (config admin, défauts en code). */
+function optionsOptimisation(cfg = getScoringConfig()) {
+  return {
+    objectif: optimizer.OBJECTIFS.includes(cfg.reoptimObjectif) ? cfg.reoptimObjectif : 'mixte',
+    poids: {
+      distance: num(cfg.reoptimPoidsDistance, 0.5),
+      duree: num(cfg.reoptimPoidsDuree, 0.5),
+    },
+    gainMinPct: num(cfg.reoptimGainMinPct, 5),
+    auto: cfg.reoptimAuto === true,
+    autoGainMinPct: num(cfg.reoptimAutoGainMinPct, 12),
+  };
+}
+
+/**
+ * Fonction de tronçon utilisée par la RECHERCHE : cache d'abord, sinon
+ * approximation Haversine × 1,3. Fonction pure une fois la matrice fournie —
+ * aucune E/S, donc utilisable dans la boucle d'optimisation.
+ *
+ * @param {Map<string,{lat,lng}>} coords
+ * @param {Map<string,{distance_km,duration_min}>} matrice tronçons mesurés
+ * @param {number} facteurTrafic multiplicateur de durée du jour
+ */
+function fabriqueLegLocal(coords, matrice, facteurTrafic, cleDe) {
+  const vitesse = reoptSpeed();
+  return (a, b) => {
+    const pa = coords.get(a);
+    const pb = coords.get(b);
+    if (!pa || !pb) return { km: 0, min: 0 };
+    const mesure = matrice.get(cleDe(pa.lat, pa.lng, pb.lat, pb.lng));
+    if (mesure) {
+      return { km: mesure.distance_km, min: mesure.duration_min * facteurTrafic };
+    }
+    const km = haversineDistance(pa.lat, pa.lng, pb.lat, pb.lng) * ROAD_FACTOR;
+    return { km, min: (km / vitesse) * 60 * facteurTrafic };
+  };
+}
+
+/**
+ * Mesure RÉELLE d'une séquence : TomTom avec trafic et gabarit poids lourd si
+ * une clé est configurée, sinon OSRM (durées à circulation libre, corrigées du
+ * facteur de circulation du jour).
+ * @returns {Promise<{distance_km, duration_min, source, retard_trafic_min}|null>}
+ */
+async function mesurerSequence(waypoints, { vehicule, facteurTrafic }) {
+  const tt = await tomtomRouteSequence(waypoints, { vehicule });
+  if (tt && Number.isFinite(tt.distance_km) && Number.isFinite(tt.duration_min)) {
+    return {
+      distance_km: tt.distance_km,
+      duration_min: tt.duration_min,
+      retard_trafic_min: tt.retard_trafic_min,
+      source: 'tomtom_trafic',
+    };
+  }
+  // Repli OSRM : on additionne les tronçons (servis par le cache dès le 2e
+  // passage), puis on applique le facteur de circulation du jour.
+  let km = 0;
+  let min = 0;
+  let mesureReelle = true;
+  for (let i = 1; i < waypoints.length; i++) {
+    const seg = await cachedRouteSegment(
+      waypoints[i - 1].lat, waypoints[i - 1].lng, waypoints[i].lat, waypoints[i].lng
+    );
+    if (seg.source === 'haversine') mesureReelle = false;
+    km += seg.distance_km;
+    min += seg.duration_min;
+  }
+  if (!mesureReelle) return null; // aucun routeur : l'appelant le signalera
+  return {
+    distance_km: km,
+    duration_min: min * facteurTrafic,
+    retard_trafic_min: facteurTrafic > 1 ? min * (facteurTrafic - 1) : 0,
+    source: 'osrm_facteur_jour',
+  };
+}
+
+/**
+ * Propose (et applique éventuellement) un nouvel ordre de passage.
+ *
+ * @param {object} p
+ * @param {number} p.tourId
+ * @param {string} [p.triggerReason] 'incident' | 'arret' | 'recurrent' | 'manual'
+ * @param {string} [p.triggeredBy]   'auto' | 'manager' | 'driver'
+ * @param {number} [p.currentLat]    position du camion (sinon dernière position GPS)
+ * @param {number} [p.currentLng]
+ * @param {object} [p.io]            Socket.IO, pour prévenir le chauffeur
+ */
 async function proposeReoptimization({
   tourId,
   triggerReason = 'manual',
@@ -53,7 +148,11 @@ async function proposeReoptimization({
   io = null,
 }) {
   const tourRes = await pool.query(
-    'SELECT id, collection_type, status FROM tours WHERE id = $1',
+    `SELECT t.id, t.collection_type, t.status, t.date, t.vehicle_id, t.is_demo,
+            v.tare_weight_kg, v.max_capacity_kg
+       FROM tours t
+       LEFT JOIN vehicles v ON v.id = t.vehicle_id
+      WHERE t.id = $1`,
     [tourId]
   );
   if (tourRes.rows.length === 0) return { error: 'Tournée non trouvée' };
@@ -61,8 +160,11 @@ async function proposeReoptimization({
   if (tour.status !== 'in_progress') {
     return { error: `Tournée non en cours (statut: ${tour.status})` };
   }
-  const isAssoc = tour.collection_type === 'association';
+  // Une tournée de formation ne doit produire ni proposition, ni notification.
+  if (tour.is_demo) return { skipped: true, reason: 'tournee_demo' };
 
+  const isAssoc = tour.collection_type === 'association';
+  const table = isAssoc ? 'tour_association_point' : 'tour_cav';
   const remainingRes = isAssoc
     ? await pool.query(
         `SELECT tap.id, tap.association_point_id AS cav_id, tap.position,
@@ -83,20 +185,19 @@ async function proposeReoptimization({
           ORDER BY tc.position`,
         [tourId]
       );
-  const remaining = remainingRes.rows.map(r => ({
+
+  const remaining = remainingRes.rows.slice(0, MAX_POINTS).map((r) => ({
     id: r.id,
     cav_id: r.cav_id,
     position: r.position,
     cav_name: r.cav_name,
-    latitude: parseFloat(r.latitude),
-    longitude: parseFloat(r.longitude),
+    lat: parseFloat(r.latitude),
+    lng: parseFloat(r.longitude),
   }));
-
   if (remaining.length < 2) {
     return { skipped: true, reason: 'moins_de_2_points_restants' };
   }
 
-  // Éviter les doublons de propositions pendantes
   const pending = await pool.query(
     `SELECT id FROM tour_reoptimizations WHERE tour_id = $1 AND status = 'pending' LIMIT 1`,
     [tourId]
@@ -105,93 +206,191 @@ async function proposeReoptimization({
     return { skipped: true, reason: 'proposition_pending_existante', existing_id: pending.rows[0].id };
   }
 
-  const startLat = Number.isFinite(currentLat) ? currentLat : CENTRE_TRI_LAT;
-  const startLng = Number.isFinite(currentLng) ? currentLng : CENTRE_TRI_LNG;
+  // Point de départ : position transmise, sinon dernière position GPS fraîche,
+  // sinon le centre de tri (le camion n'est pas encore parti).
+  let startLat = num(currentLat, null);
+  let startLng = num(currentLng, null);
+  if (startLat === null || startLng === null) {
+    const pos = await pool.query(
+      `SELECT latitude, longitude FROM gps_positions
+        WHERE vehicle_id = $1 AND recorded_at > CURRENT_TIMESTAMP - INTERVAL '20 minutes'
+        ORDER BY recorded_at DESC LIMIT 1`,
+      [tour.vehicle_id]
+    );
+    if (pos.rows.length > 0) {
+      startLat = parseFloat(pos.rows[0].latitude);
+      startLng = parseFloat(pos.rows[0].longitude);
+    }
+  }
+  if (startLat === null || startLng === null) {
+    startLat = CENTRE_TRI_LAT;
+    startLng = CENTRE_TRI_LNG;
+  }
 
-  const oldSequence = remaining.map(r => r.id);
-  const oldTotal = await osrmRouteTotal([
+  // ── 1. RECHERCHE (locale, sans réseau) ──────────────────────────────────
+  const coords = new Map();
+  coords.set(DEPART, { lat: startLat, lng: startLng });
+  coords.set(ARRIVEE, { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG });
+  remaining.forEach((r) => coords.set(r.id, { lat: r.lat, lng: r.lng }));
+
+  const paires = [];
+  const cles = [...coords.keys()];
+  cles.forEach((a) => cles.forEach((b) => {
+    if (a === b) return;
+    const pa = coords.get(a);
+    const pb = coords.get(b);
+    paires.push([pa.lat, pa.lng, pb.lat, pb.lng]);
+  }));
+  const { legKey } = require('../../services/route-cache');
+  const matrice = await prefetchLegs(paires);
+
+  const contexte = await getContextForDate(
+    (tour.date instanceof Date ? tour.date : new Date(tour.date)).toISOString().slice(0, 10)
+  ).catch(() => ({ trafficFactor: 1 }));
+  const facteurTrafic = num(contexte?.trafficFactor, 1) || 1;
+
+  const legLocal = fabriqueLegLocal(coords, matrice, facteurTrafic, legKey);
+  const opts = optionsOptimisation();
+  const ordreActuel = remaining.map((r) => r.id);
+  const recherche = optimizer.optimiserOrdre(ordreActuel, legLocal, opts);
+
+  if (!recherche.ameliore) {
+    return { skipped: true, reason: 'ordre_deja_optimal', objectif: opts.objectif };
+  }
+
+  // ── 2. MESURE (deux appels, mêmes conditions de circulation) ────────────
+  const enWaypoints = (ordre) => [
     { lat: startLat, lng: startLng },
-    ...remaining.map(r => ({ lat: r.latitude, lng: r.longitude })),
+    ...ordre.map((id) => coords.get(id)),
     { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
+  ];
+  const vehicule = { tare_weight_kg: tour.tare_weight_kg, max_capacity_kg: tour.max_capacity_kg };
+  const [mesureAvant, mesureApres] = await Promise.all([
+    mesurerSequence(enWaypoints(ordreActuel), { vehicule, facteurTrafic }),
+    mesurerSequence(enWaypoints(recherche.ordre), { vehicule, facteurTrafic }),
   ]);
 
-  let orderedPoints = null;
-  let newTotal = oldTotal;
-  const optimized = await osrmOptimizedTrip(remaining, startLat, startLng);
-  if (optimized?.orderedPoints) {
-    orderedPoints = optimized.orderedPoints;
-    newTotal = { distance_km: optimized.distance_km, duration_min: optimized.duration_min };
-  } else {
-    orderedPoints = nearestNeighborTSP(remaining, startLat, startLng);
-    const fbDistance = calculateTotalDistance(orderedPoints, startLat, startLng);
-    newTotal = { distance_km: fbDistance, duration_min: (fbDistance / reoptSpeed()) * 60 };
-  }
-  const newSequence = orderedPoints.map(p => p.id);
+  const mesure = mesureAvant && mesureApres;
+  const avant = mesure
+    ? { km: mesureAvant.distance_km, min: mesureAvant.duration_min }
+    : recherche.coutInitial;
+  const apres = mesure
+    ? { km: mesureApres.distance_km, min: mesureApres.duration_min }
+    : recherche.cout;
+  const source = mesure ? mesureApres.source : 'estimation';
 
-  const sameOrder = newSequence.length === oldSequence.length &&
-    newSequence.every((v, i) => v === oldSequence[i]);
-  const gainPercent = oldTotal.distance_km > 0
-    ? ((oldTotal.distance_km - newTotal.distance_km) / oldTotal.distance_km) * 100
-    : 0;
-  if (sameOrder || gainPercent < MIN_GAIN_PERCENT) {
+  // ── 3. DÉCISION ─────────────────────────────────────────────────────────
+  const gainPctDistance = avant.km > 0 ? ((avant.km - apres.km) / avant.km) * 100 : 0;
+  const gainPctDuree = avant.min > 0 ? ((avant.min - apres.min) / avant.min) * 100 : 0;
+  const gainRetenu = opts.objectif === 'duree' ? gainPctDuree
+    : opts.objectif === 'distance' ? gainPctDistance
+      : Math.max(gainPctDistance, gainPctDuree);
+
+  if (gainRetenu < opts.gainMinPct) {
     return {
       skipped: true,
-      reason: sameOrder ? 'ordre_identique' : 'gain_marginal',
-      gainPercent: Math.round(gainPercent * 10) / 10,
+      reason: 'gain_marginal',
+      objectif: opts.objectif,
+      source,
+      gainPercent: Math.round(gainRetenu * 10) / 10,
     };
   }
+
+  // CO2 : consommation MESURÉE du véhicule × facteur d'émission ADEME.
+  const emissions = await emissionsVehicule(tour.vehicle_id);
+  const co2Avant = optimizer.co2Kg(avant.km, emissions.litresPer100km, emissions.kgCo2eParLitre);
+  const co2Apres = optimizer.co2Kg(apres.km, emissions.litresPer100km, emissions.kgCo2eParLitre);
+  const co2Evite = co2Avant !== null && co2Apres !== null
+    ? Math.round((co2Avant - co2Apres) * 1000) / 1000 : null;
 
   const insert = await pool.query(
     `INSERT INTO tour_reoptimizations
        (tour_id, trigger_reason, triggered_by, current_lat, current_lng,
         old_sequence, new_sequence, old_distance_km, new_distance_km,
-        old_duration_min, new_duration_min, status)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, 'pending')
+        old_duration_min, new_duration_min, objectif, source_calcul,
+        co2_evite_kg, status)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, 'pending')
      RETURNING id, triggered_at`,
     [
       tourId, triggerReason, triggeredBy, startLat, startLng,
-      JSON.stringify(oldSequence), JSON.stringify(newSequence),
-      oldTotal.distance_km, newTotal.distance_km,
-      oldTotal.duration_min, newTotal.duration_min,
+      JSON.stringify(ordreActuel), JSON.stringify(recherche.ordre),
+      avant.km, apres.km, avant.min, apres.min,
+      opts.objectif, source, co2Evite,
     ]
   );
+
+  const parId = new Map(remaining.map((r) => [r.id, r]));
   const proposal = {
     id: insert.rows[0].id,
     tour_id: tourId,
     trigger_reason: triggerReason,
     triggered_by: triggeredBy,
     triggered_at: insert.rows[0].triggered_at,
-    old_sequence: oldSequence,
-    new_sequence: newSequence,
-    old_distance_km: Math.round(oldTotal.distance_km * 10) / 10,
-    new_distance_km: Math.round(newTotal.distance_km * 10) / 10,
-    old_duration_min: Math.round(oldTotal.duration_min),
-    new_duration_min: Math.round(newTotal.duration_min),
-    gain_distance_km: Math.round((oldTotal.distance_km - newTotal.distance_km) * 10) / 10,
-    gain_percent: Math.round(gainPercent * 10) / 10,
-    points: orderedPoints.map((p, idx) => ({
-      id: p.id,
-      cav_id: p.cav_id,
-      cav_name: p.cav_name,
-      old_position: p.position,
-      new_position: idx + 1,
-    })),
+    objectif: opts.objectif,
+    source_calcul: source,
+    facteur_trafic: facteurTrafic,
+    retard_trafic_min: mesure && mesureApres.retard_trafic_min != null
+      ? Math.round(mesureApres.retard_trafic_min) : null,
+    old_sequence: ordreActuel,
+    new_sequence: recherche.ordre,
+    old_distance_km: Math.round(avant.km * 10) / 10,
+    new_distance_km: Math.round(apres.km * 10) / 10,
+    old_duration_min: Math.round(avant.min),
+    new_duration_min: Math.round(apres.min),
+    gain_distance_km: Math.round((avant.km - apres.km) * 10) / 10,
+    gain_duree_min: Math.round(avant.min - apres.min),
+    gain_percent: Math.round(gainRetenu * 10) / 10,
+    gain_percent_distance: Math.round(gainPctDistance * 10) / 10,
+    gain_percent_duree: Math.round(gainPctDuree * 10) / 10,
+    // null (et non 0) quand la consommation du véhicule n'est pas saisie :
+    // « non calculable » n'est pas « aucune émission évitée ».
+    co2_evite_kg: co2Evite,
+    co2_motif: emissions.motif,
+    points: recherche.ordre.map((id, idx) => {
+      const p = parId.get(id) || {};
+      return {
+        id, cav_id: p.cav_id, cav_name: p.cav_name,
+        old_position: p.position, new_position: idx + 1,
+      };
+    }),
   };
 
   if (io) io.to(`tour-${tourId}`).emit('reoptimization-proposal', proposal);
 
-  // Push manager : proposition disponible à valider
-  sendPushToRoles(['ADMIN', 'MANAGER'], {
-    title: `Ré-optim. proposée — Tournée #${tourId}`,
-    body: `Gain ${proposal.gain_percent}% (${proposal.old_distance_km} → ${proposal.new_distance_km} km) — motif ${triggerReason}`,
-    tag: `reopt-${tourId}`,
-    data: { url: '/collections-live', tourId },
-  }).catch(() => {});
+  // Application automatique, si la Direction l'a activée et que le gain le
+  // justifie. Par défaut désactivée : réordonner la route d'un chauffeur en
+  // cours de tournée est une décision d'exploitation.
+  if (opts.auto && gainRetenu >= opts.autoGainMinPct) {
+    const applique = await applyReoptimization(proposal.id, null, { auto: true });
+    if (applique.accepted) {
+      proposal.applique_automatiquement = true;
+      if (io) io.to(`tour-${tourId}`).emit('reoptimization-accepted', {
+        reoptId: proposal.id, tour_id: tourId, auto: true,
+      });
+    }
+  }
+
+  // Réchauffement opportuniste du cache sur les tronçons RETENUS : la
+  // prochaine recherche s'appuiera sur des mesures, plus sur l'approximation.
+  const retenus = enWaypoints(recherche.ordre);
+  Promise.all(retenus.slice(1).map((w, i) =>
+    cachedRouteSegment(retenus[i].lat, retenus[i].lng, w.lat, w.lng).catch(() => null)
+  )).catch(() => {});
+
+  if (!proposal.applique_automatiquement) {
+    sendPushToRoles(['ADMIN', 'MANAGER'], {
+      title: `Ré-optim. proposée — Tournée #${tourId}`,
+      body: `Gain ${proposal.gain_percent}% (${proposal.old_distance_km} → ${proposal.new_distance_km} km`
+        + `${co2Evite !== null ? `, ${co2Evite} kg CO2 évités` : ''}) — motif ${triggerReason}`,
+      tag: `reopt-${tourId}`,
+      data: { url: '/collections-live', tourId },
+    }).catch(() => {});
+  }
 
   return { created: true, proposal };
 }
 
-async function applyReoptimization(reoptId, userId = null) {
+async function applyReoptimization(reoptId, userId = null, opts = {}) {
   const rowRes = await pool.query('SELECT * FROM tour_reoptimizations WHERE id = $1', [reoptId]);
   if (rowRes.rows.length === 0) return { error: 'Proposition non trouvée' };
   const reopt = rowRes.rows[0];
@@ -219,9 +418,10 @@ async function applyReoptimization(reoptId, userId = null) {
 
   await pool.query(
     `UPDATE tour_reoptimizations
-        SET status = 'accepted', decided_at = NOW(), decided_by_user_id = $1
-      WHERE id = $2`,
-    [userId, reoptId]
+        SET status = 'accepted', decided_at = NOW(), decided_by_user_id = $1,
+            decision_auto = $2
+      WHERE id = $3`,
+    [userId, opts.auto === true, reoptId]
   );
 
   await pool.query(
@@ -231,7 +431,7 @@ async function applyReoptimization(reoptId, userId = null) {
   );
   await computeAndStorePlannedPassages(reopt.tour_id).catch(() => {});
 
-  return { accepted: true, tour_id: reopt.tour_id };
+  return { accepted: true, tour_id: reopt.tour_id, auto: opts.auto === true };
 }
 
 async function rejectReoptimization(reoptId, userId = null) {
@@ -250,4 +450,9 @@ module.exports = {
   proposeReoptimization,
   applyReoptimization,
   rejectReoptimization,
+  // exportés pour les tests
+  optionsOptimisation,
+  fabriqueLegLocal,
+  mesurerSequence,
+  MAX_POINTS,
 };

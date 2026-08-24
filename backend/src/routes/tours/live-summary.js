@@ -101,8 +101,10 @@ router.get('/:id/live-summary', async (req, res) => {
        FROM tour_weights WHERE tour_id = $1 ORDER BY recorded_at`,
       [tourId]
     );
+    // Somme de TOUTES les pesées : une pesée intermédiaire est un chargement
+    // réellement déposé au centre, pas un relevé provisoire (cf. correctif
+    // du calcul de tours.total_weight_kg, août 2026).
     const totalWeight = weightsResult.rows
-      .filter(w => !w.is_intermediate)
       .reduce((sum, w) => sum + parseFloat(w.weight_kg || 0), 0);
 
     // Positions GPS — récupère les 200 dernières pour calculer distance parcourue
@@ -138,9 +140,16 @@ router.get('/:id/live-summary', async (req, res) => {
     // planned_passage_time stocké en BDD (calcul OSRM au démarrage de la
     // tournée) ; sinon on retombe sur l'estimation linéaire naïve.
     const nbPoints = points.length;
+    // `plannedSource` ne dit que si AU MOINS un point a une heure calculée.
+    // Or les deux méthodes cohabitent dans la même colonne : un point calculé
+    // sur l'itinéraire et un point estimé par simple répartition linéaire
+    // peuvent se retrouver dans un ordre incohérent (heure « prévue » plus
+    // tôt pour un point situé plus loin). La provenance est donc exposée
+    // POINT PAR POINT, pour que l'écran distingue les deux.
     const plannedSource = points.some(p => p.planned_passage_time) ? 'osrm' : 'estimate';
     const enrichedPoints = points.map((p) => {
-      const planned = p.planned_passage_time
+      const calcule = !!p.planned_passage_time;
+      const planned = calcule
         ? new Date(p.planned_passage_time).toISOString()
         : plannedPassageAt(tour.started_at, tour.estimated_duration_min, p.position, nbPoints);
       let delayMinutes = null;
@@ -163,6 +172,7 @@ router.get('/:id/live-summary', async (req, res) => {
         longitude: p.longitude,
         nb_containers: p.nb_containers,
         planned_passage_at: planned,
+        planned_source: calcule ? 'calcule' : 'estime',
         delay_minutes: delayMinutes,
         has_incident: pointIncidents.length > 0,
         incidents: pointIncidents.map(i => ({

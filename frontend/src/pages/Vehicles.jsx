@@ -86,6 +86,11 @@ export default function Vehicles() {
 
   // Checklists de départ (item 45) — consultation web des rondes chauffeur.
   const [checklists, setChecklists] = useState([]);
+  // Dernier état déclaré par un chauffeur au départ : c'est la seule
+  // information « terrain » de la fiche d'entretien, qui n'affichait jusqu'ici
+  // que des échéances théoriques.
+  const [etatDeclare, setEtatDeclare] = useState(null);
+  const [checklistOuverte, setChecklistOuverte] = useState(null);
 
   // useEffect loadVehicles déplacé après includeArchived (voir plus bas)
   useEffect(() => { if (activeTab === 'maintenance') loadMaintenance(); }, [activeTab]);
@@ -182,9 +187,14 @@ export default function Vehicles() {
 
   const loadChecklists = useCallback(async (vehicleId) => {
     try {
-      const res = await api.get(`/vehicles/${vehicleId}/checklists`);
-      setChecklists(res.data || []);
-    } catch (err) { console.error(err); setChecklists([]); }
+      const [liste, etat] = await Promise.all([
+        api.get(`/vehicles/${vehicleId}/checklists`),
+        api.get(`/vehicles/${vehicleId}/etat-declare`).catch(() => ({ data: null })),
+      ]);
+      setChecklists(liste.data || []);
+      setEtatDeclare(etat.data || null);
+      setChecklistOuverte(null);
+    } catch (err) { console.error(err); setChecklists([]); setEtatDeclare(null); }
   }, []);
 
   const addDocument = async (e) => {
@@ -457,9 +467,89 @@ export default function Vehicles() {
               name={selectedVehicle.name}
             />
 
+            {/* Dernier état déclaré au départ — l'information terrain de la
+                fiche d'entretien, qui n'affichait que des échéances. */}
+            <div className="card-modern p-5">
+              <h3 className="font-bold mb-4">Dernier état déclaré par le chauffeur</h3>
+              {!etatDeclare?.disponible ? (
+                <p className="text-slate-400 text-sm">
+                  {etatDeclare?.message || 'Aucune vérification de début de journée enregistrée.'}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-3 text-sm">
+                    <span className="text-slate-500">
+                      {new Date(etatDeclare.date).toLocaleDateString('fr-FR', {
+                        weekday: 'long', day: 'numeric', month: 'long',
+                      })}
+                    </span>
+                    {etatDeclare.chauffeur && <span className="font-medium text-slate-700">{etatDeclare.chauffeur}</span>}
+                    {/* Un état vieux de trois semaines ne dit rien de l'état
+                        d'aujourd'hui : on le signale plutôt que de l'afficher
+                        comme s'il était frais. */}
+                    {etatDeclare.anciennete_jours > 7 && (
+                      <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">
+                        Il y a {etatDeclare.anciennete_jours} jours
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-slate-50 rounded-lg p-2">
+                      <p className="text-[10px] uppercase text-slate-500">Carburant</p>
+                      <p className="font-bold text-slate-800">{etatDeclare.carburant || '—'}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2">
+                      <p className="text-[10px] uppercase text-slate-500">Km au départ</p>
+                      <p className="font-bold text-slate-800">
+                        {etatDeclare.km_depart != null ? Number(etatDeclare.km_depart).toLocaleString('fr-FR') : '—'}
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-2 ${etatDeclare.nb_degats > 0 ? 'bg-red-50' : 'bg-slate-50'}`}>
+                      <p className="text-[10px] uppercase text-slate-500">Dégâts signalés</p>
+                      <p className={`font-bold ${etatDeclare.nb_degats > 0 ? 'text-red-700' : 'text-slate-800'}`}>
+                        {etatDeclare.nb_degats}
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-2 ${etatDeclare.points_non_valides?.length > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                      <p className="text-[10px] uppercase text-slate-500">Points non validés</p>
+                      <p className={`font-bold ${etatDeclare.points_non_valides?.length > 0 ? 'text-amber-800' : 'text-slate-800'}`}>
+                        {etatDeclare.detail_disponible ? etatDeclare.points_non_valides.length : '—'}
+                      </p>
+                    </div>
+                  </div>
+                  {!etatDeclare.detail_disponible && (
+                    <p className="text-xs text-slate-400">
+                      Le détail du questionnaire n'a pas été transmis par cette version de
+                      l'application mobile — seuls la date, le carburant et le kilométrage
+                      sont disponibles.
+                    </p>
+                  )}
+                  {etatDeclare.notes && (
+                    <div className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" strokeWidth={1.8} />
+                      <span><span className="font-semibold">Remarque du chauffeur :</span> {etatDeclare.notes}</span>
+                    </div>
+                  )}
+                  {etatDeclare.degats?.length > 0 && (
+                    <div className="text-sm">
+                      <p className="font-semibold text-slate-700 mb-1">Dégâts relevés</p>
+                      <ul className="space-y-1">
+                        {etatDeclare.degats.map((d, i) => (
+                          <li key={i} className="text-slate-600 text-xs bg-red-50 border border-red-100 rounded px-2 py-1">
+                            <span className="font-medium">{d.type}</span> — vue {d.vue}
+                            {d.commentaire ? ` : ${d.commentaire}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Checklists de départ (item 45) — rondes de sécurité chauffeur */}
             <div className="card-modern p-5">
-              <h3 className="font-bold mb-4">Checklists de départ</h3>
+              <h3 className="font-bold mb-4">Questionnaires de début de journée</h3>
               {checklists.length === 0 ? (
                 <p className="text-slate-400 text-sm">Aucune checklist enregistrée pour ce véhicule.</p>
               ) : (
@@ -484,6 +574,47 @@ export default function Vehicles() {
                         <div className="mt-2 flex items-start gap-2 text-sm text-amber-800">
                           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" strokeWidth={1.8} />
                           <span><span className="font-semibold">Anomalie signalée :</span> {cl.notes}</span>
+                        </div>
+                      )}
+                      {/* Détail du questionnaire : ce que le chauffeur a
+                          réellement vérifié, point par point. */}
+                      {(cl.reponses?.length > 0 || cl.degats?.length > 0) && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setChecklistOuverte(checklistOuverte === cl.id ? null : cl.id)}
+                            className="text-xs text-teal-700 hover:text-teal-800 font-medium"
+                          >
+                            {checklistOuverte === cl.id ? 'Masquer le détail' : `Voir le détail (${cl.reponses?.length || 0} points${cl.degats?.length ? `, ${cl.degats.length} dégât${cl.degats.length > 1 ? 's' : ''}` : ''})`}
+                          </button>
+                          {checklistOuverte === cl.id && (
+                            <div className="mt-2 space-y-2">
+                              {cl.reponses?.length > 0 && (
+                                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                  {cl.reponses.map((r, i) => (
+                                    <li key={`${cl.id}-${r.id || i}`} className="text-xs flex items-center gap-1.5">
+                                      <span className={r.ok ? 'text-emerald-600' : 'text-red-600'}>
+                                        {r.ok ? '✓' : '✗'}
+                                      </span>
+                                      <span className={r.ok ? 'text-slate-600' : 'text-red-700 font-medium'}>
+                                        {r.libelle || r.id}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {cl.degats?.length > 0 && (
+                                <ul className="space-y-1">
+                                  {cl.degats.map((d, i) => (
+                                    <li key={`${cl.id}-d-${i}`} className="text-xs bg-red-50 border border-red-100 rounded px-2 py-1 text-slate-700">
+                                      <span className="font-medium">{d.type}</span> — vue {d.vue}
+                                      {d.commentaire ? ` : ${d.commentaire}` : ''}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

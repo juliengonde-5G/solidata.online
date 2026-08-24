@@ -344,6 +344,21 @@ const DEGAT_TYPES = ['rayure', 'choc', 'bris', 'autre'];
  * commentaire tronqué. Une entrée invalide est ignorée — jamais d'échec du
  * départ pour un point mal formé, et jamais de donnée fantaisiste stockée.
  */
+/**
+ * Normalise le détail du questionnaire de début de journée.
+ * Chaque entrée conserve l'identifiant du point, son LIBELLÉ au moment de la
+ * saisie (un référentiel qui évolue ne doit pas réécrire l'histoire) et la
+ * réponse. Bornes de taille : le mobile ne dicte pas la charge acceptée.
+ */
+function sanitizeReponses(brut) {
+  if (!Array.isArray(brut)) return [];
+  return brut.slice(0, 50).map((r) => ({
+    id: String(r?.id ?? '').slice(0, 60),
+    libelle: String(r?.libelle ?? '').slice(0, 200),
+    ok: r?.ok === true,
+  })).filter((r) => r.id);
+}
+
 function sanitizeDegats(input) {
   if (!Array.isArray(input)) return null;
   const clean = input.slice(0, 40).map((d) => {
@@ -397,7 +412,7 @@ router.post('/:id/checklist-public', async (req, res) => {
     // Vague 1 (item 45) : `notes` (remarques/anomalies saisies par le chauffeur
     // dans Checklist.jsx) était ignoré → l'anomalie disparaissait silencieusement.
     // Désormais persisté et consultable côté web (fiche véhicule).
-    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats } = req.body;
+    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats, reponses } = req.body;
 
     // Le véhicule de référence est celui du JETON quand il est connu : le corps
     // de requête ne doit pas pouvoir viser un autre camion que celui du lien.
@@ -421,12 +436,18 @@ router.post('/:id/checklist-public', async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level,
+                                       km_start, notes, degats, reponses)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
        ON CONFLICT DO NOTHING`,
-      [req.params.id, vehId, employee_id || null, exterior_ok, fuel_level || '1/2', km_start || 0,
+      [req.params.id, vehId, employee_id || null, exterior_ok,
+       // Le niveau de carburant vient du chauffeur. Le repli '1/2' n'est
+       // conservé que pour les versions de l'application qui ne le demandent
+       // pas encore — il ne doit pas devenir la valeur normale.
+       (fuel_level && String(fuel_level).trim()) || '1/2', km_start || 0,
        (notes && String(notes).trim()) ? String(notes).trim() : null,
-       JSON.stringify(sanitizeDegats(degats))]
+       JSON.stringify(sanitizeDegats(degats)),
+       JSON.stringify(sanitizeReponses(reponses))]
     );
     res.json({ ok: true, message_prevention: await messagePreventionDuJour() });
   } catch (err) {
@@ -585,6 +606,30 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);
+    }
+
+    // ── Ré-optimisation APRÈS CHAQUE BORNE (arbitrage client, août 2026) ──
+    // C'est le SEUL déclencheur du recalcul d'ordre : jamais pendant un trajet
+    // entre deux points. Le chauffeur qui roule vers une borne y est engagé ;
+    // réordonner la suite sous ses yeux à ce moment-là n'aurait pas de sens.
+    // Le camion vient de repartir d'un point : la liste des points restants a
+    // changé, et les conditions de circulation aussi. Le calcul part en
+    // arrière-plan, APRÈS la réponse au chauffeur — son écran ne doit jamais
+    // attendre une optimisation.
+    // Le service refuse de lui-même les tournées de formation, les gains
+    // marginaux et les propositions en double : rien à filtrer ici.
+    if (status === 'collected' || status === 'skipped') {
+      const tourId = parseInt(req.params.id, 10);
+      const io = req.app.get('io');
+      try { require('../../services/scheduler').noterRecalcul(tourId); } catch (_) { /* scheduler absent */ }
+      proposeReoptimization({
+        tourId,
+        triggerReason: 'arret',
+        triggeredBy: 'auto',
+        currentLat: req.body?.current_lat != null ? parseFloat(req.body.current_lat) : null,
+        currentLng: req.body?.current_lng != null ? parseFloat(req.body.current_lng) : null,
+        io,
+      }).catch((err) => console.warn('[TOURS] ré-optimisation après arrêt :', err.message));
     }
   } catch (err) {
     console.error('[TOURS] Erreur collect-public:', err);
@@ -765,11 +810,19 @@ router.post('/:id/weigh-public', async (req, res) => {
         notes ?? null,
       ]
     );
-    // Mettre à jour le total de la tournée (somme des pesées non intermédiaires)
+    // Total de la tournée = somme de TOUTES les pesées.
+    //
+    // Correctif (août 2026) : la somme ne retenait que les pesées « non
+    // intermédiaires ». Or une pesée intermédiaire n'est pas un relevé
+    // provisoire : c'est un CHARGEMENT RÉELLEMENT DÉPOSÉ au centre par un
+    // chauffeur qui repart collecter. L'exclure faisait disparaître ces kilos
+    // du total, et donc — via applyCompletionSideEffects — de tonnage_history
+    // (moteur prédictif, carte des CAV) ET des entrées de stock.
+    // Cas observé en production : une tournée avec 649 kg pesés en
+    // intermédiaire et 0 kg en pesée finale ressortait à 0 kg partout.
     await pool.query(
       `UPDATE tours SET total_weight_kg = (
-         SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights
-         WHERE tour_id = $1 AND COALESCE(is_intermediate, FALSE) = FALSE
+         SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1
        ) WHERE id = $1`,
       [req.params.id]
     );

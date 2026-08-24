@@ -1,6 +1,11 @@
 const pool = require('../../config/database');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate, getLocalEventsForDate } = require('./context');
-const { nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip } = require('./geo');
+const { nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip, haversineDistance } = require('./geo');
+// Cache des tronçons routiers : le réseau entre deux bornes fixes ne change
+// pas, seul le trafic varie (appliqué APRÈS, en multipliant la durée).
+const { cachedRouteSegment } = require('../../services/route-cache');
+const cavScoring = require('../../services/cav-scoring');
+const { emissionsVehicule } = require('../../services/vehicle-emissions');
 const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('./predictions');
 const fillFactors = require('../../utils/fill-factors');
 const timeEngine = require('../../services/tour-time-engine');
@@ -120,7 +125,10 @@ function makeRouteLeg(trafficFactor = 1) {
   const factor = Number.isFinite(parseFloat(trafficFactor)) && parseFloat(trafficFactor) > 0
     ? parseFloat(trafficFactor) : 1;
   return async (from, to) => {
-    const seg = await osrmRouteSegment(from.lat, from.lng, to.lat, to.lng);
+    // Distance/durée « à vide » servies par le cache dès le 2e passage sur le
+    // tronçon ; le facteur de circulation du jour est appliqué ensuite, il
+    // n'est donc JAMAIS figé par le cache.
+    const seg = await cachedRouteSegment(from.lat, from.lng, to.lat, to.lng);
     return { km: seg.distance_km, minutes: seg.duration_min * factor };
   };
 }
@@ -129,15 +137,102 @@ function makeRouteLeg(trafficFactor = 1) {
  * Ordre géographique optimisé (OSRM Trip, repli TSP local + 2-opt).
  * @returns {Promise<{ordered: Array, method: string}>}
  */
-async function optimizeOrder(points) {
+async function optimizeOrder(points, opts = {}) {
   if (!points || points.length <= 1) return { ordered: points || [], method: 'osrm_trip' };
+
+  // ── 1. AMORCE : un bon ordre de départ, sur le réseau routier ──────────
+  // Le TSP d'OSRM cherche l'ordre à partir de rien ; l'amélioration locale qui
+  // suit ne sait qu'améliorer un ordre existant. Les deux sont complémentaires.
+  let ordered;
+  let method;
   const osrmResult = await osrmOptimizedTrip(points, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
   if (osrmResult && osrmResult.orderedPoints) {
-    return { ordered: osrmResult.orderedPoints, method: 'osrm_trip' };
+    ordered = osrmResult.orderedPoints;
+    method = 'osrm_trip';
+  } else {
+    ordered = twoOptImprove(
+      nearestNeighborTSP(points, CENTRE_TRI_LAT, CENTRE_TRI_LNG),
+      CENTRE_TRI_LAT, CENTRE_TRI_LNG
+    );
+    method = 'haversine_tsp_2opt';
   }
-  let ordered = nearestNeighborTSP(points, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  ordered = twoOptImprove(ordered, CENTRE_TRI_LAT, CENTRE_TRI_LNG);
-  return { ordered, method: 'haversine_tsp_2opt' };
+
+  // ── 2. AMÉLIORATION sur l'objectif réel (CO2 & efficacité, trafic inclus) ─
+  // L'amorce minimise la DISTANCE à circulation libre. Le client veut aussi
+  // l'efficacité de la journée : on repasse sur l'ordre avec l'objectif
+  // paramétré et les durées pondérées par la circulation attendue.
+  // S'applique aux TROIS modes de création (IA, modèle, manuel) : ils passent
+  // tous par ici.
+  try {
+    const affine = await affinerOrdreAvecTrafic(ordered, opts);
+    if (affine && affine.ordered) return affine;
+  } catch (err) {
+    console.warn('[SMART-TOUR] Affinage trafic ignoré :', err.message);
+  }
+  return { ordered, method };
+}
+
+/**
+ * Repasse un ordre de points sur l'objectif d'optimisation configuré, avec les
+ * distances routières mises en cache et le facteur de circulation attendu.
+ * Aucun appel réseau dans la boucle : la matrice est préchargée.
+ *
+ * @param {Array} ordered points déjà ordonnés (amorce)
+ * @param {object} opts { trafficFactor }
+ * @returns {Promise<{ordered, method, gain}|null>} null si rien à améliorer
+ */
+async function affinerOrdreAvecTrafic(ordered, opts = {}) {
+  if (!Array.isArray(ordered) || ordered.length < 3) return null;
+
+  const optimizer = require('../../services/tour-optimizer');
+  const { prefetchLegs, legKey } = require('../../services/route-cache');
+  const { ROAD_FACTOR, resolveAvgSpeedKmh } = require('./geo');
+  const cfg = getScoringConfig();
+  const objectif = optimizer.OBJECTIFS.includes(cfg.reoptimObjectif) ? cfg.reoptimObjectif : 'mixte';
+  const poids = {
+    distance: numOr(cfg.reoptimPoidsDistance, 0.5),
+    duree: numOr(cfg.reoptimPoidsDuree, 0.5),
+  };
+  const facteur = numOr(opts.trafficFactor, 1) || 1;
+
+  const coords = new Map();
+  coords.set(optimizer.DEPART, { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG });
+  coords.set(optimizer.ARRIVEE, { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG });
+  ordered.forEach((p, i) => coords.set(i, {
+    lat: parseFloat(p.latitude), lng: parseFloat(p.longitude),
+  }));
+  if ([...coords.values()].some((c) => !Number.isFinite(c.lat) || !Number.isFinite(c.lng))) {
+    return null; // un point sans coordonnées : on ne réordonne pas à l'aveugle
+  }
+
+  const paires = [];
+  const cles = [...coords.keys()];
+  cles.forEach((a) => cles.forEach((b) => {
+    if (a === b) return;
+    const pa = coords.get(a);
+    const pb = coords.get(b);
+    paires.push([pa.lat, pa.lng, pb.lat, pb.lng]);
+  }));
+  const matrice = await prefetchLegs(paires);
+  const vitesse = resolveAvgSpeedKmh();
+
+  const leg = (a, b) => {
+    const pa = coords.get(a);
+    const pb = coords.get(b);
+    if (!pa || !pb) return { km: 0, min: 0 };
+    const mesure = matrice.get(legKey(pa.lat, pa.lng, pb.lat, pb.lng));
+    if (mesure) return { km: mesure.distance_km, min: mesure.duration_min * facteur };
+    const km = haversineDistance(pa.lat, pa.lng, pb.lat, pb.lng) * ROAD_FACTOR;
+    return { km, min: (km / vitesse) * 60 * facteur };
+  };
+
+  const r = optimizer.optimiserOrdre(ordered.map((_, i) => i), leg, { objectif, poids });
+  if (!r.ameliore) return null;
+  return {
+    ordered: r.ordre.map((i) => ordered[i]),
+    method: `objectif_${objectif}`,
+    gain: r.gain,
+  };
 }
 
 /**
@@ -274,19 +369,22 @@ async function estimateFixedRoute({ vehicle, points, date, optimize = false }) {
     _fill: p.type === 'cav' ? (fills.get(Number(p.id))?.fill ?? null) : null,
   }));
 
-  let ordered = enriched;
-  let ordreOptimise = null;
-  if (optimize && enriched.length > 1) {
-    const { ordered: opt } = await optimizeOrder(enriched);
-    ordered = opt;
-    ordreOptimise = opt.map((p) => p.id);
-  }
-
+  // Circulation attendue ce jour-là : lue AVANT l'optimisation d'ordre, car
+  // elle en fait partie (un ordre optimal à circulation libre ne l'est plus
+  // quand un axe est saturé). Elle sert ensuite à la chronologie.
   let trafficFactor = 1;
   try {
     const context = await getContextForDate(dateStr);
     trafficFactor = parseFloat(context?.trafficFactor) || 1;
   } catch (_) { /* contexte indisponible → facteur neutre */ }
+
+  let ordered = enriched;
+  let ordreOptimise = null;
+  if (optimize && enriched.length > 1) {
+    const { ordered: opt } = await optimizeOrder(enriched, { trafficFactor });
+    ordered = opt;
+    ordreOptimise = opt.map((p) => p.id);
+  }
 
   const estimation = await timeEngine.buildTimeline(
     ordered.map((p) => ({
@@ -339,30 +437,60 @@ async function generateIntelligentTour(vehicleId, date) {
   const predictions = await mapWithConcurrency(allCavs, PREDICT_CONCURRENCY, (cav) => predictFillRate(cav.id, date));
   const cavWithPredictions = allCavs.map((cav, i) => ({ ...cav, prediction: predictions[i] }));
 
-  // 4. Calculer le score de priorité
+  // Temps de collecte APPRIS par borne : chargés EN UNE requête avant le
+  // scoring, car le critère « temps » en dépend. (Ils étaient jusqu'ici lus
+  // après la sélection, uniquement pour le calcul d'itinéraire.)
+  const learnedTimes = await loadLearnedTimesPerCav(allCavs.map((c) => c.id));
+
+  // 4. Score de sélection — 4 facteurs hiérarchisés (arbitrage client 08/2026)
+  //    remplissage > temps > distance > émissions. Le calcul lui-même est un
+  //    module PUR (services/cav-scoring) : il ne dépend ni de la base ni du
+  //    réseau, et il est testable pour lui-même.
+  //    Les ÉMISSIONS n'entrent dans le score que si la consommation du
+  //    véhicule est mesurée (pleins saisis) — jamais estimée. Absentes, elles
+  //    le sont pour toutes les bornes de la tournée : le classement reste
+  //    cohérent.
+  const carburant = await emissionsVehicule(vehicle.id).catch(() => ({}));
+  const poidsSelection = {
+    remplissage: numOr(SCORING_CONFIG.poidsRemplissage, 1),
+    temps: numOr(SCORING_CONFIG.poidsTemps, 0.6),
+    distance: numOr(SCORING_CONFIG.poidsDistance, 0.3),
+    emissions: numOr(SCORING_CONFIG.poidsEmissions, 0.1),
+  };
+  const echellesSelection = {
+    detourKm: numOr(SCORING_CONFIG.echelleDetourKm, 15),
+    serviceMin: numOr(SCORING_CONFIG.echelleServiceMin, 20),
+  };
+  const defautService = numOr(SCORING_CONFIG.timePerCav, 10);
+
   const scoredCavs = cavWithPredictions.map(cav => {
-    const fill = cav.prediction.fill;
-    let score = 0;
+    // Distance à vol d'oiseau depuis le centre de tri : approximation assumée
+    // du « coût d'aller la chercher » AVANT que l'ordre de passage n'existe.
+    // L'itinéraire réel est calculé ensuite, sur les bornes retenues.
+    const detourKm = (cav.latitude != null && cav.longitude != null)
+      ? haversineDistance(CENTRE_TRI_LAT, CENTRE_TRI_LNG,
+        parseFloat(cav.latitude), parseFloat(cav.longitude))
+      : null;
+    const serviceMinutes = learnedTimeFor(learnedTimes, cav.id, defautService);
 
-    // Score basé sur le remplissage
-    if (fill >= 100) score += 50;
-    else if (fill >= 80) score += 35;
-    else if (fill >= 60) score += 20;
-    else if (fill >= 40) score += 10;
-    else score += 2;
-
-    // Bonus : jours depuis dernière collecte
-    score += (cav.prediction.factors?.daysSinceCollection || 0) * 1.5;
-
-    // Bonus : nombre de conteneurs (priorité aux grands sites)
-    score += (cav.nb_containers || 1) * 3;
-
-    // Bonus confiance
-    score *= cav.prediction.confidence;
+    const evaluation = cavScoring.scoreSelection({
+      fillPct: cav.prediction.fill,
+      daysSince: cav.prediction.factors?.daysSinceCollection || 0,
+      nbContainers: cav.nb_containers || 1,
+      confidence: cav.prediction.confidence,
+      serviceMinutes,
+      detourKm,
+    }, { poids: poidsSelection, echelles: echellesSelection, carburant });
 
     return {
       ...cav,
-      score: Math.round(score * 10) / 10,
+      // Score ramené sur 100 : les écrans et l'explication IA affichaient une
+      // échelle de cet ordre, on ne casse pas leur lisibilité.
+      score: Math.round(evaluation.score * 1000) / 10,
+      score_detail: evaluation.detail,
+      score_emissions_prises_en_compte: evaluation.emissionsPrisesEnCompte,
+      _detourKm: detourKm,
+      _learnedTimePerCav: serviceMinutes,
       // Poids estimé = remplissage prédit × capacité du CAV (modèle d'accumulation)
       estimatedWeightKg: estimatedWeightKgFor(cav.prediction.fill, cav.nb_containers),
     };
@@ -414,20 +542,18 @@ async function generateIntelligentTour(vehicleId, date) {
 
   if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
 
-  // Perf (item 3.D-4) : précharger EN UNE requête les temps de collecte appris des
-  // CAV retenus (au lieu d'1 requête cav_collection_times par CAV dans la boucle de
-  // routage ci-dessous). Résultat identique via learnedTimeFor (fallback défaut).
-  const learnedTimes = await loadLearnedTimesPerCav(selectedCavs.map((c) => c.id));
-  const defaultService = numOr(SCORING_CONFIG.timePerCav, 10);
-  for (const cav of selectedCavs) {
-    cav._learnedTimePerCav = learnedTimeFor(learnedTimes, cav.id, defaultService);
-  }
+  // Les temps appris sont déjà chargés (étape 4, avant le scoring) et posés
+  // sur chaque borne : rien à recharger ici.
 
   // 7. Optimiser la route via OSRM (ou fallback TSP local). Les obligatoires et
   //    les autres sont optimisés SÉPARÉMENT puis concaténés : la sélection
   //    gloutonne sous budget (étape 8) sert ainsi les CAV saturés en premier.
-  const optObl = await optimizeOrder(keptObligatoires);
-  const optAutres = await optimizeOrder(keptAutres);
+  // Circulation attendue : partagée par les deux blocs d'optimisation et par
+  // le moteur de temps ci-dessous (une seule lecture du contexte).
+  const context = await getContextForDate(dateStr).catch(() => null);
+  const facteurJour = parseFloat(context?.trafficFactor) || 1;
+  const optObl = await optimizeOrder(keptObligatoires, { trafficFactor: facteurJour });
+  const optAutres = await optimizeOrder(keptAutres, { trafficFactor: facteurJour });
   const routingMethod = (optObl.method === 'osrm_trip' && optAutres.method === 'osrm_trip')
     ? 'osrm_trip' : 'haversine_tsp_2opt';
   const candidateOrder = [...optObl.ordered, ...optAutres.ordered];
@@ -435,10 +561,9 @@ async function generateIntelligentTour(vehicleId, date) {
   // 8. Contraintes de journée (moteur partagé) : 6 h de travail max, pause
   //    déjeuner au centre hors temps de travail, retours de vidage comptés.
   // dateStr est déjà résolu à l'étape 3 (pré-chauffe du contexte).
-  const context = await getContextForDate(dateStr);
   const engineOpts = {
     ...timeEngineOptions(vehicle),
-    routeLeg: makeRouteLeg(context?.trafficFactor),
+    routeLeg: makeRouteLeg(facteurJour),
   };
   const toEnginePoint = (cav) => ({
     id: cav.id,
@@ -474,7 +599,7 @@ async function generateIntelligentTour(vehicleId, date) {
   //     ont fait valoir leur priorité, l'ordre peut redevenir purement
   //     géographique). On ne la retient que si elle tient dans le budget.
   if (optimizedRoute.length > 1 && keptObligatoires.length > 0) {
-    const { ordered: reordered } = await optimizeOrder(optimizedRoute);
+    const { ordered: reordered } = await optimizeOrder(optimizedRoute, { trafficFactor: facteurJour });
     const rebuilt = await timeEngine.buildTimeline(reordered.map(toEnginePoint), engineOpts);
     if (rebuilt.depassement_min === 0) {
       optimizedRoute = reordered;
@@ -702,5 +827,6 @@ module.exports = {
   timeEngineOptions,
   makeRouteLeg,
   optimizeOrder,
+  affinerOrdreAvecTrafic,
   DEFAULT_FILL_PCT,
 };

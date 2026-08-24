@@ -118,6 +118,48 @@ let SCORING_CONFIG = {
   lunchBreakMinutes: 30,         // durée pause déjeuner (minutes)
   lunchAfterHours: 4,            // déclencher la pause après N heures de travail
   cavProximityRadius: 100,       // rayon en mètres pour détecter arrivée/départ GPS d'un CAV
+  // ── Facteurs de SÉLECTION des bornes (arbitrage client, août 2026) ───
+  // Le moteur prédictif ne décide pas seulement de l'ordre : il décide QUELLES
+  // bornes collecter. Le client a hiérarchisé les critères, dans cet ordre :
+  //   1. le REMPLISSAGE  — une borne pleine déborde, c'est le motif premier ;
+  //   2. le TEMPS        — le budget de 6 h est la contrainte de la journée ;
+  //   3. la DISTANCE     — les kilomètres parcourus pour aller la chercher ;
+  //   4. les ÉMISSIONS   — dernier facteur, jamais le premier.
+  // Les pondérations traduisent cette hiérarchie et restent réglables. Le
+  // terme d'émissions est NEUTRALISÉ (et non estimé) quand la consommation du
+  // véhicule n'est pas mesurée — cf. services/vehicle-emissions.
+  // Le poids du remplissage dépasse la SOMME des trois autres : sinon les
+  // critères secondaires coalisés renverseraient le critère premier.
+  poidsRemplissage: 1.0,
+  poidsTemps: 0.35,
+  poidsDistance: 0.15,
+  poidsEmissions: 0.05,
+  // Échelles de normalisation : au-delà, le critère est saturé à 1. Elles
+  // évitent qu'une borne très lointaine écrase tous les autres critères.
+  echelleDetourKm: 15,      // détour de référence pour normaliser la distance
+  echelleServiceMin: 20,    // temps de service de référence par borne
+
+  // ── Ré-optimisation de l'ordre en cours de tournée (août 2026) ───────
+  // ARBITRAGE CLIENT : la PRIORITÉ est le TEMPS. Le budget de 6 h est la
+  // contrainte réelle de la journée, et le trafic se paie en minutes bien
+  // avant de se payer en kilomètres. L'arbitrage CO2 vit ailleurs — dans le
+  // moteur prédictif, qui choisit QUELLES bornes collecter.
+  //   'duree'    = temps de parcours (défaut)
+  //   'distance' = kilomètres
+  //   'mixte'    = pondération des deux
+  reoptimObjectif: 'duree',
+  reoptimPoidsDistance: 0.5,   // pondérations de l'objectif « mixte » seulement
+  reoptimPoidsDuree: 0.5,
+  reoptimGainMinPct: 5,        // gain minimal pour proposer un nouvel ordre
+  // Le recalcul est déclenché APRÈS CHAQUE BORNE, jamais en cours de trajet.
+  // Ce délai n'est qu'un garde-fou anti-doublon quand deux bornes se suivent
+  // à quelques secondes d'intervalle.
+  reoptimIntervalMin: 2,
+  // Application AUTOMATIQUE du nouvel ordre. Désactivée par défaut : changer
+  // l'itinéraire d'un chauffeur en cours de route est une décision
+  // d'exploitation, pas un effet de bord d'un calcul.
+  reoptimAuto: false,
+  reoptimAutoGainMinPct: 12,   // seuil, plus élevé, de l'application auto
 };
 
 // ──────────────────────────────────────────────────────────────

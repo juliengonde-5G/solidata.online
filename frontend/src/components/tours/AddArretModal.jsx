@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Settings, ExternalLink } from 'lucide-react';
 import api from '../../services/api';
 import { getArretCategoryMeta } from './arretCategories';
@@ -72,8 +73,11 @@ export default function AddArretModal({ tourId, onClose, onAdded }) {
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true">
+  // Portail vers <body> : au-dessus d'une carte Leaflet (calques à z-index
+  // 400, contrôles à 800), une modale rendue dans le flux de la page passe
+  // dessous et se retrouve tronquée.
+  return createPortal(
+    <div className="fixed inset-0 bg-black/40 z-[2000] flex items-start justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-6">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-semibold text-slate-800 text-sm">Ajouter un arrêt technique</h3>
@@ -174,6 +178,7 @@ export default function AddArretModal({ tourId, onClose, onAdded }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
