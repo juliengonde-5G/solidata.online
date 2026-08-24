@@ -1,18 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { MapPin, Search, Crosshair, Loader2 } from 'lucide-react';
+import { MapPin, Search, Loader2 } from 'lucide-react';
 import api from '../services/api';
 
 /**
- * Saisie d'un lieu : adresse ↔ coordonnées.
+ * Saisie d'un lieu : on tape une adresse, on choisit une proposition, les
+ * coordonnées se remplissent.
  *
- * Deux gestes, dans les deux sens :
- *   • taper une adresse → propositions cliquables qui remplissent les
- *     coordonnées (plus besoin d'aller chercher une latitude ailleurs) ;
- *   • saisir des coordonnées → retrouver l'adresse correspondante.
- *
- * DOCTRINE : rien n'est deviné. Si le service ne répond pas, le message le
- * dit et la saisie manuelle reste possible — les champs ne sont jamais
- * verrouillés par la recherche.
+ * DOCTRINE : rien n'est deviné. Si le service ne répond pas, le message le dit
+ * et la saisie manuelle reste possible — les champs latitude/longitude ne sont
+ * jamais verrouillés par la recherche.
  *
  * @param {string} adresse
  * @param {number|string|null} latitude
@@ -23,7 +19,7 @@ export default function AdresseGeocodee({
   adresse = '', latitude = '', longitude = '', onChange,
   labelAdresse = 'Adresse', requis = false,
 }) {
-  const [resultats, setResultats] = useState(null); // null = pas de recherche en cours
+  const [resultats, setResultats] = useState(null); // null = rien à proposer
   const [message, setMessage] = useState(null);
   const [chargement, setChargement] = useState(false);
   const debounceRef = useRef(null);
@@ -71,29 +67,6 @@ export default function AdresseGeocodee({
     setMessage(null);
   };
 
-  const retrouverAdresse = async () => {
-    if (!latitude || !longitude) return;
-    setChargement(true);
-    setMessage(null);
-    try {
-      const res = await api.get('/geocodage/inverse', { params: { lat: latitude, lng: longitude } });
-      const d = res.data || {};
-      if (d.disponible && d.resultat) {
-        onChange({
-          adresse: d.resultat.libelle || '',
-          code_postal: d.resultat.code_postal || undefined,
-          commune: d.resultat.commune || undefined,
-          code_insee: d.resultat.code_insee || undefined,
-        });
-      } else {
-        setMessage(d.message || 'Aucune adresse à cet endroit.');
-      }
-    } catch (_) {
-      setMessage("Service d'adresse indisponible.");
-    }
-    setChargement(false);
-  };
-
   return (
     <div className="space-y-3">
       <div className="relative">
@@ -127,9 +100,7 @@ export default function AdresseGeocodee({
                   <MapPin className="w-3.5 h-3.5 text-teal-600 mt-0.5 flex-shrink-0" />
                   <span>
                     <span className="text-slate-700">{r.libelle}</span>
-                    <span className="block text-[10px] text-slate-400">
-                      {r.latitude}, {r.longitude}
-                    </span>
+                    <span className="block text-[10px] text-slate-400">{r.latitude}, {r.longitude}</span>
                   </span>
                 </button>
               </li>
@@ -140,6 +111,7 @@ export default function AdresseGeocodee({
         {message && <p className="text-[11px] text-amber-700 mt-1">{message}</p>}
       </div>
 
+      {/* Coordonnées : remplies par la recherche, toujours modifiables à la main. */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs text-slate-500 mb-1">Latitude</label>
@@ -158,16 +130,6 @@ export default function AdresseGeocodee({
           />
         </div>
       </div>
-
-      <button
-        type="button"
-        onClick={retrouverAdresse}
-        disabled={!latitude || !longitude || chargement}
-        className="text-xs text-teal-700 hover:text-teal-800 inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        <Crosshair className="w-3.5 h-3.5" />
-        Retrouver l'adresse depuis ces coordonnées
-      </button>
     </div>
   );
 }
