@@ -104,7 +104,9 @@ UNION ALL SELECT 'tonnage_history', COUNT(*)::text FROM tonnage_history
 UNION ALL SELECT 'production_daily', COUNT(*)::text FROM production_daily
 UNION ALL SELECT 'stock_movements', COUNT(*)::text FROM stock_movements
 UNION ALL SELECT 'badgeuse_pointages', COUNT(*)::text FROM badgeuse_pointages
-UNION ALL SELECT 'insertion_milestones', COUNT(*)::text FROM insertion_milestones;"
+UNION ALL SELECT 'insertion_milestones', COUNT(*)::text FROM insertion_milestones
+UNION ALL SELECT 'tour_weights', COUNT(*)::text FROM tour_weights
+UNION ALL SELECT 'vehicle_checklists', COUNT(*)::text FROM vehicle_checklists;"
 ```
 
 **Copiez cette sortie dans un fichier texte.** C'est votre référence.
@@ -150,6 +152,26 @@ le dépôt dans `/opt/solidata.online`.
 # Depuis votre Mac
 scp ~/solidata-migration/.env.production root@<IP_TEMPORAIRE>:/opt/solidata.online/.env
 ```
+
+**Contrôlez sa forme avant d'aller plus loin.** Une valeur repliée sur la ligne
+suivante, ou des espaces autour du `=`, cassent la variable concernée — et le
+24/08/2026, une clé d'API s'est retrouvée imprimée en clair dans la sortie de
+déploiement pour cette raison.
+
+```bash
+ssh root@<IP_TEMPORAIRE>
+cd /opt/solidata.online
+chmod 600 .env
+# Lignes qui ne sont NI un commentaire, NI une ligne vide, NI une affectation :
+grep -nvE '^[[:space:]]*(#|$|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=)' .env
+```
+
+La commande ne doit **rien** renvoyer. Si elle liste des lignes, corrigez-les
+avant de continuer — ce sont des valeurs orphelines.
+
+> Le script de déploiement n'exécute plus le `.env` depuis le correctif du
+> 24/08, donc un fichier mal formé ne peut plus révéler de secret. La variable
+> concernée resterait néanmoins non chargée.
 
 ### 5.3 Les fichiers absents du dépôt
 
@@ -224,12 +246,18 @@ UNION ALL SELECT 'tonnage_history', COUNT(*)::text FROM tonnage_history
 UNION ALL SELECT 'production_daily', COUNT(*)::text FROM production_daily
 UNION ALL SELECT 'stock_movements', COUNT(*)::text FROM stock_movements
 UNION ALL SELECT 'badgeuse_pointages', COUNT(*)::text FROM badgeuse_pointages
-UNION ALL SELECT 'insertion_milestones', COUNT(*)::text FROM insertion_milestones;"
+UNION ALL SELECT 'insertion_milestones', COUNT(*)::text FROM insertion_milestones
+UNION ALL SELECT 'tour_weights', COUNT(*)::text FROM tour_weights
+UNION ALL SELECT 'vehicle_checklists', COUNT(*)::text FROM vehicle_checklists;"
 ```
 
 **Comparez ligne à ligne avec la référence de §3.3.** Un écart, même d'une
 seule ligne, doit être compris **avant** d'aller plus loin. Ne basculez pas
 sur un doute.
+
+Une seule table n'a pas à correspondre : `route_legs_cache`, le cache des
+distances routières. Il se reconstruit tout seul à l'usage et peut être vide
+sur la nouvelle machine sans conséquence.
 
 ### 5.8 Démarrer le reste
 
@@ -457,4 +485,9 @@ vous n'avez plus de production debout — d'où la recommandation du §1.
 - [ ] Relancer une sauvegarde de contrôle : `bash deploy/scripts/backup.sh manual`
 - [ ] Mettre à jour l'IP dans vos notes internes si elle a changé
 - [ ] Programmer un `docker system prune -af` après chaque déploiement
+- [ ] Rattrapage des pesées intermédiaires, s'il n'a pas encore été passé :
+      `docker compose -f docker-compose.prod.yml exec backend node src/scripts/rattraper-pesees-intermediaires.js`
+      (simulation d'abord, puis `--apply`)
+- [ ] Effacer les sauvegardes `.env.bak-*` restées sur l'ancienne machine :
+      elles contiennent des secrets, et cette machine va survivre 7 jours
 
