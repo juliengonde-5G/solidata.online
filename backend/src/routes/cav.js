@@ -560,17 +560,59 @@ router.get('/:id/scans', async (req, res) => {
   }
 });
 
+// Rendu unique des QR : les trois lieux de génération (création d'un CAV,
+// génération par lot, régénération ci-dessous) doivent produire la MÊME image,
+// sans quoi un QR régénéré ne ressemblerait pas à celui collé sur la borne.
+const QR_RENDER_OPTIONS = { width: 300, margin: 2, color: { dark: '#1A202C', light: '#FFFFFF' } };
+
+// Un nom de fichier ne se construit jamais directement depuis une valeur de
+// base : on ne garde que des caractères sûrs.
+const qrFileNameFor = (qrData) => `qr_${String(qrData).replace(/[^A-Za-z0-9._-]/g, '_')}.png`;
+
 // GET /api/cav/:id/qr-code — Télécharger le QR code d'un CAV
 router.get('/:id/qr-code', async (req, res) => {
   try {
-    const result = await pool.query('SELECT qr_code_image_path, name FROM cav WHERE id = $1', [req.params.id]);
+    const result = await pool.query(
+      'SELECT qr_code_data, qr_code_image_path, name FROM cav WHERE id = $1',
+      [req.params.id]
+    );
     if (result.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
-    if (!result.rows[0].qr_code_image_path) return res.status(404).json({ error: 'QR code non généré' });
 
-    const filePath = path.join(__dirname, '..', '..', result.rows[0].qr_code_image_path);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Fichier QR introuvable' });
+    const { qr_code_data: qrData, qr_code_image_path: storedPath, name } = result.rows[0];
 
-    res.download(filePath, `QR_CAV_${result.rows[0].name.replace(/\s+/g, '_')}.png`);
+    // Sans donnée à encoder, il n'y a rien à redessiner : le QR n'existe pas.
+    // C'est le SEUL cas où l'on renvoie « non généré ».
+    if (!qrData) return res.status(404).json({ error: 'QR code non généré' });
+
+    const downloadName = `QR_CAV_${String(name || req.params.id).replace(/\s+/g, '_')}.png`;
+
+    if (storedPath) {
+      const filePath = path.join(__dirname, '..', '..', storedPath);
+      if (fs.existsSync(filePath)) return res.download(filePath, downloadName);
+    }
+
+    // Le fichier manque : chemin jamais renseigné, ou image perdue (restauration
+    // partielle, purge de volume). L'image d'un QR est une fonction PURE de
+    // qr_code_data — la redessiner ne fabrique aucune information, elle réencode
+    // la même donnée, déjà imprimée sur la borne. On la sert immédiatement.
+    const buffer = await QRCode.toBuffer(qrData, QR_RENDER_OPTIONS);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    res.send(buffer);
+
+    // Puis on répare le disque, au mieux : un échec d'écriture ne doit jamais
+    // priver l'utilisateur du QR qu'il vient de recevoir.
+    try {
+      const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
+      if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
+      const qrFilename = qrFileNameFor(qrData);
+      fs.writeFileSync(path.join(qrDir, qrFilename), buffer);
+      await pool.query('UPDATE cav SET qr_code_image_path = $1 WHERE id = $2',
+        [`/uploads/qrcodes/${qrFilename}`, req.params.id]);
+      console.log(`[CAV] QR du CAV ${req.params.id} régénéré et réenregistré sur disque.`);
+    } catch (e) {
+      console.warn(`[CAV] QR du CAV ${req.params.id} régénéré mais non persisté :`, e.message);
+    }
   } catch (err) {
     console.error('[CAV] Erreur téléchargement QR :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -588,9 +630,9 @@ router.post('/batch-generate-qr', authorize('ADMIN', 'MANAGER'), async (req, res
     let generated = 0;
     for (const c of cavs.rows) {
       const qrData = `SOLIDATA-CAV-${c.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-      const qrFilename = `qr_${qrData}.png`;
+      const qrFilename = qrFileNameFor(qrData);
       const qrPath = path.join(qrDir, qrFilename);
-      await QRCode.toFile(qrPath, qrData, { width: 300, margin: 2, color: { dark: '#1A202C', light: '#FFFFFF' } });
+      await QRCode.toFile(qrPath, qrData, QR_RENDER_OPTIONS);
       await pool.query(
         'UPDATE cav SET qr_code_data = $1, qr_code_image_path = $2 WHERE id = $3',
         [qrData, `/uploads/qrcodes/${qrFilename}`, c.id]
@@ -1033,9 +1075,9 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
     const qrData = `SOLIDATA-CAV-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
     if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir, { recursive: true });
-    const qrFilename = `qr_${qrData}.png`;
+    const qrFilename = qrFileNameFor(qrData);
     const qrPath = path.join(qrDir, qrFilename);
-    await QRCode.toFile(qrPath, qrData, { width: 300, margin: 2, color: { dark: '#1A202C', light: '#FFFFFF' } });
+    await QRCode.toFile(qrPath, qrData, QR_RENDER_OPTIONS);
 
     const result = await pool.query(
       `INSERT INTO cav (name, address, commune, latitude, longitude,

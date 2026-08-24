@@ -290,6 +290,11 @@ export default function AdminCAV() {
   const [sheetDownloading, setSheetDownloading] = useState(null);
   const [detailCav, setDetailCav] = useState(null);
   const [detailQrUrl, setDetailQrUrl] = useState(null);
+  // 'absent' | 'chargement' | 'pret' | 'erreur'. Sans cet état, un échec de
+  // chargement était indiscernable d'une attente : le panneau restait sur
+  // « Chargement... » indéfiniment, sans jamais dire ce qui s'était passé.
+  const [detailQrEtat, setDetailQrEtat] = useState('absent');
+  const [detailQrErreur, setDetailQrErreur] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef(null);
 
@@ -350,11 +355,20 @@ export default function AdminCAV() {
   const openDetail = async (cav) => {
     setDetailCav(cav);
     setDetailQrUrl(null);
-    if (cav.qr_code_data) {
-      try {
-        const res = await api.get(`/cav/${cav.id}/qr-code`, { responseType: 'blob' });
-        setDetailQrUrl(URL.createObjectURL(res.data));
-      } catch (err) { /* pas de QR */ }
+    setDetailQrErreur('');
+    if (!cav.qr_code_data) { setDetailQrEtat('absent'); return; }
+    setDetailQrEtat('chargement');
+    try {
+      const res = await api.get(`/cav/${cav.id}/qr-code`, { responseType: 'blob' });
+      setDetailQrUrl(URL.createObjectURL(res.data));
+      setDetailQrEtat('pret');
+    } catch (err) {
+      // La réponse est demandée en blob : son corps n'est pas lisible comme du
+      // JSON ici. On rapporte donc ce qu'on sait de façon sûre — le code de
+      // statut — plutôt que d'inventer un message.
+      const statut = err?.response?.status;
+      setDetailQrEtat('erreur');
+      setDetailQrErreur(statut ? `Le serveur a répondu ${statut}.` : (err?.message || 'Serveur injoignable.'));
     }
   };
 
@@ -362,6 +376,8 @@ export default function AdminCAV() {
     if (detailQrUrl) URL.revokeObjectURL(detailQrUrl);
     setDetailCav(null);
     setDetailQrUrl(null);
+    setDetailQrEtat('absent');
+    setDetailQrErreur('');
   };
 
   const handleMapPick = ([lat, lng]) => {
@@ -975,7 +991,7 @@ export default function AdminCAV() {
                   <h3 className="text-xs font-medium text-gray-500 uppercase">QR Code</h3>
                 </div>
                 <div className="p-4 text-center">
-                  {detailQrUrl ? (
+                  {detailQrEtat === 'pret' && detailQrUrl ? (
                     <>
                       <img src={detailQrUrl} alt={`QR CAV ${detailCav.id}`} className="mx-auto w-36 h-36 object-contain mb-2" />
                       <p className="text-xs text-gray-400 font-mono break-all mb-3">{detailCav.qr_code_data}</p>
@@ -985,8 +1001,14 @@ export default function AdminCAV() {
                       </button>
                       <p className="text-xs text-amber-600 mt-2">QR code définitif — ne peut pas être modifié</p>
                     </>
-                  ) : detailCav.qr_code_data ? (
+                  ) : detailQrEtat === 'chargement' ? (
                     <p className="text-xs text-gray-400">Chargement...</p>
+                  ) : detailQrEtat === 'erreur' ? (
+                    <div className="text-center py-4">
+                      <p className="text-red-500 text-sm mb-1">QR code indisponible</p>
+                      <p className="text-xs text-gray-400 mb-2">{detailQrErreur}</p>
+                      <p className="text-xs text-gray-400 font-mono break-all">{detailCav.qr_code_data}</p>
+                    </div>
                   ) : (
                     <div className="text-center py-4">
                       <p className="text-amber-500 text-sm mb-2">QR code non généré</p>
