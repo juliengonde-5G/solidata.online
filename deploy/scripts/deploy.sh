@@ -9,6 +9,23 @@
 
 set -euo pipefail
 
+# Bash lit un script AU FIL de son exécution, en mémorisant un décalage d'octets.
+# Or « update » fait un git pull qui peut réécrire CE fichier : la suite serait
+# alors lue au même décalage dans un fichier devenu différent, donc au milieu
+# d'une ligne. Le déploiement se poursuivrait en exécutant n'importe quoi.
+# On repart donc d'une copie figée, que le pull ne peut plus atteindre.
+if [ -z "${SOLIDATA_SELF_COPY:-}" ]; then
+    COPIE_SCRIPT="$(mktemp /tmp/solidata-deploy.XXXXXX.sh)"
+    cp "$0" "${COPIE_SCRIPT}"
+    export SOLIDATA_SELF_COPY=1
+    set +e
+    bash "${COPIE_SCRIPT}" "$@"
+    CODE_SORTIE=$?
+    set -e
+    rm -f "${COPIE_SCRIPT}"
+    exit ${CODE_SORTIE}
+fi
+
 APP_DIR="/opt/solidata.online"
 DOMAIN="solidata.online"
 SERVER_IP="51.159.144.100"
