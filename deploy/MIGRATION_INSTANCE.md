@@ -432,6 +432,33 @@ docker compose -f docker-compose.prod.yml exec -T db \
   pg_restore -U solidata_user -d solidata --clean --if-exists --no-owner /tmp/final.dump
 ```
 
+### 6.2bis Les fichiers déposés depuis la première sauvegarde
+
+La base n'est pas seule à avoir bougé. Photos de CAV prises par les chauffeurs,
+pièces jointes, justificatifs : tout ce qui a été déposé depuis la sauvegarde
+de §3 vit **uniquement** dans le volume `uploads` de l'ancienne machine. Une
+restauration de base sans les fichiers laisserait des enregistrements pointant
+vers des pièces absentes.
+
+```bash
+# Sur l'ancienne machine, une fois la pile arrêtée
+docker run --rm -v solidata-uploads:/data -v /tmp:/b alpine \
+  tar czf /b/uploads_final.tar.gz -C /data .
+```
+
+```bash
+# Depuis votre Mac
+scp root@51.159.144.100:/tmp/uploads_final.tar.gz ~/solidata-migration/
+scp ~/solidata-migration/uploads_final.tar.gz root@<IP_TEMPORAIRE>:/tmp/
+```
+
+```bash
+# Sur la nouvelle machine — l'extraction ajoute et remplace, elle n'efface rien
+docker run --rm -v solidata-uploads:/data -v /tmp:/b alpine \
+  sh -c 'tar xzf /b/uploads_final.tar.gz -C /data'
+docker run --rm -v solidata-uploads:/data alpine sh -c 'du -sh /data; find /data -type f | wc -l'
+```
+
 ### 6.3 Transférer l'adresse IP
 
 Dans la console Scaleway, **Réseau → IP flexibles** :
