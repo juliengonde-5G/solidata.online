@@ -261,9 +261,19 @@ Attendez que `solidata-db` soit `healthy`.
 
 ```bash
 # Depuis votre Mac
-scp ~/solidata-migration/db_manual_*.dump.gz root@<IP_TEMPORAIRE>:/tmp/
-scp ~/solidata-migration/uploads_manual_*.tar.gz root@<IP_TEMPORAIRE>:/tmp/
+cd ~/solidata-migration
+shasum -a 256 db_manual_*.dump.gz uploads_manual_*.tar.gz
+scp db_manual_*.dump.gz uploads_manual_*.tar.gz root@<IP_TEMPORAIRE>:/tmp/
 ```
+
+```bash
+# Sur la nouvelle machine : les empreintes doivent être identiques
+sha256sum /tmp/db_manual_*.dump.gz /tmp/uploads_manual_*.tar.gz
+```
+
+**Comparez-les avant de restaurer.** Un transfert interrompu produit une
+archive tronquée qui se décompresse partiellement sans erreur visible : vous
+restaureriez une base amputée en croyant l'opération réussie.
 
 ```bash
 # Sur la nouvelle machine
@@ -282,9 +292,19 @@ fatale.
 
 ```bash
 docker run --rm -v solidata-uploads:/data -v /tmp:/backup alpine \
-  tar xzf /backup/uploads_manual_*.tar.gz -C /data
+  sh -c 'tar xzf /backup/uploads_manual_*.tar.gz -C /data'
 docker run --rm -v solidata-uploads:/data alpine sh -c 'ls /data | wc -l'
 ```
+
+Le `sh -c` n'est pas décoratif. Sans lui, l'étoile est développée par le shell
+de la machine **hôte**, contre un chemin `/backup/...` qui n'existe que dans le
+conteneur : elle ne correspond à rien, le motif est transmis tel quel, et `tar`
+— qui ne développe pas les jokers — échoue sur un fichier au nom littéral. Avec
+`sh -c`, c'est le shell du conteneur qui développe, là où le fichier est.
+
+Le second `docker run` doit renvoyer un nombre **non nul**. Zéro signifie que
+l'extraction a échoué, ou que le nom du volume ne correspond pas — auquel cas
+Docker aurait créé un volume vide au lieu de vous prévenir.
 
 ### 5.7 Vérifier les compteurs
 
