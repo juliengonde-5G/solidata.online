@@ -193,12 +193,15 @@ déploiement pour cette raison.
 ssh root@<IP_TEMPORAIRE>
 cd /opt/solidata.online
 chmod 600 .env
-# Lignes qui ne sont NI un commentaire, NI une ligne vide, NI une affectation :
-grep -nvE '^[[:space:]]*(#|$|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=)' .env
+# Numéros des lignes qui ne sont NI un commentaire, NI vides, NI une affectation.
+# On n'affiche QUE le numéro : une ligne orpheline contient justement le secret
+# qu'on cherche à ne pas exposer.
+grep -nvE '^[[:space:]]*(#|$|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=)' .env | cut -d: -f1
 ```
 
-La commande ne doit **rien** renvoyer. Si elle liste des lignes, corrigez-les
-avant de continuer — ce sont des valeurs orphelines.
+La commande ne doit **rien** renvoyer. Si elle sort des numéros, ouvrez ces
+lignes dans un éditeur (`nano .env`) et recollez la valeur sur la ligne de sa
+variable — ce sont des valeurs orphelines.
 
 > Le script de déploiement n'exécute plus le `.env` depuis le correctif du
 > 24/08, donc un fichier mal formé ne peut plus révéler de secret. La variable
