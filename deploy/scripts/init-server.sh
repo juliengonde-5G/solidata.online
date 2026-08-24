@@ -2,7 +2,7 @@
 # ============================================================
 # SOLIDATA — Initialisation serveur Scaleway
 # PURGE TOTALE du disque + réinstallation propre
-# Serveur : 51.159.144.100
+# Serveur : adresse détectée à l'exécution
 # Usage: sudo bash init-server.sh
 #
 # ⚠️  CE SCRIPT SUPPRIME TOUT : Docker, données, base,
@@ -12,7 +12,11 @@
 set -euo pipefail
 
 DOMAIN="solidata.online"
-SERVER_IP="51.159.144.100"
+# Adresse réelle de la machine, détectée au moment de l'exécution. Elle était
+# codée en dur : sur un serveur fraîchement créé, la bannière et le rappel DNS
+# affichaient l'adresse d'une AUTRE machine — trompeur pendant une migration.
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "${SERVER_IP}" ] || SERVER_IP="(adresse non détectée)"
 EMAIL="admin@solidata.online"
 APP_DIR="/opt/solidata.online"
 DEPLOY_USER="solidata"
