@@ -227,6 +227,12 @@ mkdir -p ${APP_DIR}/logs
 chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${APP_DIR}
 chown -R ${DEPLOY_USER}:${DEPLOY_USER} /opt/solidata.online-backups
 
+# Le dépôt appartient désormais à ${DEPLOY_USER}, mais deploy.sh s'exécute en
+# root et y fait « git pull ». Depuis Git 2.35.2, une différence de
+# propriétaire fait échouer toute commande Git (« dubious ownership ») : sans
+# cette exception, chaque déploiement s'arrêterait à la mise à jour du code.
+git config --global --add safe.directory ${APP_DIR} 2>/dev/null || true
+
 # --- 7. Swap (si < 2Go RAM) ---
 echo "[7/9] Vérification swap..."
 TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')
