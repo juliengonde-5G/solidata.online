@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { DataTable, PageHeader } from '../components';
-import { Brain } from 'lucide-react';
+import { Brain, Send, Copy, Check } from 'lucide-react';
 import api from '../services/api';
 
 const TYPE_COLORS = {
@@ -196,12 +196,56 @@ export default function PersonalityMatrix() {
   const [types, setTypes] = useState([]);
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [rawAnswers, setRawAnswers] = useState(null);
-  const [view, setView] = useState('list'); // list, types, profile
+  const [view, setView] = useState('list'); // list, types, profile, passer
+  // Vue « Faire passer » : liste MINIMALE de candidats (identité, poste visé,
+  // état du test). Le praticien PCM n'a pas accès à la page Candidats — ni CV,
+  // ni entretiens : cette projection lui suffit pour désigner qui teste.
+  const [candidats, setCandidats] = useState([]);
+  const [erreur, setErreur] = useState(null);
+  const [lancement, setLancement] = useState(null); // id du candidat en cours
+  const [copie, setCopie] = useState(null);         // id dont le lien vient d'être copié
 
   useEffect(() => {
     api.get('/pcm/profiles').then(r => setProfiles(r.data)).catch(() => {});
     api.get('/pcm/types').then(r => setTypes(r.data)).catch(() => {});
   }, []);
+
+  const chargerCandidats = useCallback(async () => {
+    try {
+      setErreur(null);
+      const r = await api.get('/pcm/candidats');
+      setCandidats(r.data);
+    } catch (err) {
+      setErreur(err.response?.data?.error || 'Impossible de charger la liste des candidats.');
+    }
+  }, []);
+
+  useEffect(() => { if (view === 'passer') chargerCandidats(); }, [view, chargerCandidats]);
+
+  const lienTest = (token) => `${window.location.origin}/pcm-test/${token}`;
+
+  const lancerTest = async (candidat) => {
+    setLancement(candidat.id);
+    setErreur(null);
+    try {
+      await api.post('/pcm/sessions', { candidate_id: candidat.id, mode: 'autonomous' });
+      await chargerCandidats();
+    } catch (err) {
+      setErreur(err.response?.data?.error || 'Le test n\'a pas pu être créé.');
+    } finally {
+      setLancement(null);
+    }
+  };
+
+  const copierLien = async (candidat) => {
+    try {
+      await navigator.clipboard.writeText(lienTest(candidat.access_token));
+      setCopie(candidat.id);
+      setTimeout(() => setCopie(null), 2500);
+    } catch {
+      setErreur('Copie impossible — sélectionnez le lien à la main.');
+    }
+  };
 
   const loadProfile = async (candidateId) => {
     try {
@@ -234,9 +278,72 @@ export default function PersonalityMatrix() {
             <div className="flex gap-2">
               <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Profils</button>
               <button onClick={() => setView('types')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'types' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Types PCM</button>
+              <button onClick={() => setView('passer')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'passer' ? 'bg-primary text-white' : 'bg-gray-100'}`}>Faire passer un test</button>
             </div>
           }
         />
+
+        {erreur && (
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {erreur}
+          </div>
+        )}
+
+        {view === 'passer' && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Choisissez un candidat, lancez le test, puis transmettez-lui le lien.
+              Il répond depuis n'importe quel navigateur, sans compte ni installation.
+            </p>
+            <DataTable
+              columns={[
+                { key: 'nom', label: 'Candidat', sortable: true,
+                  render: (c) => <span className="font-medium">{c.last_name?.toUpperCase()} {c.first_name}</span> },
+                { key: 'poste_vise', label: 'Poste visé',
+                  render: (c) => <span className="text-sm text-gray-600">{c.poste_vise || '—'}</span> },
+                { key: 'etat', label: 'Test PCM', render: (c) => {
+                  if (c.a_un_profil) return <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-xs font-medium">Profil disponible</span>;
+                  if (c.session_status === 'in_progress') return <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">En cours</span>;
+                  if (c.session_status === 'pending') return <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-medium">Lien envoyé, en attente</span>;
+                  return <span className="text-xs text-gray-500">Aucun test</span>;
+                } },
+                { key: 'actions', label: '', render: (c) => (
+                  <div className="flex gap-2 justify-end">
+                    {c.access_token && !c.a_un_profil && (
+                      <button
+                        onClick={() => copierLien(c)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-sm hover:bg-gray-50"
+                        title="Copier le lien à transmettre au candidat"
+                      >
+                        {copie === c.id ? <Check size={14} /> : <Copy size={14} />}
+                        {copie === c.id ? 'Copié' : 'Copier le lien'}
+                      </button>
+                    )}
+                    {c.a_un_profil ? (
+                      <button
+                        onClick={() => loadProfile(c.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm"
+                      >
+                        Voir le profil
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => lancerTest(c)}
+                        disabled={lancement === c.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm disabled:opacity-50"
+                      >
+                        <Send size={14} />
+                        {lancement === c.id ? 'Création…' : c.session_status ? 'Relancer' : 'Lancer le test'}
+                      </button>
+                    )}
+                  </div>
+                ) },
+              ]}
+              data={candidats}
+              emptyMessage="Aucun candidat à tester."
+            />
+          </div>
+        )}
 
         {view === 'list' && (
           <DataTable

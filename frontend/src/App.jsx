@@ -143,6 +143,7 @@ function HomeRedirect() {
     DPO: '/rgpd',
     FINANCE: '/finance',
     QHSE: '/qhse/accidents', // module QHSE (item 58) = espace principal du rôle ; /incidents reste au menu
+    PCM: '/pcm',             // praticien PCM : son unique écran est son accueil
   }[base];
   if (landing) return <Navigate to={landing} replace />;
   return <Dashboard />;
@@ -183,7 +184,7 @@ function App() {
               {/* Recrutement */}
               <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Candidates /></ProtectedRoute>} />
               <Route path="/recruitment-plan" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RecruitmentPlan /></ProtectedRoute>} />
-              <Route path="/pcm" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PersonalityMatrix /></ProtectedRoute>} />
+              <Route path="/pcm" element={<ProtectedRoute roles={['ADMIN', 'RH', 'PCM']}><PersonalityMatrix /></ProtectedRoute>} />
 
               {/* Équipe */}
               <Route path="/employees" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Employees /></ProtectedRoute>} />

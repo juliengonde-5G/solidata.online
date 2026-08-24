@@ -753,7 +753,7 @@ function decryptReport(encrypted) {
 // liste des questions — inutile d'exposer /questionnaire publiquement.
 // Les options sont mélangées déterministiquement par question pour éviter
 // le biais "première position = analyseur".
-router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   res.json(PCM_QUESTIONS.map(q => ({
     num: q.num,
     category: q.category,
@@ -769,7 +769,7 @@ router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), 
 });
 
 // GET /api/pcm/types — Référence des 6 types PCM
-router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   const types = Object.entries(PCM_TYPES).map(([key, data]) => ({
     key,
     ...data,
@@ -778,14 +778,14 @@ router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, re
 });
 
 // GET /api/pcm/types/:typeKey — Détail d'un type
-router.get('/types/:typeKey', authenticate, authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+router.get('/types/:typeKey', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   const data = PCM_TYPES[req.params.typeKey];
   if (!data) return res.status(404).json({ error: 'Type PCM inconnu' });
   res.json({ key: req.params.typeKey, ...data });
 });
 
 // POST /api/pcm/sessions — Créer une session de test
-router.post('/sessions', authenticate, authorize('ADMIN', 'RH'), [
+router.post('/sessions', authenticate, authorize('ADMIN', 'RH', 'PCM'), [
   body('candidate_id').isInt().withMessage('ID candidat requis'),
   body('mode').notEmpty().withMessage('Mode requis'),
 ], validate, async (req, res) => {
@@ -803,6 +803,37 @@ router.post('/sessions', authenticate, authorize('ADMIN', 'RH'), [
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[PCM] Erreur création session :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/pcm/candidats — Liste MINIMALE pour lancer un test.
+//
+// Le praticien PCM doit pouvoir désigner un candidat sans accéder au dossier de
+// recrutement : cette projection ne renvoie QUE l'identité, le poste visé et
+// l'état du test. Ni CV, ni compte rendu d'entretien, ni mise en situation, ni
+// notes, ni coordonnées — la page Candidats reste réservée à ADMIN/RH/MANAGER.
+router.get('/candidats', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT c.id, c.first_name, c.last_name, c.status,
+              pos.title AS poste_vise,
+              s.id AS session_id, s.status AS session_status, s.access_token,
+              s.created_at AS session_created_at,
+              (r.id IS NOT NULL) AS a_un_profil
+         FROM candidates c
+         LEFT JOIN positions pos ON pos.id = c.position_id
+         LEFT JOIN LATERAL (
+           SELECT id, status, access_token, created_at FROM pcm_sessions
+            WHERE candidate_id = c.id ORDER BY created_at DESC LIMIT 1
+         ) s ON true
+         LEFT JOIN pcm_reports r ON r.session_id = s.id
+        WHERE c.status <> 'rejected'
+        ORDER BY UPPER(c.last_name), UPPER(c.first_name)`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[PCM] Erreur liste candidats :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -862,7 +893,7 @@ async function authenticateSubmit(req, res, next) {
   if (access_token) return next(); // token capabilité vérifié plus bas
   return authenticate(req, res, (err) => {
     if (err) return;
-    return authorize('ADMIN', 'RH', 'MANAGER')(req, res, next);
+    return authorize('ADMIN', 'RH', 'MANAGER', 'PCM')(req, res, next);
   });
 }
 
@@ -978,7 +1009,7 @@ router.post('/submit', authenticateSubmit, [
 });
 
 // GET /api/pcm/profiles — Tous les profils
-router.get('/profiles', authenticate, authorize('ADMIN', 'RH'), async (req, res) => {
+router.get('/profiles', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT pr.id, pr.session_id, pr.candidate_id, pr.base_type, pr.phase_type,
@@ -996,7 +1027,7 @@ router.get('/profiles', authenticate, authorize('ADMIN', 'RH'), async (req, res)
 });
 
 // GET /api/pcm/profiles/:candidateId/answers — Réponses brutes d'un candidat
-router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'RH'), async (req, res) => {
+router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     // Trouver la dernière session complétée pour ce candidat
     const sessionRes = await pool.query(
@@ -1035,7 +1066,7 @@ router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'R
 });
 
 // GET /api/pcm/profiles/:candidateId — Profil d'un candidat (déchiffré)
-router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH'), async (req, res) => {
+router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT pr.*, c.first_name, c.last_name, c.email
