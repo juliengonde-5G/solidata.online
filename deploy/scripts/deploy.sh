@@ -362,12 +362,28 @@ case "${ACTION}" in
 
     # Smoke test endpoints critiques (couvre les bugs SQL post-déploiement)
     #
-    # Source .env pour récupérer API_USER / API_PASSWORD — sans, le smoke
-    # ne couvre que les endpoints publics et passe à côté des 500 derrière
-    # auth (ce qui défait l'objectif).
+    # Le smoke a besoin d'API_USER / API_PASSWORD : sans eux il ne couvre que
+    # les endpoints publics et passe à côté des 500 derrière auth.
+    #
+    # ATTENTION — on ne fait PAS `source .env`.
+    # `source` EXÉCUTE le fichier : toute ligne qui n'est pas une affectation
+    # valide (valeur repliée sur la ligne suivante, espaces autour du `=`,
+    # caractère spécial non échappé) est lancée comme une commande, et le shell
+    # l'affiche alors en clair dans les logs de déploiement — y compris s'il
+    # s'agit d'une clé d'API. Constat en production le 24/08/2026 : une clé
+    # Anthropic imprimée dans la sortie de déploiement.
+    # On extrait donc UNIQUEMENT les deux variables nécessaires, sans jamais
+    # interpréter le reste du fichier ni afficher la moindre valeur.
     log "Étape 7/7 — Smoke test endpoints critiques..."
-    # shellcheck disable=SC1091
-    set -a; source .env; set +a
+    lire_env() {
+        # $1 = nom de la variable. Dernière occurrence gagnante, guillemets
+        # optionnels retirés, commentaires et lignes vides ignorés.
+        sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .env \
+            | tail -n 1 \
+            | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+    }
+    API_USER="$(lire_env API_USER)"
+    API_PASSWORD="$(lire_env API_PASSWORD)"
     if [ -z "${API_USER:-}" ] || [ -z "${API_PASSWORD:-}" ]; then
         warn "API_USER ou API_PASSWORD absent du .env — smoke test exécuté en mode dégradé (endpoints publics seulement)."
         warn "Pour couvrir les endpoints protégés, ajoute dans .env : API_USER=<admin> et API_PASSWORD=<mot de passe>"
