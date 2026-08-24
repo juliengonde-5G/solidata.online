@@ -335,6 +335,19 @@ case "${ACTION}" in
     log "Étape 4/7 — Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
 
+    # La configuration nginx est MONTÉE depuis le dépôt, pas construite dans une
+    # image. « up -d » ne recrée donc pas le conteneur quand seul le contenu du
+    # fichier a changé : il reste « Running », avec l'ancienne configuration
+    # chargée en mémoire. Toute évolution de deploy/nginx/conf.d/ était ainsi
+    # récupérée par git pull puis ignorée, sans le moindre signal.
+    if docker compose -f ${COMPOSE_FILE} exec -T nginx nginx -t >/dev/null 2>&1; then
+        docker compose -f ${COMPOSE_FILE} exec -T nginx nginx -s reload
+        log "  Configuration nginx rechargée."
+    else
+        warn "  Configuration nginx INVALIDE — rechargement refusé, l'ancienne reste active."
+        warn "  Diagnostic : docker compose -f ${COMPOSE_FILE} exec nginx nginx -t"
+    fi
+
     # Migrations base de données
     log "Étape 5/7 — Migrations base de données..."
     sleep 5
