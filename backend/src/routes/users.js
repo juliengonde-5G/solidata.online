@@ -16,7 +16,7 @@ router.use(autoLogActivity('user'));
 // QHSE (incidents + véhicules + exports d'audit). Ce sont des rôles INTÉGRÉS
 // (pas des rôles personnalisés) car ils ouvrent des accès qu'un rôle dupliqué,
 // borné aux droits de son rôle de base, ne pourrait pas accorder.
-const BUILTIN_ROLES = ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE'];
+const BUILTIN_ROLES = ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE', 'PCM'];
 // Un rôle est valide s'il est intégré ou personnalisé (table custom_roles).
 async function isValidRole(role) {
   if (BUILTIN_ROLES.includes(role)) return true;

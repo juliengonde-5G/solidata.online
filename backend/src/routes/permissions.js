@@ -21,9 +21,13 @@ const BUILTIN_ROLES = {
   ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines',
   COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique',
   DPO: 'Délégué à la protection des données (DPO)', FINANCE: 'Finance (consultation)', QHSE: 'QHSE',
+  // Praticien PCM : fait passer les tests de personnalité et restitue les
+  // profils, SANS accès au dossier de recrutement (CV, entretiens) ni au
+  // reste des RH (contrats, salaires, parcours d'insertion).
+  PCM: 'Praticien PCM',
 };
 // Rôles pouvant servir de base à un rôle personnalisé (jamais ADMIN → pas d'escalade).
-const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE'];
+const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE', 'PCM'];
 
 // Génère une clé de rôle sûre et sans collision avec les rôles intégrés.
 function slugRoleKey(label) {
@@ -58,6 +62,7 @@ const MODULE_CATALOG = [
   { key: 'boutiques', label: 'Frip › Boutiques' },
   { key: 'vak', label: 'Frip › Vente au Kilo' },
   { key: 'rh', label: 'RH et Insertion' },
+  { key: 'pcm', label: 'Tests PCM (praticien)' },
   { key: 'equipe', label: "Gestion d'équipe" },
   // Vague 2 : nouvelles sections de 1er niveau (Layout.jsx filtre sur section.id).
   // Présentes ici pour que la matrice d'habilitations puisse aussi les masquer

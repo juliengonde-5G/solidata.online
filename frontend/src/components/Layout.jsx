@@ -124,7 +124,7 @@ const NAV_TREE = [
         children: [
           { label: 'Besoin au recrutement', path: '/recruitment-plan', icon: ClipboardList, roles: ['ADMIN', 'RH'] },
           { label: 'Gestion candidatures', path: '/candidates', icon: UserPlus, roles: ['ADMIN', 'RH', 'MANAGER'] },
-          { label: 'Analyse personnalités', path: '/pcm', icon: Brain, roles: ['ADMIN', 'RH'] },
+          { label: 'Analyse personnalités', path: '/pcm', icon: Brain, roles: ['ADMIN', 'RH', 'PCM'] },
         ],
       },
       {
@@ -409,15 +409,21 @@ const NAV_TREE = [
 ];
 
 // Filtre récursif par rôle ; un nœud "groupe" disparaît si tous ses enfants disparaissent.
-function filterByRole(tree, role) {
+//
+// `roles` porte le rôle BRUT et son rôle de BASE, exactement comme le fait
+// ProtectedRoute (App.jsx) : un rôle intégré nommé explicitement sur un écran
+// doit le voir au menu, même si son rôle de base ne l'a pas. Sans ça, un rôle
+// pouvait accéder à une page par son URL sans jamais la trouver dans la barre
+// latérale — une incohérence relevée en ajoutant le rôle « Praticien PCM ».
+function filterByRole(tree, roles) {
   return tree
     .map((node) => {
       if (node.children) {
-        const kids = filterByRole(node.children, role);
+        const kids = filterByRole(node.children, roles);
         if (kids.length === 0) return null;
         return { ...node, children: kids };
       }
-      if (node.roles && !node.roles.includes(role)) return null;
+      if (node.roles && !node.roles.some((r) => roles.includes(r))) return null;
       return node;
     })
     .filter(Boolean);
@@ -469,7 +475,7 @@ export default function Layout({ children }) {
   // refusé au rôle est masqué ; l'ADMIN voit tout).
   // base_role : un rôle personnalisé hérite des accès de son rôle intégré.
   const filteredTree = useMemo(() => {
-    const byRole = filterByRole(NAV_TREE, user?.base_role || user?.role);
+    const byRole = filterByRole(NAV_TREE, [user?.base_role, user?.role].filter(Boolean));
     return filterByModuleAccess(byRole, canAccessModule);
   }, [user?.base_role, user?.role, canAccessModule]);
 
