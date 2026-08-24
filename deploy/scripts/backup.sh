@@ -18,9 +18,18 @@ mkdir -p "${BACKUP_DIR}"
 echo "[BACKUP] Sauvegarde ${TYPE} — ${DATE}"
 
 # --- 1. Dump PostgreSQL ---
+# stderr n'est PAS masqué : un pg_dump qui se plaint doit se voir. Une
+# sauvegarde muette qui se termine sans bruit passe pour une sauvegarde saine,
+# et le défaut n'apparaît qu'au jour de la restauration.
 echo "[BACKUP] Export base de données..."
 docker exec solidata-db pg_dump -U solidata_user -d solidata --format=custom \
-    -f /backups/solidata_${DATE}.dump 2>/dev/null
+    -f /backups/solidata_${DATE}.dump
+
+# Relire l'archive telle que pg_restore la lira. Une archive tronquée ou
+# corrompue échoue ici, à la sauvegarde, plutôt que le jour où l'on en a besoin.
+echo "[BACKUP] Vérification de l'archive..."
+docker exec solidata-db pg_restore --list /backups/solidata_${DATE}.dump > /dev/null
+echo "[BACKUP] Archive relue sans erreur"
 
 # Copier hors du conteneur
 cp "${APP_DIR}/deploy/backups/solidata_${DATE}.dump" "${BACKUP_DIR}/db_${TYPE}_${DATE}.dump" 2>/dev/null || \
