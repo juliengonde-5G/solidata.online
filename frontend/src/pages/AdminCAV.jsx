@@ -908,8 +908,11 @@ export default function AdminCAV() {
                 </div>
                 <div className="p-4">
                   {detailCav.photo_path ? (
+                    // photo_path vaut déjà « /uploads/... ». Le préfixer par « /api »
+                    // désignait une route inexistante : le backend sert les fichiers
+                    // sur /uploads, jamais sur /api/uploads.
                     <img
-                      src={`/api${detailCav.photo_path}`}
+                      src={detailCav.photo_path}
                       alt={`Photo CAV ${detailCav.id}`}
                       className="w-full h-48 object-cover rounded-lg"
                       key={detailCav.photo_taken_at || detailCav.photo_path}
