@@ -199,6 +199,8 @@ app.use('/api/etiquettes', require('./routes/etiquettes'));
 app.use('/api/expeditions', require('./routes/expeditions'));
 app.use('/api/refashion', require('./routes/refashion'));
 app.use('/api/communes', require('./routes/communes'));
+// Géocodage adresse ↔ coordonnées pour les formulaires de lieux (BAN, repli TomTom)
+app.use('/api/geocodage', require('./routes/geocodage'));
 app.use('/api/stock-original', require('./routes/stock-original'));
 app.use('/api/referentiels', require('./routes/referentiels'));
 app.use('/api/insertion', require('./routes/insertion'));

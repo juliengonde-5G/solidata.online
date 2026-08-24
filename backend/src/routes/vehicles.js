@@ -209,8 +209,8 @@ router.get('/:id/checklists', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req,
   try {
     const result = await pool.query(
       `SELECT vc.id, vc.tour_id, vc.exterior_ok, vc.fuel_level, vc.km_start, vc.km_end,
-              vc.notes, vc.created_at,
-              CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+              vc.notes, vc.degats, vc.reponses, vc.created_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS employee_name,
               t.date AS tour_date, t.status AS tour_status
          FROM vehicle_checklists vc
          LEFT JOIN employees e ON e.id = vc.employee_id
@@ -223,6 +223,73 @@ router.get('/:id/checklists', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req,
     res.json(result.rows);
   } catch (err) {
     console.error('[VEHICLES] Erreur checklists :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/vehicles/:id/etat-declare — Dernier état déclaré par un chauffeur
+// ─────────────────────────────────────────────────────────────────────────
+// La fiche d'entretien affiche des échéances (contrôle technique, vidange…)
+// mais rien de ce que le chauffeur constate CHAQUE MATIN. Cet endpoint rend
+// le dernier questionnaire de début de journée sous une forme directement
+// exploitable : date, chauffeur, carburant, kilométrage, dégâts signalés, et
+// les points NON validés — c'est-à-dire ce qui doit déclencher une action.
+//
+// Réponse honnête : aucune checklist → `{ disponible: false }` avec le motif,
+// jamais un état « conforme » par défaut.
+router.get('/:id/etat-declare', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT vc.id, vc.tour_id, vc.exterior_ok, vc.fuel_level, vc.km_start, vc.km_end,
+              vc.notes, vc.degats, vc.reponses, vc.created_at,
+              NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), '') AS employee_name,
+              t.date AS tour_date
+         FROM vehicle_checklists vc
+         LEFT JOIN employees e ON e.id = vc.employee_id
+         LEFT JOIN tours t ON t.id = vc.tour_id
+        WHERE vc.vehicle_id = $1
+        ORDER BY vc.created_at DESC
+        LIMIT 1`,
+      [req.params.id]
+    );
+    if (r.rows.length === 0) {
+      return res.json({
+        disponible: false,
+        message: "Aucune vérification de début de journée enregistrée pour ce véhicule.",
+      });
+    }
+    const c = r.rows[0];
+    const reponses = Array.isArray(c.reponses) ? c.reponses : [];
+    const degats = Array.isArray(c.degats) ? c.degats : [];
+    const nonValides = reponses.filter((x) => x && x.ok !== true);
+
+    // Ancienneté : un état déclaré il y a trois semaines ne dit rien de l'état
+    // d'aujourd'hui. L'écran doit pouvoir le signaler.
+    const jours = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 86400000);
+
+    res.json({
+      disponible: true,
+      checklist_id: c.id,
+      tour_id: c.tour_id,
+      date: c.created_at,
+      tour_date: c.tour_date,
+      anciennete_jours: jours,
+      chauffeur: c.employee_name,
+      carburant: c.fuel_level,
+      km_depart: c.km_start,
+      km_retour: c.km_end,
+      notes: c.notes,
+      degats,
+      nb_degats: degats.length,
+      points_verifies: reponses.length,
+      points_non_valides: nonValides,
+      // `reponses` vide = checklist enregistrée par une version de
+      // l'application qui ne transmettait pas encore le détail. On le DIT,
+      // plutôt que de laisser croire que rien n'a été vérifié.
+      detail_disponible: reponses.length > 0,
+    });
+  } catch (err) {
+    console.error('[VEHICLES] Erreur etat-declare :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

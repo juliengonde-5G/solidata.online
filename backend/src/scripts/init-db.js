@@ -634,6 +634,18 @@ async function initDatabase() {
       );
     `);
 
+    // Détail du questionnaire de début de journée. Jusqu'ici seul le booléen
+    // global `exterior_ok` était conservé — et comme le chauffeur ne peut pas
+    // partir sans avoir tout coché, il valait TOUJOURS vrai : le contenu du
+    // questionnaire était donc intégralement perdu, et le manager n'avait rien
+    // à consulter. `reponses` conserve chaque point vérifié, avec son libellé
+    // au moment de la saisie (un référentiel qui évolue ne doit pas réécrire
+    // l'histoire).
+    await client.query(`
+      ALTER TABLE vehicle_checklists
+        ADD COLUMN IF NOT EXISTS reponses JSONB;
+    `);
+
     // Déclarations de fin de journée (chauffeur / suiveur / binôme) — pendant
     // mobile de vehicle_checklists (départ), posée au retour au centre de tri
     // (TourSummary.jsx « Terminer la journée »). Les 6 booléens sont NOT NULL :

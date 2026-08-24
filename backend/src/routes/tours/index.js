@@ -344,6 +344,21 @@ const DEGAT_TYPES = ['rayure', 'choc', 'bris', 'autre'];
  * commentaire tronqué. Une entrée invalide est ignorée — jamais d'échec du
  * départ pour un point mal formé, et jamais de donnée fantaisiste stockée.
  */
+/**
+ * Normalise le détail du questionnaire de début de journée.
+ * Chaque entrée conserve l'identifiant du point, son LIBELLÉ au moment de la
+ * saisie (un référentiel qui évolue ne doit pas réécrire l'histoire) et la
+ * réponse. Bornes de taille : le mobile ne dicte pas la charge acceptée.
+ */
+function sanitizeReponses(brut) {
+  if (!Array.isArray(brut)) return [];
+  return brut.slice(0, 50).map((r) => ({
+    id: String(r?.id ?? '').slice(0, 60),
+    libelle: String(r?.libelle ?? '').slice(0, 200),
+    ok: r?.ok === true,
+  })).filter((r) => r.id);
+}
+
 function sanitizeDegats(input) {
   if (!Array.isArray(input)) return null;
   const clean = input.slice(0, 40).map((d) => {
@@ -397,7 +412,7 @@ router.post('/:id/checklist-public', async (req, res) => {
     // Vague 1 (item 45) : `notes` (remarques/anomalies saisies par le chauffeur
     // dans Checklist.jsx) était ignoré → l'anomalie disparaissait silencieusement.
     // Désormais persisté et consultable côté web (fiche véhicule).
-    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats } = req.body;
+    const { vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats, reponses } = req.body;
 
     // Le véhicule de référence est celui du JETON quand il est connu : le corps
     // de requête ne doit pas pouvoir viser un autre camion que celui du lien.
@@ -421,12 +436,18 @@ router.post('/:id/checklist-public', async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level, km_start, notes, degats)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level,
+                                       km_start, notes, degats, reponses)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
        ON CONFLICT DO NOTHING`,
-      [req.params.id, vehId, employee_id || null, exterior_ok, fuel_level || '1/2', km_start || 0,
+      [req.params.id, vehId, employee_id || null, exterior_ok,
+       // Le niveau de carburant vient du chauffeur. Le repli '1/2' n'est
+       // conservé que pour les versions de l'application qui ne le demandent
+       // pas encore — il ne doit pas devenir la valeur normale.
+       (fuel_level && String(fuel_level).trim()) || '1/2', km_start || 0,
        (notes && String(notes).trim()) ? String(notes).trim() : null,
-       JSON.stringify(sanitizeDegats(degats))]
+       JSON.stringify(sanitizeDegats(degats)),
+       JSON.stringify(sanitizeReponses(reponses))]
     );
     res.json({ ok: true, message_prevention: await messagePreventionDuJour() });
   } catch (err) {
