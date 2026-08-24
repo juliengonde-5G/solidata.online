@@ -338,8 +338,38 @@ docker compose -f docker-compose.prod.yml ps
 curl -sS -o /dev/null -w "backend=%{http_code}\n" http://localhost/api/health
 ```
 
-Nginx va se plaindre des certificats, absents à ce stade. C'est attendu : ils
-arriveront avec l'adresse IP, en §6.
+Nginx va se plaindre des certificats s'ils ne sont pas encore recopiés (§5.9).
+
+Le backend doit répondre `{"status":"ok"}` en interne, sans passer par nginx :
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T backend \
+  wget -qO- http://127.0.0.1:3001/api/health
+```
+
+### 5.8bis — Rendormir le backend jusqu'à la bascule
+
+**Dès que la validation est faite, arrêtez le backend.** Ce n'est pas une
+précaution de principe : un backend démarré n'attend pas sagement, il agit.
+
+```bash
+docker compose -f docker-compose.prod.yml stop backend certbot
+```
+
+Trois effets, constatés dans les journaux d'une migration réelle :
+
+- Il **s'abonne au topic Orange LiveObjects**, qui est une file `fifo` : un
+  relevé de capteur consommé par une machine n'est jamais vu par l'autre. Les
+  relevés avalés ici atterrissent dans une base qui sera écrasée par la
+  sauvegarde différentielle du §6.2 — perdus des deux côtés.
+- Son **planificateur s'exécute en double** avec l'ancienne machine, effets
+  externes compris : une alerte badgeuse est réellement partie par courriel.
+- La **synchronisation SumUp est armée** ; un jour de VAK, deux machines
+  interrogeraient la caisse en parallèle.
+
+Gardez `db`, `redis`, `nginx`, `frontend` et `mobile`. La suite n'a besoin que
+de la base — et la restauration `--clean` du §6.2 échouerait de toute façon sur
+des objets qu'un backend connecté maintiendrait occupés. Tout repart en §6.5.
 
 
 ### 5.9 Récupérer les certificats SSL
