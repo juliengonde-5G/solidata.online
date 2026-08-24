@@ -217,16 +217,33 @@ montage inutilisable. Deux entrées ne sont pas dans Git :
 ssh root@<IP_TEMPORAIRE>
 cd /opt/solidata.online
 mkdir -p boutiques-csv
-touch "Carte des PAV au 28-02-2026.kml"   # ou copiez le vrai fichier depuis l'ancien serveur
+touch "Carte des PAV au 28-02-2026.kml"
 ls -la *.xlsx *.xlsm *.kml boutiques-csv
 ```
 
-Pour récupérer le vrai KML depuis l'ancienne machine :
+**Le fichier vide suffit pour le KML, et c'est volontaire.** Le seul code qui
+lise un KML est `scripts/seed-cav.js`, un script de peuplement initial qui
+cherche d'abord `Carte des PAV au 29-03-2026.kml` — celui-là est bien versionné
+dans le dépôt. Le montage du 28-02 est un reliquat : rien ne l'ouvre, et vos CAV
+viennent de la sauvegarde, pas d'un semis. On crée le fichier uniquement pour
+empêcher Docker de fabriquer un dossier vide à sa place. Inutile donc d'aller le
+chercher sur l'ancienne machine.
+
+Les huit autres fichiers montés (`Liste PAV.xlsx`, `tournee.xlsx`,
+`tonnages.xlsx`, `KPI_Production 2026.xlsx`, les deux `Dashboard`,
+`Feuille_Production_V1.xlsx`, `Liste_asso.xlsx`) sont dans le dépôt : le clone
+les a déjà posés.
+
+Le dossier `boutiques-csv/`, lui, est monté en écriture et scanné par le
+planificateur. Les imports déjà effectués sont dans la sauvegarde et
+dédoublonnés par empreinte SHA-256, donc un dossier vide ne provoque aucun
+double comptage. Si vous tenez à conserver l'archive brute des CSV de caisse,
+recopiez-la pendant que l'ancienne machine tourne :
 
 ```bash
-# Depuis votre Mac
-scp root@51.159.144.100:"/opt/solidata.online/Carte des PAV au 28-02-2026.kml" .
-scp "Carte des PAV au 28-02-2026.kml" root@<IP_TEMPORAIRE>:/opt/solidata.online/
+# Depuis votre Mac, facultatif
+rsync -az root@51.159.144.100:/opt/solidata.online/boutiques-csv/ ./boutiques-csv/
+rsync -az ./boutiques-csv/ root@<IP_TEMPORAIRE>:/opt/solidata.online/boutiques-csv/
 ```
 
 ### 5.4 Démarrer la pile
