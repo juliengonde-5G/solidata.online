@@ -78,14 +78,45 @@ Vous obtenez deux fichiers : `db_manual_<date>.dump.gz` et
 
 Une sauvegarde qui reste sur la machine qu'on migre ne sauve rien.
 
+Relevez d'abord le nom EXACT des deux fichiers que la sauvegarde vient de
+produire — celui de l'horodatage affiché à la fin du §3.1 :
+
 ```bash
-# Depuis votre Mac
+# Sur le serveur
+ls -1t /opt/solidata.online-backups/db_manual_*.dump.gz | head -1
+ls -1t /opt/solidata.online-backups/uploads_manual_*.tar.gz | head -1
+```
+
+Puis, depuis votre Mac, en reprenant ces deux noms :
+
+```bash
 mkdir -p ~/solidata-migration && cd ~/solidata-migration
-scp root@51.159.144.100:/opt/solidata.online-backups/db_manual_*.dump.gz .
-scp root@51.159.144.100:/opt/solidata.online-backups/uploads_manual_*.tar.gz .
+scp root@51.159.144.100:'/opt/solidata.online-backups/db_manual_AAAAMMJJ_HHMMSS.dump.gz' .
+scp root@51.159.144.100:'/opt/solidata.online-backups/uploads_manual_AAAAMMJJ_HHMMSS.tar.gz' .
 scp root@51.159.144.100:/opt/solidata.online/.env .env.production
 ls -lh
 ```
+
+> **Les guillemets simples ne sont pas décoratifs.** Sans eux, un `*` dans un
+> chemin distant est développé par votre shell **sur le Mac** : zsh ne trouve
+> évidemment rien en local, répond `no matches found` et **ne lance jamais
+> `scp`**. Le transfert échoue en silence apparent — la commande suivante
+> s'exécute comme si de rien n'était.
+>
+> Et ne rapatriez que les DEUX fichiers du jour : le répertoire de sauvegardes
+> en contient des dizaines, pour plus de 2 Go.
+
+**Vérifiez que ce qui est arrivé est intact** avant d'aller plus loin :
+
+```bash
+# Depuis votre Mac, dans ~/solidata-migration
+gzip -t db_manual_*.dump.gz && echo "archive base : intacte"
+tar -tzf uploads_manual_*.tar.gz > /dev/null && echo "archive uploads : intacte"
+ls -lh
+```
+
+Les tailles doivent correspondre à celles affichées sur le serveur. Un fichier
+tronqué se détecte ici, pas au moment de la restauration.
 
 Le `.env` contient vos mots de passe, la clé JWT, les jetons Pennylane, SumUp,
 Brevo, Anthropic et TomTom. **Il n'est pas dans Git** : sans lui, la nouvelle
