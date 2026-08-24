@@ -26,9 +26,25 @@ TYPE="${1:-manual}"
 declare -A RETENTION=( [daily]=30 [weekly]=84 [monthly]=365 [manual]=90 )
 DAYS=${RETENTION[$TYPE]:-30}
 
-# Charger les credentials S3 (jamais en argv)
+# Charger les credentials S3 (jamais en argv).
+#
+# On n'utilise PAS `source` : il EXÉCUTE le fichier, et toute ligne qui n'est
+# pas une affectation valide part en commande — le shell l'affiche alors en
+# clair, ici directement dans /var/log/solidata-backup.log (la sortie est
+# tee'ée juste en dessous). Un secret mal collé se retrouverait donc écrit sur
+# disque. On extrait chaque variable attendue, sans rien interpréter.
 if [ -f /etc/solidata-backup.env ]; then
-  set -a; . /etc/solidata-backup.env; set +a
+  lire_env() {
+    sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" /etc/solidata-backup.env \
+      | tail -n 1 \
+      | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+  }
+  for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION \
+           S3_BUCKET S3_ENDPOINT ALERT_WEBHOOK; do
+    valeur="$(lire_env "$v")"
+    [ -n "$valeur" ] && export "$v=$valeur"
+  done
+  unset valeur
 fi
 
 mkdir -p "${BACKUP_DIR}"
