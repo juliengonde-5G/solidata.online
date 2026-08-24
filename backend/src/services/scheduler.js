@@ -1844,27 +1844,22 @@ function scheduleNextTick() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// RÉ-OPTIMISATION RÉCURRENTE DES TOURNÉES EN COURS
+// RÉ-OPTIMISATION DES TOURNÉES EN COURS — DÉCLENCHÉE PAR LES ARRÊTS
 // ══════════════════════════════════════════════════════════════════════════
-// Le trafic évolue pendant la tournée : un ordre optimal à 8 h ne l'est plus
-// à 11 h. Le recalcul tourne donc en continu sur les tournées en cours, en
-// plus du déclenchement après chaque arrêt.
+// ARBITRAGE CLIENT (août 2026) : le recalcul se fait APRÈS CHAQUE BORNE, et
+// JAMAIS pendant un trajet entre deux points. Réordonner la suite du parcours
+// alors que le chauffeur roule vers un point précis n'a pas de sens : il est
+// déjà engagé, et un changement d'ordre en pleine route est perturbant.
+// Le déclenchement vit donc dans le handler de collecte
+// (routes/tours/index.js, collect-public), pas dans un minuteur.
 //
-// Sobriété : le timer bat toutes les minutes mais ne fait RIEN tant que
-// l'intervalle paramétré (`reoptimIntervalMin`, défaut 15 min) n'est pas
-// écoulé pour la tournée concernée, et rien du tout s'il n'y a aucune tournée
-// en cours — cas de la très grande majorité des minutes de l'année.
-const REOPTIM_TICK_MS = parseInt(process.env.REOPTIM_TICK_MS, 10) || 60 * 1000;
-let reoptimTimer = null;
-let reoptimEnCours = false;
+// Ne subsiste ici que le suivi du dernier recalcul par tournée, utilisé pour
+// éviter deux calculs coup sur coup quand deux bornes se suivent de très près.
 /** Dernier recalcul par tournée (en mémoire : un redémarrage relance, sans dommage). */
 const dernierRecalcul = new Map();
 
 /** Tournées à recalculer maintenant (fonction PURE, testée). */
 function tourneesARecalculer(tournees, dernier, maintenantMs, intervalleMin) {
-  // Un intervalle de 0 est une consigne valide (« aussi souvent que
-  // possible ») et non une valeur absente : seul un réglage illisible
-  // retombe sur 15 min. Plancher d'une minute dans tous les cas.
   // parseFloat et non Number : Number(null) vaut 0, ce qui transformerait un
   // réglage absent en « recalculer sans arrêt ».
   const brut = parseFloat(intervalleMin);
@@ -1878,63 +1873,16 @@ function tourneesARecalculer(tournees, dernier, maintenantMs, intervalleMin) {
 }
 
 /**
- * Signale qu'une tournée vient d'être recalculée (déclenchement après arrêt) :
- * le tick récurrent ne la reprendra qu'après l'intervalle, sans doublon.
+ * Signale qu'une tournée vient d'être recalculée (déclenchement après borne).
  */
 function noterRecalcul(tourId) {
   if (Number.isInteger(Number(tourId))) dernierRecalcul.set(Number(tourId), Date.now());
 }
 
-async function reoptimizationTick() {
-  if (reoptimEnCours) return { skipped: 'tick_precedent_en_cours' };
-  reoptimEnCours = true;
-  try {
-    const { getScoringConfig } = require('../routes/tours/predictions');
-    const intervalle = parseFloat(getScoringConfig()?.reoptimIntervalMin) || 15;
-
-    // Les tournées de formation sont exclues ici ET dans le service : un
-    // exercice ne doit produire aucune proposition, aucune notification.
-    const res = await pool.query(
-      `SELECT id FROM tours
-        WHERE status = 'in_progress' AND is_demo IS NOT TRUE
-        ORDER BY id`
-    );
-    if (res.rows.length === 0) return { tournees: 0 };
-
-    const aFaire = tourneesARecalculer(res.rows, dernierRecalcul, Date.now(), intervalle);
-    if (aFaire.length === 0) return { tournees: res.rows.length, recalculees: 0 };
-
-    const { proposeReoptimization } = require('../routes/tours/reoptimize-service');
-    const io = global.__io || null;
-    let proposees = 0;
-    // Journalisé (job_runs) UNIQUEMENT quand il y a du travail : l'absence de
-    // run est normale hors tournée en cours, elle ne doit pas être lue comme
-    // une panne. Volontairement hors JOB_SCHEDULE pour cette raison.
-    await runInstrumented('reoptimizationTournees', async () => {
-      for (const tourId of aFaire) {
-        dernierRecalcul.set(tourId, Date.now());
-        try {
-          const r = await proposeReoptimization({
-            tourId, triggerReason: 'recurrent', triggeredBy: 'auto', io,
-          });
-          if (r && r.created) proposees += 1;
-        } catch (err) {
-          console.warn(`[SCHEDULER] ré-optimisation tournée #${tourId} :`, err.message);
-        }
-      }
-      return { tournees: aFaire.length, proposees };
-    });
-    // Purge des tournées terminées, pour que la table mémoire ne gonfle pas.
-    const actives = new Set(res.rows.map((r) => r.id));
-    [...dernierRecalcul.keys()].forEach((id) => { if (!actives.has(id)) dernierRecalcul.delete(id); });
-
-    return { tournees: res.rows.length, recalculees: aFaire.length, proposees };
-  } catch (err) {
-    console.error('[SCHEDULER] reoptimizationTick:', err.message);
-    return { erreur: err.message };
-  } finally {
-    reoptimEnCours = false;
-  }
+/** Dernier recalcul connu d'une tournée (null si jamais recalculée). */
+function dernierRecalculDe(tourId) {
+  const v = dernierRecalcul.get(Number(tourId));
+  return v === undefined ? null : v;
 }
 
 function startScheduler() {
@@ -1957,13 +1905,6 @@ function startScheduler() {
   if (vakLiveSyncTimer && vakLiveSyncTimer.unref) vakLiveSyncTimer.unref();
   console.log(`[SCHEDULER] Sync SumUp live armée (toutes les ${Math.round(VAK_LIVE_SYNC_INTERVAL_MS / 60000)} min les jours de VAK)`);
 
-  // Ré-optimisation des tournées en cours : bat à la minute, n'agit qu'à
-  // l'intervalle paramétré, no-op complet hors tournée en cours.
-  reoptimTimer = setInterval(() => {
-    reoptimizationTick().catch((e) => console.error('[SCHEDULER] reoptimizationTick rejeté:', e.message));
-  }, REOPTIM_TICK_MS);
-  if (reoptimTimer && reoptimTimer.unref) reoptimTimer.unref();
-  console.log('[SCHEDULER] Ré-optimisation des tournées en cours armée');
 }
 
 // ══════════════════════════════════════════
@@ -2173,8 +2114,8 @@ module.exports = {
   syncBadgeuseMeteo,
   // Sync SumUp live 5 min (jours de VAK) — exposés pour les tests.
   vakLiveSyncTick,
-  reoptimizationTick,
   tourneesARecalculer,
   noterRecalcul,
+  dernierRecalculDe,
   isVakActiveToday,
 };

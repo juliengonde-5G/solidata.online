@@ -814,9 +814,11 @@ router.get('/insights/tour/:id', authenticate, authorize('ADMIN', 'MANAGER'), as
            FROM tour_cav WHERE tour_id = $1`,
         [tourId]
       ).catch(() => ({ rows: [] })),
+      // Toutes les pesées : une pesée intermédiaire est un chargement déposé au
+      // centre, pas un relevé provisoire (correctif d'août 2026).
       pool.query(
         `SELECT COALESCE(SUM(weight_kg), 0)::float AS total
-           FROM tour_weights WHERE tour_id = $1 AND COALESCE(is_intermediate, FALSE) = FALSE`,
+           FROM tour_weights WHERE tour_id = $1`,
         [tourId]
       ),
       pool.query(

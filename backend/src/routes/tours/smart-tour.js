@@ -1,9 +1,11 @@
 const pool = require('../../config/database');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate, getLocalEventsForDate } = require('./context');
-const { nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip } = require('./geo');
+const { nearestNeighborTSP, twoOptImprove, osrmRouteSegment, osrmOptimizedTrip, haversineDistance } = require('./geo');
 // Cache des tronçons routiers : le réseau entre deux bornes fixes ne change
 // pas, seul le trafic varie (appliqué APRÈS, en multipliant la durée).
 const { cachedRouteSegment } = require('../../services/route-cache');
+const cavScoring = require('../../services/cav-scoring');
+const { emissionsVehicule } = require('../../services/vehicle-emissions');
 const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('./predictions');
 const fillFactors = require('../../utils/fill-factors');
 const timeEngine = require('../../services/tour-time-engine');
@@ -184,7 +186,7 @@ async function affinerOrdreAvecTrafic(ordered, opts = {}) {
 
   const optimizer = require('../../services/tour-optimizer');
   const { prefetchLegs, legKey } = require('../../services/route-cache');
-  const { haversineDistance, ROAD_FACTOR, resolveAvgSpeedKmh } = require('./geo');
+  const { ROAD_FACTOR, resolveAvgSpeedKmh } = require('./geo');
   const cfg = getScoringConfig();
   const objectif = optimizer.OBJECTIFS.includes(cfg.reoptimObjectif) ? cfg.reoptimObjectif : 'mixte';
   const poids = {
@@ -435,30 +437,60 @@ async function generateIntelligentTour(vehicleId, date) {
   const predictions = await mapWithConcurrency(allCavs, PREDICT_CONCURRENCY, (cav) => predictFillRate(cav.id, date));
   const cavWithPredictions = allCavs.map((cav, i) => ({ ...cav, prediction: predictions[i] }));
 
-  // 4. Calculer le score de priorité
+  // Temps de collecte APPRIS par borne : chargés EN UNE requête avant le
+  // scoring, car le critère « temps » en dépend. (Ils étaient jusqu'ici lus
+  // après la sélection, uniquement pour le calcul d'itinéraire.)
+  const learnedTimes = await loadLearnedTimesPerCav(allCavs.map((c) => c.id));
+
+  // 4. Score de sélection — 4 facteurs hiérarchisés (arbitrage client 08/2026)
+  //    remplissage > temps > distance > émissions. Le calcul lui-même est un
+  //    module PUR (services/cav-scoring) : il ne dépend ni de la base ni du
+  //    réseau, et il est testable pour lui-même.
+  //    Les ÉMISSIONS n'entrent dans le score que si la consommation du
+  //    véhicule est mesurée (pleins saisis) — jamais estimée. Absentes, elles
+  //    le sont pour toutes les bornes de la tournée : le classement reste
+  //    cohérent.
+  const carburant = await emissionsVehicule(vehicle.id).catch(() => ({}));
+  const poidsSelection = {
+    remplissage: numOr(SCORING_CONFIG.poidsRemplissage, 1),
+    temps: numOr(SCORING_CONFIG.poidsTemps, 0.6),
+    distance: numOr(SCORING_CONFIG.poidsDistance, 0.3),
+    emissions: numOr(SCORING_CONFIG.poidsEmissions, 0.1),
+  };
+  const echellesSelection = {
+    detourKm: numOr(SCORING_CONFIG.echelleDetourKm, 15),
+    serviceMin: numOr(SCORING_CONFIG.echelleServiceMin, 20),
+  };
+  const defautService = numOr(SCORING_CONFIG.timePerCav, 10);
+
   const scoredCavs = cavWithPredictions.map(cav => {
-    const fill = cav.prediction.fill;
-    let score = 0;
+    // Distance à vol d'oiseau depuis le centre de tri : approximation assumée
+    // du « coût d'aller la chercher » AVANT que l'ordre de passage n'existe.
+    // L'itinéraire réel est calculé ensuite, sur les bornes retenues.
+    const detourKm = (cav.latitude != null && cav.longitude != null)
+      ? haversineDistance(CENTRE_TRI_LAT, CENTRE_TRI_LNG,
+        parseFloat(cav.latitude), parseFloat(cav.longitude))
+      : null;
+    const serviceMinutes = learnedTimeFor(learnedTimes, cav.id, defautService);
 
-    // Score basé sur le remplissage
-    if (fill >= 100) score += 50;
-    else if (fill >= 80) score += 35;
-    else if (fill >= 60) score += 20;
-    else if (fill >= 40) score += 10;
-    else score += 2;
-
-    // Bonus : jours depuis dernière collecte
-    score += (cav.prediction.factors?.daysSinceCollection || 0) * 1.5;
-
-    // Bonus : nombre de conteneurs (priorité aux grands sites)
-    score += (cav.nb_containers || 1) * 3;
-
-    // Bonus confiance
-    score *= cav.prediction.confidence;
+    const evaluation = cavScoring.scoreSelection({
+      fillPct: cav.prediction.fill,
+      daysSince: cav.prediction.factors?.daysSinceCollection || 0,
+      nbContainers: cav.nb_containers || 1,
+      confidence: cav.prediction.confidence,
+      serviceMinutes,
+      detourKm,
+    }, { poids: poidsSelection, echelles: echellesSelection, carburant });
 
     return {
       ...cav,
-      score: Math.round(score * 10) / 10,
+      // Score ramené sur 100 : les écrans et l'explication IA affichaient une
+      // échelle de cet ordre, on ne casse pas leur lisibilité.
+      score: Math.round(evaluation.score * 1000) / 10,
+      score_detail: evaluation.detail,
+      score_emissions_prises_en_compte: evaluation.emissionsPrisesEnCompte,
+      _detourKm: detourKm,
+      _learnedTimePerCav: serviceMinutes,
       // Poids estimé = remplissage prédit × capacité du CAV (modèle d'accumulation)
       estimatedWeightKg: estimatedWeightKgFor(cav.prediction.fill, cav.nb_containers),
     };
@@ -510,14 +542,8 @@ async function generateIntelligentTour(vehicleId, date) {
 
   if (selectedCavs.length === 0) throw new Error('Aucun CAV sélectionné — vérifiez la capacité du véhicule et les données de remplissage.');
 
-  // Perf (item 3.D-4) : précharger EN UNE requête les temps de collecte appris des
-  // CAV retenus (au lieu d'1 requête cav_collection_times par CAV dans la boucle de
-  // routage ci-dessous). Résultat identique via learnedTimeFor (fallback défaut).
-  const learnedTimes = await loadLearnedTimesPerCav(selectedCavs.map((c) => c.id));
-  const defaultService = numOr(SCORING_CONFIG.timePerCav, 10);
-  for (const cav of selectedCavs) {
-    cav._learnedTimePerCav = learnedTimeFor(learnedTimes, cav.id, defaultService);
-  }
+  // Les temps appris sont déjà chargés (étape 4, avant le scoring) et posés
+  // sur chaque borne : rien à recharger ici.
 
   // 7. Optimiser la route via OSRM (ou fallback TSP local). Les obligatoires et
   //    les autres sont optimisés SÉPARÉMENT puis concaténés : la sélection

@@ -791,41 +791,89 @@ export default function AdminPredictive() {
           </div>
         </Section>
 
-        {/* ══════════ OPTIMISATION CO2 & EFFICACITÉ ══════════ */}
+        {/* ══════════ FACTEURS DE SÉLECTION DES BORNES ══════════ */}
         <Section
-          title="Optimisation des tournées — CO2 & efficacité"
-          desc="Arbitrage entre kilomètres (donc CO2) et temps de travail, cadence du recalcul en cours de tournée, et application automatique du nouvel ordre."
+          title="Facteurs de sélection des bornes"
+          desc="Ce qui décide QUELLES bornes le moteur prédictif retient pour une tournée."
         >
           <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 mb-4 space-y-1">
             <p>
-              Les émissions d'un trajet sont proportionnelles aux <strong>kilomètres</strong> ;
-              l'efficacité de la journée se mesure en <strong>minutes</strong>. Les deux ne
-              vont pas toujours ensemble : contourner un bouchon rallonge la distance mais
-              raccourcit la journée. L'objectif ci-dessous tranche.
+              Quatre critères, dans cet ordre : <strong>remplissage</strong> (une borne
+              pleine déborde), <strong>temps</strong> (le budget de la journée),
+              <strong> distance parcourue</strong>, puis les <strong>émissions</strong> en
+              dernier facteur.
             </p>
             <p>
-              Le recalcul tourne <strong>après chaque arrêt</strong> et à l'intervalle
-              indiqué. Il tient compte de la circulation du moment dès qu'une clé TomTom
+              Le poids du remplissage doit rester <strong>supérieur à la somme des trois
+              autres</strong> : sinon les critères secondaires réunis renverseraient le
+              critère premier. Les bornes qui atteignent le seuil de saturation restent,
+              elles, servies en priorité absolue.
+            </p>
+            <p>
+              Les émissions n'entrent dans le calcul que si la consommation du véhicule est
+              <strong> mesurée</strong> (pleins saisis dans Énergie &amp; GES). Sinon le
+              critère est simplement écarté — jamais estimé.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <ParamInput label="1. Poids du remplissage" value={config.scoring.poidsRemplissage} onChange={v => updateScoring('poidsRemplissage', v)} />
+            <ParamInput label="2. Poids du temps de collecte" value={config.scoring.poidsTemps} onChange={v => updateScoring('poidsTemps', v)} />
+            <ParamInput label="3. Poids de la distance" value={config.scoring.poidsDistance} onChange={v => updateScoring('poidsDistance', v)} />
+            <ParamInput label="4. Poids des émissions" value={config.scoring.poidsEmissions} onChange={v => updateScoring('poidsEmissions', v)} />
+            <ParamInput label="Distance de référence (km)" value={config.scoring.echelleDetourKm} onChange={v => updateScoring('echelleDetourKm', v)} />
+            <ParamInput label="Temps de service de référence (min)" value={config.scoring.echelleServiceMin} onChange={v => updateScoring('echelleServiceMin', v)} />
+          </div>
+          {(() => {
+            const p = (v, d) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : d);
+            const premier = p(config.scoring.poidsRemplissage, 1);
+            const autres = p(config.scoring.poidsTemps, 0.35)
+              + p(config.scoring.poidsDistance, 0.15)
+              + p(config.scoring.poidsEmissions, 0.05);
+            return premier <= autres ? (
+              <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
+                Le poids du remplissage ({premier}) ne dépasse plus la somme des trois autres
+                ({Math.round(autres * 100) / 100}) : une borne pleine mais éloignée peut désormais
+                passer derrière une borne quasi vide toute proche.
+              </div>
+            ) : null;
+          })()}
+        </Section>
+
+        {/* ══════════ OPTIMISATION CO2 & EFFICACITÉ ══════════ */}
+        <Section
+          title="Ordre de passage en cours de tournée"
+          desc="Recalcul de l'ordre des bornes restantes, déclenché après chaque borne collectée."
+        >
+          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 mb-4 space-y-1">
+            <p>
+              Le recalcul se déclenche <strong>après chaque borne collectée</strong>, et
+              jamais pendant un trajet : le chauffeur en route vers un point y est déjà
+              engagé. Il tient compte de la circulation du moment dès qu'une clé TomTom
               est renseignée ; sans clé, il travaille à circulation moyenne et le dit.
+            </p>
+            <p>
+              La priorité est le <strong>temps</strong> — c'est le budget de la journée qui
+              contraint la collecte. Le choix des bornes à collecter, lui, se règle plus
+              haut dans « Facteurs de sélection des bornes ».
             </p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
-              <label className="text-xs font-medium text-gray-500 block mb-1">Objectif d'optimisation</label>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Objectif du recalcul d'ordre</label>
               <select
-                value={config.scoring.reoptimObjectif ?? 'mixte'}
+                value={config.scoring.reoptimObjectif ?? 'duree'}
                 onChange={e => updateScoring('reoptimObjectif', e.target.value)}
                 className="input-modern"
               >
-                <option value="mixte">Mixte — kilomètres et temps</option>
-                <option value="distance">Kilomètres (CO2) en priorité</option>
-                <option value="duree">Temps de travail en priorité</option>
+                <option value="duree">Temps de parcours (recommandé)</option>
+                <option value="distance">Kilomètres</option>
+                <option value="mixte">Mixte — temps et kilomètres</option>
               </select>
             </div>
             <ParamInput label="Pondération kilomètres (objectif mixte)" value={config.scoring.reoptimPoidsDistance} onChange={v => updateScoring('reoptimPoidsDistance', v)} />
             <ParamInput label="Pondération temps (objectif mixte)" value={config.scoring.reoptimPoidsDuree} onChange={v => updateScoring('reoptimPoidsDuree', v)} />
             <ParamInput label="Gain minimal pour proposer un nouvel ordre (%)" value={config.scoring.reoptimGainMinPct} onChange={v => updateScoring('reoptimGainMinPct', v)} />
-            <ParamInput label="Intervalle de recalcul en tournée (min)" value={config.scoring.reoptimIntervalMin} onChange={v => updateScoring('reoptimIntervalMin', v)} />
+            <ParamInput label="Délai anti-doublon entre deux recalculs (min)" value={config.scoring.reoptimIntervalMin} onChange={v => updateScoring('reoptimIntervalMin', v)} />
             <ParamInput label="Gain minimal pour appliquer SANS validation (%)" value={config.scoring.reoptimAutoGainMinPct} onChange={v => updateScoring('reoptimAutoGainMinPct', v)} />
             <div className="md:col-span-3">
               <label className="flex items-start gap-2 text-xs text-slate-700">

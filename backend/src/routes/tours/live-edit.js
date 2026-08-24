@@ -307,6 +307,19 @@ router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), as
     }
 
     await pool.query('DELETE FROM tour_cav WHERE id = $1 AND tour_id = $2', [tourCavId, tourId]);
+    // Renumérotation : sans elle, retirer un point laisse un TROU définitif
+    // dans l'ordre (« 1, 2, 3, 4, 6, 7 » pour six points), visible sur la fiche
+    // de tournée et faussant le calcul de décalage de la ré-optimisation, qui
+    // se cale sur MAX(position). L'ordre relatif est préservé.
+    await pool.query(
+      `WITH ordonne AS (
+         SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) AS rang
+           FROM tour_cav WHERE tour_id = $1
+       )
+       UPDATE tour_cav tc SET position = o.rang
+         FROM ordonne o WHERE o.id = tc.id AND tc.position <> o.rang`,
+      [tourId]
+    );
     await pool.query(
       'UPDATE tours SET nb_cav = GREATEST(COALESCE(nb_cav, 1) - 1, 0) WHERE id = $1', [tourId]
     );

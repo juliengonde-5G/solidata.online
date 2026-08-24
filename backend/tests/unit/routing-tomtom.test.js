@@ -1,11 +1,12 @@
 /**
- * Routage TomTom avec trafic, en mode poids lourd.
+ * Routage TomTom avec trafic.
  *
  * Enjeux vérifiés :
  *   • un appel porte la SÉQUENCE ENTIÈRE (économie du forfait : jamais un
  *     appel par tronçon) ;
- *   • le camion est déclaré comme tel, avec son poids réel — un itinéraire de
- *     voiture peut passer par un pont interdit au véhicule ;
+ *   • le mode par défaut est VOITURE — le parc est constitué d'utilitaires
+ *     légers, un itinéraire poids lourd leur imposerait des détours inutiles ;
+ *   • le gabarit n'est transmis QUE si le mode poids lourd est demandé ;
  *   • sans clé ou en cas de silence du service, on renvoie null : l'appelant
  *     retombe sur OSRM et le DIT, aucune donnée n'est fabriquée.
  */
@@ -41,13 +42,27 @@ describe('buildRouteUrl', () => {
     expect((url.match(/calculateRoute/g) || [])).toHaveLength(1);
   });
 
-  test('le véhicule est déclaré poids lourd, avec son poids', () => {
+  test('mode VOITURE par défaut : le parc est constitué d’utilitaires légers', () => {
     const url = buildRouteUrl(WAYPOINTS, {
       key: 'K', vehicule: { tare_weight_kg: 3500, max_capacity_kg: 2000 },
+    });
+    expect(url).toContain('travelMode=car');
+    // Aucun gabarit imposé : il ferait faire des détours pour rien.
+    expect(url).not.toContain('vehicleWeight');
+    expect(url).not.toContain('vehicleCommercial');
+  });
+
+  test('mode poids lourd explicite : le gabarit reprend ses droits', () => {
+    const url = buildRouteUrl(WAYPOINTS, {
+      key: 'K', travelMode: 'truck', vehicule: { tare_weight_kg: 3500, max_capacity_kg: 2000 },
     });
     expect(url).toContain('travelMode=truck');
     expect(url).toContain('vehicleCommercial=true');
     expect(url).toContain('vehicleWeight=5500');
+  });
+
+  test('le trajet le plus RAPIDE est demandé (priorité au temps de collecte)', () => {
+    expect(buildRouteUrl(WAYPOINTS, { key: 'K' })).toContain('routeType=fastest');
   });
 
   test('le trafic est demandé, avec les deux durées (avec et sans)', () => {
@@ -56,8 +71,8 @@ describe('buildRouteUrl', () => {
     expect(url).toContain('computeTravelTimeFor=all');
   });
 
-  test('poids inconnu : aucun vehicleWeight forcé', () => {
-    expect(buildRouteUrl(WAYPOINTS, { key: 'K' })).not.toContain('vehicleWeight');
+  test('poids inconnu en mode poids lourd : aucun vehicleWeight forcé', () => {
+    expect(buildRouteUrl(WAYPOINTS, { key: 'K', travelMode: 'truck' })).not.toContain('vehicleWeight');
   });
 });
 

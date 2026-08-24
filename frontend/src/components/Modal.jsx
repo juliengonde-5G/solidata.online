@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 const sizeClasses = {
   sm: 'max-w-md',
@@ -78,11 +79,17 @@ export default function Modal({ isOpen, onClose, title, size = 'md', children, f
     if (e.target === overlayRef.current) onClose();
   };
 
-  return (
+  // PORTAIL vers <body> : une modale rendue à l'intérieur de la page héritait
+  // du plan d'empilement de son conteneur. Au-dessus d'une carte Leaflet —
+  // dont les calques montent à z-index 400 et les contrôles à 800 — elle
+  // passait DESSOUS et se retrouvait tronquée (constat client, août 2026).
+  // Le portail supprime aussi tout risque de rognage par un ancêtre
+  // `overflow: hidden`, comme la carte de la page Collecte en direct.
+  return createPortal(
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[2000] flex items-center justify-center p-4"
       style={{
         animation: 'modalFadeIn 0.2s ease-out',
       }}
@@ -158,6 +165,7 @@ export default function Modal({ isOpen, onClose, title, size = 'md', children, f
           to { opacity: 1; transform: scale(1); }
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }

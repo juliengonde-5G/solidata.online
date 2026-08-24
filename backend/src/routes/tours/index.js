@@ -587,11 +587,14 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       res.json(result.rows[0]);
     }
 
-    // ── Ré-optimisation APRÈS CHAQUE ARRÊT (exigence client, août 2026) ──
+    // ── Ré-optimisation APRÈS CHAQUE BORNE (arbitrage client, août 2026) ──
+    // C'est le SEUL déclencheur du recalcul d'ordre : jamais pendant un trajet
+    // entre deux points. Le chauffeur qui roule vers une borne y est engagé ;
+    // réordonner la suite sous ses yeux à ce moment-là n'aurait pas de sens.
     // Le camion vient de repartir d'un point : la liste des points restants a
-    // changé, et les conditions de circulation aussi. On relance le calcul en
-    // arrière-plan, APRÈS avoir répondu au chauffeur — son écran ne doit
-    // jamais attendre un calcul d'optimisation.
+    // changé, et les conditions de circulation aussi. Le calcul part en
+    // arrière-plan, APRÈS la réponse au chauffeur — son écran ne doit jamais
+    // attendre une optimisation.
     // Le service refuse de lui-même les tournées de formation, les gains
     // marginaux et les propositions en double : rien à filtrer ici.
     if (status === 'collected' || status === 'skipped') {
@@ -786,11 +789,19 @@ router.post('/:id/weigh-public', async (req, res) => {
         notes ?? null,
       ]
     );
-    // Mettre à jour le total de la tournée (somme des pesées non intermédiaires)
+    // Total de la tournée = somme de TOUTES les pesées.
+    //
+    // Correctif (août 2026) : la somme ne retenait que les pesées « non
+    // intermédiaires ». Or une pesée intermédiaire n'est pas un relevé
+    // provisoire : c'est un CHARGEMENT RÉELLEMENT DÉPOSÉ au centre par un
+    // chauffeur qui repart collecter. L'exclure faisait disparaître ces kilos
+    // du total, et donc — via applyCompletionSideEffects — de tonnage_history
+    // (moteur prédictif, carte des CAV) ET des entrées de stock.
+    // Cas observé en production : une tournée avec 649 kg pesés en
+    // intermédiaire et 0 kg en pesée finale ressortait à 0 kg partout.
     await pool.query(
       `UPDATE tours SET total_weight_kg = (
-         SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights
-         WHERE tour_id = $1 AND COALESCE(is_intermediate, FALSE) = FALSE
+         SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1
        ) WHERE id = $1`,
       [req.params.id]
     );

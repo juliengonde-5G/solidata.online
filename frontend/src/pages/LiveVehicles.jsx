@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, MapSizeFix } from '../components';
 import api from '../services/api';
+import Modal from '../components/Modal';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import io from 'socket.io-client';
@@ -213,6 +214,10 @@ export default function CollectionsLive() {
   // décide ne les voyait pas.
   const [reoptims, setReoptims] = useState([]);
   const [reoptEnCours, setReoptEnCours] = useState(null);
+  // Clôture d'une tournée depuis le bureau : { tour, nbRestants } tant que la
+  // confirmation n'est pas donnée.
+  const [clotureDemandee, setClotureDemandee] = useState(null);
+  const [clotureEnCours, setClotureEnCours] = useState(false);
   const socketRef = useRef(null);
 
   const loadActive = useCallback(async () => {
@@ -271,6 +276,21 @@ export default function CollectionsLive() {
       console.error('[CollectionsLive] itineraires:', err);
     }
   }, []);
+
+  // Clôture d'une tournée par le gestionnaire. Passe par la MÊME route que la
+  // clôture chauffeur (`PUT /tours/:id/status`) : mêmes effets de fin de
+  // tournée (tonnage, stock, apprentissage), même idempotence.
+  const cloturerTournee = useCallback(async (tour) => {
+    setClotureEnCours(true);
+    try {
+      await api.put(`/tours/${tour.id}/status`, { status: 'completed' });
+      setClotureDemandee(null);
+      await Promise.all([loadActive(), loadItineraires(), loadReoptims()]);
+    } catch (err) {
+      console.error('[CollectionsLive] clôture:', err);
+    }
+    setClotureEnCours(false);
+  }, [loadActive, loadItineraires, loadReoptims]);
 
   // Initial load + polling 30s + Socket.IO pour positions GPS temps réel
   useEffect(() => {
@@ -373,6 +393,55 @@ export default function CollectionsLive() {
             color="slate"
           />
         </div>
+
+        {/* Confirmation de clôture — la clôture n'est pas un simple changement
+            d'étiquette : elle enregistre le tonnage, alimente le stock et
+            nourrit le moteur prédictif. Elle se confirme donc explicitement,
+            et l'écran rappelle ce qui reste non collecté. */}
+        {clotureDemandee && (
+          <Modal
+            isOpen
+            onClose={() => !clotureEnCours && setClotureDemandee(null)}
+            title={`Terminer la tournée #${clotureDemandee.tour.id} ?`}
+            size="sm"
+          >
+            <div className="space-y-3 text-sm text-slate-700">
+              <p>
+                Véhicule <strong>{clotureDemandee.tour.vehicle_registration || clotureDemandee.tour.vehicle_name || '—'}</strong>
+                {clotureDemandee.tour.driver_name ? <> — {clotureDemandee.tour.driver_name}</> : null}
+              </p>
+              {clotureDemandee.nbRestants > 0 && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs">
+                  <strong>{clotureDemandee.nbRestants} point{clotureDemandee.nbRestants > 1 ? 's' : ''}</strong>
+                  {clotureDemandee.nbRestants > 1 ? ' ne sont pas collectés' : " n'est pas collecté"} :
+                  {clotureDemandee.nbRestants > 1 ? ' ils resteront' : ' il restera'} en attente dans l'historique.
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                La clôture enregistre le tonnage pesé, crée l'entrée de stock et alimente
+                le moteur prédictif. Elle ne peut pas être annulée d'un clic.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={clotureEnCours}
+                  onClick={() => setClotureDemandee(null)}
+                  className="px-3 py-1.5 rounded-lg text-sm bg-white border border-slate-300 text-slate-600 disabled:opacity-50"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={clotureEnCours}
+                  onClick={() => cloturerTournee(clotureDemandee.tour)}
+                  className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white disabled:opacity-50"
+                >
+                  {clotureEnCours ? 'Clôture…' : 'Terminer la tournée'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
 
         {/* ── Propositions de ré-optimisation en attente ─────────────────
             Le recalcul tourne après chaque arrêt et à intervalle régulier ;
@@ -609,6 +678,7 @@ export default function CollectionsLive() {
                       <th className="text-right py-2 px-3">Temps</th>
                       <th className="text-center py-2 px-3">Alerte</th>
                       <th className="text-right py-2 px-3">Poids</th>
+                      <th className="text-right py-2 px-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -673,11 +743,26 @@ export default function CollectionsLive() {
                             <td className="py-2 px-3 text-right text-xs font-semibold tabular-nums">
                               {tour.weight_collected_kg > 0 ? `${tour.weight_collected_kg} kg` : '—'}
                             </td>
+                            {/* Clôture depuis le bureau : un chauffeur peut avoir
+                                terminé sans clôturer (batterie, oubli, perte de
+                                réseau). Confirmation obligatoire — la clôture
+                                déclenche le tonnage et les entrées de stock. */}
+                            <td className="py-2 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                              {['planned', 'in_progress', 'paused', 'returning'].includes(tour.status) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClotureDemandee({ tour, nbRestants: tour.nb_remaining ?? 0 })}
+                                  className="px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+                                >
+                                  Terminer
+                                </button>
+                              ) : <span className="text-xs text-slate-300">—</span>}
+                            </td>
                           </tr>
 
                           {isExpanded && (
                             <tr>
-                              <td colSpan={9} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
+                              <td colSpan={10} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
                                 <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} />
                               </td>
                             </tr>

@@ -3,12 +3,16 @@
 // ══════════════════════════════════════════════════════════════════════════
 //
 // POURQUOI EN PLUS D'OSRM
-// OSRM calcule un itinéraire de VOITURE sur un réseau figé : il ignore le
-// trafic, et il ignore qu'un camion de collecte ne passe pas partout (ponts,
-// tonnage, gabarit). TomTom sait faire les deux. On l'utilise donc là où il
-// apporte quelque chose qu'OSRM ne sait pas produire :
-//   • `traffic=true`   → durées réelles du moment, retard de circulation isolé
-//   • `travelMode=truck` + poids → itinéraire praticable par le véhicule réel
+// OSRM calcule sur un réseau routier FIGÉ : il ignore complètement le trafic.
+// TomTom, lui, rend les durées du moment. On l'utilise donc pour ce qu'OSRM
+// ne sait pas produire : `traffic=true` → durées réelles et retard de
+// circulation isolé.
+//
+// MODE DE DÉPLACEMENT : VOITURE (arbitrage client, août 2026). Le parc est
+// constitué de véhicules UTILITAIRES légers, pas de poids lourds : les
+// restrictions de tonnage et de gabarit ne les concernent pas, et un
+// itinéraire poids lourd leur imposerait des détours inutiles. Le réglage
+// reste ouvert (`travelMode`) si le parc évolue vers un porteur.
 //
 // ÉCONOMIE DU FORFAIT (20 000 appels Routing/mois en offre gratuite)
 // On n'appelle JAMAIS TomTom tronçon par tronçon : un appel porte la SÉQUENCE
@@ -30,10 +34,13 @@ const TIMEOUT_MS = parseInt(process.env.TOMTOM_ROUTING_TIMEOUT_MS, 10) || 8000;
 /** Limite de l'API ; au-delà, l'appelant doit découper. */
 const MAX_WAYPOINTS = 150;
 
+/** Mode de déplacement par défaut : voiture (parc d'utilitaires légers). */
+const TRAVEL_MODE_DEFAUT = process.env.TOMTOM_TRAVEL_MODE || 'car';
+
 /**
- * Poids total roulant du véhicule (kg), pour un itinéraire réellement
- * praticable. `null` si on ne le connaît pas : on préfère laisser TomTom
- * appliquer son défaut plutôt que d'inventer un tonnage.
+ * Poids total roulant du véhicule (kg). N'est transmis QU'EN MODE POIDS LOURD :
+ * en mode voiture, TomTom l'ignore et le renseigner n'aurait aucun effet.
+ * `null` si on ne le connaît pas — on n'invente pas un tonnage.
  * @param {{tare_weight_kg, max_capacity_kg}} vehicule
  */
 function poidsRoulantKg(vehicule) {
@@ -42,7 +49,7 @@ function poidsRoulantKg(vehicule) {
   const charge = parseFloat(vehicule.max_capacity_kg);
   if (!Number.isFinite(tare) || tare <= 0) return null;
   // Poids à vide + charge utile déclarée : l'hypothèse haute, celle qui
-  // interdit les ponts que le camion PLEIN ne peut pas franchir.
+  // interdit les ponts que le véhicule PLEIN ne peut pas franchir.
   return Math.round(tare + (Number.isFinite(charge) && charge > 0 ? charge : 0));
 }
 
@@ -53,18 +60,24 @@ function poidsRoulantKg(vehicule) {
  */
 function buildRouteUrl(waypoints, opts = {}) {
   const locations = waypoints.map((w) => `${w.lat},${w.lng}`).join(':');
+  const travelMode = opts.travelMode || TRAVEL_MODE_DEFAUT;
   const params = new URLSearchParams({
     key: opts.key,
+    // `fastest` : la priorité est le TEMPS de collecte (arbitrage client).
     routeType: opts.routeType || 'fastest',
     traffic: opts.trafic === false ? 'false' : 'true',
     // Demande les DEUX durées : avec et sans circulation. C'est ce qui permet
     // d'afficher « +12 min de trafic » plutôt qu'un total opaque.
     computeTravelTimeFor: 'all',
-    travelMode: opts.travelMode || 'truck',
-    vehicleCommercial: 'true',
+    travelMode,
   });
-  const poids = poidsRoulantKg(opts.vehicule);
-  if (poids) params.set('vehicleWeight', String(poids));
+  // Gabarit et tonnage n'ont de sens qu'en mode poids lourd : sur un parc
+  // d'utilitaires légers, les transmettre imposerait des détours inutiles.
+  if (travelMode === 'truck') {
+    params.set('vehicleCommercial', 'true');
+    const poids = poidsRoulantKg(opts.vehicule);
+    if (poids) params.set('vehicleWeight', String(poids));
+  }
   if (opts.departAt) params.set('departAt', opts.departAt);
   return `${BASE_URL}/${locations}/json?${params}`;
 }
@@ -141,5 +154,5 @@ async function tomtomDisponible() {
 module.exports = {
   tomtomRouteSequence, tomtomDisponible,
   buildRouteUrl, parseRouteResponse, poidsRoulantKg,
-  MAX_WAYPOINTS,
+  MAX_WAYPOINTS, TRAVEL_MODE_DEFAUT,
 };
