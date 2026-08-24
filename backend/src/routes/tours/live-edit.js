@@ -588,6 +588,28 @@ router.get('/trafic', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
+// ── GET /api/tours/trafic-public?bbox=sud,ouest,nord,est ───────────────────
+// Mêmes événements de circulation, pour la carte du CHAUFFEUR : il doit voir
+// le bouchon qui l'attend, pas seulement le gestionnaire au bureau.
+//
+// Auth : JWT chauffeur (suffixe « -public », garde appliquée en amont par
+// tours/index.js). Aucune donnée propre à un véhicule n'est exposée ici — ce
+// sont les incidents publics d'une emprise de carte — donc aucun périmètre
+// véhicule n'a de sens à appliquer.
+//
+// Quota : le service met en cache par emprise arrondie (~2 km) pendant 5 min,
+// et les chauffeurs travaillent tous sur le même territoire. Quatre camions
+// qui consultent la carte coûtent donc à peine plus qu'un seul.
+router.get('/trafic-public', async (req, res) => {
+  try {
+    const { getTrafficIncidents } = require('../../services/traffic');
+    res.json(await getTrafficIncidents(req.query.bbox));
+  } catch (err) {
+    console.error('[TOURS] Erreur trafic-public :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 module.exports = router;
 module.exports.chargerProgramme = chargerProgramme;
 module.exports.STATUTS_MODIFIABLES = STATUTS_MODIFIABLES;

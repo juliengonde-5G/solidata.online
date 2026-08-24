@@ -797,5 +797,8 @@ router.computeConsommation100km = computeConsommation100km;
 // — consommés en LECTURE, agrégats NON nominatifs (émissions propres, intensité).
 router.computeAnnualGes = computeAnnualGes;
 router.resolveCA = resolveCA;
+// Consommation plein-à-plein : SOURCE UNIQUE, réutilisée par le calcul de CO2
+// des tournées (services/vehicle-emissions.js) — pas de seconde formule.
+router.computeConsommation100km = computeConsommation100km;
 
 module.exports = router;

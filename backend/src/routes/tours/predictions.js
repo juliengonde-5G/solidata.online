@@ -118,6 +118,21 @@ let SCORING_CONFIG = {
   lunchBreakMinutes: 30,         // durée pause déjeuner (minutes)
   lunchAfterHours: 4,            // déclencher la pause après N heures de travail
   cavProximityRadius: 100,       // rayon en mètres pour détecter arrivée/départ GPS d'un CAV
+  // ── Optimisation des tournées (CO2 & efficacité, août 2026) ──────────
+  // `objectif` arbitre entre les deux grandeurs que le client veut optimiser :
+  //   'distance' = CO2 pur (les émissions sont proportionnelles aux km)
+  //   'duree'    = efficacité pure (le budget de 6 h est la vraie contrainte)
+  //   'mixte'    = pondération des deux (défaut)
+  reoptimObjectif: 'mixte',
+  reoptimPoidsDistance: 0.5,   // pondération CO2 dans l'objectif « mixte »
+  reoptimPoidsDuree: 0.5,      // pondération efficacité
+  reoptimGainMinPct: 5,        // gain minimal pour proposer un nouvel ordre
+  reoptimIntervalMin: 15,      // cadence du recalcul en cours de tournée (min)
+  // Application AUTOMATIQUE du nouvel ordre. Désactivée par défaut : changer
+  // l'itinéraire d'un chauffeur en cours de route est une décision
+  // d'exploitation, pas un effet de bord d'un calcul.
+  reoptimAuto: false,
+  reoptimAutoGainMinPct: 12,   // seuil, plus élevé, de l'application auto
 };
 
 // ──────────────────────────────────────────────────────────────

@@ -586,6 +586,27 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);
     }
+
+    // ── Ré-optimisation APRÈS CHAQUE ARRÊT (exigence client, août 2026) ──
+    // Le camion vient de repartir d'un point : la liste des points restants a
+    // changé, et les conditions de circulation aussi. On relance le calcul en
+    // arrière-plan, APRÈS avoir répondu au chauffeur — son écran ne doit
+    // jamais attendre un calcul d'optimisation.
+    // Le service refuse de lui-même les tournées de formation, les gains
+    // marginaux et les propositions en double : rien à filtrer ici.
+    if (status === 'collected' || status === 'skipped') {
+      const tourId = parseInt(req.params.id, 10);
+      const io = req.app.get('io');
+      try { require('../../services/scheduler').noterRecalcul(tourId); } catch (_) { /* scheduler absent */ }
+      proposeReoptimization({
+        tourId,
+        triggerReason: 'arret',
+        triggeredBy: 'auto',
+        currentLat: req.body?.current_lat != null ? parseFloat(req.body.current_lat) : null,
+        currentLng: req.body?.current_lng != null ? parseFloat(req.body.current_lng) : null,
+        io,
+      }).catch((err) => console.warn('[TOURS] ré-optimisation après arrêt :', err.message));
+    }
   } catch (err) {
     console.error('[TOURS] Erreur collect-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });

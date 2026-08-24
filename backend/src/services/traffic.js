@@ -58,6 +58,16 @@ function snapBbox({ sud, ouest, nord, est }) {
   };
 }
 
+/**
+ * Incrémente le compteur d'appels TomTom. Les autres modules qui consomment
+ * le même forfait (routage avec trafic) passent par ici : la supervision doit
+ * voir la consommation TOTALE, pas seulement celle des incidents.
+ */
+function noterAppelTomTom() {
+  _compteur.appels += 1;
+  _compteur.dernier = new Date().toISOString();
+}
+
 /** Consommation observée (exposée par la supervision, jamais estimée). */
 function trafficUsage() {
   return { ..._compteur, emprises_en_cache: _cache.size, cache_ms: CACHE_MS };
@@ -219,7 +229,7 @@ async function getTrafficIncidents(bboxRaw) {
 }
 
 module.exports = {
-  getTrafficIncidents, parseBbox, mapIncidents, getApiKey, trafficUsage,
+  getTrafficIncidents, parseBbox, mapIncidents, getApiKey, trafficUsage, noterAppelTomTom,
   snapBbox, SETTINGS_KEY, CATEGORIES, GRILLE_DEG, CACHE_MS,
 };
 

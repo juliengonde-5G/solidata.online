@@ -1214,6 +1214,38 @@ async function initDatabase() {
         triggered_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // Ré-optimisation en cours de tournée : objectif retenu (CO2 / efficacité
+    // / mixte), provenance des chiffres publiés (mesure TomTom avec trafic,
+    // OSRM, ou estimation), CO2 évité et application automatique.
+    await client.query(`
+      ALTER TABLE tour_reoptimizations
+        ADD COLUMN IF NOT EXISTS objectif VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS source_calcul VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS co2_evite_kg DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS decision_auto BOOLEAN NOT NULL DEFAULT FALSE;
+    `);
+    // Le recalcul devient RÉCURRENT (après chaque arrêt et à intervalle
+    // régulier) : deux nouveaux motifs de déclenchement, que la contrainte
+    // d'origine refusait. Reconstruite par DO-scan de pg_constraint pour
+    // rester idempotente et ne pas dépendre du nom exact de la contrainte.
+    await client.query(`
+      DO $$
+      DECLARE nom text;
+      BEGIN
+        SELECT conname INTO nom FROM pg_constraint
+         WHERE conrelid = 'tour_reoptimizations'::regclass
+           AND contype = 'c'
+           AND pg_get_constraintdef(oid) LIKE '%trigger_reason%';
+        IF nom IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE tour_reoptimizations DROP CONSTRAINT %I', nom);
+        END IF;
+        ALTER TABLE tour_reoptimizations
+          ADD CONSTRAINT tour_reoptimizations_trigger_reason_check
+          CHECK (trigger_reason IN ('manual','incident','skipped','full','delay',
+                                    'inaccessible','arret','recurrent'));
+      END $$;
+    `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_tour ON tour_reoptimizations(tour_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tour_reopt_status ON tour_reoptimizations(status);`);
 

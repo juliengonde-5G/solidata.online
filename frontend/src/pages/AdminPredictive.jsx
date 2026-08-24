@@ -791,6 +791,64 @@ export default function AdminPredictive() {
           </div>
         </Section>
 
+        {/* ══════════ OPTIMISATION CO2 & EFFICACITÉ ══════════ */}
+        <Section
+          title="Optimisation des tournées — CO2 & efficacité"
+          desc="Arbitrage entre kilomètres (donc CO2) et temps de travail, cadence du recalcul en cours de tournée, et application automatique du nouvel ordre."
+        >
+          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 mb-4 space-y-1">
+            <p>
+              Les émissions d'un trajet sont proportionnelles aux <strong>kilomètres</strong> ;
+              l'efficacité de la journée se mesure en <strong>minutes</strong>. Les deux ne
+              vont pas toujours ensemble : contourner un bouchon rallonge la distance mais
+              raccourcit la journée. L'objectif ci-dessous tranche.
+            </p>
+            <p>
+              Le recalcul tourne <strong>après chaque arrêt</strong> et à l'intervalle
+              indiqué. Il tient compte de la circulation du moment dès qu'une clé TomTom
+              est renseignée ; sans clé, il travaille à circulation moyenne et le dit.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Objectif d'optimisation</label>
+              <select
+                value={config.scoring.reoptimObjectif ?? 'mixte'}
+                onChange={e => updateScoring('reoptimObjectif', e.target.value)}
+                className="input-modern"
+              >
+                <option value="mixte">Mixte — kilomètres et temps</option>
+                <option value="distance">Kilomètres (CO2) en priorité</option>
+                <option value="duree">Temps de travail en priorité</option>
+              </select>
+            </div>
+            <ParamInput label="Pondération kilomètres (objectif mixte)" value={config.scoring.reoptimPoidsDistance} onChange={v => updateScoring('reoptimPoidsDistance', v)} />
+            <ParamInput label="Pondération temps (objectif mixte)" value={config.scoring.reoptimPoidsDuree} onChange={v => updateScoring('reoptimPoidsDuree', v)} />
+            <ParamInput label="Gain minimal pour proposer un nouvel ordre (%)" value={config.scoring.reoptimGainMinPct} onChange={v => updateScoring('reoptimGainMinPct', v)} />
+            <ParamInput label="Intervalle de recalcul en tournée (min)" value={config.scoring.reoptimIntervalMin} onChange={v => updateScoring('reoptimIntervalMin', v)} />
+            <ParamInput label="Gain minimal pour appliquer SANS validation (%)" value={config.scoring.reoptimAutoGainMinPct} onChange={v => updateScoring('reoptimAutoGainMinPct', v)} />
+            <div className="md:col-span-3">
+              <label className="flex items-start gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={config.scoring.reoptimAuto === true}
+                  onChange={e => updateScoring('reoptimAuto', e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <strong>Appliquer automatiquement</strong> le nouvel ordre au-delà du gain
+                  ci-dessus, sans validation du gestionnaire.
+                  <span className="block text-slate-500">
+                    Désactivé par défaut : réordonner la route d'un chauffeur en cours de
+                    tournée est une décision d'exploitation. Activé, le chauffeur voit son
+                    ordre changer sur son téléphone et le gestionnaire en est informé.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </Section>
+
         {/* ══════════ PONDÉRATION MÉTÉO APPRISE ══════════ */}
         <Section title="Pondération météo apprise (dépôts)" desc="Effet du beau temps sur les dépôts, appris chaque mois depuis les collectes réelles croisées avec la météo quotidienne — distinction semaine / week-end.">
           {config.weatherLearned?.ok ? (

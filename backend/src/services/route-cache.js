@@ -165,6 +165,50 @@ async function cachedRouteSegment(lat1, lng1, lat2, lng2, deps = {}) {
   return seg;
 }
 
+/**
+ * Précharge en UNE requête tous les tronçons déjà mesurés d'un jeu de paires.
+ *
+ * L'optimiseur d'ordre évalue des milliers de séquences : il ne peut pas
+ * interroger le routeur dans sa boucle. Il lui faut donc une matrice en
+ * mémoire, servie par ce préchargement — et, pour les paires jamais mesurées,
+ * une approximation locale assumée (l'appelant mesure ENSUITE la séquence
+ * retenue pour publier des chiffres réels).
+ *
+ * @param {Array<[number, number, number, number]>} paires [latA, lngA, latB, lngB]
+ * @returns {Promise<Map<string, {distance_km, duration_min}>>}
+ */
+async function prefetchLegs(paires, deps = {}) {
+  const db = 'pool' in deps ? deps.pool : pool;
+  const trouves = new Map();
+  const cles = [];
+  (paires || []).forEach((p) => {
+    const k = legKey(p[0], p[1], p[2], p[3]);
+    if (!k) return;
+    const enMemoire = memoGet(k);
+    if (enMemoire) trouves.set(k, { distance_km: enMemoire.distance_km, duration_min: enMemoire.duration_min });
+    else cles.push(k);
+  });
+  if (cles.length === 0 || !db || !tableDisponible) return trouves;
+  try {
+    const r = await db.query(
+      'SELECT cle, distance_km, duration_min FROM route_legs_cache WHERE cle = ANY($1::text[])',
+      [cles]
+    );
+    r.rows.forEach((row) => {
+      const valeur = {
+        distance_km: parseFloat(row.distance_km),
+        duration_min: parseFloat(row.duration_min),
+      };
+      memoSet(row.cle, valeur);
+      trouves.set(row.cle, valeur);
+    });
+  } catch (err) {
+    if (err && err.code === '42P01') tableDisponible = false;
+    else console.warn('[ROUTE-CACHE] préchargement impossible :', err.message);
+  }
+  return trouves;
+}
+
 /** Statistiques du cache (page d'administration / supervision). */
 async function cacheStats(db = pool) {
   const stats = { memoire: memo.size, base: null, hits: null, dernier_calcul: null };
@@ -184,6 +228,7 @@ async function cacheStats(db = pool) {
 
 module.exports = {
   cachedRouteSegment,
+  prefetchLegs,
   cacheStats,
   // exportés pour les tests unitaires
   roundCoord,
