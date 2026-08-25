@@ -46,9 +46,15 @@ router.get('/active-summary', async (req, res) => {
     const tourIds = tours.map((t) => t.id);
 
     // 2. Points (CAV ou association points selon collection_type)
+    //
+    // Aucun poids par point : le camion est pesé au centre de tri, pas borne par
+    // borne. La colonne existait ici en NULL constant, et l'écran affichait donc
+    // une colonne de tirets qui se lisait comme une donnée manquante alors
+    // qu'elle n'a jamais existé. Le poids se lit au total de la tournée
+    // (tour_weights), là où il est réellement mesuré.
     const cavPointsRes = await pool.query(
       `SELECT tc.tour_id, tc.id AS point_id, tc.cav_id, tc.position, tc.status,
-              tc.fill_level, tc.collected_at, NULL::double precision AS weight_kg,
+              tc.fill_level, tc.collected_at,
               tc.planned_passage_time,
               c.name AS point_name, c.address, c.commune, c.latitude, c.longitude
        FROM tour_cav tc
@@ -173,7 +179,6 @@ router.get('/active-summary', async (req, res) => {
           status: p.status,
           fill_level: p.fill_level,
           collected_at: p.collected_at,
-          weight_kg: p.weight_kg ? parseFloat(p.weight_kg) : null,
           planned_passage_time: p.planned_passage_time,
         })),
       };

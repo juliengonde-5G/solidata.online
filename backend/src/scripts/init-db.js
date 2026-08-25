@@ -2819,8 +2819,11 @@ async function initDatabase() {
       END $$;
     `);
     // Le motif porte la RAISON de l'arrêt, indépendamment du lieu : le centre de
-    // tri sert au vidage, à la pause et à la fin de tournée. Sans lui, trois
-    // situations très différentes seraient indiscernables dans le programme.
+    // tri sert au départ du matin, au vidage, à la pause et à la fin de tournée.
+    // Sans lui, quatre situations très différentes seraient indiscernables dans
+    // le programme. La contrainte est RECONSTRUITE à chaque passage (et non
+    // seulement créée si absente) : ajouter un motif à la liste doit suffire à
+    // le rendre acceptable, sans intervention manuelle en base.
     await client.query(`
       ALTER TABLE tour_arret_technique
         ADD COLUMN IF NOT EXISTS motif VARCHAR(20) NOT NULL DEFAULT 'technique';
@@ -2833,11 +2836,12 @@ async function initDatabase() {
          WHERE conrelid = 'tour_arret_technique'::regclass
            AND contype = 'c'
            AND pg_get_constraintdef(oid) LIKE '%motif%';
-        IF nom IS NULL THEN
-          ALTER TABLE tour_arret_technique
-            ADD CONSTRAINT tour_arret_technique_motif_check
-            CHECK (motif IN ('technique', 'vidage', 'pause_dejeuner', 'fin_tournee'));
+        IF nom IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE tour_arret_technique DROP CONSTRAINT %I', nom);
         END IF;
+        ALTER TABLE tour_arret_technique
+          ADD CONSTRAINT tour_arret_technique_motif_check
+          CHECK (motif IN ('technique', 'depart_centre', 'vidage', 'pause_dejeuner', 'fin_tournee'));
       END $$;
     `);
     // Seed du centre de tri. Les coordonnées viennent de l'environnement, avec

@@ -570,7 +570,6 @@ export default function CollectionsLive() {
                                 {p.address && <p className="text-slate-500">{p.address}</p>}
                                 <p>Statut : <strong>{p.status}</strong></p>
                                 {p.collected_at && <p>Collecté à : {fmtTime(p.collected_at)}</p>}
-                                {p.weight_kg != null && <p>Poids déclaré : <strong>{p.weight_kg} kg</strong></p>}
                                 {p.fill_level != null && <p>Remplissage : <strong>{p.fill_level}/5</strong></p>}
                                 {p.planned_passage_time && !isCollected && (
                                   <p className="text-slate-400">Passage prévu : {fmtTime(p.planned_passage_time)}</p>
@@ -732,12 +731,36 @@ export default function CollectionsLive() {
                             <td className="py-2 px-3 text-right text-xs tabular-nums">
                               {fmtDuration(tour.elapsed_min)} / {fmtDuration(tour.estimated_duration_min)}
                             </td>
-                            <td className="py-2 px-3 text-center">
-                              {tour.alert_overrun && (
-                                <span title="Risque de dépassement de durée" className="inline-flex"><AlertTriangle className="w-4 h-4 text-red-500" /></span>
-                              )}
-                              {tour.nb_incidents > 0 && (
-                                <span title={`${tour.nb_incidents} incident(s)`} className="ml-1 inline-flex"><XCircle className="w-4 h-4 text-amber-500" /></span>
+                            {/* Une icône seule n'informe personne : il faut
+                                survoler et attendre pour savoir de quoi il
+                                s'agit. Le motif est donc écrit à côté du
+                                pictogramme, et l'absence d'alerte se dit
+                                explicitement au lieu de laisser une case vide
+                                qu'on prend pour un oubli d'affichage. */}
+                            <td className="py-2 px-3">
+                              {!tour.alert_overrun && !(tour.nb_incidents > 0) ? (
+                                <span className="text-[11px] text-slate-400">Aucune</span>
+                              ) : (
+                                <div className="flex flex-col gap-1 items-start">
+                                  {tour.alert_overrun && (
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-medium text-red-700 whitespace-nowrap"
+                                      title="La durée réelle dépasse la durée estimée de la tournée"
+                                    >
+                                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                      Dépassement de durée
+                                    </span>
+                                  )}
+                                  {tour.nb_incidents > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-medium text-amber-700 whitespace-nowrap"
+                                      title="Incidents déclarés par l'équipage sur cette tournée"
+                                    >
+                                      <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                                      {tour.nb_incidents} incident{tour.nb_incidents > 1 ? 's' : ''}
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </td>
                             <td className="py-2 px-3 text-right text-xs font-semibold tabular-nums">
@@ -832,7 +855,7 @@ function ExpandedDetail({ tour, color, onRefresh }) {
               <th className="text-right py-1.5 px-2">Heure prévue</th>
               <th className="text-right py-1.5 px-2">Heure réelle</th>
               <th className="text-right py-1.5 px-2">Remplissage</th>
-              <th className="text-right py-1.5 px-2">Poids</th>
+
             </tr>
           </thead>
           <tbody>
@@ -859,14 +882,17 @@ function ExpandedDetail({ tour, color, onRefresh }) {
                   <td className="py-1.5 px-2 text-right">
                     {p.fill_level != null ? <span className="font-semibold">{p.fill_level}/5</span> : <span className="text-slate-400">—</span>}
                   </td>
-                  <td className="py-1.5 px-2 text-right tabular-nums">
-                    {p.weight_kg != null ? <span className="font-semibold">{p.weight_kg} kg</span> : <span className="text-slate-400">—</span>}
-                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        {/* Le poids ne se mesure pas borne par borne : le camion est pesé au
+            centre de tri. Afficher une colonne de tirets laissait croire à une
+            donnée manquante, alors qu'elle n'existe pas. On dit où elle est. */}
+        <p className="text-[11px] text-slate-400 px-2 py-2 border-t border-slate-100">
+          Le poids est pesé au centre de tri, pas borne par borne — il figure au total de la tournée.
+        </p>
       </div>
 
       {/* Reprendre la main sur la tournée : programme (ordre, ajout/retrait de

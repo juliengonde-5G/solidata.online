@@ -24,6 +24,7 @@ export const ARRET_CATEGORIES = [
  * endroit mais ne racontent pas la même chose au gestionnaire.
  */
 export const ARRET_MOTIFS = {
+  depart_centre: { label: 'Départ du centre', color: 'text-slate-700', bg: 'bg-slate-100' },
   vidage: { label: 'Camion plein — vidage', color: 'text-amber-700', bg: 'bg-amber-100' },
   pause_dejeuner: { label: 'Pause déjeuner', color: 'text-blue-700', bg: 'bg-blue-100' },
   fin_tournee: { label: 'Fin de tournée', color: 'text-teal-700', bg: 'bg-teal-100' },

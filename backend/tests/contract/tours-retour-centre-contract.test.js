@@ -139,20 +139,43 @@ describe('POST /:id/retour-centre-public', () => {
     expect(insert[1]).toContain('vidage');
   });
 
-  test('la fin de tournée va en QUEUE de programme, pas devant le chauffeur', async () => {
+  test('la fin de tournée déclarée vient DEVANT le chauffeur, pas en queue', async () => {
     mockDb();
     const res = await declarer('fin_tournee');
 
     expect(res.status).toBe(200);
     expect(res.body.suite).toBe('pesee_finale');
-    // Position de fin (MAX+1), et aucun décalage des points restants.
-    expect(res.body.position).toBe(4);
+    // Le retour s'intercale après le dernier point traité : laissé en queue de
+    // programme, il resterait derrière les bornes non collectées et l'étape
+    // courante du mobile ne le sélectionnerait jamais — l'appui sur « Fin »
+    // n'aurait rien affiché.
     const decalage = mockQuery.mock.calls.find(([s]) => /UPDATE tour_cav SET position = position \+ 1/.test(String(s)));
-    expect(decalage).toBeUndefined();
+    expect(decalage).toBeDefined();
+  });
+
+  test('un retour déjà prévu plus loin est DÉPLACÉ devant le chauffeur', async () => {
+    // Cas réel : la création de tournée a posé le retour de fin en queue de
+    // programme ; l'équipage décide de rentrer avant d'avoir tout collecté.
+    mockDb({ arretExistant: { id: 707, position: 11 } });
+    const res = await declarer('fin_tournee');
+
+    expect(res.status).toBe(200);
+    expect(res.body.arret_id).toBe(707);
+    expect(res.body.deja_present).toBe(true);
+    // Sorti de la file, le trou refermé, puis réinséré devant le chauffeur.
+    const sentinelle = mockQuery.mock.calls.find(([s]) => /SET position = -1/.test(String(s)));
+    expect(sentinelle).toBeDefined();
+    const reinsertion = mockQuery.mock.calls.find(
+      ([s, p]) => /UPDATE tour_arret_technique SET position = \$2 WHERE id = \$1/.test(String(s)) && p[0] === 707
+    );
+    expect(reinsertion).toBeDefined();
+    // Il ne repart pas de sa position d'origine : il a bien changé de place.
+    expect(reinsertion[1][1]).not.toBe(11);
   });
 
   test('un double appui n\'empile pas deux retours', async () => {
     mockDb({ arretExistant: { id: 404, position: 4 } });
+    // Aucun second arrêt créé : le premier est réutilisé (et repositionné).
     const res = await declarer('vidage');
 
     expect(res.status).toBe(200);

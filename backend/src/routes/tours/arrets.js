@@ -23,16 +23,17 @@
 const pool = require('../../config/database');
 
 /** Motifs d'arrêt. `technique` = arrêt libre posé par le gestionnaire. */
-const MOTIFS = ['technique', 'vidage', 'pause_dejeuner', 'fin_tournee'];
+const MOTIFS = ['technique', 'depart_centre', 'vidage', 'pause_dejeuner', 'fin_tournee'];
 
 /** Les trois motifs qui ramènent au centre de tri. */
-const MOTIFS_CENTRE = ['vidage', 'pause_dejeuner', 'fin_tournee'];
+const MOTIFS_CENTRE = ['depart_centre', 'vidage', 'pause_dejeuner', 'fin_tournee'];
 
 /**
  * Libellés destinés au CHAUFFEUR : phrases courtes, sans jargon, qui disent ce
  * qu'il y a à faire (doctrine FALC du parcours mobile).
  */
 const LIBELLE_MOTIF = {
+  depart_centre: 'Départ du centre de tri',
   vidage: 'Retour au centre — camion plein',
   pause_dejeuner: 'Pause déjeuner au centre',
   fin_tournee: 'Retour au centre — fin de tournée',
@@ -40,6 +41,7 @@ const LIBELLE_MOTIF = {
 
 /** Ce qui attend le chauffeur une fois l'arrivée déclarée. */
 const SUITE_MOTIF = {
+  depart_centre: 'reprise_tournee',
   vidage: 'pesee_intermediaire',
   pause_dejeuner: 'reprise_tournee',
   fin_tournee: 'pesee_finale',
@@ -163,6 +165,71 @@ async function creerRetourCentre(client, { tourId, motif, centre, enFin = false 
 }
 
 /**
+ * Amène un retour au centre JUSTE DEVANT le chauffeur — qu'il faille le créer
+ * ou déplacer celui qui était déjà prévu plus loin dans la journée.
+ *
+ * C'est le geste du chauffeur qui déclare « je rentre maintenant ». Sans ce
+ * déplacement, le retour de fin de tournée posé automatiquement en queue de
+ * programme resterait derrière les bornes non collectées : l'appui sur « Fin »
+ * n'afficherait rien, puisque l'étape courante est toujours le point le plus
+ * proche devant le chauffeur.
+ *
+ * @returns {Promise<{id:number, position:number, deja_present:boolean}>}
+ */
+async function avancerRetourCentre(client, { tourId, motif, centre }) {
+  const existant = await arretEnAttente(client, tourId, motif);
+  if (!existant) {
+    const cree = await creerRetourCentre(client, { tourId, motif, centre, enFin: false });
+    await abandonnerArretsRestants(client, tourId, motif, cree.id);
+    return cree;
+  }
+
+  // On sort d'abord l'arrêt de la file (position sentinelle), on referme le
+  // trou, puis on l'insère à sa nouvelle place. Faire l'inverse décalerait
+  // l'arrêt lui-même et le rendrait introuvable.
+  await client.query(
+    'UPDATE tour_arret_technique SET position = -1 WHERE id = $1', [existant.id]
+  );
+  await client.query(
+    'UPDATE tour_cav SET position = position - 1 WHERE tour_id = $1 AND position > $2',
+    [tourId, existant.position]
+  );
+  await client.query(
+    'UPDATE tour_arret_technique SET position = position - 1 WHERE tour_id = $1 AND position > $2 AND id <> $3',
+    [tourId, existant.position, existant.id]
+  );
+
+  const position = await insererApresDernierPointTraite(client, tourId);
+  await client.query(
+    'UPDATE tour_arret_technique SET position = $2 WHERE id = $1', [existant.id, position]
+  );
+  await abandonnerArretsRestants(client, tourId, motif, existant.id);
+  return { id: existant.id, position, deja_present: true };
+}
+
+/**
+ * Quand l'équipage déclare la FIN de sa tournée, les arrêts encore prévus plus
+ * loin dans la journée n'auront pas lieu : ils sont marqués « non effectués ».
+ *
+ * Sans cela, la pause du midi restée en attente derrière le retour de fin
+ * deviendrait l'étape courante du mobile juste après la pesée finale — on
+ * proposerait un déjeuner à une équipe qui rentre. Constaté en vérification sur
+ * base réelle, pas déduit.
+ *
+ * Les points de collecte, eux, ne sont PAS touchés : leur statut « pending »
+ * est la trace de ce qui n'a pas été collecté, et cette trace a de la valeur.
+ */
+async function abandonnerArretsRestants(client, tourId, motif, sauf) {
+  if (motif !== 'fin_tournee') return;
+  await client.query(
+    `UPDATE tour_arret_technique
+        SET status = 'skipped'
+      WHERE tour_id = $1 AND status = 'pending' AND id <> $2`,
+    [tourId, sauf]
+  );
+}
+
+/**
  * Pose la PAUSE DÉJEUNER au centre de tri (demande client : un retour au centre
  * chaque jour entre 12 h et 13 h, sur toutes les tournées).
  *
@@ -210,15 +277,80 @@ async function poserPauseDejeuner(client, tourId, estimation, centre) {
 }
 
 /**
+ * Pose les TROIS passages au centre de tri d'une journée type (demande client) :
+ * le départ du matin, la pause du midi, et le retour de fin de tournée. Le
+ * programme raconte alors la journée entière, et non les seules bornes.
+ *
+ * L'ordre des opérations n'est pas indifférent : chaque insertion décale les
+ * positions suivantes. On pose donc la fin d'abord (en queue), puis la pause
+ * (qui décale la fin), puis le départ (qui décale tout le reste). Calculer les
+ * trois positions d'avance sur l'état initial les rendrait toutes fausses dès
+ * la première écriture.
+ *
+ * @returns {Promise<{depart:object|null, pause:object|null, fin:object|null}>}
+ */
+async function poserRetoursAutomatiques(client, tourId, estimation, centre) {
+  const lieu = centre || (await centreDeTri(client));
+
+  // 1. Fin de tournée, en queue de programme.
+  const fin = await creerRetourCentre(client, {
+    tourId, motif: 'fin_tournee', centre: lieu, enFin: true,
+  });
+
+  // 2. Pause du midi, à la place que le moteur lui a donnée dans sa chronologie.
+  const pause = await poserPauseDejeuner(client, tourId, estimation, lieu);
+
+  // 3. Départ du matin, en tête. Il est marqué « fait » au démarrage de la
+  //    tournée : le chauffeur EST au centre à ce moment-là, lui demander de
+  //    déclarer son arrivée à son propre point de départ n'aurait aucun sens.
+  const existantDepart = await arretEnAttente(client, tourId, 'depart_centre');
+  let depart = existantDepart;
+  if (!existantDepart) {
+    await client.query(
+      'UPDATE tour_cav SET position = position + 1 WHERE tour_id = $1', [tourId]
+    );
+    await client.query(
+      'UPDATE tour_arret_technique SET position = position + 1 WHERE tour_id = $1', [tourId]
+    );
+    const r = await client.query(
+      `INSERT INTO tour_arret_technique (tour_id, lieu_id, libelle, position, motif, status)
+       VALUES ($1, $2, $3, 1, 'depart_centre', 'pending')
+       RETURNING id, position`,
+      [tourId, lieu.id, LIBELLE_MOTIF.depart_centre]
+    );
+    depart = r.rows[0];
+  }
+
+  return { depart, pause, fin };
+}
+
+/**
+ * Marque le départ du centre comme fait. Appelé au démarrage de la tournée :
+ * l'équipage est au centre, il n'a rien à déclarer de plus.
+ */
+async function cloturerDepartCentre(db, tourId) {
+  try {
+    await db.query(
+      `UPDATE tour_arret_technique
+          SET status = 'done', arrived_at = COALESCE(arrived_at, NOW()), completed_at = NOW()
+        WHERE tour_id = $1 AND motif = 'depart_centre' AND status = 'pending'`,
+      [tourId]
+    );
+  } catch (err) {
+    console.warn(`[TOURS] Départ du centre non clôturé (tournée ${tourId}) :`, err.message);
+  }
+}
+
+/**
  * Enveloppe « best effort » de la pose de pause à la création d'une tournée :
  * une pause qui ne s'inscrit pas ne doit JAMAIS faire échouer la création de la
  * tournée elle-même — mais l'échec est journalisé, jamais avalé en silence.
  */
 async function poserPauseDejeunerSansBloquer(db, tourId, estimation) {
   try {
-    return await poserPauseDejeuner(db, tourId, estimation, null);
+    return await poserRetoursAutomatiques(db, tourId, estimation, null);
   } catch (err) {
-    console.warn(`[TOURS] Pause déjeuner non posée sur la tournée ${tourId} :`, err.message);
+    console.warn(`[TOURS] Passages au centre non posés sur la tournée ${tourId} :`, err.message);
     return null;
   }
 }
@@ -272,6 +404,10 @@ module.exports = {
   insererApresDernierPointTraite,
   arretEnAttente,
   creerRetourCentre,
+  avancerRetourCentre,
+  abandonnerArretsRestants,
+  poserRetoursAutomatiques,
+  cloturerDepartCentre,
   poserPauseDejeuner,
   poserPauseDejeunerSansBloquer,
   arretsPourMobile,

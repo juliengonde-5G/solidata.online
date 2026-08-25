@@ -66,7 +66,7 @@ function uploadPhotoOr400(mw) {
 
 // Fraîcheur de la photo du CAV — seuil paramétrable `collecte.photo_fraicheur_mois`.
 const { getPhotoFraicheurMois, photoRequise } = require('../../utils/cav-photo');
-const { arretsPourMobile, creerRetourCentre, centreDeTri, SUITE_MOTIF } = require('./arrets');
+const { arretsPourMobile, avancerRetourCentre, cloturerDepartCentre, centreDeTri, SUITE_MOTIF } = require('./arrets');
 
 // Sub-routers
 const crudRouter = require('./crud');
@@ -526,6 +526,10 @@ router.put('/:id/start-public', async (req, res) => {
     // Calculer les horaires prévisionnels en tâche de fond (non bloquant)
     ensurePlannedPassages(req.params.id).catch(err =>
       console.warn('[TOURS] planned-passage (start-public) échec :', err.message));
+    // Le départ du centre est acquitté d'office : l'équipage EST au centre à cet
+    // instant. Lui demander de déclarer son arrivée à son propre point de départ
+    // n'apporterait rien et ajouterait un geste.
+    await cloturerDepartCentre(pool, req.params.id);
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur start-public:', err);
@@ -765,12 +769,12 @@ router.post('/:id/retour-centre-public', async (req, res) => {
 
     await client.query('BEGIN');
     const centre = await centreDeTri(client);
-    // Un retour de fin va TOUJOURS en queue de programme : ce qui reste de la
-    // journée est abandonné, pas doublé. Un vidage s'intercale au contraire
-    // juste devant le chauffeur, les points suivants restant à faire après.
-    const arret = await creerRetourCentre(client, {
-      tourId, motif, centre, enFin: motif === 'fin_tournee',
-    });
+    // Un retour DÉCLARÉ par l'équipage vient toujours se placer devant lui —
+    // qu'il faille le créer, ou déplacer celui que la création de tournée avait
+    // posé plus loin dans la journée. Laisser le retour de fin en queue de
+    // programme le rendrait invisible tant qu'il reste des bornes : l'étape
+    // courante du mobile est le point le plus proche devant le chauffeur.
+    const arret = await avancerRetourCentre(client, { tourId, motif, centre });
     await client.query('COMMIT');
 
     res.json({
