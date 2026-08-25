@@ -108,6 +108,15 @@
     color: white;
   }
 
+  /* Le bandeau de synchronisation est en `position: fixed` : il sort du flux et
+     recouvrirait l'en-tête de la page. Toutes les pages passent par
+     `.screen-header` (MobileShell et la carte de tournée), on lui réserve donc
+     la hauteur réellement mesurée par SyncStatusBanner. Le repli couvre le
+     court instant précédant la première mesure. */
+  body.sync-banner-on .screen-header {
+    padding-top: calc(1rem + var(--sync-banner-h, 44px));
+  }
+
   /* Safe-area bottom utility — utilisé par les barres basses ancrées. */
   .safe-bottom {
     padding-bottom: calc(var(--safe-bottom) + 12px);

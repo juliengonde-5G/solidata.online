@@ -6,6 +6,7 @@ import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
 import { getCurrentPosition, distanceMeters } from '../services/geo';
 import { isDemoModeActive } from '../services/demoMode';
+import { libellePoint } from '../services/pointLabel';
 
 // Sécurité anti-fraude : impossible de valider un point sans être physiquement
 // à proximité du CAV concerné (scan QR, sélection dans la liste, ou code
@@ -271,7 +272,7 @@ export default function IdentifyCav() {
               </p>
               {expectedCav && (
                 <p className="text-white/80 text-sm mt-1 font-medium">
-                  Attendu : {expectedCav.nom || expectedCav.cav_name}
+                  Attendu : {libellePoint(expectedCav).titre || expectedCav.cav_name}
                 </p>
               )}
               {proximityError && (
@@ -376,7 +377,12 @@ export default function IdentifyCav() {
               className="w-full card-mobile p-4 flex items-center gap-3 ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5 text-left disabled:opacity-50"
             >
               <span className="flex-1 min-w-0">
-                <span className="block font-bold text-gray-900 truncate">{expectedCav.nom || expectedCav.cav_name}</span>
+                {/* Adresse isolée de la commune : c'est ici que le chauffeur
+                    confirme qu'il est à la BONNE borne — une rue tronquée y est
+                    plus qu'un défaut d'affichage. */}
+                <span className="block font-bold text-gray-900 leading-tight line-clamp-2">
+                  {libellePoint(expectedCav).titre || expectedCav.cav_name}
+                </span>
                 {expectedCav.commune && (
                   <span className="block text-sm text-gray-500 truncate">{expectedCav.commune}</span>
                 )}
@@ -401,7 +407,9 @@ export default function IdentifyCav() {
                   className="w-full card-mobile p-3 text-left flex items-center gap-3 disabled:opacity-50"
                 >
                   <span className="flex-1 min-w-0">
-                    <span className="block font-semibold text-gray-800 truncate">{cav.nom || cav.cav_name}</span>
+                    <span className="block font-semibold text-gray-800 leading-tight line-clamp-2">
+                      {libellePoint(cav).titre || cav.cav_name}
+                    </span>
                     {cav.commune && (
                       <span className="block text-xs text-gray-400 truncate">{cav.commune}</span>
                     )}

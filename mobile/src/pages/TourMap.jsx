@@ -10,6 +10,7 @@ import UsageModeBanner from '../components/UsageModeBanner';
 import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
 import { addGpsPosition } from '../services/db';
+import { libellePoint } from '../services/pointLabel';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -701,8 +702,14 @@ export default function TourMap() {
             <p className="text-[11px] uppercase tracking-widest text-gray-400 font-bold">
               Prochain point #{currentCavIndex + 1}
             </p>
-            <h3 className="font-extrabold text-gray-900 truncate text-lg">
-              {currentCAV.nom || currentCAV.cav_name}
+            {/* Le nom du point porte la commune en préfixe
+                (« CAUDEBEC-LÈS-ELBEUF - 67 Rue de Strasbourg ») et la commune
+                est réaffichée juste en dessous. Sur un téléphone, la troncature
+                sur une seule ligne faisait disparaître la RUE — la seule
+                information dont le chauffeur ait besoin, puisqu'il est déjà
+                dans la commune. On isole donc l'adresse, sur deux lignes. */}
+            <h3 className="font-extrabold text-gray-900 text-lg leading-tight line-clamp-2">
+              {libellePoint(currentCAV).titre}
             </h3>
             {/* Photo attendue sur ce point (aucune photo en base ou photo
                 périmée) — annoncé AVANT l'arrivée pour éviter la surprise à la
@@ -712,16 +719,20 @@ export default function TourMap() {
                 <span aria-hidden="true">📷</span> Photo à prendre
               </p>
             )}
+            {/* `pr-16` dégage le bouton flottant d'assistance, qui recouvrait
+                la fin de la ligne (« 50 % remp… » sur la capture terrain). */}
             {mode !== USAGE_MODES.DRIVING && (
-              <div className="flex items-center justify-between mt-1">
-                <p className="text-xs text-gray-500 truncate">{currentCAV.commune}</p>
+              <div className="flex items-center justify-between gap-2 mt-1 pr-16">
+                <p className="text-xs text-gray-500 truncate">
+                  {libellePoint(currentCAV).sousTitre || currentCAV.commune}
+                </p>
                 {isAssociationTour && currentCAV.contact_phone ? (
                   <a href={`tel:${currentCAV.contact_phone.replace(/\s/g, '')}`} className="text-sm font-bold text-blue-600 underline">
                     {currentCAV.contact_phone}
                   </a>
                 ) : (
-                  <span className="text-sm font-bold text-amber-600">
-                    {Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}% remplissage
+                  <span className="text-sm font-bold text-amber-600 whitespace-nowrap flex-shrink-0">
+                    {Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}% rempli
                   </span>
                 )}
               </div>

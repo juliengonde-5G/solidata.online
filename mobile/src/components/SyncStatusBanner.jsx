@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { syncEvents, getPendingCount, syncAll } from '../services/sync';
 
 /**
@@ -11,12 +11,21 @@ import { syncEvents, getPendingCount, syncAll } from '../services/sync';
  *   - éléments locaux en attente
  * En nominal (online + 0 pending + idle), le bandeau n'apparaît pas.
  *
- * Placé en haut de l'écran sous la safe-area. Conçu pour ne pas bloquer
- * le scroll ni masquer les headers des pages (hauteur ~36 px).
+ * Placé en haut de l'écran sous la safe-area, en `position: fixed`.
+ *
+ * Étant fixe, il SORT du flux : sans réservation de place, il recouvrait
+ * purement et simplement l'en-tête de la page (constaté sur la carte de
+ * tournée — le numéro de tournée et l'avancement passaient sous le bandeau,
+ * les deux textes se superposant et devenant illisibles). Le cas avait été
+ * traité pour le bandeau de mode démo, jamais dans le cas général.
+ *
+ * Il publie donc sa hauteur réelle dans `--sync-banner-h` et pose la classe
+ * `sync-banner-on` sur le body : le contenu applicatif se décale d'autant.
  */
 export default function SyncStatusBanner() {
   const [state, setState] = useState(navigator.onLine ? 'idle' : 'offline');
   const [counts, setCounts] = useState({ total: 0 });
+  const ref = useRef(null);
 
   useEffect(() => {
     const onState = (e) => setState(e.detail?.state || 'idle');
@@ -39,7 +48,32 @@ export default function SyncStatusBanner() {
     return 'idle';
   })();
 
-  if (effectiveState === 'idle') return null;
+  const visible = effectiveState !== 'idle';
+
+  // Réservation de la place occupée par le bandeau. La hauteur est MESURÉE
+  // (safe-area et retour à la ligne compris) plutôt que devinée : une valeur
+  // codée en dur redeviendrait fausse au premier changement de libellé.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (!visible || !ref.current) {
+      root.style.removeProperty('--sync-banner-h');
+      document.body.classList.remove('sync-banner-on');
+      return undefined;
+    }
+    const el = ref.current;
+    const publier = () => root.style.setProperty('--sync-banner-h', `${el.offsetHeight}px`);
+    publier();
+    document.body.classList.add('sync-banner-on');
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(publier) : null;
+    if (ro) ro.observe(el);
+    return () => {
+      if (ro) ro.disconnect();
+      root.style.removeProperty('--sync-banner-h');
+      document.body.classList.remove('sync-banner-on');
+    };
+  });
+
+  if (!visible) return null;
 
   const labels = {
     offline: pending > 0
@@ -83,6 +117,7 @@ export default function SyncStatusBanner() {
 
   return (
     <div
+      ref={ref}
       className={`sync-banner sync-banner--${effectiveState}`}
       role={effectiveState === 'error' ? 'alert' : 'status'}
       aria-live="polite"

@@ -13,6 +13,7 @@ import { sendCollect, sendCollectWithPhoto, sendCavPhoto, getPendingCount } from
 import { authedFetch } from '../services/authedFetch';
 import { pickAuditCavId } from '../services/auditPhoto';
 import { computePhotoRequirement } from '../services/cavPhoto';
+import { libellePoint } from '../services/pointLabel';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -121,7 +122,8 @@ export default function FillLevel() {
 
     return {
       cavId: cav.cav_id || cav.id,
-      displayName: cav.nom || cav.cav_name || 'CAV',
+      // Adresse seule : la commune préfixait le nom et mangeait la largeur.
+      displayName: libellePoint(cav).titre || cav.cav_name || 'CAV',
       tourIsAssociation,
       cavs,
       // Point courant complet : porte `photo_requise` (décision serveur) et
