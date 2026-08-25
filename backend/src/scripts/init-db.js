@@ -2795,6 +2795,70 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_arret_tour ON tour_arret_technique(tour_id)');
 
+    // ── Le centre de tri devient un LIEU comme un autre (demande client 08/2026)
+    // Le retour au centre — camion plein, pause déjeuner, fin de tournée — était
+    // un saut d'écran côté chauffeur : aucune étape, aucun itinéraire, la pesée
+    // s'ouvrait directement. C'est pourtant un déplacement réel, qui consomme du
+    // temps et des kilomètres. Il devient un arrêt du programme, donc visible du
+    // chauffeur ET du gestionnaire, et compté par le moteur de temps.
+    await client.query(`
+      DO $$
+      DECLARE nom text;
+      BEGIN
+        SELECT conname INTO nom FROM pg_constraint
+         WHERE conrelid = 'lieux_techniques'::regclass
+           AND contype = 'c'
+           AND pg_get_constraintdef(oid) LIKE '%categorie%';
+        IF nom IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE lieux_techniques DROP CONSTRAINT %I', nom);
+        END IF;
+        ALTER TABLE lieux_techniques
+          ADD CONSTRAINT lieux_techniques_categorie_check
+          CHECK (categorie IN ('magasin', 'entretien', 'carburant', 'dechetterie',
+                               'administratif', 'pause', 'centre_tri', 'autre'));
+      END $$;
+    `);
+    // Le motif porte la RAISON de l'arrêt, indépendamment du lieu : le centre de
+    // tri sert au vidage, à la pause et à la fin de tournée. Sans lui, trois
+    // situations très différentes seraient indiscernables dans le programme.
+    await client.query(`
+      ALTER TABLE tour_arret_technique
+        ADD COLUMN IF NOT EXISTS motif VARCHAR(20) NOT NULL DEFAULT 'technique';
+    `);
+    await client.query(`
+      DO $$
+      DECLARE nom text;
+      BEGIN
+        SELECT conname INTO nom FROM pg_constraint
+         WHERE conrelid = 'tour_arret_technique'::regclass
+           AND contype = 'c'
+           AND pg_get_constraintdef(oid) LIKE '%motif%';
+        IF nom IS NULL THEN
+          ALTER TABLE tour_arret_technique
+            ADD CONSTRAINT tour_arret_technique_motif_check
+            CHECK (motif IN ('technique', 'vidage', 'pause_dejeuner', 'fin_tournee'));
+        END IF;
+      END $$;
+    `);
+    // Seed du centre de tri. Les coordonnées viennent de l'environnement, avec
+    // le repli documenté du centre réel — jamais une position inventée. Le seed
+    // ne réécrit PAS un lieu déjà présent : un ajustement fait à la main dans le
+    // référentiel des lieux techniques doit survivre au redémarrage.
+    await client.query(
+      `INSERT INTO lieux_techniques (nom, categorie, adresse, latitude, longitude, duree_min, notes)
+       SELECT $1, 'centre_tri', $2, $3, $4, $5,
+              'Créé automatiquement : destination des retours au centre (vidage, pause, fin de tournée).'
+        WHERE NOT EXISTS (SELECT 1 FROM lieux_techniques WHERE categorie = 'centre_tri')`,
+      [
+        'Centre de tri — Solidarité Textiles',
+        process.env.CENTRE_TRI_ADRESSE || null,
+        parseFloat(process.env.CENTRE_TRI_LAT) || 49.4231,
+        parseFloat(process.env.CENTRE_TRI_LNG) || 1.0993,
+        20,
+      ]
+    );
+    console.log('[INIT-DB] Retours au centre de tri (arrêts de programme) ✓');
+
     // Dégâts relevés au départ, pointés sur un schéma du véhicule (4 vues),
     // à la manière d'un constat amiable. JSONB : [{vue, x, y, type, commentaire}]
     // avec x/y RELATIFS (0..1) — indépendants de la taille d'écran.

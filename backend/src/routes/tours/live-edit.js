@@ -30,6 +30,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
+const { estimerProgramme, impactApresModification, resumerImpact } = require('./impact');
 
 /** Statuts de tournée sur lesquels le programme reste modifiable. */
 const STATUTS_MODIFIABLES = ['planned', 'in_progress', 'paused', 'returning'];
@@ -77,7 +78,7 @@ async function chargerProgramme(tourId) {
     ),
     pool.query(
       `SELECT ta.id, ta.lieu_id AS ref_id, ta.position, ta.status, ta.notes,
-              ta.arrived_at, ta.completed_at,
+              ta.arrived_at, ta.completed_at, ta.motif,
               COALESCE(ta.libelle, lt.nom) AS name,
               lt.adresse AS address, lt.latitude, lt.longitude,
               lt.categorie, lt.duree_min
@@ -181,6 +182,10 @@ router.put('/:id/programme/ordre', authorize('ADMIN', 'MANAGER'), async (req, re
 
   const tour = await loadTourEditable(tourId, res);
   if (!tour) return;
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
 
   const client = await pool.connect();
   try {
@@ -227,8 +232,14 @@ router.put('/:id/programme/ordre', authorize('ADMIN', 'MANAGER'), async (req, re
     }
     await client.query('COMMIT');
 
-    await notifierChauffeur(req, tour, 'Nouvel itinéraire : l\'ordre des points a été modifié. Consulte ta carte.');
-    res.json({ ok: true, points: await chargerProgramme(tourId) });
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    await notifierChauffeur(
+      req, tour,
+      'Nouvel itinéraire : l\'ordre des points a été modifié. Consulte ta carte.'
+        + (resume ? ` (${resume})` : '')
+    );
+    res.json({ ok: true, points: await chargerProgramme(tourId), impact });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[TOURS] Erreur réordonnancement :', err);
@@ -247,6 +258,10 @@ router.post('/:id/programme/cav', authorize('ADMIN', 'MANAGER'), async (req, res
   }
   const tour = await loadTourEditable(tourId, res);
   if (!tour) return;
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
 
   const client = await pool.connect();
   try {
@@ -271,8 +286,10 @@ router.post('/:id/programme/cav', authorize('ADMIN', 'MANAGER'), async (req, res
     await client.query('UPDATE tours SET nb_cav = COALESCE(nb_cav, 0) + 1 WHERE id = $1', [tourId]);
     await client.query('COMMIT');
 
-    await notifierChauffeur(req, tour, `Nouveau point ajouté à ta tournée : ${cav.rows[0].name}.`);
-    res.status(201).json({ ok: true, points: await chargerProgramme(tourId) });
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    await notifierChauffeur(req, tour, `Nouveau point ajouté à ta tournée : ${cav.rows[0].name}.` + (resume ? ` (${resume})` : ''));
+    res.status(201).json({ ok: true, points: await chargerProgramme(tourId), impact });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[TOURS] Erreur ajout de point :', err);
@@ -291,6 +308,10 @@ router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), as
   }
   const tour = await loadTourEditable(tourId, res);
   if (!tour) return;
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
 
   try {
     const point = await pool.query(
@@ -323,8 +344,10 @@ router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), as
     await pool.query(
       'UPDATE tours SET nb_cav = GREATEST(COALESCE(nb_cav, 1) - 1, 0) WHERE id = $1', [tourId]
     );
-    await notifierChauffeur(req, tour, `Point retiré de ta tournée : ${point.rows[0].name}. Tu n'as plus à y passer.`);
-    res.json({ ok: true, points: await chargerProgramme(tourId) });
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    await notifierChauffeur(req, tour, `Point retiré de ta tournée : ${point.rows[0].name}. Tu n'as plus à y passer.` + (resume ? ` (${resume})` : ''));
+    res.json({ ok: true, points: await chargerProgramme(tourId), impact });
   } catch (err) {
     console.error('[TOURS] Erreur retrait de point :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -345,6 +368,10 @@ router.post('/:id/programme/arret', authorize('ADMIN', 'MANAGER'), async (req, r
 
   const tour = await loadTourEditable(tourId, res);
   if (!tour) return;
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
 
   const client = await pool.connect();
   try {
@@ -365,8 +392,10 @@ router.post('/:id/programme/arret', authorize('ADMIN', 'MANAGER'), async (req, r
     );
     await client.query('COMMIT');
 
-    await notifierChauffeur(req, tour, `Nouvel arrêt ajouté à ta tournée : ${nom}.`);
-    res.status(201).json({ ok: true, points: await chargerProgramme(tourId) });
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    await notifierChauffeur(req, tour, `Nouvel arrêt ajouté à ta tournée : ${nom}.` + (resume ? ` (${resume})` : ''));
+    res.status(201).json({ ok: true, points: await chargerProgramme(tourId), impact });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[TOURS] Erreur ajout d\'arrêt :', err);
@@ -385,6 +414,10 @@ router.delete('/:id/programme/arret/:arretId', authorize('ADMIN', 'MANAGER'), as
   }
   const tour = await loadTourEditable(tourId, res);
   if (!tour) return;
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
 
   try {
     const arret = await pool.query(
@@ -402,8 +435,10 @@ router.delete('/:id/programme/arret/:arretId', authorize('ADMIN', 'MANAGER'), as
     }
 
     await pool.query('DELETE FROM tour_arret_technique WHERE id = $1 AND tour_id = $2', [arretId, tourId]);
-    await notifierChauffeur(req, tour, `Arrêt retiré de ta tournée : ${arret.rows[0].nom}.`);
-    res.json({ ok: true, points: await chargerProgramme(tourId) });
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    await notifierChauffeur(req, tour, `Arrêt retiré de ta tournée : ${arret.rows[0].nom}.` + (resume ? ` (${resume})` : ''));
+    res.json({ ok: true, points: await chargerProgramme(tourId), impact });
   } catch (err) {
     console.error('[TOURS] Erreur retrait d\'arrêt :', err);
     res.status(500).json({ error: 'Erreur serveur' });

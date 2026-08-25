@@ -7,6 +7,7 @@ const { validate } = require('../../middleware/validate');
 const { predictFillRate, getSeasonalFactors, setSeasonalFactors, getDayOfWeekFactors, setDayOfWeekFactors, getHolidays, setHolidays, getSchoolVacations, setSchoolVacations, getScoringConfig, setScoringConfig, reloadPersistedConfig, ensureConfigLoaded } = require('./predictions');
 const fillFactors = require('../../utils/fill-factors');
 const { generateIntelligentTour, estimateFixedRoute, estimationSummary } = require('./smart-tour');
+const { poserPauseDejeunerSansBloquer } = require('./arrets');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
 
 // ══════════════════════════════════════════════════════════════
@@ -476,6 +477,10 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), [
         [tourId, cav.cav_id, cav.position, cav.predicted_fill ?? null]
       );
     }
+    // Le retour au centre du midi devient une ÉTAPE visible du programme, sur
+    // toutes les tournées (demande client). Le moteur a déjà décidé de la pause
+    // et de sa place : on ne fait que la rendre visible au chauffeur.
+    await poserPauseDejeunerSansBloquer(pool, tourId, result.estimation);
 
     res.status(201).json({
       tour: tourResult.rows[0],
@@ -538,6 +543,10 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), [
         [tourId, estimated[i].id, i + 1, estimated[i]._fill ?? null]
       );
     }
+    // Le retour au centre du midi devient une ÉTAPE visible du programme, sur
+    // toutes les tournées (demande client). Le moteur a déjà décidé de la pause
+    // et de sa place : on ne fait que la rendre visible au chauffeur.
+    await poserPauseDejeunerSansBloquer(pool, tourId, estimation);
 
     res.status(201).json({ ...tourResult.rows[0], estimation });
   } catch (err) {
@@ -602,6 +611,10 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
         [tourId, estimated[i].id, i + 1, estimated[i]._fill ?? null]
       );
     }
+    // Le retour au centre du midi devient une ÉTAPE visible du programme, sur
+    // toutes les tournées (demande client). Le moteur a déjà décidé de la pause
+    // et de sa place : on ne fait que la rendre visible au chauffeur.
+    await poserPauseDejeunerSansBloquer(pool, tourId, estimation);
 
     res.status(201).json({ ...tourResult.rows[0], estimation });
   } catch (err) {
@@ -665,6 +678,9 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
         [tourId, points[i].id, i + 1]
       );
     }
+    // Même règle pour les tournées association : la pause du midi au centre
+    // est une étape du programme, pas une déduction invisible.
+    await poserPauseDejeunerSansBloquer(pool, tourId, estimation);
 
     res.status(201).json({ ...tourResult.rows[0], estimation });
   } catch (err) {

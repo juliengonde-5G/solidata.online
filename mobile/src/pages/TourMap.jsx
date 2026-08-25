@@ -23,6 +23,13 @@ const cavIcon = (color) => new L.DivIcon({
   className: '', iconSize: [28, 28], iconAnchor: [14, 14],
 });
 
+// Le centre de tri se distingue d'une borne au premier coup d'œil : c'est une
+// destination, pas un point à collecter.
+const centreIcon = new L.DivIcon({
+  html: '<div style="background:#0D9488;color:white;border-radius:12px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:16px;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.35)">\u{1F3ED}</div>',
+  className: '', iconSize: [34, 34], iconAnchor: [17, 17],
+});
+
 const myIcon = new L.DivIcon({
   html: '<div style="background:#3B82F6;border-radius:50%;width:16px;height:16px;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>',
   className: '', iconSize: [16, 16], iconAnchor: [8, 8],
@@ -85,6 +92,12 @@ function traficIcon(type) {
 export default function TourMap() {
   const [tour, setTour] = useState(null);
   const [cavs, setCavs] = useState([]);
+  // Arrêts de programme : retour au centre pour vidage, pause déjeuner, fin de
+  // tournée. Ce sont des ÉTAPES au même titre qu'une borne — avec itinéraire,
+  // et une arrivée à déclarer. Avant, le retour au centre n'existait pas ici :
+  // l'application sautait droit à la pesée, sans montrer le trajet.
+  const [arrets, setArrets] = useState([]);
+  const [arretEnCours, setArretEnCours] = useState(false);
   const [currentCavIndex, setCurrentCavIndex] = useState(0);
   const [myPosition, setMyPosition] = useState(null);
   // Tracé ROUTIER du reste de la tournée (suit les rues au lieu de relier les
@@ -148,6 +161,7 @@ export default function TourMap() {
       const data = await res.json();
       setTour(data);
       setCavs(data.cavs || []);
+      setArrets(data.arrets || []);
       cavsRef.current = data.cavs || [];
       const visitedCount = (data.cavs || []).filter(c => c.status === 'collected').length;
       setCurrentCavIndex(visitedCount);
@@ -287,9 +301,59 @@ export default function TourMap() {
     }
   };
 
-  const intermediateReturn = () => {
-    localStorage.setItem('intermediate_return', 'true');
-    navigate('/weigh-in');
+  /**
+   * Déclare un retour au centre. Le serveur pose une ÉTAPE dans le programme ;
+   * on recharge la tournée pour que l'équipage la voie apparaître, avec son
+   * itinéraire. La pesée n'arrive qu'à l'arrivée déclarée.
+   *
+   * Hors ligne, l'appel échoue : on le dit franchement plutôt que d'ouvrir une
+   * pesée pour un camion qui n'est pas encore rentré.
+   */
+  const declarerRetourCentre = async (motif) => {
+    if (arretEnCours) return;
+    setArretEnCours(true);
+    try {
+      const res = await authedFetch(`/api/tours/${tourId}/retour-centre-public`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motif }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadTour();
+    } catch (err) {
+      console.error(err);
+      alert("Impossible d'enregistrer le retour au centre. Vérifiez la connexion et réessayez.");
+    }
+    setArretEnCours(false);
+  };
+
+  /**
+   * L'équipage est arrivé au centre. C'est CE geste qui ouvre la pesée : tant
+   * qu'il n'a pas eu lieu, le camion est en route.
+   */
+  const confirmerArrivee = async (arret) => {
+    if (arretEnCours) return;
+    setArretEnCours(true);
+    try {
+      const res = await authedFetch(`/api/tours/${tourId}/arret/${arret.id}/arrive-public`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.suite === 'pesee_intermediaire') {
+        localStorage.setItem('intermediate_return', 'true');
+        navigate('/weigh-in');
+      } else if (data.suite === 'pesee_finale') {
+        navigate('/return-centre');
+      } else {
+        await loadTour();
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Impossible d'enregistrer l'arrivée. Vérifiez la connexion et réessayez.");
+    }
+    setArretEnCours(false);
   };
 
   const openNavigation = () => {
@@ -332,12 +396,58 @@ export default function TourMap() {
   };
 
   const currentCAV = cavs[currentCavIndex];
-  const center = myPosition || (currentCAV ? [currentCAV.latitude, currentCAV.longitude] : [49.4231, 1.0993]);
-  const hasCoords = currentCAV?.latitude && currentCAV?.longitude;
+
+  // Un arrêt en attente placé AVANT le prochain point de collecte devient
+  // l'étape courante : c'est là que le camion doit aller maintenant.
+  const positionProchainCav = (() => {
+    const restant = cavs.find((c) => c.status !== 'collected' && c.status !== 'skipped');
+    return restant ? Number(restant.position) : Infinity;
+  })();
+  const arretCourant = arrets
+    .filter((a) => a.status === 'pending' && Number(a.position) <= positionProchainCav)
+    .sort((a, b) => Number(a.position) - Number(b.position))[0] || null;
+
+  const etapeCoords = arretCourant
+    ? [arretCourant.latitude, arretCourant.longitude]
+    : currentCAV ? [currentCAV.latitude, currentCAV.longitude] : null;
+  const center = myPosition || (etapeCoords && etapeCoords[0] != null ? etapeCoords : [49.4231, 1.0993]);
+  const hasCoords = arretCourant
+    ? arretCourant.latitude != null && arretCourant.longitude != null
+    : Boolean(currentCAV?.latitude && currentCAV?.longitude);
+
+  const naviguerVersEtape = () => {
+    if (!etapeCoords || etapeCoords[0] == null) return;
+    window.open(
+      `https://www.google.com/maps/dir/?api=1&destination=${etapeCoords[0]},${etapeCoords[1]}`,
+      '_blank'
+    );
+  };
 
   // Configuration de la barre d'action selon le mode d'usage.
   // Une seule CTA visible à la fois. Le secondaire reste simple.
   const actionConfig = (() => {
+    // Étape « retour au centre » : on ne collecte rien, on roule puis on
+    // annonce son arrivée. En conduite, seule la navigation est proposée.
+    if (arretCourant) {
+      if (mode === USAGE_MODES.DRIVING) {
+        return {
+          primaryLabel: 'Naviguer',
+          primaryIcon: NAV_ICON,
+          onPrimary: naviguerVersEtape,
+          disabled: !hasCoords,
+          secondaryLabel: null,
+        };
+      }
+      return {
+        primaryLabel: arretEnCours ? 'Enregistrement…' : 'Je suis arrivé au centre',
+        primaryIcon: null,
+        onPrimary: () => confirmerArrivee(arretCourant),
+        disabled: arretEnCours,
+        secondaryLabel: hasCoords ? 'Naviguer' : null,
+        secondaryIcon: hasCoords ? NAV_ICON : null,
+        onSecondary: hasCoords ? naviguerVersEtape : null,
+      };
+    }
     if (!currentCAV) return null;
     if (mode === USAGE_MODES.DRIVING) {
       return {
@@ -448,8 +558,8 @@ export default function TourMap() {
           <UsageModeBanner onDark />
           <button
             type="button"
-            aria-label="Pesée intermédiaire"
-            onClick={intermediateReturn}
+            aria-label="Camion plein, retour au centre pour pesée"
+            onClick={() => declarerRetourCentre('vidage')}
             className="touch-target flex items-center justify-center rounded-xl bg-amber-500/80 hover:bg-amber-500 text-xs font-medium px-3"
           >
             Pesée
@@ -457,7 +567,7 @@ export default function TourMap() {
           <button
             type="button"
             aria-label="Fin de tournée, retour au centre"
-            onClick={() => navigate('/return-centre')}
+            onClick={() => declarerRetourCentre('fin_tournee')}
             className="touch-target flex items-center justify-center rounded-xl bg-white/20 hover:bg-white/30 text-sm font-medium px-3"
           >
             Fin
@@ -521,6 +631,22 @@ export default function TourMap() {
             ) : null
           ))}
 
+          {arretCourant && arretCourant.latitude != null && arretCourant.longitude != null && (
+            <Marker
+              position={[arretCourant.latitude, arretCourant.longitude]}
+              icon={centreIcon}
+            >
+              <Popup>
+                <div style={{ minWidth: 150 }}>
+                  <strong>{arretCourant.name}</strong>
+                  {arretCourant.address && (
+                    <div style={{ fontSize: 12, color: '#64748B' }}>{arretCourant.address}</div>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          )}
+
           {trace?.geometry?.length >= 2 ? (
             <Polyline
               positions={trace.geometry}
@@ -535,7 +661,7 @@ export default function TourMap() {
         </MapContainer>
       </div>
 
-      {currentCAV && actionConfig && (
+      {(arretCourant || currentCAV) && actionConfig && (
         <div
           className="relative z-20 bg-white flex-shrink-0"
           style={{
@@ -548,7 +674,29 @@ export default function TourMap() {
           <div className="flex justify-center pt-2.5">
             <div className="w-10 h-1 rounded-full bg-gray-300" />
           </div>
-          {/* Carte "Prochain point" — version allégée en conduite */}
+          {/* Étape « retour au centre » : elle occupe toute la carte, pour
+              qu'on ne la confonde pas avec une borne à collecter. */}
+          {arretCourant ? (
+            <div className="px-4 pt-2 pb-2">
+              <p className="text-[11px] uppercase tracking-widest text-teal-600 font-bold">
+                Étape en cours
+              </p>
+              <h3 className="font-extrabold text-gray-900 text-lg">
+                <span aria-hidden="true">🏭</span> {arretCourant.name}
+              </h3>
+              {mode !== USAGE_MODES.DRIVING && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {arretCourant.address
+                    || 'Rejoignez le centre de tri, puis appuyez sur « Je suis arrivé ».'}
+                </p>
+              )}
+              {mode !== USAGE_MODES.DRIVING && arretCourant.motif === 'vidage' && (
+                <p className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                  La pesée s'ouvrira à votre arrivée
+                </p>
+              )}
+            </div>
+          ) : (
           <div className="px-4 pt-2 pb-2">
             <p className="text-[11px] uppercase tracking-widest text-gray-400 font-bold">
               Prochain point #{currentCavIndex + 1}
@@ -579,6 +727,7 @@ export default function TourMap() {
               </div>
             )}
           </div>
+          )}
           <PrimaryActionBar
             primaryLabel={actionConfig.primaryLabel}
             primaryIcon={actionConfig.primaryIcon}
@@ -591,7 +740,7 @@ export default function TourMap() {
         </div>
       )}
 
-      {!currentCAV && cavs.length > 0 && (
+      {!arretCourant && !currentCAV && cavs.length > 0 && (
         <div className="relative z-20 bg-green-50 border-t border-green-200 flex-shrink-0">
           <div className="px-4 py-3 text-center">
             <p className="text-green-800 font-bold">
@@ -599,8 +748,8 @@ export default function TourMap() {
             </p>
           </div>
           <PrimaryActionBar
-            primaryLabel="Retour au centre de tri"
-            onPrimary={() => navigate('/return-centre')}
+            primaryLabel={arretEnCours ? 'Enregistrement…' : 'Retour au centre de tri'}
+            onPrimary={() => declarerRetourCentre('fin_tournee')}
             secondaryLabel="Incident"
             secondaryIcon={INCIDENT_ICON}
             onSecondary={() => navigate('/incident')}

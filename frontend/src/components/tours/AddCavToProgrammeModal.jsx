@@ -22,7 +22,7 @@ function fillBadgeClass(rate) {
  *  - tourId      : id de la tournée
  *  - excludeIds  : number[] — ids des CAV déjà au programme (ref_id)
  *  - onClose     : () => void
- *  - onAdded     : (points) => void — appelé avec le programme à jour renvoyé par l'API
+ *  - onAdded     : (points, impact) => void — programme à jour + effet chiffré de l'ajout
  */
 export default function AddCavToProgrammeModal({ tourId, excludeIds, onClose, onAdded }) {
   const [items, setItems] = useState([]);
@@ -62,7 +62,7 @@ export default function AddCavToProgrammeModal({ tourId, excludeIds, onClose, on
     setAddError(null);
     try {
       const res = await api.post(`/tours/${tourId}/programme/cav`, { cav_id: cav.id });
-      onAdded(res.data.points);
+      onAdded(res.data.points, res.data.impact);
     } catch (err) {
       const code = err.response?.data?.code;
       setAddError(

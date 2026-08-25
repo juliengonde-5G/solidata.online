@@ -66,6 +66,7 @@ function uploadPhotoOr400(mw) {
 
 // Fraîcheur de la photo du CAV — seuil paramétrable `collecte.photo_fraicheur_mois`.
 const { getPhotoFraicheurMois, photoRequise } = require('../../utils/cav-photo');
+const { arretsPourMobile, creerRetourCentre, centreDeTri, SUITE_MOTIF } = require('./arrets');
 
 // Sub-routers
 const crudRouter = require('./crud');
@@ -275,9 +276,14 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
       points = cavsResult.rows;
     }
     const photoState = await decoratePhotoState(points, tour.collection_type === 'association');
+    // Les arrêts de programme (retour au centre : vidage, pause, fin) voyagent
+    // À CÔTÉ des points de collecte, dans une clé distincte : un mobile hors
+    // ligne resté sur une ancienne version continue de lire `cavs` sans rien
+    // perdre, et la carte fusionne les deux sur `position`.
     res.json({
       tour: { ...tour, photo_fraicheur_mois: photoState.photo_fraicheur_mois },
       cavs: photoState.points,
+      arrets: await arretsPourMobile(tour.id),
     });
   } catch (err) {
     console.error('[TOURS] Erreur vehicle/today:', err);
@@ -327,6 +333,7 @@ router.get('/:id/public', async (req, res) => {
       ...tour,
       photo_fraicheur_mois: photoState.photo_fraicheur_mois,
       cavs: photoState.points,
+      arrets: await arretsPourMobile(tour.id),
     });
   } catch (err) {
     console.error('[TOURS] Erreur public/:id:', err);
@@ -726,6 +733,101 @@ router.post('/:id/cav/:cavId/photo-public', uploadPhotoOr400(uploadCavPhoto.sing
   } catch (err) {
     cleanupUpload();
     console.error('[TOURS] Erreur photo-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── RETOUR AU CENTRE DE TRI (demande client 08/2026) ───────────────────────
+// Avant : « camion plein » ouvrait la page de pesée sur-le-champ. Le trajet de
+// retour n'existait ni à l'écran du chauffeur, ni dans les chiffres de la
+// tournée. Désormais l'équipage se voit poser une ÉTAPE de plus, avec son
+// itinéraire, et la pesée n'arrive qu'une fois l'arrivée déclarée.
+//
+// POST /api/tours/:id/retour-centre-public  { motif: 'vidage' | 'fin_tournee' }
+router.post('/:id/retour-centre-public', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const tourId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Tournée invalide' });
+
+    const motif = String(req.body?.motif || 'vidage');
+    // La pause du midi est POSÉE PAR LE SERVEUR, pas déclarée par le chauffeur :
+    // elle n'a pas à être créable depuis le mobile.
+    if (!['vidage', 'fin_tournee'].includes(motif)) {
+      return res.status(400).json({ error: 'Motif de retour inconnu' });
+    }
+
+    const t = await client.query('SELECT id, status FROM tours WHERE id = $1', [tourId]);
+    if (t.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+    if (['completed', 'cancelled'].includes(t.rows[0].status)) {
+      return res.status(409).json({ error: 'Cette tournée est déjà terminée.' });
+    }
+
+    await client.query('BEGIN');
+    const centre = await centreDeTri(client);
+    // Un retour de fin va TOUJOURS en queue de programme : ce qui reste de la
+    // journée est abandonné, pas doublé. Un vidage s'intercale au contraire
+    // juste devant le chauffeur, les points suivants restant à faire après.
+    const arret = await creerRetourCentre(client, {
+      tourId, motif, centre, enFin: motif === 'fin_tournee',
+    });
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      arret_id: arret.id,
+      position: arret.position,
+      deja_present: arret.deja_present,
+      motif,
+      suite: SUITE_MOTIF[motif],
+      destination: {
+        name: centre.nom || 'Centre de tri',
+        address: centre.adresse || null,
+        latitude: centre.latitude,
+        longitude: centre.longitude,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur retour-centre-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/tours/:id/arret/:arretId/arrive-public — l'équipage est arrivé.
+// C'est CE geste, et lui seul, qui ouvre la pesée : tant qu'il n'a pas eu lieu,
+// le camion est en route et la tournée n'a rien à peser.
+router.post('/:id/arret/:arretId/arrive-public', async (req, res) => {
+  try {
+    const tourId = parseInt(req.params.id, 10);
+    const arretId = parseInt(req.params.arretId, 10);
+    if (!Number.isInteger(tourId) || !Number.isInteger(arretId)) {
+      return res.status(400).json({ error: 'Identifiant invalide' });
+    }
+
+    const r = await pool.query(
+      `UPDATE tour_arret_technique
+          SET status = 'done',
+              arrived_at = COALESCE(arrived_at, NOW()),
+              completed_at = NOW()
+        WHERE id = $1 AND tour_id = $2
+        RETURNING id, motif, position, arrived_at`,
+      [arretId, tourId]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Arrêt non trouvé' });
+
+    const arret = r.rows[0];
+    res.json({
+      success: true,
+      arret_id: arret.id,
+      motif: arret.motif,
+      arrived_at: arret.arrived_at,
+      suite: SUITE_MOTIF[arret.motif] || 'reprise_tournee',
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur arrive-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

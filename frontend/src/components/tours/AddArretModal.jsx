@@ -14,7 +14,7 @@ import { getArretCategoryMeta } from './arretCategories';
  * Props :
  *  - tourId  : id de la tournée
  *  - onClose : () => void
- *  - onAdded : (points) => void — appelé avec le programme à jour renvoyé par l'API
+ *  - onAdded : (points, impact) => void — programme à jour + effet chiffré de l'ajout
  */
 export default function AddArretModal({ tourId, onClose, onAdded }) {
   const [mode, setMode] = useState('lieu'); // 'lieu' | 'libre'
@@ -56,7 +56,7 @@ export default function AddArretModal({ tourId, onClose, onAdded }) {
         ? { lieu_id: parseInt(lieuId, 10), notes: trimmedNotes }
         : { libelle: libelle.trim(), notes: trimmedNotes };
       const res = await api.post(`/tours/${tourId}/programme/arret`, body);
-      onAdded(res.data.points);
+      onAdded(res.data.points, res.data.impact);
       setSuccessCount((c) => c + 1);
       setLieuId('');
       setLibelle('');

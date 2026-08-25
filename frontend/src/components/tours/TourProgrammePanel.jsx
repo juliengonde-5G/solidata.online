@@ -8,12 +8,28 @@ import { ErrorState, useToast } from '..';
 import TourEquipePanel from './TourEquipePanel';
 import AddCavToProgrammeModal from './AddCavToProgrammeModal';
 import AddArretModal from './AddArretModal';
-import { getArretCategoryMeta } from './arretCategories';
+import { getArretCategoryMeta, getArretMotifMeta } from './arretCategories';
 
 function fmtTime(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
+
+/** Écart signé, ou « — » quand il n'a pas pu être calculé (jamais « 0 » par défaut). */
+function fmtEcart(valeur, unite) {
+  if (valeur == null || !Number.isFinite(Number(valeur))) return '—';
+  const v = Number(valeur);
+  if (v === 0) return `sans changement`;
+  return `${v > 0 ? '+' : ''}${v} ${unite}`;
+}
+
+/** Minutes → « 5 h 40 », lisible d'un coup d'œil. */
+function fmtDuree(minutes) {
+  if (minutes == null || !Number.isFinite(Number(minutes))) return '—';
+  const m = Math.round(Number(minutes));
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+}
+
 
 // Déplace l'élément d'index `from` vers l'index `to` (nouvelle liste, non mutée).
 function moveItem(list, from, to) {
@@ -56,6 +72,10 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
 
   const [showAddCav, setShowAddCav] = useState(false);
   const [showAddArret, setShowAddArret] = useState(false);
+  // Effet chiffré de la dernière modification. Sans lui, on déplaçait des
+  // lignes sans jamais savoir ce que ça coûtait en kilomètres, en minutes, ni
+  // si la journée tenait encore dans le temps de travail.
+  const [impact, setImpact] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,6 +145,7 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
         ordre: reordered.map((p) => ({ kind: p.kind, id: p.id })),
       });
       setPoints(res.data.points || reordered);
+      setImpact(res.data.impact || null);
       await afterPointsChange();
     } catch (err) {
       // Jamais mentir sur l'ordre réel : on restaure l'ordre précédent.
@@ -160,6 +181,7 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
         : `/tours/${tourId}/programme/arret/${point.id}`;
       const res = await api.delete(url);
       setPoints(res.data.points || []);
+      setImpact(res.data.impact || null);
       await afterPointsChange();
     } catch (err) {
       const code = err.response?.data?.code;
@@ -176,8 +198,9 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
     }
   };
 
-  const handlePointsUpdated = (serverPoints) => {
+  const handlePointsUpdated = (serverPoints, serverImpact) => {
     setPoints(serverPoints || []);
+    if (serverImpact !== undefined) setImpact(serverImpact || null);
     afterPointsChange();
   };
 
@@ -226,6 +249,71 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
         </div>
       )}
 
+      {/* Effet de la dernière modification. Affiché seulement APRÈS un geste :
+          on ne montre pas un bilan permanent, on répond à « qu'est-ce que je
+          viens de changer ? ». */}
+      {impact && (
+        <div
+          className={`mb-2 rounded-lg border px-3 py-2 text-xs ${
+            impact.calculable === false
+              ? 'border-slate-200 bg-slate-50 text-slate-600'
+              : impact.budget?.bascule_hors_budget
+                ? 'border-red-200 bg-red-50 text-red-800'
+                : 'border-teal-200 bg-teal-50 text-teal-800'
+          }`}
+          role="status"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-semibold">
+                {impact.calculable === false
+                  ? 'Effet non calculé'
+                  : impact.budget?.bascule_hors_budget
+                    ? 'La journée ne tient plus dans le temps de travail'
+                    : 'Effet de la modification'}
+              </p>
+              {impact.calculable === false ? (
+                <p className="mt-0.5">{impact.motif}</p>
+              ) : (
+                <>
+                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>
+                      Distance&nbsp;:{' '}
+                      <strong>{fmtEcart(impact.ecart?.distance_km, 'km')}</strong>
+                      {' '}({impact.apres?.distance_km} km au total)
+                    </span>
+                    <span>
+                      Travail&nbsp;:{' '}
+                      <strong>{fmtEcart(impact.ecart?.duree_travail_min, 'min')}</strong>
+                      {' '}({fmtDuree(impact.apres?.duree_travail_min)} sur {fmtDuree(impact.budget?.budget_travail_min)})
+                    </span>
+                  </p>
+                  <p className="mt-0.5">
+                    Retour estimé à <strong>{impact.horaires?.heure_fin_estimee || '—'}</strong>
+                    {impact.horaires?.heure_fin_precedente
+                      && impact.horaires.heure_fin_precedente !== impact.horaires.heure_fin_estimee
+                      && <> (au lieu de {impact.horaires.heure_fin_precedente})</>}
+                    {impact.budget?.depassement_min > 0
+                      && <> — dépassement de {impact.budget.depassement_min} min</>}
+                  </p>
+                  {impact.budget?.revient_dans_budget && (
+                    <p className="mt-0.5 font-medium">La journée retombe dans le temps de travail.</p>
+                  )}
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setImpact(null)}
+              className="flex-shrink-0 text-slate-400 hover:text-slate-600"
+              aria-label="Masquer l'effet de la modification"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Liste ordonnée des points */}
       <div className="rounded-lg border border-slate-200 overflow-hidden bg-white">
         {points.length === 0 ? (
@@ -236,6 +324,9 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
         ) : points.map((point, index) => {
           const isCav = point.kind === 'cav';
           const categoryMeta = !isCav ? getArretCategoryMeta(point.categorie) : null;
+          // Un retour au centre se lit par son MOTIF, pas par son lieu : les
+          // trois motifs se déroulent au même endroit.
+          const motifMeta = !isCav ? getArretMotifMeta(point.motif) : null;
           const Icon = isCav ? MapPin : categoryMeta.icon;
           const done = point.editable === false;
           const skipped = isCav && !!point.skip_reason;
@@ -281,7 +372,8 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
                 <p className="text-[11px] text-slate-400 truncate">
                   {isCav
                     ? (point.commune || point.address || '—')
-                    : `${categoryMeta.label}${point.duree_min ? ` · ${point.duree_min} min` : ''}`}
+                    : `${motifMeta ? motifMeta.label : categoryMeta.label}${point.duree_min ? ` · ${point.duree_min} min` : ''}`}
+                  {!isCav && point.arrived_at ? ` · arrivée à ${fmtTime(point.arrived_at)}` : ''}
                   {point.collected_at ? ` · collecté à ${fmtTime(point.collected_at)}` : ''}
                 </p>
               </div>
