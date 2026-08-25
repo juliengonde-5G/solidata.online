@@ -394,7 +394,12 @@ export default function PlanningTournees() {
                     accepts={['vehicle']}
                     dragTarget={dragTarget}
                     onDrop={(t) => assignFromDrop(tour, t)}
-                    onClear={tour.registration ? () => clearSlot(tour, 'vehicle_id') : null}
+                    /* Pas de « retirer » sur le véhicule : une tournée ne peut
+                       pas exister sans lui (c'est le véhicule qui porte le lien
+                       d'accès du chauffeur). Proposer une action impossible
+                       menait à une erreur serveur opaque. On remplace un
+                       véhicule en en déposant un autre. */
+                    onClear={null}
                   />
                   <DropSlot
                     label="Suiveur 1"

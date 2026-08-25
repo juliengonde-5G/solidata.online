@@ -172,7 +172,14 @@ router.get('/planning/resources',
 
 // PATCH /api/tours/:id/assign — Modifier driver et/ou véhicule
 // Vérifie : tournée terminée = refus ; conflit dispo ; conflit déjà affecté.
-// Passer null pour déaffecter une ressource.
+//
+// Passer null déaffecte une ressource — SAUF le véhicule. Une tournée est
+// indissociable de son véhicule : c'est lui qui porte le lien d'accès du
+// chauffeur (« 1 URL = 1 véhicule »), et `tours.vehicle_id` est NOT NULL par
+// conception, alors que `driver_employee_id` est nullable depuis la 2.24.1.
+// Ce commentaire promettait auparavant le contraire, et la demande partait
+// jusqu'à PostgreSQL, qui la refusait en 23502 — l'utilisateur voyait
+// « Erreur serveur » sans jamais savoir pourquoi.
 router.patch('/:id/assign',
   authorize('ADMIN', 'MANAGER'),
   [
@@ -209,6 +216,18 @@ router.patch('/:id/assign',
 
       const driverId = hasDriver ? parseId('driver_employee_id') : undefined;
       const vehicleId = hasVehicle ? parseId('vehicle_id') : undefined;
+
+      // Refus EXPLICITE plutôt qu'une violation de contrainte remontée en 500.
+      if (hasVehicle && vehicleId === null) {
+        return res.status(400).json({
+          error: 'Une tournée ne peut pas exister sans véhicule. Déposez un autre véhicule pour le remplacer, ou annulez la tournée.',
+          code: 'VEHICULE_OBLIGATOIRE',
+        });
+      }
+      // Un identifiant illisible ne doit pas non plus finir en erreur serveur.
+      if (hasVehicle && !Number.isInteger(vehicleId)) {
+        return res.status(400).json({ error: 'Véhicule invalide' });
+      }
       const suiveur1Id = hasSuiveur1 ? parseId('suiveur1_employee_id') : undefined;
       const suiveur2Id = hasSuiveur2 ? parseId('suiveur2_employee_id') : undefined;
 
