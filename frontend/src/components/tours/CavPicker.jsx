@@ -14,6 +14,14 @@ import api from '../../services/api';
  *  - onOptimize : () => void  (optionnel) — si fourni, affiche le bouton
  *                 « Optimiser l'ordre » au-dessus de la sélection
  *  - optimizing : boolean — état de chargement du bouton optimiser
+ *  - durations        : { [id]: number|null } (mode association uniquement)
+ *                       — durée d'arrêt COURANTE de chaque point sélectionné.
+ *                       `null` = pas d'ajustement, la cascade fiche > réglage
+ *                       global s'applique côté serveur.
+ *  - onDurationChange : (id, minutesOrNull) => void — appelé à chaque
+ *                       modification ET pour préremplir automatiquement un
+ *                       point qui vient d'entrer dans la sélection (depuis la
+ *                       durée de sa fiche, `duree_collecte_min`, si connue).
  */
 
 // Seuils repris de FillRateMap.jsx (getFillColor / getFillBg) pour une
@@ -24,6 +32,13 @@ function fillBadgeClass(rate) {
   if (rate >= 40) return 'bg-yellow-100 text-yellow-700';
   return 'bg-green-100 text-green-700';
 }
+
+// Provenance de la durée d'arrêt affichée (RG-C3, cascade tournée > fiche > global).
+const DUREE_SOURCE_META = {
+  ajustee: { label: 'ajustée', cls: 'bg-indigo-100 text-indigo-700' },
+  fiche: { label: 'fiche', cls: 'bg-blue-100 text-blue-700' },
+  global: { label: 'réglage global', cls: 'bg-slate-100 text-slate-500' },
+};
 
 const MIN_FILL_OPTIONS = [
   { value: 0, label: 'Tous les taux' },
@@ -44,6 +59,9 @@ export default function CavPicker({
   // à chaque ajout/retrait de point et la passe ici — la barre reste visible en
   // tête de la colonne Sélection pendant qu'on compose la tournée.
   estimation = null, estimating = false, estimationHint = null,
+  // Durée d'arrêt ajustable par point (mode association — RG-C2/C3 du chantier
+  // tournées associations). Ignoré en mode CAV.
+  durations = null, onDurationChange = null,
 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +85,9 @@ export default function CavPicker({
           address: p.address,
           commune: p.ville,
           fillRate: null,
+          // Durée par défaut de la fiche (RG-C1) — `null` = non renseignée,
+          // le réglage global s'appliquera côté serveur.
+          duree_collecte_min: p.duree_collecte_min != null ? Number(p.duree_collecte_min) : null,
         })));
       } else {
         const res = await api.get('/cav/fill-rate');
@@ -122,6 +143,42 @@ export default function CavPicker({
     () => selectedIds.map(id => itemsById[id]).filter(Boolean),
     [selectedIds, itemsById]
   );
+
+  // Préremplissage de la durée d'arrêt (RG-C2) : tout point qui entre dans la
+  // sélection — par clic ici, ou par une sélection posée par le parent (choix
+  // d'un modèle, préremplissage depuis une demande) — reçoit sa durée de fiche
+  // si elle est connue, sinon `null` (le réglage global s'appliquera côté
+  // serveur ; jamais de nombre deviné affiché ici). Ne touche jamais une
+  // valeur déjà présente dans `durations` (ajustement du gestionnaire ou
+  // rechargement après un premier passage).
+  useEffect(() => {
+    if (mode !== 'association' || typeof onDurationChange !== 'function') return;
+    selectedIds.forEach((id) => {
+      if (durations && Object.prototype.hasOwnProperty.call(durations, id)) return;
+      const item = itemsById[id];
+      onDurationChange(id, item && item.duree_collecte_min != null ? item.duree_collecte_min : null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedIds, itemsById, durations, onDurationChange]);
+
+  const setDuration = (id, raw) => {
+    if (typeof onDurationChange !== 'function') return;
+    if (raw === '' || raw == null) { onDurationChange(id, null); return; }
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) { onDurationChange(id, null); return; }
+    onDurationChange(id, Math.min(480, Math.max(1, n)));
+  };
+
+  // Provenance affichée de la durée courante (RG-C3) : ajustée (le
+  // gestionnaire l'a modifiée pour cette tournée) > fiche (valeur du point,
+  // reprise telle quelle) > réglage global (rien de connu ici, jamais de
+  // nombre inventé à l'écran).
+  const dureeSource = (item) => {
+    const val = durations ? durations[item.id] : null;
+    if (val == null) return 'global';
+    if (item.duree_collecte_min != null && val === item.duree_collecte_min) return 'fiche';
+    return 'ajustee';
+  };
 
   const addItem = (id) => { if (!selectedIds.includes(id)) onChange([...selectedIds, id]); };
   const removeItem = (id) => onChange(selectedIds.filter(v => v !== id));
@@ -274,30 +331,51 @@ export default function CavPicker({
               <p className="text-xs text-slate-400">Cliquez sur un élément à gauche pour l'ajouter à la tournée.</p>
             </div>
           ) : selected.map((item, idx) => (
-            <div key={item.id} className="flex items-center gap-2 px-2.5 py-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white text-[10px] font-bold grid place-items-center">
-                {idx + 1}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-xs font-medium text-slate-700 truncate">{item.name}</span>
-                <span className="block text-[10px] text-slate-400 truncate">{item.commune || item.address || '—'}</span>
-              </span>
-              {mode === 'cav' && item.fillRate != null && (
-                <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${fillBadgeClass(item.fillRate)}`}>
-                  {item.fillRate}%
+            <div key={item.id} className="px-2.5 py-2">
+              <div className="flex items-center gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white text-[10px] font-bold grid place-items-center">
+                  {idx + 1}
                 </span>
-              )}
-              <div className="flex items-center flex-shrink-0">
-                <button type="button" onClick={() => moveUp(idx)} disabled={idx === 0} aria-label="Monter" className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-30 disabled:cursor-not-allowed">
-                  <ArrowUp className="w-3.5 h-3.5" />
-                </button>
-                <button type="button" onClick={() => moveDown(idx)} disabled={idx === selected.length - 1} aria-label="Descendre" className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-30 disabled:cursor-not-allowed">
-                  <ArrowDown className="w-3.5 h-3.5" />
-                </button>
-                <button type="button" onClick={() => removeItem(item.id)} aria-label="Retirer" className="p-1 text-slate-400 hover:text-red-600">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium text-slate-700 truncate">{item.name}</span>
+                  <span className="block text-[10px] text-slate-400 truncate">{item.commune || item.address || '—'}</span>
+                </span>
+                {mode === 'cav' && item.fillRate != null && (
+                  <span className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${fillBadgeClass(item.fillRate)}`}>
+                    {item.fillRate}%
+                  </span>
+                )}
+                <div className="flex items-center flex-shrink-0">
+                  <button type="button" onClick={() => moveUp(idx)} disabled={idx === 0} aria-label="Monter" className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-30 disabled:cursor-not-allowed">
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button type="button" onClick={() => moveDown(idx)} disabled={idx === selected.length - 1} aria-label="Descendre" className="p-1 text-slate-400 hover:text-teal-600 disabled:opacity-30 disabled:cursor-not-allowed">
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button type="button" onClick={() => removeItem(item.id)} aria-label="Retirer" className="p-1 text-slate-400 hover:text-red-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
+              {/* Durée d'arrêt ajustable (RG-C2/C3) — mode association uniquement */}
+              {mode === 'association' && (
+                <div className="flex items-center gap-1.5 mt-1 pl-7">
+                  <input
+                    type="number"
+                    min="1"
+                    max="480"
+                    value={durations && durations[item.id] != null ? durations[item.id] : ''}
+                    onChange={(e) => setDuration(item.id, e.target.value)}
+                    placeholder="—"
+                    aria-label={`Durée d'arrêt pour ${item.name}`}
+                    className="w-14 text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-center focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                  <span className="text-[10px] text-slate-400">min</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${DUREE_SOURCE_META[dureeSource(item)].cls}`}>
+                    {DUREE_SOURCE_META[dureeSource(item)].label}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
         </div>

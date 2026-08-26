@@ -129,6 +129,23 @@ async function mesurerSequence(waypoints, { vehicule, facteurTrafic }) {
 }
 
 /**
+ * Reconstruit l'ordre complet : les passages épinglés (rendez-vous) reprennent
+ * EXACTEMENT leur place, les points libres réoptimisés comblent le reste.
+ * @param {Array} ordreLibre      ids des points libres, dans le nouvel ordre
+ * @param {Map<number, any>} places  index figé → id du passage épinglé
+ * @param {number} taille         nombre total de passages restants
+ */
+function reinsererEpingles(ordreLibre, places, taille) {
+  const resultat = new Array(taille).fill(undefined);
+  for (const [index, id] of places) resultat[index] = id;
+  let k = 0;
+  for (let i = 0; i < taille; i++) {
+    if (resultat[i] === undefined) resultat[i] = ordreLibre[k++];
+  }
+  return resultat;
+}
+
+/**
  * Propose (et applique éventuellement) un nouvel ordre de passage.
  *
  * @param {object} p
@@ -167,7 +184,7 @@ async function proposeReoptimization({
   const table = isAssoc ? 'tour_association_point' : 'tour_cav';
   const remainingRes = isAssoc
     ? await pool.query(
-        `SELECT tap.id, tap.association_point_id AS cav_id, tap.position,
+        `SELECT tap.id, tap.association_point_id AS cav_id, tap.position, tap.demande_id,
                 ap.name AS cav_name, ap.latitude, ap.longitude
            FROM tour_association_point tap
            JOIN association_points ap ON ap.id = tap.association_point_id
@@ -193,6 +210,8 @@ async function proposeReoptimization({
     cav_name: r.cav_name,
     lat: parseFloat(r.latitude),
     lng: parseFloat(r.longitude),
+    // Passage rattaché à une demande de collecte (rendez-vous) : ÉPINGLÉ.
+    demande_id: r.demande_id != null ? Number(r.demande_id) : null,
   }));
   if (remaining.length < 2) {
     return { skipped: true, reason: 'moins_de_2_points_restants' };
@@ -252,11 +271,41 @@ async function proposeReoptimization({
   const legLocal = fabriqueLegLocal(coords, matrice, facteurTrafic, legKey);
   const opts = optionsOptimisation();
   const ordreActuel = remaining.map((r) => r.id);
-  const recherche = optimizer.optimiserOrdre(ordreActuel, legLocal, opts);
+
+  // ── RG-B5 : les rendez-vous sont ÉPINGLÉS ───────────────────────────────
+  // Un passage rattaché à une demande de collecte a une heure convenue avec
+  // une personne : la ré-optimisation ne le déplace JAMAIS. Sa PLACE dans
+  // l'ordre est figée (et non le point retiré de la liste : le retirer
+  // laisserait sa position en collision avec celles des points renumérotés) ;
+  // seuls les autres points sont permutés, entre eux, autour de lui.
+  const placesEpinglees = new Map(); // index dans l'ordre → id de passage
+  remaining.forEach((r, i) => { if (r.demande_id != null) placesEpinglees.set(i, r.id); });
+  const libres = remaining.filter((r) => r.demande_id == null).map((r) => r.id);
+
+  if (placesEpinglees.size > 0 && libres.length < 2) {
+    return {
+      skipped: true,
+      reason: 'points_epingles_rendez_vous',
+      epingles: placesEpinglees.size,
+      objectif: opts.objectif,
+    };
+  }
+
+  // Sans rendez-vous : comportement strictement inchangé (tout est permutable).
+  const aOptimiser = placesEpinglees.size > 0 ? libres : ordreActuel;
+  const recherche = optimizer.optimiserOrdre(aOptimiser, legLocal, opts);
 
   if (!recherche.ameliore) {
     return { skipped: true, reason: 'ordre_deja_optimal', objectif: opts.objectif };
   }
+
+  // Ordre complet reconstruit : les épinglés retrouvent leur place exacte.
+  // NB : la recherche a raisonné sur le SOUS-PARCOURS des points libres ; le
+  // gain publié, lui, est TOUJOURS mesuré ci-dessous sur les séquences
+  // complètes (avant / après), donc sur la réalité de la tournée.
+  const ordrePropose = placesEpinglees.size > 0
+    ? reinsererEpingles(recherche.ordre, placesEpinglees, remaining.length)
+    : recherche.ordre;
 
   // ── 2. MESURE (deux appels, mêmes conditions de circulation) ────────────
   const enWaypoints = (ordre) => [
@@ -267,7 +316,7 @@ async function proposeReoptimization({
   const vehicule = { tare_weight_kg: tour.tare_weight_kg, max_capacity_kg: tour.max_capacity_kg };
   const [mesureAvant, mesureApres] = await Promise.all([
     mesurerSequence(enWaypoints(ordreActuel), { vehicule, facteurTrafic }),
-    mesurerSequence(enWaypoints(recherche.ordre), { vehicule, facteurTrafic }),
+    mesurerSequence(enWaypoints(ordrePropose), { vehicule, facteurTrafic }),
   ]);
 
   const mesure = mesureAvant && mesureApres;
@@ -313,7 +362,7 @@ async function proposeReoptimization({
      RETURNING id, triggered_at`,
     [
       tourId, triggerReason, triggeredBy, startLat, startLng,
-      JSON.stringify(ordreActuel), JSON.stringify(recherche.ordre),
+      JSON.stringify(ordreActuel), JSON.stringify(ordrePropose),
       avant.km, apres.km, avant.min, apres.min,
       opts.objectif, source, co2Evite,
     ]
@@ -332,7 +381,7 @@ async function proposeReoptimization({
     retard_trafic_min: mesure && mesureApres.retard_trafic_min != null
       ? Math.round(mesureApres.retard_trafic_min) : null,
     old_sequence: ordreActuel,
-    new_sequence: recherche.ordre,
+    new_sequence: ordrePropose,
     old_distance_km: Math.round(avant.km * 10) / 10,
     new_distance_km: Math.round(apres.km * 10) / 10,
     old_duration_min: Math.round(avant.min),
@@ -346,7 +395,7 @@ async function proposeReoptimization({
     // « non calculable » n'est pas « aucune émission évitée ».
     co2_evite_kg: co2Evite,
     co2_motif: emissions.motif,
-    points: recherche.ordre.map((id, idx) => {
+    points: ordrePropose.map((id, idx) => {
       const p = parId.get(id) || {};
       return {
         id, cav_id: p.cav_id, cav_name: p.cav_name,
@@ -372,7 +421,7 @@ async function proposeReoptimization({
 
   // Réchauffement opportuniste du cache sur les tronçons RETENUS : la
   // prochaine recherche s'appuiera sur des mesures, plus sur l'approximation.
-  const retenus = enWaypoints(recherche.ordre);
+  const retenus = enWaypoints(ordrePropose);
   Promise.all(retenus.slice(1).map((w, i) =>
     cachedRouteSegment(retenus[i].lat, retenus[i].lng, w.lat, w.lng).catch(() => null)
   )).catch(() => {});

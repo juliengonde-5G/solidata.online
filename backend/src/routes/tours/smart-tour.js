@@ -10,6 +10,30 @@ const { predictFillRate, getSchoolVacationStatus, getScoringConfig } = require('
 const fillFactors = require('../../utils/fill-factors');
 const timeEngine = require('../../services/tour-time-engine');
 
+// ──────────────────────────────────────────────────────────────
+// Horaires d'accessibilité des associations — module PUR partagé
+// ──────────────────────────────────────────────────────────────
+// Le module `services/association-horaires` porte TOUTE la connaissance du
+// calendrier hebdomadaire (validation, plages du jour, fenêtre effective d'un
+// rendez-vous). Il est chargé de façon TOLÉRANTE : tant qu'il n'est pas
+// déployé, la planification continue — mais SANS contrôle d'horaires, et
+// l'estimation le DIT (avertissement explicite, cf. estimateFixedRoute).
+// Un contrôle qui disparaît en silence serait pire que pas de contrôle du tout.
+let associationHoraires = null;
+try {
+  associationHoraires = require('../../services/association-horaires');
+} catch (_) {
+  console.warn('[SMART-TOUR] services/association-horaires indisponible — '
+    + 'le contrôle des horaires d\'accessibilité des associations est INACTIF.');
+}
+
+/** Le module d'horaires est-il exploitable (fonctions attendues présentes) ? */
+function horairesDisponibles() {
+  return !!(associationHoraires
+    && typeof associationHoraires.plagesDuJour === 'function'
+    && typeof associationHoraires.fenetreEffective === 'function');
+}
+
 // ══════════════════════════════════════════════════════════════
 // ALGORITHME DE TOURNÉE INTELLIGENTE v3
 // ──────────────────────────────────────────────────────────────
@@ -95,6 +119,156 @@ function learnedTimeFor(map, cavId, defaultTime) {
   return v != null ? v : defaultTime;
 }
 
+// ──────────────────────────────────────────────────────────────
+// CASCADE DES DURÉES D'ARRÊT (RG-C3) — source UNIQUE
+// ──────────────────────────────────────────────────────────────
+// duree_prevue_min (ajustement de CETTE tournée, table tour_association_point)
+//   → duree_collecte_min (défaut de la FICHE association)
+//     → réglage global `timePerCav` (10 min, partagé avec les CAV).
+// Chaque niveau ne s'applique QUE si le précédent est vide : aucune valeur
+// n'est inventée, et la provenance reste affichable (`resolveDureeArret`).
+// Consommée par l'estimation (estimateFixedRoute), la création et le calcul
+// des heures prévues (planned-passage.js) : les trois lisent la même règle,
+// sans quoi deux écrans donneraient deux horaires différents pour un même point.
+
+/** Durée d'arrêt exploitable (minutes) ou null : > 0 et ≤ 480 (8 h). */
+function dureeArretValide(valeur) {
+  const n = typeof valeur === 'string' ? parseFloat(valeur) : valeur;
+  if (!Number.isFinite(n)) return null;
+  if (n <= 0 || n > 480) return null;
+  return n;
+}
+
+/**
+ * Résout la durée d'arrêt d'un point ET sa provenance.
+ * @param {object} point  peut porter `duree_prevue_min` et/ou `duree_collecte_min`
+ * @param {number} defautGlobal  réglage `timePerCav`
+ * @returns {{minutes:number, source:'tournee'|'fiche'|'global'}}
+ */
+function resolveDureeArret(point, defautGlobal) {
+  const tournee = dureeArretValide(point && point.duree_prevue_min);
+  if (tournee != null) return { minutes: tournee, source: 'tournee' };
+  const fiche = dureeArretValide(point && point.duree_collecte_min);
+  if (fiche != null) return { minutes: fiche, source: 'fiche' };
+  return { minutes: defautGlobal, source: 'global' };
+}
+
+/** Raccourci : minutes seules (cf. resolveDureeArret pour la provenance). */
+function resolveServiceMinutes(point, defautGlobal) {
+  return resolveDureeArret(point, defautGlobal).minutes;
+}
+
+// ──────────────────────────────────────────────────────────────
+// CONVERSION référentiel → moteur (le moteur ne connaît ni le calendrier
+// ni la table des demandes — même partage des rôles que `routeLeg`)
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * Plages d'accessibilité du JOUR de la tournée, en minutes d'horloge.
+ * @returns {Array<[number,number]>|null} null = horaires inconnus (jamais bloquant)
+ */
+function fenetresDuJour(point, dateStr) {
+  if (!point || point.type !== 'association') return null;
+  if (!horairesDisponibles()) return null;
+  const brut = point.horaires_accessibilite;
+  if (brut === undefined || brut === null) return null;
+  try {
+    return associationHoraires.plagesDuJour(brut, dateStr);
+  } catch (_) {
+    return null; // horaires illisibles → inconnus, jamais « fermé » par défaut
+  }
+}
+
+/**
+ * Fenêtre effective d'un rendez-vous porté par le point (`_demande`), en
+ * minutes d'horloge, tolérance appliquée des deux côtés.
+ * @returns {{debutMin:number, finMin:number}|null}
+ */
+function ancrageDuPoint(point, toleranceDefautMin) {
+  const d = point && point._demande;
+  if (!d || !d.heure_debut) return null;
+  if (!horairesDisponibles()) return null;
+  try {
+    const f = associationHoraires.fenetreEffective(
+      { heure_debut: d.heure_debut, heure_fin: d.heure_fin, tolerance_min: d.tolerance_min },
+      toleranceDefautMin
+    );
+    if (!f || !Number.isFinite(f.debutMin) || !Number.isFinite(f.finMin)) return null;
+    return { debutMin: f.debutMin, finMin: f.finMin };
+  } catch (_) {
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// SUGGESTION D'ORDRE SOUS RENDEZ-VOUS (RG-B4) — heuristique v1
+// ──────────────────────────────────────────────────────────────
+// Volontairement simple (l'optimisation fine sous fenêtres — 2-opt contraint —
+// est explicitement hors périmètre) :
+//   1. les points ANCRÉS sont placés d'abord, triés par fenêtre croissante ;
+//   2. chaque point LIBRE est inséré à la position qui minimise le détour,
+//      sous test de faisabilité par simulation ; on retient la première
+//      position faisable en partant de la moins coûteuse.
+// Aucun point n'est jamais abandonné : si aucune position ne tient le
+// rendez-vous, le point est placé au moindre détour et la faisabilité de
+// l'ordre complet est vérifiée à la fin. Un ordre qui ne tient toujours pas
+// n'est PAS proposé (`null`) — proposer un ordre qui échoue serait mentir.
+//
+// Fonction PURE : la distance et le test de faisabilité sont INJECTÉS.
+//
+// @param {Array} points   points dans l'ordre soumis (peuvent porter `anchor`)
+// @param {object} deps
+// @param {(a,b)=>number} deps.distance  coût entre deux points (a/b = null → centre)
+// @param {(ordre)=>Promise<boolean>} deps.faisable  vrai si l'ordre tient les RDV
+// @returns {Promise<Array|null>} ordre suggéré (mêmes objets) ou null
+async function suggererOrdre(points, { distance, faisable } = {}) {
+  const liste = Array.isArray(points) ? points.slice() : [];
+  if (liste.length < 2 || typeof distance !== 'function' || typeof faisable !== 'function') {
+    return null;
+  }
+  const ancres = liste.filter((p) => p && p.anchor);
+  if (ancres.length === 0) return null; // rien à ancrer : aucune suggestion à faire
+
+  // 1. Squelette : les points ancrés, par fenêtre croissante (début puis fin).
+  const ordre = ancres.slice().sort((a, b) => (
+    a.anchor.debutMin - b.anchor.debutMin || a.anchor.finMin - b.anchor.finMin
+  ));
+
+  // 2. Insertion des points libres au moindre détour, sous test de faisabilité.
+  const rangSoumis = new Map(liste.map((p, i) => [p, i]));
+  const libres = liste.filter((p) => !(p && p.anchor));
+  for (const point of libres) {
+    // À DÉTOUR ÉGAL, on bouleverse le moins possible l'ordre soumis : la
+    // position de référence est le nombre de points déjà placés qui
+    // précédaient déjà ce point dans la sélection du gestionnaire.
+    const reference = ordre.filter((q) => rangSoumis.get(q) < rangSoumis.get(point)).length;
+    const candidats = [];
+    for (let i = 0; i <= ordre.length; i++) {
+      const avant = i === 0 ? null : ordre[i - 1];
+      const apres = i === ordre.length ? null : ordre[i];
+      const detour = distance(avant, point) + distance(point, apres) - distance(avant, apres);
+      candidats.push({ i, detour, ecart: Math.abs(i - reference) });
+    }
+    candidats.sort((a, b) => a.detour - b.detour || a.ecart - b.ecart || a.i - b.i);
+    let place = false;
+    for (const c of candidats) {
+      const essai = ordre.slice();
+      essai.splice(c.i, 0, point);
+      // eslint-disable-next-line no-await-in-loop
+      if (await faisable(essai)) { ordre.splice(c.i, 0, point); place = true; break; }
+    }
+    // Aucune position ne tient les rendez-vous : on garde le moindre détour et
+    // c'est la vérification finale qui tranchera (jamais de point abandonné).
+    if (!place) ordre.splice(candidats[0].i, 0, point);
+  }
+
+  if (!(await faisable(ordre))) return null;
+  // Un ordre identique à celui soumis n'est pas une « suggestion ».
+  const memeOrdre = ordre.length === liste.length
+    && ordre.every((p, i) => p === liste[i]);
+  return memeOrdre ? null : ordre;
+}
+
 /**
  * Poids estimé (kg) collecté sur un CAV = remplissage prédit × capacité du CAV
  * (nb conteneurs × 150 kg, source unique utils/fill-factors).
@@ -131,6 +305,37 @@ function makeRouteLeg(trafficFactor = 1) {
     const seg = await cachedRouteSegment(from.lat, from.lng, to.lat, to.lng);
     return { km: seg.distance_km, minutes: seg.duration_min * factor };
   };
+}
+
+/**
+ * Mémoïse une fonction `routeLeg` sur la paire de coordonnées (5 décimales
+ * ≈ 1 m). La suggestion d'ordre rejoue plusieurs simulations sur les MÊMES
+ * points : sans mémo, chaque simulation redemanderait tous ses tronçons au
+ * routeur. Le moteur mémoïse déjà en interne, mais seulement par appel.
+ */
+function memoRouteLeg(routeLeg) {
+  const cache = new Map();
+  const cle = (p) => `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`;
+  return async (from, to) => {
+    const k = `${cle(from)}>${cle(to)}`;
+    if (cache.has(k)) return cache.get(k);
+    const leg = await routeLeg(from, to);
+    cache.set(k, leg);
+    return leg;
+  };
+}
+
+/**
+ * Distance à vol d'oiseau entre deux points, le CENTRE DE TRI tenant lieu de
+ * point de départ et d'arrivée (`null`). Sert uniquement à CLASSER les
+ * positions d'insertion candidates de la suggestion d'ordre : la faisabilité,
+ * elle, est toujours vérifiée par une simulation complète du moteur.
+ */
+function distanceOuCentre(a, b) {
+  const lat = (p) => (p && p.latitude != null ? parseFloat(p.latitude) : CENTRE_TRI_LAT);
+  const lng = (p) => (p && p.longitude != null ? parseFloat(p.longitude) : CENTRE_TRI_LNG);
+  const d = haversineDistance(lat(a), lng(a), lat(b), lng(b));
+  return Number.isFinite(d) ? d : 0;
 }
 
 /**
@@ -259,6 +464,9 @@ function timeEngineOptions(vehicle, over = {}) {
       vehicleFillReturnPct: cfg.vehicleFillReturnPct,
       capacityKg,
     }),
+    // Arbitrage client n°3 : l'attente devant une association avant l'heure de
+    // son rendez-vous est du temps de travail (l'équipage est en service).
+    attenteCompteTravail: cfg.attenteCompteTravail !== false,
     ...over,
   };
 }
@@ -316,12 +524,23 @@ async function loadPredictedFills(cavIds, dateStr) {
  *                            name, latitude, longitude, nb_containers}
  * @param {string} p.date     date de la tournée (YYYY-MM-DD)
  * @param {boolean} [p.optimize] réordonner géographiquement avant estimation
- * @returns {Promise<{estimation:object, ordre_optimise:number[]|null, points:Array}>}
+ * @param {boolean} [p.suggererOrdre] proposer un ordre tenant les rendez-vous
+ *                  quand l'ordre soumis en manque un (RG-B4)
+ * @returns {Promise<{estimation:object, ordre_optimise:number[]|null,
+ *                    ordre_suggere:number[]|null, points:Array}>}
  *          `points` = les points dans l'ordre finalement estimé, enrichis du
  *          remplissage prédit `_fill` (écrit dans tour_cav.predicted_fill_rate)
  *          et du poids retenu `_weightKg`.
+ *
+ * Points ASSOCIATION : la durée d'arrêt suit la cascade RG-C3
+ * (`duree_prevue_min` → `duree_collecte_min` → `timePerCav`), les horaires
+ * d'accessibilité (`horaires_accessibilite`) deviennent les `windows` du jour
+ * et une demande de collecte rattachée (`_demande`) devient l'`anchor` du
+ * moteur. Le moteur SIGNALE (violations), la route DÉCIDE (409 forçable).
  */
-async function estimateFixedRoute({ vehicle, points, date, optimize = false }) {
+async function estimateFixedRoute({
+  vehicle, points, date, optimize = false, suggererOrdre: avecSuggestion = false,
+}) {
   const cfg = getScoringConfig();
   const dateStr = typeof date === 'string' && date
     ? date.slice(0, 10)
@@ -358,16 +577,38 @@ async function estimateFixedRoute({ vehicle, points, date, optimize = false }) {
   }
 
   const defaultService = numOr(cfg.timePerCav, 10);
-  const enriched = rows.map((p) => ({
-    ...p,
-    _weightKg: p.type === 'cav'
-      ? estimatedWeightKgFor(fills.get(Number(p.id))?.fill ?? null, p.nb_containers)
-      : 0,
-    _serviceMinutes: p.type === 'cav'
-      ? learnedTimeFor(learnedTimes, p.id, defaultService)
-      : defaultService,
-    _fill: p.type === 'cav' ? (fills.get(Number(p.id))?.fill ?? null) : null,
-  }));
+  const toleranceRdv = numOr(cfg.rdvToleranceMin, 15);
+  const enriched = rows.map((p) => {
+    // Durée d'arrêt : temps APPRIS pour les CAV (inchangé), cascade RG-C3 pour
+    // les associations (ajustement de la tournée > fiche > réglage global).
+    const duree = p.type === 'cav'
+      ? { minutes: learnedTimeFor(learnedTimes, p.id, defaultService), source: 'appris' }
+      : resolveDureeArret(p, defaultService);
+    return {
+      ...p,
+      _weightKg: p.type === 'cav'
+        ? estimatedWeightKgFor(fills.get(Number(p.id))?.fill ?? null, p.nb_containers)
+        : 0,
+      _serviceMinutes: duree.minutes,
+      _dureeSource: duree.source,
+      _fill: p.type === 'cav' ? (fills.get(Number(p.id))?.fill ?? null) : null,
+      _windows: fenetresDuJour(p, dateStr),
+      _anchor: ancrageDuPoint(p, toleranceRdv),
+    };
+  });
+
+  // Un contrôle d'horaires qui n'a pas pu être fait doit se VOIR : sans le
+  // module d'horaires, une association fermée passerait pour ouverte.
+  const nbHorairesRenseignes = rows.filter(
+    (p) => p.type === 'association' && p.horaires_accessibilite != null
+  ).length;
+  const nbDemandes = rows.filter((p) => p.type === 'association' && p._demande).length;
+  if (!horairesDisponibles() && (nbHorairesRenseignes > 0 || nbDemandes > 0)) {
+    warnings.push(
+      'Contrôle des horaires d’accessibilité et des rendez-vous INDISPONIBLE '
+      + '(module association-horaires absent) — les heures prévues ne sont pas vérifiées.'
+    );
+  }
 
   // Circulation attendue ce jour-là : lue AVANT l'optimisation d'ordre, car
   // elle en fait partie (un ordre optimal à circulation libre ne l'est plus
@@ -386,21 +627,64 @@ async function estimateFixedRoute({ vehicle, points, date, optimize = false }) {
     ordreOptimise = opt.map((p) => p.id);
   }
 
-  const estimation = await timeEngine.buildTimeline(
-    ordered.map((p) => ({
-      id: p.id,
-      type: p.type,
-      name: p.name,
-      lat: p.latitude,
-      lng: p.longitude,
-      serviceMinutes: p._serviceMinutes,
-      weightKg: p._weightKg,
-    })),
-    { ...timeEngineOptions(vehicle), routeLeg: makeRouteLeg(trafficFactor) }
-  );
+  // Un seul résolveur de tronçons pour l'estimation ET les simulations de la
+  // suggestion d'ordre : chaque tronçon n'est demandé au routeur qu'une fois.
+  const routeLeg = memoRouteLeg(makeRouteLeg(trafficFactor));
+  const pourMoteur = (liste) => liste.map((p) => ({
+    id: p.id,
+    type: p.type,
+    name: p.name,
+    lat: p.latitude,
+    lng: p.longitude,
+    serviceMinutes: p._serviceMinutes,
+    weightKg: p._weightKg,
+    windows: p._windows,
+    anchor: p._anchor,
+  }));
+  const optionsMoteur = { ...timeEngineOptions(vehicle), routeLeg };
+
+  const estimation = await timeEngine.buildTimeline(pourMoteur(ordered), optionsMoteur);
+
+  // Rétro-compatibilité : un moteur qui ne connaît pas encore les fenêtres ne
+  // renvoie pas `violations`. On expose alors un tableau vide (aucune violation
+  // constatée) et on le DIT quand un contrôle était attendu.
+  const moteurControle = Array.isArray(estimation.violations);
+  if (!moteurControle) {
+    estimation.violations = [];
+    const attendait = ordered.some((p) => p._windows != null || p._anchor != null);
+    if (attendait) {
+      warnings.push(
+        'Contrôle des horaires et des rendez-vous NON EFFECTUÉ : le moteur de temps '
+        + 'installé ne gère pas les fenêtres horaires.'
+      );
+    }
+  }
+  if (!Number.isFinite(estimation.duree_attente_min)) estimation.duree_attente_min = 0;
+
+  // Suggestion d'ordre : uniquement quand un rendez-vous n'est pas tenu (RG-B4).
+  let ordreSuggere = null;
+  if (avecSuggestion && estimation.violations.some((v) => v && v.type === 'rdv_manque')) {
+    const propose = await suggererOrdre(
+      ordered.map((p) => ({ ...p, anchor: p._anchor })),
+      {
+        distance: (a, b) => distanceOuCentre(a, b),
+        faisable: async (essai) => {
+          const test = await timeEngine.buildTimeline(pourMoteur(essai), optionsMoteur);
+          return !(test.violations || []).some((v) => v && v.type === 'rdv_manque');
+        },
+      }
+    );
+    if (propose) ordreSuggere = propose.map((p) => p.id);
+  }
+
   estimation.avertissements = [...estimation.avertissements, ...warnings];
 
-  return { estimation, ordre_optimise: ordreOptimise, points: ordered };
+  return {
+    estimation,
+    ordre_optimise: ordreOptimise,
+    ordre_suggere: ordreSuggere,
+    points: ordered,
+  };
 }
 
 async function generateIntelligentTour(vehicleId, date) {
@@ -816,6 +1100,15 @@ function estimationSummary(estimation, { mode, vehicle, forced = false } = {}) {
 }
 
 module.exports = {
+  // Cascade des durées d'arrêt (RG-C3) — partagée avec planned-passage.js
+  resolveDureeArret,
+  resolveServiceMinutes,
+  dureeArretValide,
+  // Conversion référentiel → moteur + suggestion d'ordre (RG-A / RG-B)
+  fenetresDuJour,
+  ancrageDuPoint,
+  suggererOrdre,
+  horairesDisponibles,
   generateIntelligentTour,
   generateAIExplanation,
   estimateFixedRoute,

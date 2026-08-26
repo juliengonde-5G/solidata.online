@@ -186,6 +186,97 @@ Modèles gérés par `POST/PUT/DELETE /tours/association-routes[/:id]`
 avertissement explicite, « jamais de valeur inventée »). Contrainte conservée : pas
 de mélange PAV/association pour un même véhicule le même jour.
 
+Une association n'est pas une borne de rue : c'est un local tenu par des personnes,
+avec des horaires, parfois un rendez-vous, et un temps de collecte très variable.
+Trois règles de gestion en découlent (CDC : `rapports/tournees-associations-2026-08-26/`).
+
+#### 5.4.1 Horaires d'accessibilité (RG-A)
+
+`association_points.horaires_accessibilite` (JSONB) porte les plages hebdomadaires :
+
+```json
+{ "lundi": [{"debut":"09:00","fin":"12:00"},{"debut":"14:00","fin":"17:00"}],
+  "mardi": [{"debut":"09:00","fin":"12:00"}], "mercredi": [], ... }
+```
+
+**Trois états distincts, à ne jamais confondre** — c'est la source d'erreur principale
+de ce module :
+
+| État | Signification | Effet sur la planification |
+|---|---|---|
+| colonne `NULL` | horaires **inconnus** (fiche non renseignée) | aucune contrainte, mention affichée |
+| jour à `[]` ou absent | **fermé** ce jour-là | passage refusé ce jour |
+| plages présentes | ouvert sur ces plages | passage refusé hors plages |
+
+Bloquer sur une information absente paralyserait le module dès le premier jour : un
+point sans horaires reste planifiable, et l'écran le dit au lieu de le taire.
+
+Le module PUR `services/association-horaires.js` porte toute cette logique (validation
+du JSONB, plages du jour, jours fermés, premier créneau compatible, fenêtre effective
+d'un rendez-vous) — sans base ni horloge, donc testable sans rien monter.
+
+À l'estimation et à la création, `smart-tour.js` traduit les horaires du jour en
+`windows` (minutes d'horloge) transmises au moteur de temps. Un passage dont
+l'intervalle `[arrivée ; arrivée + durée]` ne tient dans aucune plage produit une
+violation `hors_horaires`, et la création est refusée en **409
+`ASSOCIATION_HORS_HORAIRES`** — détaillé point par point (heure prévue, plages du
+jour, premier créneau compatible), **forçable** par `force:true` avec trace dans
+`ai_explanation`, exactement comme le `DUREE_MAX_DEPASSEE` existant. Les heures
+prévues restent des estimations : le gestionnaire peut savoir ce que le logiciel
+ignore.
+
+#### 5.4.2 Collecte sur rendez-vous (RG-B)
+
+`association_collecte_demandes` enregistre une demande de passage (association, date,
+heure précise ou créneau, tolérance — défaut `rdvToleranceMin`, 15 min). Un passage
+peut être rattaché à une demande (`tour_association_point.demande_id`), ce qui l'**ancre** :
+`smart-tour.js` transmet au moteur une `anchor` = fenêtre effective
+`[début − tolérance ; fin + tolérance]`.
+
+Dans le moteur, l'ancrage est la **seule** chose qui fait attendre l'équipage : arrivée
+avant l'ouverture de la fenêtre → entrée `{type:'attente'}` explicite dans la
+chronologie, imputée au temps de travail selon `attenteCompteTravail` (défaut : oui,
+l'équipage est en service). Un horaire d'ouverture seul ne génère **jamais** d'attente :
+arriver à 11h55 devant un local qui rouvre à 14h ne doit pas fabriquer deux heures de
+temps mort silencieux — cela se signale, cela ne s'invente pas.
+
+Rendez-vous intenable → violation `rdv_manque` → **409 `RDV_NON_TENABLE`**, avec
+`ordre_suggere` quand un ordre de passage qui le tient existe. Forçable et tracé, même
+logique que ci-dessus. La ré-optimisation en cours de tournée **épingle** les points
+ancrés : elle ne les déplace jamais hors de leur fenêtre.
+
+**Le statut d'une demande est DÉRIVÉ, jamais stocké** (`a_planifier`, `planifiee`,
+`honoree`, `non_honoree`, `annulee`) : il se lit de la réalité de la tournée, donc il ne
+peut pas diverger d'elle. Supprimer une tournée fait retomber ses demandes
+« à planifier » par la seule FK `ON DELETE SET NULL`, sans code de rattrapage.
+
+#### 5.4.3 Durée d'arrêt (RG-C)
+
+Le temps passé sur place varie beaucoup d'une association à l'autre. Cascade de
+résolution, chaque niveau ne s'appliquant que si le précédent est `null` :
+
+```
+tour_association_point.duree_prevue_min   (ajustement pour CETTE tournée)
+  → association_points.duree_collecte_min (défaut de la fiche)
+    → SCORING_CONFIG.timePerCav           (réglage global, 10 min)
+```
+
+La provenance de la valeur est affichée à la programmation : l'utilisateur doit savoir
+d'où vient le chiffre qu'il voit. La même durée est consommée par l'estimation ET par
+le calcul des heures prévues (`planned-passage.js`) — sinon les deux écrans se
+contrediraient.
+
+#### 5.4.4 Points d'attention du modèle
+
+- Les positions de `tour_association_point`, `tour_cav` et `tour_arret_technique`
+  partagent **une seule échelle** : le programme est leur fusion ordonnée, et le mobile
+  désigne l'étape courante en comparant ces numéros. Toute fonction qui numérote ou
+  décale des positions doit voir les **trois** tables.
+- Le poids d'un point association n'est **pas** estimé (0 kg, avertissement explicite) :
+  les retours de vidage ne sont pas anticipés sur ces tournées. L'alimentation de
+  `tonnage_history_association` à la clôture est le préalable qui rendra une estimation
+  possible un jour.
+
 ### 5.5 Garde de saturation transverse
 `GET /api/tours/saturation-risks?days=7` (ADMIN/MANAGER) : pour chaque CAV dont les
 données permettent une projection (prédictions `ml_fill_predictions`, sinon capteur),

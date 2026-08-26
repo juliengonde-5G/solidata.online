@@ -1,12 +1,40 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar, Truck, User, AlertTriangle, X, Users, Car,
-  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus, Clock,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, PageHeader } from '../components';
+import { LoadingSpinner, PageHeader, Modal } from '../components';
 import CreateTourModal from '../components/tours/CreateTourModal';
 import api from '../services/api';
+
+// Statuts d'une demande de collecte — DÉRIVÉS côté serveur, jamais saisis
+// (contrat §4.2) : traduits en français et distingués visuellement.
+const DEMANDE_STATUT_META = {
+  a_planifier: { label: 'À planifier', cls: 'bg-amber-100 text-amber-700' },
+  planifiee: { label: 'Planifiée', cls: 'bg-blue-100 text-blue-700' },
+  honoree: { label: 'Honorée', cls: 'bg-emerald-100 text-emerald-700' },
+  non_honoree: { label: 'Non honorée', cls: 'bg-red-100 text-red-700' },
+  annulee: { label: 'Annulée', cls: 'bg-slate-200 text-slate-500' },
+};
+
+const EMPTY_DEMANDE_FORM = {
+  association_point_id: '', date_souhaitee: '', heure_debut: '', heure_fin: '',
+  tolerance_min: '', commentaire: '',
+};
+
+// Lundi → dimanche de la semaine ISO contenant la date donnée ('YYYY-MM-DD').
+function weekRange(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const day = d.getDay(); // 0 = dimanche
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = (x) => x.toISOString().slice(0, 10);
+  return { du: fmt(monday), au: fmt(sunday) };
+}
 
 // Badge du mode de planification d'une tournée (IA / modèle / manuelle / association)
 function modeBadge(t) {

@@ -229,6 +229,64 @@ async function decoratePhotoState(points, isAssociation) {
   };
 }
 
+/**
+ * Enrichit les points d'une tournée ASSOCIATION de ce que le chauffeur doit voir :
+ * les horaires du jour et le rendez-vous éventuel.
+ *
+ * Trois états d'horaires, à ne JAMAIS confondre — c'est ce qui sépare un écran juste
+ * d'un écran qui ment à une équipe en tournée :
+ *   • `null` → horaires non renseignés : le mobile n'affiche rien, plutôt qu'une
+ *     assurance qu'on ne peut pas donner ;
+ *   • `[]`   → fermé aujourd'hui (passage forcé par le bureau) ;
+ *   • plages → ouvert sur ces plages.
+ *
+ * Best effort : sur une base non migrée, le parcours de collecte doit continuer sans
+ * ces informations plutôt que de renvoyer une erreur au chauffeur.
+ */
+async function decorerHorairesEtRdv(points, tourId, dateTournee) {
+  if (!Array.isArray(points) || points.length === 0) return points;
+  try {
+    const { jourDeDate } = require('../../services/association-horaires');
+    const jour = jourDeDate(
+      typeof dateTournee === 'string' ? dateTournee.slice(0, 10)
+        : new Date(dateTournee).toISOString().slice(0, 10)
+    );
+    const r = await pool.query(
+      `SELECT tap.association_point_id AS point_id, ap.horaires_accessibilite,
+              d.id AS demande_id,
+              to_char(d.heure_debut, 'HH24:MI') AS heure_debut,
+              to_char(d.heure_fin, 'HH24:MI') AS heure_fin,
+              d.tolerance_min
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+         LEFT JOIN association_collecte_demandes d
+                ON d.id = tap.demande_id AND d.annulee_le IS NULL
+        WHERE tap.tour_id = $1`,
+      [tourId]
+    );
+    const parPoint = new Map(r.rows.map((row) => [Number(row.point_id), row]));
+    return points.map((p) => {
+      const info = parPoint.get(Number(p.cav_id));
+      if (!info) return p;
+      const h = info.horaires_accessibilite;
+      return {
+        ...p,
+        horaires_jour: h == null ? null : (Array.isArray(h[jour]) ? h[jour] : []),
+        rdv: info.demande_id
+          ? {
+            heure_debut: info.heure_debut,
+            heure_fin: info.heure_fin,
+            tolerance_min: info.tolerance_min,
+          }
+          : null,
+      };
+    });
+  } catch (err) {
+    console.warn('[TOURS] Horaires/RDV des points association illisibles :', err.message);
+    return points;
+  }
+}
+
 // GET /api/tours/vehicle/:vehicleId/today — Tournée du jour (JWT chauffeur requis)
 router.get('/vehicle/:vehicleId/today', async (req, res) => {
   try {
@@ -261,7 +319,7 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
          WHERE tap.tour_id = $1 ORDER BY tap.position`,
         [tour.id]
       );
-      points = assoResult.rows;
+      points = await decorerHorairesEtRdv(assoResult.rows, tour.id, tour.date);
     } else {
       const cavsResult = await pool.query(
         `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,
@@ -316,7 +374,7 @@ router.get('/:id/public', async (req, res) => {
          WHERE tap.tour_id = $1 ORDER BY tap.position`,
         [tour.id]
       );
-      points = assoResult.rows;
+      points = await decorerHorairesEtRdv(assoResult.rows, tour.id, tour.date);
     } else {
       const cavsResult = await pool.query(
         `SELECT tc.*, c.name as cav_name, c.address, c.commune, c.latitude, c.longitude,

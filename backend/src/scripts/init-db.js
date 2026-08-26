@@ -5059,6 +5059,68 @@ async function initDatabase() {
       ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
     `);
 
+    // ──────────────────────────────────────────────────────────────
+    // Horaires d'accessibilité, durée d'arrêt et demandes de collecte
+    // (cahier des charges du 26/08/2026, RG-A / RG-B / RG-C).
+    // Migrations idempotentes — l'ORDRE compte : la table des demandes doit
+    // exister avant la colonne `demande_id` qui la référence.
+    // ──────────────────────────────────────────────────────────────
+
+    // RG-A1 / RG-C1 — fiche association.
+    // `horaires_accessibilite` : objet JSONB { lundi: [{debut,fin}], ... }.
+    //   Colonne NULL       = horaires INCONNUS → planification permise, mention
+    //                        affichée (RG-A2 : on ne bloque jamais sur une
+    //                        information absente).
+    //   Jour à [] ou absent = FERMÉ ce jour-là (RG-A5).
+    // `duree_collecte_min` : durée d'arrêt par défaut du point ; NULL = non
+    //   renseignée, le réglage global s'applique alors (RG-C3, cascade
+    //   passage → fiche → global, aucune valeur inventée).
+    await client.query(`
+      ALTER TABLE association_points
+        ADD COLUMN IF NOT EXISTS horaires_accessibilite JSONB,
+        ADD COLUMN IF NOT EXISTS horaires_notes TEXT,
+        ADD COLUMN IF NOT EXISTS duree_collecte_min INTEGER;
+    `);
+
+    // RG-C2 — durée d'arrêt ajustée POUR CETTE TOURNÉE (premier niveau de la
+    // cascade). NULL = non ajustée : la fiche, puis le réglage global, prennent
+    // le relais.
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS duree_prevue_min INTEGER;
+    `);
+
+    // RG-B1 / RG-B8 — demandes de collecte à horaire précis. Le devenir de la
+    // demande (à planifier / planifiée / honorée / non honorée) est DÉRIVÉ des
+    // passages rattachés, jamais stocké : `annulee_le` est le seul état posé à
+    // la main (RG-B7). Une seule demande par association et par date.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS association_collecte_demandes (
+        id SERIAL PRIMARY KEY,
+        association_point_id INTEGER NOT NULL REFERENCES association_points(id) ON DELETE CASCADE,
+        date_souhaitee DATE NOT NULL,
+        heure_debut TIME NOT NULL,
+        heure_fin TIME,
+        tolerance_min INTEGER,
+        commentaire TEXT,
+        annulee_le TIMESTAMP,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (association_point_id, date_souhaitee)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_assoc_demandes_date ON association_collecte_demandes(date_souhaitee);');
+
+    // RG-B3 — rattachement du passage à la demande. ON DELETE SET NULL : la
+    // suppression d'une demande ne fait pas disparaître le passage de la
+    // tournée ; à l'inverse, la suppression de la tournée (CASCADE sur
+    // tour_association_point) fait retomber la demande « à planifier » sans
+    // perte (RG-B7). Posée APRÈS la table ci-dessus — la FK l'exige.
+    await client.query(`
+      ALTER TABLE tour_association_point
+        ADD COLUMN IF NOT EXISTS demande_id INTEGER REFERENCES association_collecte_demandes(id) ON DELETE SET NULL;
+    `);
+
     // Route standard association (jonction route ↔ points association)
     await client.query(`
       CREATE TABLE IF NOT EXISTS standard_route_association (

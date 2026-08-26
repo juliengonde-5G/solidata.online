@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight } from 'lucide-react';
+import { Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight, AlertTriangle } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, Section, EmptyState, ErrorState } from '../components';
 import CavPicker from '../components/tours/CavPicker';
@@ -10,6 +10,90 @@ import api from '../services/api';
 
 const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
 const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée' };
+
+// Codes de refus 409 forçables à la création (gestionnaire ADMIN/MANAGER,
+// forçage tracé côté serveur dans ai_explanation) — même mécanique que le
+// dépassement de durée historique.
+const FORCABLE_CODES = ['DUREE_MAX_DEPASSEE', 'ASSOCIATION_HORS_HORAIRES', 'RDV_NON_TENABLE'];
+
+const FORCE_LABELS = {
+  DUREE_MAX_DEPASSEE: 'le dépassement de la durée de travail maximale',
+  ASSOCIATION_HORS_HORAIRES: "l'horaire hors des plages d'accessibilité d'au moins une association",
+  RDV_NON_TENABLE: 'le rendez-vous non tenable avec cet ordre de passage',
+};
+
+// Minutes d'HORLOGE (depuis minuit) → 'HH:MM'.
+function fmtClockMin(min) {
+  if (min == null || Number.isNaN(min)) return '—';
+  const m = ((Math.round(min) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+// Minutes ÉCOULÉES depuis le départ + heure de départ 'HH:MM' → heure d'horloge.
+// Les deux référentiels ne se mélangent jamais (cf. contrat tour-time-engine).
+function fmtElapsedAsClock(heureDepart, elapsedMin) {
+  if (!heureDepart || elapsedMin == null || Number.isNaN(elapsedMin)) return '—';
+  const parts = String(heureDepart).split(':').map(Number);
+  if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) return '—';
+  return fmtClockMin(parts[0] * 60 + parts[1] + Math.round(elapsedMin));
+}
+
+// Avertissements d'horaires/rendez-vous de l'estimation LIVE (POST /tours/estimate,
+// forme numérique brute du moteur — cf. contrat §3), affichés AVANT toute
+// soumission : le refus 409 doit être l'exception, pas la découverte.
+function ViolationsPanel({ estimation, onApplyOrder }) {
+  const violations = estimation?.violations;
+  const ordreSuggere = estimation?.ordre_suggere;
+  const hasOrdre = Array.isArray(ordreSuggere) && ordreSuggere.length > 0;
+  if ((!violations || violations.length === 0) && !hasOrdre) return null;
+  const heureDepart = estimation?.heure_depart;
+  return (
+    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+      {violations?.length > 0 && (
+        <>
+          <p className="text-xs font-bold text-amber-800 mb-1.5 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {violations.length} avertissement{violations.length > 1 ? 's' : ''} d'horaires — à régler, ou à forcer en connaissance de cause à la création
+          </p>
+          <ul className="text-xs text-amber-800 space-y-1.5">
+            {violations.map((v, i) => (
+              <li key={i} className="bg-white/60 rounded-lg px-2 py-1.5">
+                <span className="font-semibold">{v.name || `Point #${v.point_id}`}</span>
+                {v.type === 'hors_horaires' && (
+                  <>
+                    {' — arrivée prévue '}{fmtElapsedAsClock(heureDepart, v.arrivee_min)}
+                    {', hors des horaires du jour'}
+                    {v.plages?.length
+                      ? ` (${v.plages.map(p => `${fmtClockMin(p[0])}-${fmtClockMin(p[1])}`).join(', ')})`
+                      : ' (fermé ce jour)'}
+                    {v.prochain_creneau_min != null
+                      ? ` — premier créneau compatible : ${fmtClockMin(v.prochain_creneau_min)}`
+                      : ' — aucun créneau compatible ce jour'}
+                  </>
+                )}
+                {v.type === 'rdv_manque' && (
+                  <>
+                    {' — rendez-vous manqué : arrivée prévue '}{fmtElapsedAsClock(heureDepart, v.arrivee_min)}
+                    {v.fenetre ? `, fenêtre ${fmtClockMin(v.fenetre.debutMin)}-${fmtClockMin(v.fenetre.finMin)}` : ''}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {hasOrdre && onApplyOrder && (
+        <button
+          type="button"
+          onClick={() => onApplyOrder(ordreSuggere)}
+          className="mt-2 text-[11px] font-semibold text-amber-800 underline hover:text-amber-900"
+        >
+          Appliquer l'ordre suggéré par le serveur (tient le rendez-vous)
+        </button>
+      )}
+    </div>
+  );
+}
 
 function fmtRouteDuration(min) {
   if (min == null) return null;
@@ -39,13 +123,22 @@ export default function Tours() {
   const [generating, setGenerating] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [createErrorCode, setCreateErrorCode] = useState(null);
+  const [createErrorViolations, setCreateErrorViolations] = useState([]);
+  const [createErrorOrdreSuggere, setCreateErrorOrdreSuggere] = useState(null);
   const [confirmForce, setConfirmForce] = useState(false);
 
-  // Flux association (inchangé, fonctionne déjà)
+  // Flux association — sélection ORDONNÉE (CavPicker), plus de liste à
+  // cocher ni d'inclusion par défaut de « toutes les associations actives »
+  // (arbitrage 6 du chantier tournées associations, 26/08/2026 : une
+  // sélection explicite est désormais exigée).
   const [assoRoutes, setAssoRoutes] = useState([]);
-  const [assoPoints, setAssoPoints] = useState([]);
   const [selectedAssoRoute, setSelectedAssoRoute] = useState('');
   const [selectedAssoPoints, setSelectedAssoPoints] = useState([]);
+  // Durée d'arrêt par point association, ajustable pour cette tournée
+  // (RG-C2/C3) : { [pointId]: minutes|null }. Préremplie par CavPicker depuis
+  // la fiche du point ; `null` laisse la cascade fiche > réglage global
+  // s'appliquer côté serveur.
+  const [assoDurations, setAssoDurations] = useState({});
 
   // Modèles de tournée CAV (mode standard)
   const [standardRoutes, setStandardRoutes] = useState([]);
@@ -90,29 +183,30 @@ export default function Tours() {
 
   const openWizard = async () => {
     try {
-      const [vRes, eRes, arRes, apRes, srRes] = await Promise.all([
+      const [vRes, eRes, arRes, srRes] = await Promise.all([
         api.get('/vehicles?available=true'),
         api.get('/employees'),
         api.get('/tours/association-routes/list').catch(() => ({ data: [] })),
-        api.get('/association-points?status=active').catch(() => ({ data: [] })),
         api.get('/tours/routes/list').catch(() => ({ data: [] })),
       ]);
       setVehicles(vRes.data);
       setEmployees(eRes.data);
       setAssoRoutes(arRes.data);
-      setAssoPoints(apRes.data);
       setStandardRoutes((srRes.data || []).filter(r => r.is_active !== false));
     } catch (err) { console.error(err); }
     setWizardStep(1);
     setGeneratedTour(null);
     setSelectedAssoRoute('');
     setSelectedAssoPoints([]);
+    setAssoDurations({});
     setSelectedStandardRoute('');
     setStandardRoutePreview(null);
     setEstimation(null);
     setEstimateError(null);
     setCreateError(null);
     setCreateErrorCode(null);
+    setCreateErrorViolations([]);
+    setCreateErrorOrdreSuggere(null);
     setConfirmForce(false);
     setOptimizeError(null);
     setWizForm(f => ({ ...f, collection_type: 'pav', mode: 'intelligent', vehicle_id: '', driver_employee_id: '', cav_ids: [] }));
@@ -137,8 +231,12 @@ export default function Tours() {
   // IA (aucune prévisualisation possible, l'algorithme choisit à la création).
   const buildPointsBody = useCallback(() => {
     if (wizForm.collection_type === 'association') {
-      const pointIds = selectedAssoPoints.length > 0 ? selectedAssoPoints : assoPoints.map(p => p.id);
-      return { association_point_ids: pointIds };
+      // Arbitrage 6 (26/08/2026) : sélection EXPLICITE exigée — plus de repli
+      // « toutes les associations actives » quand rien n'est coché.
+      if (!selectedAssoPoints.length) return null;
+      return {
+        association_points: selectedAssoPoints.map(id => ({ id, duree_min: assoDurations[id] ?? null })),
+      };
     }
     if (wizForm.mode === 'standard') {
       return { standard_route_id: selectedStandardRoute ? parseInt(selectedStandardRoute, 10) : null };
@@ -147,7 +245,7 @@ export default function Tours() {
       return { cav_ids: wizForm.cav_ids || [] };
     }
     return null;
-  }, [wizForm.collection_type, wizForm.mode, wizForm.cav_ids, selectedAssoPoints, assoPoints, selectedStandardRoute]);
+  }, [wizForm.collection_type, wizForm.mode, wizForm.cav_ids, selectedAssoPoints, assoDurations, selectedStandardRoute]);
 
   const runEstimate = useCallback(async () => {
     // Avant le choix du véhicule (étape 1, où l'on sélectionne modèle/points),
@@ -187,10 +285,11 @@ export default function Tours() {
     if (isIntelligentPav) return; // le mode IA choisit ses points à la création
     if (isManualPav && !(wizForm.cav_ids || []).length) { setEstimation(null); return; }
     if (isStandardPav && !selectedStandardRoute) { setEstimation(null); return; }
+    if (wizForm.collection_type === 'association' && !selectedAssoPoints.length) { setEstimation(null); return; }
     const t = setTimeout(() => { runEstimate(); }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStepKey, wizForm.vehicle_id, wizForm.date, selectedAssoPoints, selectedStandardRoute, wizForm.cav_ids]);
+  }, [currentStepKey, wizForm.vehicle_id, wizForm.date, wizForm.collection_type, selectedAssoPoints, assoDurations, selectedStandardRoute, wizForm.cav_ids]);
 
   const optimizeManualOrder = async () => {
     if (!wizForm.vehicle_id || (wizForm.cav_ids || []).length < 2) return;
@@ -215,6 +314,7 @@ export default function Tours() {
   };
 
   const generateTour = async (force = false) => {
+    if (wizForm.collection_type === 'association' && !selectedAssoPoints.length) return;
     setGenerating(true);
     setCreateError(null);
     try {
@@ -225,10 +325,9 @@ export default function Tours() {
         driver_employee_id: wizForm.driver_employee_id ? parseInt(wizForm.driver_employee_id, 10) : undefined,
       };
       if (wizForm.collection_type === 'association') {
-        const pointIds = selectedAssoPoints.length > 0 ? selectedAssoPoints : assoPoints.map(p => p.id);
         res = await api.post('/tours/association', {
           ...base,
-          association_point_ids: pointIds,
+          points: selectedAssoPoints.map(id => ({ id, duree_min: assoDurations[id] ?? null })),
           standard_route_id: selectedAssoRoute || null,
           force,
         }, { timeout: 120000 });
@@ -249,17 +348,24 @@ export default function Tours() {
       }
       setGeneratedTour(res.data);
       setCreateErrorCode(null);
+      setCreateErrorViolations([]);
+      setCreateErrorOrdreSuggere(null);
       setWizardStep(totalSteps); // étape « Résultat », toujours la dernière
       loadTours();
     } catch (err) {
       console.error(err);
-      if (err.response?.status === 409 && err.response?.data?.code === 'DUREE_MAX_DEPASSEE') {
-        if (err.response.data.estimation) setEstimation(err.response.data.estimation);
-        setCreateErrorCode('DUREE_MAX_DEPASSEE');
-        setCreateError(err.response.data.error || 'Durée de travail maximale dépassée');
+      const data = err.response?.data;
+      if (err.response?.status === 409 && FORCABLE_CODES.includes(data?.code)) {
+        if (data.estimation) setEstimation(data.estimation);
+        setCreateErrorCode(data.code);
+        setCreateErrorViolations(Array.isArray(data.violations) ? data.violations : []);
+        setCreateErrorOrdreSuggere(Array.isArray(data.ordre_suggere) ? data.ordre_suggere : null);
+        setCreateError(data.error || 'Création refusée — confirmation nécessaire');
       } else {
         setCreateErrorCode(null);
-        setCreateError(err.response?.data?.error || 'Erreur lors de la génération de la tournée');
+        setCreateErrorViolations([]);
+        setCreateErrorOrdreSuggere(null);
+        setCreateError(data?.error || 'Erreur lors de la génération de la tournée');
       }
     }
     setGenerating(false);
@@ -590,16 +696,23 @@ export default function Tours() {
                     </p>
                   )}
 
-                  {/* Sélection points association */}
+                  {/* Sélection points association — CavPicker : recherche, filtre
+                      par commune, sélection ORDONNÉE (l'ordre est l'ordre de
+                      passage). Plus de repli « tout inclus » (arbitrage 6) :
+                      la sélection est explicite, la création reste bloquée
+                      tant qu'aucun point n'est choisi. */}
                   {wizForm.collection_type === 'association' && (
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-slate-500">Points de collecte associatifs</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-slate-500">Points de collecte associatifs</label>
+                        <Link to="/route-templates" className="text-[11px] text-teal-600 hover:text-teal-700 hover:underline">Gérer les modèles →</Link>
+                      </div>
                       {assoRoutes.length > 0 && (
                         <select value={selectedAssoRoute} onChange={e => {
                           setSelectedAssoRoute(e.target.value);
                           if (e.target.value) {
                             api.get(`/tours/association-routes/${e.target.value}/points`).then(res => {
-                              setSelectedAssoPoints(res.data.map(p => p.id));
+                              setSelectedAssoPoints((res.data || []).map(p => p.id));
                             });
                           } else {
                             setSelectedAssoPoints([]);
@@ -609,25 +722,23 @@ export default function Tours() {
                           {assoRoutes.map(r => <option key={r.id} value={r.id}>{r.name} ({r.point_count} points)</option>)}
                         </select>
                       )}
-                      <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1">
-                        {assoPoints.map(ap => (
-                          <label key={ap.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer text-sm ${selectedAssoPoints.includes(ap.id) ? 'bg-orange-50' : 'hover:bg-slate-50'}`}>
-                            <input type="checkbox" checked={selectedAssoPoints.includes(ap.id)}
-                              onChange={e => {
-                                if (e.target.checked) setSelectedAssoPoints([...selectedAssoPoints, ap.id]);
-                                else setSelectedAssoPoints(selectedAssoPoints.filter(id => id !== ap.id));
-                              }} />
-                            <span className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" />
-                            <span className="truncate">{ap.name}</span>
-                            <span className="text-xs text-slate-400 ml-auto">{ap.ville || ''}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <p className="text-xs text-slate-400">{selectedAssoPoints.length > 0 ? `${selectedAssoPoints.length} points sélectionnés` : `Tous les ${assoPoints.length} points actifs seront inclus`}</p>
-                      {/* Durée prévisionnelle au fil de l'eau (recalculée à chaque point coché) */}
-                      {assoPoints.length > 0 && (
+                      <CavPicker
+                        mode="association"
+                        value={selectedAssoPoints}
+                        onChange={setSelectedAssoPoints}
+                        durations={assoDurations}
+                        onDurationChange={(id, min) => setAssoDurations(prev => ({ ...prev, [id]: min }))}
+                      />
+                      {selectedAssoPoints.length === 0 ? (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-2">
+                          Sélectionnez au moins un point — aucune association n'est incluse par défaut.
+                        </p>
+                      ) : (
                         <>
+                          <p className="text-xs text-slate-400">{selectedAssoPoints.length} point{selectedAssoPoints.length > 1 ? 's' : ''} sélectionné{selectedAssoPoints.length > 1 ? 's' : ''}</p>
+                          {/* Durée prévisionnelle + avertissements d'horaires, au fil de l'eau */}
                           <EstimationPanel estimation={estimation} loading={estimating} error={estimateError} compact />
+                          <ViolationsPanel estimation={estimation} onApplyOrder={setSelectedAssoPoints} />
                           {!wizForm.vehicle_id && estimation && vehicles[0] && (
                             <p className="text-[11px] text-slate-400">
                               Aperçu sur la base du véhicule {vehicles[0].registration} — recalculé avec le véhicule que vous choisirez.
@@ -640,7 +751,7 @@ export default function Tours() {
 
                   <button
                     onClick={goNext}
-                    disabled={isStandardPav && !selectedStandardRoute}
+                    disabled={(isStandardPav && !selectedStandardRoute) || (wizForm.collection_type === 'association' && selectedAssoPoints.length === 0)}
                     className="w-full py-2.5 rounded-button bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Suivant
@@ -748,14 +859,47 @@ export default function Tours() {
                 <div className="space-y-4">
                   <h3 className="font-bold text-slate-800">Estimation avant création</h3>
                   <EstimationPanel estimation={estimation} loading={estimating} error={estimateError} />
+                  {wizForm.collection_type === 'association' && (
+                    <ViolationsPanel estimation={estimation} onApplyOrder={setSelectedAssoPoints} />
+                  )}
 
                   {createError && (
                     <div className="rounded-xl border border-red-200 bg-red-50 p-3 space-y-2">
                       <p className="text-sm text-red-700 font-medium">{createError}</p>
-                      {createErrorCode === 'DUREE_MAX_DEPASSEE' && (
+                      {createErrorCode === 'ASSOCIATION_HORS_HORAIRES' && createErrorViolations.length > 0 && (
+                        <ul className="text-xs text-red-700 space-y-1 list-disc list-inside">
+                          {createErrorViolations.map((v, i) => (
+                            <li key={i}>
+                              <strong>{v.name}</strong> — prévu à {v.heure_prevue}, horaires du jour : {(v.plages || []).join(', ') || 'fermé'}
+                              {v.prochain_creneau ? ` · premier créneau compatible : ${v.prochain_creneau}` : ' · aucun créneau compatible ce jour'}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {createErrorCode === 'RDV_NON_TENABLE' && createErrorViolations.length > 0 && (
+                        <ul className="text-xs text-red-700 space-y-1 list-disc list-inside">
+                          {createErrorViolations.map((v, i) => (
+                            <li key={i}><strong>{v.name}</strong> — arrivée prévue {v.heure_prevue}, rendez-vous {v.fenetre}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {createErrorCode === 'RDV_NON_TENABLE' && createErrorOrdreSuggere && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedAssoPoints(createErrorOrdreSuggere);
+                            setCreateError(null); setCreateErrorCode(null); setCreateErrorViolations([]); setCreateErrorOrdreSuggere(null);
+                            setConfirmForce(false);
+                          }}
+                          className="text-xs font-semibold text-red-800 underline hover:text-red-900"
+                        >
+                          Appliquer l'ordre suggéré plutôt que forcer
+                        </button>
+                      )}
+                      {FORCABLE_CODES.includes(createErrorCode) && (
                         <label className="flex items-start gap-2 text-xs text-red-700">
                           <input type="checkbox" checked={confirmForce} onChange={e => setConfirmForce(e.target.checked)} className="mt-0.5" />
-                          Je confirme la création malgré le dépassement de la durée de travail maximale.
+                          Je confirme la création malgré {FORCE_LABELS[createErrorCode] || 'le refus signalé'}.
                         </label>
                       )}
                     </div>
@@ -764,11 +908,11 @@ export default function Tours() {
                   <div className="flex gap-2">
                     <button onClick={goBack} className="flex-1 py-2.5 rounded-button bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold transition-colors">Retour</button>
                     <button
-                      onClick={() => generateTour(createErrorCode === 'DUREE_MAX_DEPASSEE' ? confirmForce : false)}
-                      disabled={generating || estimating || (createErrorCode === 'DUREE_MAX_DEPASSEE' && !confirmForce)}
-                      className={`flex-1 py-2.5 rounded-button text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${createErrorCode === 'DUREE_MAX_DEPASSEE' ? 'bg-red-600 hover:bg-red-700' : 'bg-teal-600 hover:bg-teal-700'}`}
+                      onClick={() => generateTour(FORCABLE_CODES.includes(createErrorCode) ? confirmForce : false)}
+                      disabled={generating || estimating || (FORCABLE_CODES.includes(createErrorCode) && !confirmForce)}
+                      className={`flex-1 py-2.5 rounded-button text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${FORCABLE_CODES.includes(createErrorCode) ? 'bg-red-600 hover:bg-red-700' : 'bg-teal-600 hover:bg-teal-700'}`}
                     >
-                      {generating ? 'Création…' : createErrorCode === 'DUREE_MAX_DEPASSEE' ? 'Créer quand même' : 'Confirmer et créer la tournée'}
+                      {generating ? 'Création…' : FORCABLE_CODES.includes(createErrorCode) ? 'Créer quand même' : 'Confirmer et créer la tournée'}
                     </button>
                   </div>
                 </div>

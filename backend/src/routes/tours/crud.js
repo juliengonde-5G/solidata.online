@@ -9,6 +9,32 @@ const fillFactors = require('../../utils/fill-factors');
 const { generateIntelligentTour, estimateFixedRoute, estimationSummary } = require('./smart-tour');
 const { poserPauseDejeunerSansBloquer } = require('./arrets');
 const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
+const timeEngine = require('../../services/tour-time-engine');
+
+// Module PUR des horaires d'association (plages du jour, fenêtre de RDV).
+// Chargé de façon tolérante : son absence n'empêche pas de planifier, elle
+// désactive le CONTRÔLE — et l'estimation le dit (cf. smart-tour.js).
+const ASSOC_HORAIRES = (() => {
+  try { return require('../../services/association-horaires'); } catch (_) { return null; }
+})();
+
+/** 'HH:MM' → minutes depuis minuit (repli local si le module est absent). */
+function minutesDeHeure(valeur) {
+  if (ASSOC_HORAIRES && typeof ASSOC_HORAIRES.minutesDepuisHHMM === 'function') {
+    const v = ASSOC_HORAIRES.minutesDepuisHHMM(String(valeur || '').slice(0, 5));
+    if (Number.isFinite(v)) return v;
+  }
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(valeur || ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+}
+
+/** Minutes d'horloge → 'HH:MM' (suffixe « (+1 j) » au-delà de minuit). */
+function heureDeMinutes(minutes) {
+  if (ASSOC_HORAIRES && typeof ASSOC_HORAIRES.hhmmDepuisMinutes === 'function') {
+    return ASSOC_HORAIRES.hhmmDepuisMinutes(minutes);
+  }
+  return timeEngine.minutesToHHMM(minutes);
+}
 
 // ══════════════════════════════════════════════════════════════
 // Contraintes de journée sur TOUS les modes de création (août 2026)
@@ -66,12 +92,22 @@ async function loadRouteCavPoints(routeId) {
   return r.rows.map((row) => ({ ...row, type: 'cav' }));
 }
 
-/** Points association dans l'ordre demandé. */
-async function loadAssociationPoints(pointIds) {
+/**
+ * Points association dans l'ordre demandé, avec ce qu'il faut pour la cascade
+ * de durées (RG-C3) et le contrôle d'horaires (RG-A) :
+ *   - `duree_collecte_min`      durée par défaut de la FICHE ;
+ *   - `horaires_accessibilite`  semaine d'ouverture (null = inconnue) ;
+ *   - `duree_prevue_min`        ajustement pour CETTE tournée (map `durees`).
+ *
+ * @param {Array} pointIds  identifiants, dans l'ordre de passage
+ * @param {Map<number, number>} [durees]  ajustements par identifiant de point
+ */
+async function loadAssociationPoints(pointIds, durees = null) {
   const ids = (pointIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite);
   if (ids.length === 0) return [];
   const r = await pool.query(
-    `SELECT id, name, address, ville AS commune, latitude, longitude
+    `SELECT id, name, address, ville AS commune, latitude, longitude,
+            duree_collecte_min, horaires_accessibilite, horaires_notes
        FROM association_points WHERE id = ANY($1)`,
     [ids]
   );
@@ -79,7 +115,144 @@ async function loadAssociationPoints(pointIds) {
   return ids
     .map((id) => byId.get(id))
     .filter(Boolean)
-    .map((row) => ({ ...row, type: 'association', nb_containers: null }));
+    .map((row) => ({
+      ...row,
+      type: 'association',
+      nb_containers: null,
+      // null quand aucun ajustement n'a été saisi : la cascade descend alors
+      // d'un cran (fiche, puis réglage global). Jamais de valeur inventée.
+      duree_prevue_min: durees && durees.has(Number(row.id)) ? durees.get(Number(row.id)) : null,
+    }));
+}
+
+/**
+ * Normalise les deux formes acceptées de sélection de points association :
+ *   - `association_points: [{ id, duree_min }]` (prioritaire, RG-C2) ;
+ *   - `association_point_ids: [id]`             (forme historique).
+ * @returns {{ids:number[], durees:Map<number,number>}|null} null si aucune
+ */
+function normaliserSelectionAssociation(pointsAvecDuree, idsSeuls) {
+  const durees = new Map();
+  let ids = [];
+  if (Array.isArray(pointsAvecDuree) && pointsAvecDuree.length > 0) {
+    for (const p of pointsAvecDuree) {
+      const id = parseInt(p && typeof p === 'object' ? p.id : p, 10);
+      if (!Number.isFinite(id)) continue;
+      ids.push(id);
+      const d = p && typeof p === 'object' ? parseFloat(p.duree_min) : NaN;
+      // Une durée absente/nulle n'est PAS un ajustement : elle laisse la
+      // cascade descendre vers la fiche puis le réglage global.
+      if (Number.isFinite(d) && d > 0) durees.set(id, d);
+    }
+  } else if (Array.isArray(idsSeuls) && idsSeuls.length > 0) {
+    ids = idsSeuls.map((v) => parseInt(v, 10)).filter(Number.isFinite);
+  }
+  if (ids.length === 0) return null;
+  return { ids, durees };
+}
+
+/**
+ * Rattache les demandes de collecte (rendez-vous) aux points de la tournée.
+ * Chaque demande devient l'ANCRAGE du point (`_demande`), converti en fenêtre
+ * effective par smart-tour.js — le moteur ne connaît pas la table des demandes.
+ *
+ * Rien n'est accepté en silence : une demande inconnue, annulée, en double sur
+ * un même point ou portant sur un point absent de la tournée est REFUSÉE.
+ *
+ * @returns {Promise<{erreur:string}|{avertissements:string[], parPoint:Map}>}
+ */
+async function attacherDemandes(points, demandeIds, dateStr) {
+  const ids = [...new Set((demandeIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+  const avertissements = [];
+  const parPoint = new Map();
+  if (ids.length === 0) return { avertissements, parPoint };
+
+  const r = await pool.query(
+    `SELECT id, association_point_id, date_souhaitee, heure_debut, heure_fin,
+            tolerance_min, annulee_le
+       FROM association_collecte_demandes WHERE id = ANY($1)`,
+    [ids]
+  );
+  const parId = new Map(r.rows.map((row) => [Number(row.id), row]));
+
+  const inconnues = ids.filter((id) => !parId.has(id));
+  if (inconnues.length > 0) {
+    return { erreur: `Demande(s) de collecte introuvable(s) : ${inconnues.join(', ')}` };
+  }
+  const annulees = ids.filter((id) => parId.get(id).annulee_le != null);
+  if (annulees.length > 0) {
+    return { erreur: `Demande(s) de collecte annulée(s), impossible à rattacher : ${annulees.join(', ')}` };
+  }
+
+  const idsPoints = new Set(points.map((p) => Number(p.id)));
+  for (const id of ids) {
+    const d = parId.get(id);
+    const pid = Number(d.association_point_id);
+    if (!idsPoints.has(pid)) {
+      return {
+        erreur: `La demande #${id} porte sur un point association absent de cette tournée `
+          + `(point ${pid}). Ajoutez le point ou retirez la demande.`,
+      };
+    }
+    if (parPoint.has(pid)) {
+      return {
+        erreur: `Deux demandes de collecte visent le même point association (${pid}) : `
+          + 'un passage ne peut honorer qu’un seul rendez-vous.',
+      };
+    }
+    parPoint.set(pid, d);
+    const jour = d.date_souhaitee instanceof Date
+      ? d.date_souhaitee.toISOString().slice(0, 10)
+      : String(d.date_souhaitee || '').slice(0, 10);
+    if (jour && dateStr && jour !== dateStr) {
+      avertissements.push(
+        `Demande #${id} : passage souhaité le ${jour}, planifié le ${dateStr} — `
+        + 'seule l’heure du rendez-vous est contrôlée.'
+      );
+    }
+  }
+
+  for (const p of points) {
+    const d = parPoint.get(Number(p.id));
+    if (d) p._demande = d;
+  }
+  return { avertissements, parPoint };
+}
+
+/**
+ * Traduit les violations du moteur (minutes) en payload d'API (heures lisibles).
+ * `arrivee_min` est en minutes ÉCOULÉES depuis le départ, les champs `*Min` en
+ * minutes d'HORLOGE : les deux référentiels ne se mélangent jamais.
+ */
+function violationsLisibles(estimation, parPoint = new Map()) {
+  const departMin = minutesDeHeure(estimation.heure_depart);
+  const brutes = Array.isArray(estimation.violations) ? estimation.violations : [];
+  const horsHoraires = [];
+  const rdv = [];
+  for (const v of brutes) {
+    if (!v) continue;
+    if (v.type === 'hors_horaires') {
+      horsHoraires.push({
+        point_id: v.point_id,
+        name: v.name,
+        heure_prevue: heureDeMinutes(departMin + (v.arrivee_min || 0)),
+        plages: (v.plages || []).map(([a, b]) => `${heureDeMinutes(a)}-${heureDeMinutes(b)}`),
+        prochain_creneau: v.prochain_creneau_min != null ? heureDeMinutes(v.prochain_creneau_min) : null,
+      });
+    } else if (v.type === 'rdv_manque') {
+      const demande = parPoint.get(Number(v.point_id));
+      rdv.push({
+        demande_id: demande ? demande.id : null,
+        point_id: v.point_id,
+        name: v.name,
+        heure_prevue: heureDeMinutes(departMin + (v.arrivee_min || 0)),
+        fenetre: v.fenetre
+          ? `${heureDeMinutes(v.fenetre.debutMin)}-${heureDeMinutes(v.fenetre.finMin)}`
+          : null,
+      });
+    }
+  }
+  return { horsHoraires, rdv };
 }
 
 /** Jour utilisé par défaut pour une estimation (jour civil de Paris). */
@@ -332,48 +505,77 @@ router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
 // Permet au manager de vérifier AVANT création qu'une liste de points tient
 // dans la journée (6 h de travail, pause déjeuner au centre hors travail,
 // retours de vidage comptés). Exactement UNE source de points : `cav_ids`,
-// `standard_route_id` ou `association_point_ids`.
+// `standard_route_id`, ou les points association (`association_points` avec
+// leur durée d'arrêt ajustée, sinon `association_point_ids`).
+//
+// Pour les tournées association, la réponse porte en plus :
+//   - `violations`    : horaires d'accessibilité non tenus / rendez-vous manqués ;
+//   - `ordre_suggere` : ordre tenant les rendez-vous quand celui soumis échoue.
+// L'écran d'estimation les affiche AVANT la soumission — le 409 de création
+// devient l'exception, pas la découverte.
 // ══════════════════════════════════════════
 router.post('/estimate', authorize('ADMIN', 'MANAGER'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
 ], validate, async (req, res) => {
   try {
-    const { vehicle_id, date, cav_ids, standard_route_id, association_point_ids, optimize } = req.body;
+    const {
+      vehicle_id, date, cav_ids, standard_route_id,
+      association_point_ids, association_points, demande_ids, optimize,
+    } = req.body;
     const vid = parseInt(vehicle_id, 10);
     if (!Number.isFinite(vid)) return res.status(400).json({ error: 'vehicle_id invalide' });
 
+    const selectionAssoc = normaliserSelectionAssociation(association_points, association_point_ids);
     const sources = [
       Array.isArray(cav_ids) && cav_ids.length > 0 ? 'cav_ids' : null,
       standard_route_id != null && standard_route_id !== '' ? 'standard_route_id' : null,
-      Array.isArray(association_point_ids) && association_point_ids.length > 0 ? 'association_point_ids' : null,
+      selectionAssoc ? 'association' : null,
     ].filter(Boolean);
     if (sources.length !== 1) {
       return res.status(400).json({
-        error: 'Fournissez exactement une source de points : cav_ids, standard_route_id ou association_point_ids.',
+        error: 'Fournissez exactement une source de points : cav_ids, standard_route_id, '
+          + 'association_points ou association_point_ids.',
       });
     }
 
     const vehicle = await loadVehicle(vid);
     if (!vehicle) return res.status(404).json({ error: 'Véhicule non trouvé' });
 
+    const dateStr = (date || defaultEstimateDate()).slice(0, 10);
     let points = [];
     if (sources[0] === 'cav_ids') points = await loadCavPoints(cav_ids);
     else if (sources[0] === 'standard_route_id') points = await loadRouteCavPoints(parseInt(standard_route_id, 10));
-    else points = await loadAssociationPoints(association_point_ids);
+    else points = await loadAssociationPoints(selectionAssoc.ids, selectionAssoc.durees);
 
     if (points.length === 0) {
       return res.status(400).json({ error: 'Aucun point valide pour cette estimation.' });
     }
 
-    const { estimation, ordre_optimise } = await estimateFixedRoute({
+    // Rendez-vous éventuels : ils ancrent le passage dans une fenêtre horaire.
+    const rattachement = await attacherDemandes(points, demande_ids, dateStr);
+    if (rattachement.erreur) return res.status(400).json({ error: rattachement.erreur });
+
+    const { estimation, ordre_optimise, ordre_suggere } = await estimateFixedRoute({
       vehicle,
       points,
-      date: date || defaultEstimateDate(),
+      date: dateStr,
       optimize: optimize === true || optimize === 'true',
+      suggererOrdre: true,
     });
     if (ordre_optimise) estimation.ordre_optimise = ordre_optimise;
+    if (rattachement.avertissements.length > 0) {
+      estimation.avertissements = [...estimation.avertissements, ...rattachement.avertissements];
+    }
 
-    res.json({ estimation });
+    const lisibles = violationsLisibles(estimation, rattachement.parPoint);
+    res.json({
+      estimation,
+      // Violations « brutes » du moteur dans l'estimation (minutes), et forme
+      // lisible ici (heures) — même contenu, deux publics.
+      violations: [...lisibles.rdv.map((v) => ({ ...v, type: 'rdv_manque' })),
+        ...lisibles.horsHoraires.map((v) => ({ ...v, type: 'hors_horaires' }))],
+      ordre_suggere: ordre_suggere || null,
+    });
   } catch (err) {
     console.error('[TOURS] Erreur estimation :', err.message, err.stack);
     res.status(500).json({ error: err.message || 'Erreur serveur' });
@@ -624,17 +826,38 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
 });
 
 // POST /api/tours/association — Créer une tournée association
+// ──────────────────────────────────────────
+// Trois refus possibles, dans CET ORDRE (un seul 409 est renvoyé, le premier
+// rencontré) — tous les trois forçables par `force: true`, avec trace dans
+// `ai_explanation` :
+//   1. DUREE_MAX_DEPASSEE      la journée de travail ne tient pas ;
+//   2. RDV_NON_TENABLE         un rendez-vous d'association serait manqué ;
+//   3. ASSOCIATION_HORS_HORAIRES  un passage tombe hors des heures d'accès.
+// L'ordre n'est pas arbitraire : une tournée qui déborde de la journée n'a pas
+// à discuter de ses horaires, et un rendez-vous pris avec une personne prime
+// sur une plage d'ouverture théorique.
 router.post('/association', authorize('ADMIN', 'MANAGER'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
   body('date').notEmpty().withMessage('Date requise'),
-  body('association_point_ids').isArray({ min: 1 }).withMessage('Liste de points association requise'),
+  body('association_point_ids').custom((value, { req }) => {
+    const avecDuree = Array.isArray(req.body.points) && req.body.points.length > 0;
+    const idsSeuls = Array.isArray(value) && value.length > 0;
+    if (!avecDuree && !idsSeuls) {
+      throw new Error('Liste de points association requise (points ou association_point_ids)');
+    }
+    return true;
+  }),
 ], validate, async (req, res) => {
   try {
-    const { vehicle_id, date, driver_employee_id, association_point_ids, standard_route_id, force } = req.body;
+    const {
+      vehicle_id, date, driver_employee_id, association_point_ids,
+      points: pointsDemandes, demande_ids, standard_route_id, force,
+    } = req.body;
 
     const vid = parseInt(vehicle_id, 10);
     const did = driver_employee_id ? parseInt(driver_employee_id, 10) : null;
     const srid = standard_route_id ? parseInt(standard_route_id, 10) : null;
+    const dateStr = String(date).slice(0, 10);
 
     // Vague 1 (item 47a) — bloque la double affectation véhicule.
     const conflict = await findVehicleConflict(vid, date);
@@ -643,15 +866,31 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
     const vehicle = await loadVehicle(vid);
     if (!vehicle) return res.status(404).json({ error: 'Véhicule non trouvé' });
 
-    const points = await loadAssociationPoints(association_point_ids);
+    const selection = normaliserSelectionAssociation(pointsDemandes, association_point_ids);
+    if (!selection) return res.status(400).json({ error: 'Aucun point association valide dans la liste fournie.' });
+
+    const points = await loadAssociationPoints(selection.ids, selection.durees);
     if (points.length === 0) return res.status(400).json({ error: 'Aucun point association valide dans la liste fournie.' });
-    const inconnus = uniqueIds(association_point_ids).filter((id) => !points.some((p) => Number(p.id) === id));
+    const inconnus = uniqueIds(selection.ids).filter((id) => !points.some((p) => Number(p.id) === id));
     if (inconnus.length > 0) {
       return res.status(400).json({ error: `Point(s) association introuvable(s) : ${inconnus.join(', ')}` });
     }
 
-    const { estimation } = await estimateFixedRoute({ vehicle, points, date });
+    // Rendez-vous : refusés en 400 si la demande est inconnue, annulée, en
+    // double ou étrangère à la tournée (jamais rattachée en silence).
+    const rattachement = await attacherDemandes(points, demande_ids, dateStr);
+    if (rattachement.erreur) return res.status(400).json({ error: rattachement.erreur });
+
+    const { estimation, ordre_suggere } = await estimateFixedRoute({
+      vehicle, points, date: dateStr, suggererOrdre: true,
+    });
+    if (rattachement.avertissements.length > 0) {
+      estimation.avertissements = [...estimation.avertissements, ...rattachement.avertissements];
+    }
     const forced = force === true || force === 'true';
+    const forcages = [];
+
+    // ── 1. Budget de la journée ───────────────────────────────────────────
     if (estimation.depassement_min > 0 && !forced) {
       return res.status(409).json({
         error: `Cette tournée association dépasse la journée de travail de ${estimation.depassement_min} min `
@@ -661,21 +900,73 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
         estimation,
       });
     }
+    if (estimation.depassement_min > 0) {
+      forcages.push(`dépassement de ${estimation.depassement_min} min de la journée de travail`);
+    }
+
+    const { horsHoraires, rdv } = violationsLisibles(estimation, rattachement.parPoint);
+
+    // ── 2. Rendez-vous non tenable ────────────────────────────────────────
+    if (rdv.length > 0 && !forced) {
+      return res.status(409).json({
+        error: `${rdv.length} rendez-vous ne peu(ven)t pas être tenu(s) avec cet ordre de passage : `
+          + rdv.map((v) => `${v.name} prévu ${v.heure_prevue} pour la fenêtre ${v.fenetre}`).join(' ; ')
+          + '. Réordonnez la tournée, retirez des points ou forcez la création.',
+        code: 'RDV_NON_TENABLE',
+        estimation,
+        ordre_suggere: ordre_suggere || null,
+        violations: rdv,
+      });
+    }
+    for (const v of rdv) {
+      forcages.push(`rendez-vous non tenu — ${v.name} prévu ${v.heure_prevue} pour la fenêtre ${v.fenetre}`);
+    }
+
+    // ── 3. Horaires d'accessibilité ───────────────────────────────────────
+    if (horsHoraires.length > 0 && !forced) {
+      return res.status(409).json({
+        error: `${horsHoraires.length} point(s) association seraient desservis hors de leurs horaires `
+          + `d'accessibilité : ` + horsHoraires.map((v) => (
+            `${v.name} prévu ${v.heure_prevue} (${v.plages.length > 0 ? v.plages.join(', ') : 'fermé ce jour-là'})`
+          )).join(' ; ')
+          + '. Changez de jour, réordonnez la tournée ou forcez la création.',
+        code: 'ASSOCIATION_HORS_HORAIRES',
+        estimation,
+        violations: horsHoraires,
+      });
+    }
+    for (const v of horsHoraires) {
+      forcages.push(
+        `hors horaires d'accessibilité — ${v.name} prévu ${v.heure_prevue} `
+        + `(${v.plages.length > 0 ? v.plages.join(', ') : 'fermé ce jour-là'})`
+      );
+    }
 
     const tourResult = await pool.query(
       `INSERT INTO tours (date, vehicle_id, driver_employee_id, standard_route_id, mode, status, collection_type,
                           ai_explanation, estimated_distance_km, estimated_duration_min, nb_cav, is_demo)
        VALUES ($1, $2, $3, $4, 'standard', 'planned', 'association', $5, $6, $7, $8, (SELECT COALESCE(is_demo, false) FROM vehicles WHERE id = $2)) RETURNING *`,
       [date, vid, did, srid,
-        estimationSummary(estimation, { mode: 'association', vehicle, forced: forced && estimation.depassement_min > 0 }),
+        estimationSummary(estimation, {
+          mode: 'association', vehicle,
+          forced: forced && estimation.depassement_min > 0,
+          forcages: forced ? forcages.filter((f) => !f.startsWith('dépassement')) : [],
+        }),
         estimation.distance_km, estimation.duree_travail_min, estimation.nb_points]
     );
     const tourId = tourResult.rows[0].id;
 
+    // La durée d'arrêt RETENUE par le moteur est écrite sur le passage : c'est
+    // elle qui fera foi ensuite (heures prévues, édition en direct), sans quoi
+    // l'estimation et l'exécution divergeraient dès le premier recalcul.
     for (let i = 0; i < points.length; i++) {
+      const demande = rattachement.parPoint.get(Number(points[i].id));
       await pool.query(
-        'INSERT INTO tour_association_point (tour_id, association_point_id, position) VALUES ($1, $2, $3)',
-        [tourId, points[i].id, i + 1]
+        `INSERT INTO tour_association_point (tour_id, association_point_id, position, duree_prevue_min, demande_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [tourId, points[i].id, i + 1,
+          points[i].duree_prevue_min != null ? points[i].duree_prevue_min : null,
+          demande ? demande.id : null]
       );
     }
     // Même règle pour les tournées association : la pause du midi au centre
