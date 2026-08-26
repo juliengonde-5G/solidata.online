@@ -297,14 +297,28 @@ export default function TourMap() {
 
   const isAssociationTour = tour?.collection_type === 'association';
 
+  /**
+   * Chez une association, le bouton dit où en est l'équipage : tant qu'il n'a
+   * pas déclaré son arrivée, il l'annonce ; ensuite il déclare son départ.
+   * Le serveur fait foi (`arrived_at`), l'appareil prend le relais hors ligne.
+   */
+  const libelleActionAssociation = () => {
+    const p = cavs[currentCavIndex];
+    if (!p) return 'Déclarer mon arrivée';
+    const arrive = p.arrived_at || lireArrivee(tourId, p.cav_id || p.id);
+    return arrive ? 'Déclarer mon départ' : 'Déclarer mon arrivée';
+  };
+
   const goToIdentify = () => {
     if (cavs[currentCavIndex]) {
       const cav = cavs[currentCavIndex];
       localStorage.setItem('selected_cav_id', String(cav.cav_id || cav.id));
       localStorage.setItem('selected_cav_name', cav.nom || cav.cav_name || '');
       if (isAssociationTour) {
-        // Pas de scan QR pour la collecte association → directement au remplissage
-        navigate('/fill-level');
+        // Une association n'a pas de QR code, et il n'y a rien à regarder
+        // « dedans » : le passage se déclare (arrivée, puis départ) sur un écran
+        // dédié, qui mesure au passage la durée réelle de l'arrêt.
+        navigate('/association-stop');
       } else {
         navigate('/identify-cav');
       }
@@ -351,6 +365,10 @@ export default function TourMap() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      // Le serveur dit s'il y a quelque chose à peser : rien n'a été collecté
+      // depuis la dernière pesée = camion vide, la pesée n'a plus d'objet.
+      // Absent de la réponse (ancien backend) → on garde l'ancien comportement.
+      localStorage.setItem('pesee_attendue', data.pesee_attendue === false ? '0' : '1');
       if (data.suite === 'pesee_intermediaire') {
         localStorage.setItem('intermediate_return', 'true');
         navigate('/weigh-in');
@@ -479,7 +497,7 @@ export default function TourMap() {
     }
     if (mode === USAGE_MODES.SHORT_STOP) {
       return {
-        primaryLabel: isAssociationTour ? 'Collecter' : 'Identifier le CAV',
+        primaryLabel: isAssociationTour ? libelleActionAssociation() : 'Identifier le CAV',
         primaryIcon: IDENTIFY_ICON,
         onPrimary: goToIdentify,
         secondaryLabel: 'Incident',
@@ -489,7 +507,7 @@ export default function TourMap() {
     }
     // operational_stop (défaut)
     return {
-      primaryLabel: isAssociationTour ? 'Collecter' : 'Identifier le CAV',
+      primaryLabel: isAssociationTour ? libelleActionAssociation() : 'Identifier le CAV',
       primaryIcon: IDENTIFY_ICON,
       onPrimary: goToIdentify,
       secondaryLabel: hasCoords ? 'Naviguer' : null,

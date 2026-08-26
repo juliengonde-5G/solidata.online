@@ -57,6 +57,7 @@ router.get('/:id/live-summary', async (req, res) => {
       const r = await pool.query(`
         SELECT tap.id, tap.tour_id, tap.association_point_id AS cav_id,
                tap.position, tap.status, tap.fill_level, tap.collected_at,
+               tap.arrived_at, tap.duree_prevue_min,
                tap.notes, tap.planned_passage_time,
                ap.name AS cav_name, ap.address, ap.ville AS commune,
                ap.latitude, ap.longitude, NULL::int AS nb_containers

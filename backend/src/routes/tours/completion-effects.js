@@ -156,6 +156,29 @@ async function ecrireFeedbackAssociation(tourId, tour, db = pool) {
  * @param {number|null} userId  Auteur (req.user.id — compte générique chauffeur
  *                              pour le mobile), tracé dans created_by du stock.
  */
+/**
+ * Poids réellement pesé sur la tournée — LA source de vérité, `tour_weights`.
+ *
+ * `tours.total_weight_kg` est une valeur DÉRIVÉE, recalculée par les écrans de
+ * pesée. Elle est donc juste tant qu'on passe par eux — et périmée dès qu'on
+ * clôture autrement : par la ré-ouverture d'une tournée, par le bouton
+ * « Terminer » du gestionnaire, ou (depuis le 26/08/2026) par un équipage qui
+ * termine sans repasser par la pesée parce que le camion venait d'être vidé.
+ * Dans ce dernier cas la colonne valait encore 0 alors que 980 kg avaient été
+ * pesés en cours de journée : ni tonnage, ni entrée de stock, ni apprentissage.
+ *
+ * On ne fait donc plus confiance à la valeur stockée au moment de la clôture :
+ * on la recalcule. La règle est celle de la 2.35.0 — TOUTES les pesées, les
+ * intermédiaires comprises, chacune étant un chargement réellement déposé.
+ */
+async function poidsTotalPese(tourId, db = pool) {
+  const r = await db.query(
+    'SELECT COALESCE(SUM(weight_kg), 0) AS total FROM tour_weights WHERE tour_id = $1',
+    [tourId]
+  );
+  return Number(r.rows[0]?.total) || 0;
+}
+
 async function applyCompletionSideEffects(tour, tourId, userId) {
   // MODE DÉMO (formations) : une tournée d'entraînement ne produit AUCUN effet
   // métier — ni tonnage, ni entrée de stock, ni apprentissage du moteur
@@ -174,7 +197,28 @@ async function applyCompletionSideEffects(tour, tourId, userId) {
     await ecrireFeedbackAssociation(tourId, tour);
   }
 
-  if (tour.total_weight_kg > 0) {
+  // Le poids fait foi depuis `tour_weights` — sauf si cette table est muette.
+  //
+  // Règle, et sa raison : quand des pesées EXISTENT, leur somme est la
+  // définition même du poids de la tournée, et elle l'emporte sur la colonne
+  // dérivée (qui peut être périmée — voir poidsTotalPese). Quand il n'y en a
+  // AUCUNE, un total déjà stocké vient forcément d'ailleurs (reprise manuelle,
+  // import, historique) : on ne le RAMÈNE PAS à zéro, car rien ne permettrait
+  // de le retrouver. Le correctif ne peut donc qu'ajouter du poids qui se
+  // perdait, jamais en retirer.
+  const totalPese = await poidsTotalPese(tourId);
+  const stocke = Number(tour.total_weight_kg || 0);
+  const total = totalPese > 0 ? totalPese : stocke;
+  if (totalPese > 0 && totalPese !== stocke) {
+    console.warn(
+      `[TOURS] Clôture #${tourId} : total recalculé depuis les pesées ` +
+      `(${stocke} kg stockés → ${totalPese} kg pesés).`
+    );
+    await pool.query('UPDATE tours SET total_weight_kg = $1 WHERE id = $2', [totalPese, tourId]);
+  }
+  tour = { ...tour, total_weight_kg: total };
+
+  if (total > 0) {
     const points = await pointsCollectes(tour, tourId);
 
     // 1. Tonnage par point collecté : le poids total pesé est réparti entre les
@@ -221,6 +265,7 @@ async function applyCompletionSideEffects(tour, tourId, userId) {
 
 module.exports = {
   applyCompletionSideEffects,
+  poidsTotalPese,
   // Exportés pour le script de rattrapage et les tests : la règle de
   // répartition doit rester UNE seule, jamais réécrite ailleurs.
   estAssociation,

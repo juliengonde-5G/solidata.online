@@ -9,6 +9,7 @@ import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { INCIDENT_TYPE_LABELS as INCIDENT_TYPE_LABELS_PARTAGES, INCIDENT_STATUS_LABELS } from '../utils/incidents';
 
 // Leaflet ne calcule la taille du conteneur que lors du `mount` initial.
 // Quand la carte apparaît dans un panneau (fiche détail) qui était démonté
@@ -85,18 +86,15 @@ const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude
   communaute_communes: '', surface: '', ref_refashion: '', entite_detentrice: '', code_postal: '' };
 
 // ─── Historique & incidents par CAV ────────────────────────────────────────
-const INCIDENT_TYPE_LABELS = {
-  cav_problem: 'Problème CAV',
-  environment: 'Environnement',
-  vehicle_breakdown: 'Panne véhicule',
-  accident: 'Accident',
-  other: 'Autre',
-};
+// Libellés partagés (utils/incidents.js) : c'était la TROISIÈME copie de cette
+// table dans le frontend, et les trois divergeaient déjà (« Problème CAV » ici,
+// « CAV dégradée » ailleurs pour le même code).
+const INCIDENT_TYPE_LABELS = INCIDENT_TYPE_LABELS_PARTAGES;
 const INCIDENT_STATUS_META = {
-  open: { label: 'Ouvert', cls: 'bg-red-100 text-red-700' },
-  in_progress: { label: 'En cours', cls: 'bg-amber-100 text-amber-700' },
-  resolved: { label: 'Résolu', cls: 'bg-green-100 text-green-700' },
-  closed: { label: 'Clôturé', cls: 'bg-gray-100 text-gray-600' },
+  open: { label: INCIDENT_STATUS_LABELS.open, cls: 'bg-red-100 text-red-700' },
+  in_progress: { label: INCIDENT_STATUS_LABELS.in_progress, cls: 'bg-amber-100 text-amber-700' },
+  resolved: { label: INCIDENT_STATUS_LABELS.resolved, cls: 'bg-green-100 text-green-700' },
+  closed: { label: INCIDENT_STATUS_LABELS.closed, cls: 'bg-gray-100 text-gray-600' },
 };
 const SKIP_REASON_LABELS = {
   cav_fermee: 'CAV fermé',

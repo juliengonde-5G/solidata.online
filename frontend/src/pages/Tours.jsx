@@ -7,6 +7,8 @@ import CavPicker from '../components/tours/CavPicker';
 import EstimationPanel from '../components/tours/EstimationPanel';
 import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
+import { libelleTypeIncident, libelleStatutIncident } from '../utils/incidents';
+import { printRapportTournee } from '../components/tours/pdf-tournee';
 
 const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
 const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée' };
@@ -1039,6 +1041,23 @@ function TourDetailPanel({ tour, onClose }) {
   // alors la colonne plutôt que d'aligner des tirets sans explication.
   const colonnePoids = points.some(p => p.weight_kg != null || p.collected_weight_kg != null);
 
+  // Le rapport est assemblé par le SERVEUR (GET /tours/:id/rapport) : il croise
+  // des données que cet écran n'a pas — trace GPS, messages échangés, check-list
+  // de départ. On ne recompose donc rien ici, on imprime ce qu'il renvoie.
+  const [pdfEnCours, setPdfEnCours] = useState(false);
+  const [pdfErreur, setPdfErreur] = useState(null);
+  const exporterPdf = async () => {
+    setPdfEnCours(true); setPdfErreur(null);
+    try {
+      const { data } = await api.get(`/tours/${tour.id}/rapport`);
+      printRapportTournee(data);
+    } catch (e) {
+      setPdfErreur(e.response?.data?.error || 'Le rapport n’a pas pu être préparé. Réessayez dans un instant.');
+    } finally {
+      setPdfEnCours(false);
+    }
+  };
+
   return (
     <>
       <div className="flex justify-between items-start mb-4">
@@ -1049,8 +1068,26 @@ function TourDetailPanel({ tour, onClose }) {
             {tour.collection_type === 'association' && <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700">ASSOCIATIONS</span>}
           </p>
         </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none p-1 rounded-lg hover:bg-slate-100">&times;</button>
+        <div className="flex items-center gap-2">
+          {/* Rapport PDF d'une page : le gestionnaire garde une trace complète
+              de la journée (détail des passages, écarts à l'horaire, itinéraire
+              prévu et réalisé, événements, échanges) sans avoir à recomposer
+              l'information depuis quatre écrans. */}
+          <button
+            onClick={exporterPdf}
+            disabled={pdfEnCours}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-solidata-green text-solidata-green hover:bg-green-50 disabled:opacity-50 disabled:cursor-wait"
+          >
+            {pdfEnCours ? 'Préparation…' : 'Exporter en PDF'}
+          </button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none p-1 rounded-lg hover:bg-slate-100">&times;</button>
+        </div>
       </div>
+      {pdfErreur && (
+        <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+          {pdfErreur}
+        </div>
+      )}
 
       {/* Résumé en 3 colonnes */}
       <div className="grid grid-cols-3 gap-3 mb-4">
@@ -1200,11 +1237,11 @@ function TourDetailPanel({ tour, onClose }) {
             {incidents.map((inc) => (
               <div key={inc.id} className="bg-red-50 border border-red-100 rounded-lg p-2 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-red-800">{inc.type}</span>
+                  <span className="font-semibold text-red-800">{libelleTypeIncident(inc.type)}</span>
                   <span className="text-[10px] text-red-500">{fmtTime(inc.created_at)}</span>
                 </div>
                 {inc.description && <p className="text-slate-600 mt-1">{inc.description}</p>}
-                <p className="text-[10px] text-slate-400 mt-1">Statut : {inc.status}</p>
+                <p className="text-[10px] text-slate-400 mt-1">Statut : {libelleStatutIncident(inc.status)}</p>
               </div>
             ))}
           </div>
