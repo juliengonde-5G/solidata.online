@@ -5121,6 +5121,13 @@ async function initDatabase() {
         ADD COLUMN IF NOT EXISTS demande_id INTEGER REFERENCES association_collecte_demandes(id) ON DELETE SET NULL;
     `);
 
+    // Index posé APRÈS l'ALTER : la colonne doit exister. Le poser avant faisait
+    // échouer init-db sur une base NEUVE — invisible sur une base déjà migrée,
+    // où la colonne était là depuis la veille.
+    // Le statut d'une demande est DÉRIVÉ par un LATERAL qui remonte le passage
+    // rattaché : il filtre sur cette colonne à chaque lecture de la liste.
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_point_demande ON tour_association_point(demande_id) WHERE demande_id IS NOT NULL;');
+
     // Route standard association (jonction route ↔ points association)
     await client.query(`
       CREATE TABLE IF NOT EXISTS standard_route_association (

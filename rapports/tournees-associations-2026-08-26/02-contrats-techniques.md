@@ -240,3 +240,34 @@ ne se code pas.
    d'eux échoue, c'est le code neuf qui est en cause, pas le test.
 8. Rapport final attendu : ce qui a été fait, fichier par fichier ; ce qui a été prouvé et comment ;
    ce qui a été laissé de côté et pourquoi ; toute divergence au présent contrat.
+
+---
+
+## 7. Errata du contrat (constatés à l'implémentation)
+
+Ces points ont été relevés par les agents en cours de chantier. Ils sont consignés ici
+plutôt que corrigés en amont : le contrat reste la trace de ce qui a été demandé, l'errata
+la trace de ce qui a dû être ajusté.
+
+1. **Chemin erroné** — le §5 annonçait `backend/src/services/reoptimize-service.js` ; le
+   fichier réel est `backend/src/routes/tours/reoptimize-service.js`. L'agent C2 a modifié
+   le bon fichier.
+2. **Trou de découpage** — `backend/src/routes/tours/index.js`, qui sert les payloads
+   mobiles, n'était attribué à aucun agent : les champs `horaires_jour` et `rdv` attendus
+   par le mobile n'auraient été produits par personne. Comblé par l'orchestrateur et prouvé
+   sur base réelle par le vrai handler Express.
+3. **Tolérance de rendez-vous en double** — le §4.2 confie la dérivation du statut à
+   l'agent A (constante du module pur) et le §4.5 le réglage `rdvToleranceMin` à l'agent C2 :
+   les deux n'étaient pas reliés. Une tolérance portée à 30 min planifiait des rendez-vous
+   « tenables » qui ressortaient « non honorés » dans la liste des demandes, jugés sur 15.
+   Recousu en passe de debug : le réglage d'administration fait foi, la constante est le repli.
+4. **`GET /tours/association-routes/:id/points`** — supposé non enrichi par l'agent D2 ;
+   il l'était en réalité (`SELECT ap.*` remonte les colonnes nouvelles). La provenance de la
+   durée est donc affichable dans la modale, et l'a été en passe de debug.
+5. **Index sur `tour_association_point(demande_id)`** — absent du DDL du §1, ajouté en passe
+   de debug : c'est la colonne sur laquelle filtre le `LATERAL` de dérivation du statut.
+6. **`predicted_fill_rate` sur `tour_association_point`** — n'existe pas ; aucune prédiction
+   n'est relevée à la planification d'une tournée association. L'agent C1 rejoue donc le
+   moteur avant l'écriture des tonnages et écarte son repli (50 % sans historique), qui n'est
+   pas une prédiction. Limitation documentée, non comblée : elle relève d'une évolution du
+   modèle, pas de ce chantier.

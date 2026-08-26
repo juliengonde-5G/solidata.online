@@ -229,6 +229,103 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
     expect(res.body.ordre_suggere).toEqual([52, 51]);
   });
 
+  it('préfère un ordre SANS AUCUNE violation, et le dit quand il n’en existe pas', async () => {
+    // Même géométrie dans les deux cas ; seule l'heure d'ouverture du point
+    // ancré change. Le rendez-vous de 09:00 ±15 min autorise une arrivée à
+    // 08:45 : le local ouvert dès 08:00 la reçoit, celui qui ouvre à 09:00 non.
+    const scenario = (ouverture) => ({
+      associationPoints: [
+        ASSO(51, { duree: 60, x: 1 }),
+        ASSO(52, { horaires: SEMAINE([{ debut: ouverture, fin: '17:00' }]), x: 2 }),
+      ],
+      demandes: [{
+        id: 7, association_point_id: 52, date_souhaitee: DATE,
+        heure_debut: '09:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
+      }],
+    });
+    const estimer = async () => {
+      const r = await post('/api/tours/estimate', 'MANAGER', {
+        vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.violations.some((v) => v.type === 'rdv_manque')).toBe(true);
+      return r.body.ordre_suggere;
+    };
+
+    // 1. Ouvert dès 08:00 : l'ordre inversé ne viole PLUS RIEN — il est proposé.
+    installMocks(scenario('08:00'));
+    expect(await estimer()).toEqual([52, 51]);
+
+    // 2. Ouvert à 09:00 seulement : aucun ordre n'est pleinement conforme.
+    //    L'ordre proposé tient au moins le rendez-vous (c'est l'objet de la
+    //    règle) ; la violation d'horaires qui subsiste sera signalée à son tour
+    //    à la prochaine estimation — jamais tue, jamais résolue en silence.
+    installMocks(scenario('09:00'));
+    expect(await estimer()).toEqual([52, 51]);
+  });
+
+  it('un rendez-vous en avance fait ATTENDRE l’équipage, et l’attente est du travail', async () => {
+    installMocks({
+      associationPoints: [ASSO(51, { x: 1 })],
+      demandes: [{
+        id: 7, association_point_id: 51, date_souhaitee: DATE,
+        heure_debut: '10:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
+      }],
+    });
+    const res = await post('/api/tours/estimate', 'MANAGER', {
+      vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [7],
+    });
+    expect(res.status).toBe(200);
+    const e = res.body.estimation;
+    // Départ 08:00, 10 min de route : arrivée 08:10 pour une fenêtre ouverte à
+    // 09:45 → 95 min d'attente, comptées dans la journée (arbitrage n°3).
+    expect(e.duree_attente_min).toBe(95);
+    expect(e.timeline.some((t) => t.type === 'attente')).toBe(true);
+    expect(res.body.violations).toHaveLength(0);
+    // 10 (aller) + 95 (attente) + 10 (collecte) + 10 (retour) = 125 min.
+    expect(e.duree_travail_min).toBe(125);
+  });
+
+  it('le réglage `attenteCompteTravail` sort l’attente du temps de travail', async () => {
+    const { getScoringConfig, setScoringConfig } = require('../../src/routes/tours/predictions');
+    const avant = getScoringConfig();
+    expect(avant.rdvToleranceMin).toBe(15);
+    expect(avant.attenteCompteTravail).toBe(true);
+    setScoringConfig({ ...avant, attenteCompteTravail: false });
+    try {
+      installMocks({
+        associationPoints: [ASSO(51, { x: 1 })],
+        demandes: [{
+          id: 7, association_point_id: 51, date_souhaitee: DATE,
+          heure_debut: '10:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
+        }],
+      });
+      const res = await post('/api/tours/estimate', 'MANAGER', {
+        vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [7],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.estimation.duree_attente_min).toBe(95);
+      expect(res.body.estimation.duree_travail_min).toBe(30); // l'attente n'est plus du travail
+    } finally {
+      setScoringConfig(avant);
+    }
+  });
+
+  it('la tolérance de rendez-vous par défaut (15 min) s’applique quand la demande n’en porte pas', async () => {
+    installMocks({
+      associationPoints: [ASSO(51, { duree: 240, x: 1 }), ASSO(52, { x: 2 })],
+      demandes: [{
+        id: 7, association_point_id: 52, date_souhaitee: DATE,
+        heure_debut: '09:00:00', heure_fin: null, tolerance_min: null, annulee_le: null,
+      }],
+    });
+    const res = await post('/api/tours/association', 'MANAGER', {
+      vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.violations[0].fenetre).toBe('08:45-09:15');
+  });
+
   it('refuse une demande inconnue, annulée ou étrangère à la tournée (jamais en silence)', async () => {
     const base = {
       associationPoints: [ASSO(51), ASSO(52)],

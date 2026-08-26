@@ -31,6 +31,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { TOLERANCE_RDV_DEFAUT_MIN, minutesDepuisHHMM, jourDeDate } = require('../services/association-horaires');
+const { getScoringConfig } = require('./tours/predictions');
 
 router.use(authenticate);
 router.use(authorize('ADMIN', 'MANAGER'));
@@ -51,10 +52,35 @@ const STATUTS_FIGES = ['honoree', 'non_honoree'];
  * @param {{ids?: number[], du?: string, au?: string, statut?: string, association_point_id?: number}} filtres
  * @returns {{text: string, values: any[]}}
  */
+/**
+ * Tolérance par défaut appliquée aux demandes qui n'en portent pas.
+ *
+ * Le réglage d'administration `rdvToleranceMin` (écran « Moteur prédictif ») FAIT
+ * FOI, parce que c'est LUI que la planification applique déjà pour ancrer un
+ * rendez-vous. Sans ce câblage, porter la tolérance à 30 min produisait deux
+ * écrans qui se contredisent : la tournée était planifiée comme tenable à ±30 min,
+ * et la même collecte ressortait « non honorée » dans la liste des demandes, jugée
+ * sur ±15. La constante du module pur ne sert plus que de repli.
+ */
+function toleranceParDefaut() {
+  try {
+    const brut = getScoringConfig()?.rdvToleranceMin;
+    // `Number(null)` et `Number('')` valent 0 : sans ce filtre, un réglage ABSENT
+    // devenait une tolérance de zéro minute — « à l'heure pile » —, et presque
+    // tous les rendez-vous seraient ressortis « non honorés ». Une absence n'est
+    // pas une valeur.
+    if (brut !== null && brut !== undefined && brut !== '') {
+      const v = Number(brut);
+      if (Number.isFinite(v) && v >= 0 && v <= 240) return Math.round(v);
+    }
+  } catch (_) { /* réglages illisibles : on retombe sur la valeur du module pur */ }
+  return TOLERANCE_RDV_DEFAUT_MIN;
+}
+
 function construireRequete(filtres = {}) {
   // $1 : tolérance par défaut, appliquée aux seules demandes qui n'en portent
   // pas. Paramètre et non littéral : la valeur reste unique et modifiable.
-  const values = [TOLERANCE_RDV_DEFAUT_MIN];
+  const values = [toleranceParDefaut()];
   const where = [];
 
   if (Array.isArray(filtres.ids) && filtres.ids.length > 0) {
@@ -383,3 +409,7 @@ router.post('/:id/annuler', async (req, res) => {
 });
 
 module.exports = router;
+// Exporté pour les tests : la résolution de la tolérance est une RÈGLE (le réglage
+// d'administration fait foi, la constante du module pur est le repli), pas un détail
+// d'implémentation — elle mérite d'être verrouillée.
+module.exports.toleranceParDefaut = toleranceParDefaut;

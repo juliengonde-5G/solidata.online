@@ -124,11 +124,23 @@ function AssoTemplatePoints({ points, durations, onDurationChange }) {
               const min = raw === '' ? null : Math.min(480, Math.max(1, Math.round(Number(raw)) || 1));
               onDurationChange(p.id, min);
             }}
-            placeholder="auto"
+            placeholder={p.duree_collecte_min != null ? String(p.duree_collecte_min) : 'auto'}
             aria-label={`Durée d'arrêt pour ${p.name}`}
             className="w-14 text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-center"
           />
           <span className="text-[10px] text-slate-400">min</span>
+          {/* Provenance de la durée : l'utilisateur doit savoir d'où vient le
+              chiffre qu'il voit. `ap.*` de l'endpoint des points de modèle
+              remonte bien `duree_collecte_min` — sans lui, on ne devine pas. */}
+          <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+            durations?.[p.id] != null && durations[p.id] !== p.duree_collecte_min
+              ? 'bg-indigo-100 text-indigo-700'
+              : p.duree_collecte_min != null ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'
+          }`}>
+            {durations?.[p.id] != null && durations[p.id] !== p.duree_collecte_min
+              ? 'ajustée'
+              : p.duree_collecte_min != null ? 'fiche' : 'réglage global'}
+          </span>
         </div>
       ))}
     </div>
