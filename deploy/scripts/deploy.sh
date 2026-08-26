@@ -349,6 +349,27 @@ case "${ACTION}" in
     docker compose -f ${COMPOSE_FILE} build --no-cache mobile
     docker image prune -f 2>/dev/null || true
 
+    # ── Mode maintenance ────────────────────────────────────────────────
+    # Posé ICI et pas au début : pendant les reconstructions d'images
+    # (plusieurs minutes), l'ancienne version tourne toujours et sert
+    # parfaitement les utilisateurs. Fermer le site pendant ce temps-là serait
+    # une coupure gratuite. La vraie indisponibilité commence maintenant.
+    #
+    # nginx ne redémarre pas ici (son image n'est jamais reconstruite) : c'est
+    # donc lui qui sert la page, en 503, pendant que tout le reste redémarre.
+    MAINTENANCE_ACTIVE=0
+    signaler_maintenance_restee() {
+        [ "${MAINTENANCE_ACTIVE}" = "1" ] || return 0
+        echo ""
+        warn "Le mode maintenance est TOUJOURS ACTIF : le déploiement ne s'est pas terminé normalement."
+        warn "C'est volontaire — mieux vaut une page honnête qu'une application à moitié déployée."
+        warn "Une fois le problème réglé, levez-le :  bash deploy/scripts/maintenance.sh off"
+    }
+    trap signaler_maintenance_restee EXIT
+
+    bash deploy/scripts/maintenance.sh on "Mise à jour de SOLIDATA en cours"
+    MAINTENANCE_ACTIVE=1
+
     log "Étape 4/7 — Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
 
@@ -383,7 +404,7 @@ case "${ACTION}" in
     # (cert localhost ≠ cert solidata.online → -k requis en interne).
     # Le Host header force le bon vhost : sans ça nginx tombe sur le default_server
     # qui peut être un autre projet (ex: solireport) → 502.
-    HTTP_CODE=$(curl -sk -H "Host: solidata.online" -o /dev/null -w "%{http_code}" --connect-timeout 5 https://localhost/api/health 2>/dev/null || echo "000")
+    HTTP_CODE=$(curl -sk -H "Host: solidata.online" -H "X-Solidata-Bypass-Maintenance: 1" -o /dev/null -w "%{http_code}" --connect-timeout 5 https://localhost/api/health 2>/dev/null || echo "000")
     if [ "$HTTP_CODE" = "200" ]; then
         log "Health check API : OK (HTTP 200)"
     else
@@ -461,6 +482,13 @@ case "${ACTION}" in
         error "Smoke test ÉCHOUÉ — un ou plusieurs endpoints critiques n'ont pas répondu correctement. Inspecter la sortie ci-dessus + les journaux du backend. Rollback à envisager : git reset --hard HEAD~1 && bash deploy/scripts/deploy.sh update"
     fi
 
+    # Le site rouvre SEULEMENT ici : après les migrations, le health check et
+    # le smoke test. Tout échec précédent a interrompu le script, laissant la
+    # page de maintenance en place — c'est ce qu'on veut.
+    bash deploy/scripts/maintenance.sh off
+    MAINTENANCE_ACTIVE=0
+    trap - EXIT
+
     # Cleanup
     docker image prune -f
 
@@ -476,7 +504,12 @@ case "${ACTION}" in
   # ===============================
   restart)
     log "Redémarrage des services..."
+    # Un redémarrage coupe le service au même titre qu'une mise à jour : les
+    # utilisateurs méritent la même page plutôt qu'un 502 nu.
+    bash deploy/scripts/maintenance.sh on "Redémarrage des services"
     docker compose -f ${COMPOSE_FILE} restart
+    sleep 5
+    bash deploy/scripts/maintenance.sh off
     docker compose -f ${COMPOSE_FILE} ps
     ;;
 

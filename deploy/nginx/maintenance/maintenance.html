@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>SOLIDATA — mise à jour en cours</title>
+<style>
+  :root{
+    --vert:#2D8C4E; --vert-clair:#8BC540; --encre:#1E2A22; --doux:#5B6B5F;
+    --fond:#F5F7F4; --carte:#FFFFFF; --trait:#DDE4DC;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --encre:#E6ECE7; --doux:#9AA89D; --fond:#131A15; --carte:#1B231D; --trait:#2A342C; --vert:#5CB97E; }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; display:grid; place-items:center; padding:24px;
+    background:var(--fond); color:var(--encre);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:17px; line-height:1.6;
+  }
+  .carte{
+    background:var(--carte); border:1px solid var(--trait); border-radius:16px;
+    padding:32px 28px; max-width:540px; width:100%;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);
+  }
+  .logo{
+    display:inline-flex; align-items:center; gap:10px; font-weight:800;
+    letter-spacing:.04em; font-size:1.05rem; color:var(--vert); margin-bottom:22px;
+  }
+  .pastille{width:12px;height:12px;border-radius:50%;background:var(--vert-clair);flex:none}
+  h1{font-size:1.55rem; line-height:1.25; margin:0 0 14px; font-weight:750}
+  p{margin:0 0 14px}
+  .rassure{
+    margin:22px 0 0; padding:14px 16px; border-radius:12px;
+    background:color-mix(in srgb, var(--vert) 10%, transparent);
+    border:1px solid color-mix(in srgb, var(--vert) 28%, transparent);
+    font-size:.97rem;
+  }
+  .rassure strong{color:var(--vert)}
+  .etat{
+    display:flex; align-items:center; gap:10px; margin-top:24px;
+    color:var(--doux); font-size:.9rem;
+  }
+  .points{display:inline-flex; gap:4px}
+  .points i{
+    width:6px;height:6px;border-radius:50%;background:var(--vert);display:block;
+    animation:pulse 1.4s infinite ease-in-out;
+  }
+  .points i:nth-child(2){animation-delay:.2s}
+  .points i:nth-child(3){animation-delay:.4s}
+  @keyframes pulse{0%,80%,100%{opacity:.25}40%{opacity:1}}
+  @media (prefers-reduced-motion: reduce){ .points i{animation:none;opacity:.7} }
+  .pied{margin-top:20px; padding-top:16px; border-top:1px solid var(--trait); color:var(--doux); font-size:.85rem}
+</style>
+</head>
+<body>
+  <main class="carte" role="main">
+    <div class="logo"><span class="pastille"></span>SOLIDATA</div>
+
+    <h1>Une mise à jour est en cours</h1>
+
+    <p>L'application est indisponible quelques minutes, le temps d'installer
+       une nouvelle version. Il n'y a rien à faire : cette page se rouvrira
+       toute seule dès que SOLIDATA sera de nouveau prêt.</p>
+
+    <div class="rassure">
+      <p style="margin:0"><strong>Vous êtes en tournée ?</strong> Continuez.
+      L'application du chauffeur garde en mémoire tout ce que vous saisissez
+      hors connexion — collectes, pesées, incidents — et l'envoie automatiquement
+      au retour du service. <strong>Rien n'est perdu.</strong></p>
+    </div>
+
+    <div class="etat">
+      <span class="points" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span id="etat">Vérification du service…</span>
+    </div>
+
+    <p class="pied">Si cette page reste affichée plus d'une quinzaine de minutes,
+       prévenez votre responsable.</p>
+  </main>
+
+<script>
+// On interroge le service à intervalle régulier plutôt que de recharger en
+// boucle : recharger afficherait cette même page et ferait clignoter l'écran
+// sans rien apprendre. Dès que l'API répond normalement, on revient à
+// l'application — sur la page d'où l'on venait.
+(function () {
+  var etat = document.getElementById('etat');
+  var essais = 0;
+
+  function dire(texte) { if (etat) etat.textContent = texte; }
+
+  function verifier() {
+    essais++;
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function (r) {
+        if (r.ok) {
+          dire('Service rétabli — retour à l’application…');
+          setTimeout(function () { location.reload(); }, 800);
+          return;
+        }
+        replanifier();
+      })
+      .catch(replanifier);
+  }
+
+  function replanifier() {
+    // Espacement progressif, plafonné : une maintenance longue ne doit pas
+    // marteler le serveur au moment précis où il redémarre.
+    var delai = Math.min(5000 + essais * 1000, 20000);
+    dire('Service encore indisponible — nouvelle vérification dans '
+         + Math.round(delai / 1000) + ' s.');
+    setTimeout(verifier, delai);
+  }
+
+  verifier();
+})();
+</script>
+</body>
+</html>

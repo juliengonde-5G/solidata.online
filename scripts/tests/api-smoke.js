@@ -60,7 +60,15 @@ async function request(method, path, body = null, headers = {}) {
   const url = `${BASE_URL}${path}`;
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: {
+      'Content-Type': 'application/json',
+      // Traverse le mode maintenance : le smoke test vérifie l'application
+      // APRÈS un déploiement, alors que la page de maintenance peut encore
+      // être posée. Sans cet en-tête il se heurterait à elle et déclarerait en
+      // panne un service parfaitement sain (cf. conf.d/maintenance-garde.inc).
+      'X-Solidata-Bypass-Maintenance': '1',
+      ...headers,
+    },
   };
   if (body && (method === 'POST' || method === 'PUT')) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);

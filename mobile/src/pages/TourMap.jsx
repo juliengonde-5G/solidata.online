@@ -11,6 +11,7 @@ import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
 import { addGpsPosition } from '../services/db';
 import { libellePoint } from '../services/pointLabel';
+import InfosPointAssociation from '../components/InfosPointAssociation';
 import { infoHorairesJour, texteRdv } from '../services/pointHoraires';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -789,16 +790,23 @@ export default function TourMap() {
                 <p className="text-xs text-gray-500 truncate">
                   {libellePoint(currentCAV).sousTitre || currentCAV.commune}
                 </p>
-                {isAssociationTour && currentCAV.contact_phone ? (
-                  <a href={`tel:${currentCAV.contact_phone.replace(/\s/g, '')}`} className="text-sm font-bold text-blue-600 underline">
-                    {currentCAV.contact_phone}
-                  </a>
-                ) : (
+                {/* Le taux de remplissage n'a de sens que pour une borne : le
+                    contenu d'une association n'est pas prédit (aucun historique
+                    exploitable), et afficher « 0 % rempli » serait un chiffre
+                    inventé. */}
+                {!isAssociationTour && (
                   <span className="text-sm font-bold text-amber-600 whitespace-nowrap flex-shrink-0">
                     {Math.round(currentCAV.predicted_fill_rate || currentCAV.estimated_fill_rate || 0)}% rempli
                   </span>
                 )}
               </div>
+            )}
+            {/* Chez une association, le chauffeur a besoin de plus qu'une
+                adresse : consignes d'accès, référent à demander, téléphone.
+                Le numéro était déjà là, mais seul et en petit — il est repris
+                dans cet encart, avec une cible tactile utilisable en tournée. */}
+            {mode !== USAGE_MODES.DRIVING && isAssociationTour && (
+              <InfosPointAssociation point={currentCAV} className="mt-2" />
             )}
           </div>
           )}

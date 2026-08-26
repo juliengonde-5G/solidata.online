@@ -15,6 +15,7 @@ import { pickAuditCavId } from '../services/auditPhoto';
 import { computePhotoRequirement } from '../services/cavPhoto';
 import { libellePoint } from '../services/pointLabel';
 import { texteRdv } from '../services/pointHoraires';
+import InfosPointAssociation from '../components/InfosPointAssociation';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -367,6 +368,12 @@ export default function FillLevel() {
             <span>{rdvTexte}</span>
           </div>
         )}
+
+        {/* Infos du point association — le chauffeur est SUR PLACE au moment
+            de cette saisie : c'est ici qu'il consulte le référent à demander ou
+            le numéro à appeler si personne ne répond. Ne rend rien quand rien
+            n'est renseigné (cf. components/InfosPointAssociation.jsx). */}
+        <InfosPointAssociation point={currentPoint} />
 
         {/* 1. Niveau — grille 3x2 avec CAV iconographique */}
         <div>
