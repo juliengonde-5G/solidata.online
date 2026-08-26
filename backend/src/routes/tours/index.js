@@ -66,7 +66,7 @@ function uploadPhotoOr400(mw) {
 
 // Fraîcheur de la photo du CAV — seuil paramétrable `collecte.photo_fraicheur_mois`.
 const { getPhotoFraicheurMois, photoRequise } = require('../../utils/cav-photo');
-const { arretsPourMobile, avancerRetourCentre, cloturerDepartCentre, centreDeTri, SUITE_MOTIF } = require('./arrets');
+const { arretsPourMobile, avancerRetourCentre, preparerProgrammeAuDemarrage, centreDeTri, SUITE_MOTIF } = require('./arrets');
 
 // Sub-routers
 const crudRouter = require('./crud');
@@ -526,10 +526,10 @@ router.put('/:id/start-public', async (req, res) => {
     // Calculer les horaires prévisionnels en tâche de fond (non bloquant)
     ensurePlannedPassages(req.params.id).catch(err =>
       console.warn('[TOURS] planned-passage (start-public) échec :', err.message));
-    // Le départ du centre est acquitté d'office : l'équipage EST au centre à cet
-    // instant. Lui demander de déclarer son arrivée à son propre point de départ
-    // n'apporterait rien et ajouterait un geste.
-    await cloturerDepartCentre(pool, req.params.id);
+    // Programme de la journée : passages au centre posés s'ils manquent (tournée
+    // planifiée avant leur mise en place), puis départ acquitté d'office —
+    // l'équipage EST au centre à cet instant.
+    await preparerProgrammeAuDemarrage(pool, req.params.id);
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur start-public:', err);
@@ -1129,6 +1129,7 @@ router.put('/:id/status-public', async (req, res) => {
     if (status === 'in_progress') {
       ensurePlannedPassages(req.params.id).catch(err =>
         console.warn('[TOURS] planned-passage (status-public) échec :', err.message));
+      await preparerProgrammeAuDemarrage(pool, req.params.id);
     }
     if (km_start !== undefined && km_start !== null && km_start !== '') {
       params.push(parseInt(km_start, 10));
