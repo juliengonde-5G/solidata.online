@@ -11,6 +11,7 @@ import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
 import { addGpsPosition } from '../services/db';
 import { libellePoint } from '../services/pointLabel';
+import { infoHorairesJour, texteRdv } from '../services/pointHoraires';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -19,8 +20,15 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-const cavIcon = (color) => new L.DivIcon({
-  html: `<div style="background:${color};color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)">📍</div>`,
+// `rdv: true` ajoute une petite pastille horloge : le point ancré à un
+// rendez-vous (RG-B6) doit se repérer parmi les autres marqueurs sans avoir
+// à ouvrir chaque infobulle. Le débordement de la pastille hors du cercle de
+// 28px est volontaire (badge classique en Leaflet — DivIcon n'écrête pas).
+const cavIcon = (color, { rdv = false } = {}) => new L.DivIcon({
+  html: `<div style="position:relative;width:28px;height:28px;">
+    <div style="background:${color};color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)">📍</div>
+    ${rdv ? '<div style="position:absolute;top:-5px;right:-5px;background:#4338CA;color:#fff;border-radius:50%;width:15px;height:15px;display:flex;align-items:center;justify-content:center;font-size:9px;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.4)">⏰</div>' : ''}
+  </div>`,
   className: '', iconSize: [28, 28], iconAnchor: [14, 14],
 });
 
@@ -398,6 +406,15 @@ export default function TourMap() {
 
   const currentCAV = cavs[currentCavIndex];
 
+  // Rendez-vous (RG-B6) et horaires du jour (RG-A8) du point courant.
+  // `null` = rien à afficher — voir services/pointHoraires.js pour la
+  // distinction stricte des trois états des horaires (renseigné / fermé /
+  // inconnu). Ces champs sont ajoutés par le backend en parallèle de ce
+  // chantier : tant qu'ils n'arrivent pas dans le payload, `undefined`
+  // dégrade silencieusement vers « rien à afficher ».
+  const currentRdvTexte = texteRdv(currentCAV?.rdv);
+  const currentHoraires = infoHorairesJour(currentCAV?.horaires_jour);
+
   // Un arrêt en attente placé AVANT le prochain point de collecte devient
   // l'étape courante : c'est là que le camion doit aller maintenant.
   const positionProchainCav = (() => {
@@ -595,8 +612,18 @@ export default function TourMap() {
           {cavs.map((cav, i) => {
             const color = cav.status === 'collected' ? '#22C55E' : i === currentCavIndex ? '#EF4444' : '#9CA3AF';
             if (!cav.latitude || !cav.longitude) return null;
+            // Points association (chantier tournées associations, 26/08/2026) :
+            // rendez-vous (RG-B6) et horaires du jour (RG-A8). `null` = rien à
+            // dire — les trois états des horaires ne se confondent jamais
+            // (services/pointHoraires.js).
+            const rdvTxt = texteRdv(cav.rdv);
+            const horaires = infoHorairesJour(cav.horaires_jour);
             return (
-              <Marker key={cav.cav_id || i} position={[cav.latitude, cav.longitude]} icon={cavIcon(color)}>
+              <Marker
+                key={cav.cav_id || i}
+                position={[cav.latitude, cav.longitude]}
+                icon={cavIcon(color, { rdv: !!rdvTxt })}
+              >
                 <Popup>
                   <div className="text-xs">
                     <p className="font-bold">#{i + 1} {cav.nom || cav.cav_name}</p>
@@ -605,6 +632,14 @@ export default function TourMap() {
                     {/* Exigence 08/2026 : point sans photo, ou photo périmée
                         (décision serveur `photo_requise`). */}
                     {cav.photo_requise && <p className="font-bold">📷 Photo à prendre</p>}
+                    {rdvTxt && (
+                      <p className="font-bold" style={{ color: '#4338CA' }}>📅 {rdvTxt}</p>
+                    )}
+                    {horaires && (
+                      <p style={{ color: horaires.etat === 'ferme' ? '#64748B' : '#0D9488', fontWeight: 700 }}>
+                        {horaires.texte}
+                      </p>
+                    )}
                   </div>
                 </Popup>
               </Marker>
@@ -711,6 +746,34 @@ export default function TourMap() {
             <h3 className="font-extrabold text-gray-900 text-lg leading-tight line-clamp-2">
               {libellePoint(currentCAV).titre}
             </h3>
+            {/* Rendez-vous (RG-B6, chantier tournées associations 26/08/2026) :
+                c'est l'information la plus engageante pour le chauffeur sur ce
+                point, affichée avant tout le reste. */}
+            {currentRdvTexte && (
+              <p
+                className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1"
+                role="status"
+              >
+                <span aria-hidden="true">📅</span> {currentRdvTexte}
+              </p>
+            )}
+            {/* Horaires du jour (RG-A8) : uniquement quand ils sont
+                renseignés (ouvert OU fermé). Jamais de mention « horaires
+                inconnus » écrite en gros — le silence est le bon choix quand
+                l'information est absente (services/pointHoraires.js). */}
+            {currentHoraires && (
+              <p
+                className={`mt-1 inline-flex items-center gap-1.5 text-[12px] font-bold rounded-lg px-2 py-1 border ${
+                  currentHoraires.etat === 'ferme'
+                    ? 'text-slate-600 bg-slate-50 border-slate-200'
+                    : 'text-teal-700 bg-teal-50 border-teal-200'
+                }`}
+                role="status"
+              >
+                <span aria-hidden="true">{currentHoraires.etat === 'ferme' ? '🚪' : '🕒'}</span>
+                {currentHoraires.texte}
+              </p>
+            )}
             {/* Photo attendue sur ce point (aucune photo en base ou photo
                 périmée) — annoncé AVANT l'arrivée pour éviter la surprise à la
                 validation. */}

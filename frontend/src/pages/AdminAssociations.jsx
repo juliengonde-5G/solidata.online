@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, PageHeader, MapSizeFix } from '../components';
+import { LoadingSpinner, Modal, PageHeader, MapSizeFix, FormField } from '../components';
+import HorairesHebdo, { JOURS, JOUR_LABELS, JOUR_ABBR, formatPlagesJour } from '../components/associations/HorairesHebdo';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
@@ -28,6 +29,8 @@ function LocationPicker({ position, onPick }) {
 const EMPTY_FORM = {
   name: '', address: '', complement_adresse: '', code_postal: '', ville: '',
   latitude: '', longitude: '', contact_phone: '', contact_info: '',
+  // Accessibilité (RG-A1/RG-C1) — `horaires_accessibilite` null = non renseigné (cf. HorairesHebdo.jsx)
+  horaires_accessibilite: null, horaires_notes: '', duree_collecte_min: '',
 };
 
 const STATUS_LABELS = {
@@ -56,6 +59,7 @@ export default function AdminAssociations() {
   const [mapPos, setMapPos] = useState(null);
   const [geocoding, setGeocoding] = useState(false);
   const [detailItem, setDetailItem] = useState(null);
+  const [horairesErreurs, setHorairesErreurs] = useState(null); // erreurs 400 HORAIRES_INVALIDES, jamais avalées
 
   const loadData = useCallback(async () => {
     try {
@@ -78,6 +82,7 @@ export default function AdminAssociations() {
     setEditItem(null);
     setForm(EMPTY_FORM);
     setMapPos(null);
+    setHorairesErreurs(null);
     setShowModal(true);
   };
 
@@ -93,26 +98,53 @@ export default function AdminAssociations() {
       longitude: item.longitude || '',
       contact_phone: item.contact_phone || '',
       contact_info: item.contact_info || '',
+      // `horaires_accessibilite` arrive tel quel (jsonb) : object renseigné ou null — jamais deviné.
+      horaires_accessibilite: item.horaires_accessibilite ?? null,
+      horaires_notes: item.horaires_notes || '',
+      duree_collecte_min: item.duree_collecte_min != null ? String(item.duree_collecte_min) : '',
     });
     setMapPos(item.latitude && item.longitude ? [item.latitude, item.longitude] : null);
+    setHorairesErreurs(null);
     setShowModal(true);
   };
 
   const handleSave = async () => {
     if (!form.name) { showAlertMsg('Le nom est requis', 'error'); return; }
     setSaving(true);
+    setHorairesErreurs(null);
+
+    // Cascade des durées (RG-C3) : une valeur vide reste `null`, jamais un 0 ou
+    // un défaut inventé côté front — c'est la fiche > le réglage global qui décide.
+    let dureeCollecteMin = null;
+    if (form.duree_collecte_min !== '' && form.duree_collecte_min != null) {
+      const n = Number(form.duree_collecte_min);
+      if (!Number.isNaN(n)) dureeCollecteMin = Math.round(n);
+    }
+    const payload = {
+      ...form,
+      duree_collecte_min: dureeCollecteMin,
+      horaires_notes: form.horaires_notes.trim() ? form.horaires_notes.trim() : null,
+    };
+
     try {
       if (editItem) {
-        await api.put(`/association-points/${editItem.id}`, form);
+        await api.put(`/association-points/${editItem.id}`, payload);
         showAlertMsg('Point association mis à jour');
       } else {
-        await api.post('/association-points', form);
+        await api.post('/association-points', payload);
         showAlertMsg('Point association créé');
       }
       setShowModal(false);
       loadData();
     } catch (err) {
-      showAlertMsg(err.response?.data?.error || 'Erreur lors de la sauvegarde', 'error');
+      const data = err.response?.data;
+      if (data?.code === 'HORAIRES_INVALIDES') {
+        // Le serveur reste l'autorité : on affiche ses erreurs telles quelles, sans les avaler.
+        setHorairesErreurs(Array.isArray(data.erreurs) && data.erreurs.length > 0 ? data.erreurs : [data.error || 'Horaires invalides.']);
+        showAlertMsg(data.error || 'Horaires invalides — corrigez les erreurs signalées ci-dessous', 'error');
+      } else {
+        showAlertMsg(data?.error || 'Erreur lors de la sauvegarde', 'error');
+      }
     }
     setSaving(false);
   };
@@ -226,12 +258,25 @@ export default function AdminAssociations() {
             <div key={item.id} className="card-modern p-4 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setDetailItem(item)}>
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="w-3 h-3 rounded-full bg-orange-400 flex-shrink-0" />
                     <h3 className="font-semibold text-slate-800 truncate">{item.name}</h3>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_COLORS[item.status]}`}>
                       {STATUS_LABELS[item.status]}
                     </span>
+                    {/* RG-A2 : « non renseigné » (neutre) n'est jamais confondu avec « fermé » (orange, restreint la planification) */}
+                    {item.horaires_renseignes === false && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500" title="Aucun horaire saisi sur la fiche — la planification reste autorisée">
+                        Horaires non renseignés
+                      </span>
+                    )}
+                    {Array.isArray(item.jours_fermes) && item.jours_fermes.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-200" title="Jours sans plage d'accessibilité — planification bloquée ces jours-là">
+                        {item.jours_fermes.length === 7
+                          ? 'Fermé toute la semaine'
+                          : `Fermé ${item.jours_fermes.map((j) => JOUR_ABBR[j] || j).join(', ')}`}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500 truncate">{[item.address, item.ville].filter(Boolean).join(', ') || 'Adresse non renseignée'}</p>
                   {item.contact_phone && <p className="text-xs text-blue-600 mt-0.5">{item.contact_phone}</p>}
@@ -280,6 +325,39 @@ export default function AdminAssociations() {
                   <p className="text-slate-400 text-xs">Dernière collecte</p>
                   <p>{detailItem.last_collection ? new Date(detailItem.last_collection).toLocaleDateString('fr-FR') : '—'}</p>
                 </div>
+                <div>
+                  <p className="text-slate-400 text-xs">Durée de collecte</p>
+                  <p>{detailItem.duree_collecte_min != null ? `${detailItem.duree_collecte_min} min (fiche)` : 'Réglage global (10 min par défaut)'}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-slate-400 text-xs mb-1">Horaires d'accessibilité</p>
+                  {detailItem.horaires_renseignes ? (
+                    <ul className="text-xs divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+                      {JOURS.map((j) => {
+                        const plages = detailItem.horaires_accessibilite?.[j];
+                        const ferme = !Array.isArray(plages) || plages.length === 0;
+                        return (
+                          <li key={j} className="flex items-center justify-between gap-2 px-2 py-1">
+                            <span className="text-slate-500">{JOUR_LABELS[j]}</span>
+                            <span className={ferme ? 'text-orange-600 font-medium' : 'text-slate-700'}>
+                              {formatPlagesJour(plages)}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-slate-500 italic bg-slate-50 border border-dashed border-slate-200 rounded-lg p-2">
+                      Non renseignés — la planification reste autorisée.
+                    </p>
+                  )}
+                </div>
+                {detailItem.horaires_notes && (
+                  <div className="col-span-2">
+                    <p className="text-slate-400 text-xs">Notes d'accès</p>
+                    <p className="whitespace-pre-wrap">{detailItem.horaires_notes}</p>
+                  </div>
+                )}
               </div>
               {detailItem.latitude && detailItem.longitude && (
                 <div className="h-48 rounded-lg overflow-hidden border">
@@ -340,6 +418,50 @@ export default function AdminAssociations() {
                 <label className="text-xs text-slate-500">Info contact</label>
                 <input type="text" value={form.contact_info} onChange={e => setForm({ ...form, contact_info: e.target.value })} className="input-modern" placeholder="Nom du référent..." />
               </div>
+            </div>
+
+            {/* Accessibilité — RG-A1/RG-A2 (horaires) et RG-C1 (durée de collecte) */}
+            <div className="pt-3 border-t border-slate-100 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-800">Accessibilité</h3>
+
+              <HorairesHebdo
+                value={form.horaires_accessibilite}
+                onChange={(v) => setForm({ ...form, horaires_accessibilite: v })}
+              />
+
+              {horairesErreurs && horairesErreurs.length > 0 && (
+                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-2.5">
+                  <p className="text-xs font-medium text-red-700 mb-1">Horaires refusés par le serveur — à corriger :</p>
+                  <ul className="text-xs text-red-700 list-disc list-inside space-y-0.5">
+                    {horairesErreurs.map((e, i) => (
+                      <li key={i}>{typeof e === 'string' ? e : (e?.message || JSON.stringify(e))}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <FormField
+                label="Notes d'accès"
+                type="textarea"
+                name="horaires_notes"
+                value={form.horaires_notes}
+                onChange={(e) => setForm({ ...form, horaires_notes: e.target.value })}
+                rows={2}
+                placeholder="Ex : sonner au portail, accès par l'arrière, fermé en août..."
+              />
+
+              <FormField
+                label="Durée de collecte par défaut"
+                type="number"
+                name="duree_collecte_min"
+                value={form.duree_collecte_min}
+                onChange={(e) => setForm({ ...form, duree_collecte_min: e.target.value })}
+                min={1}
+                max={480}
+                placeholder="10"
+                hint="Laissé vide, le réglage global « Temps par CAV » s'applique (10 min par défaut, réglable dans Administration → Moteur prédictif). Rien n'est deviné : la fiche n'impose que ce qui y est saisi."
+                className="max-w-xs"
+              />
             </div>
 
             {/* Géocodage */}

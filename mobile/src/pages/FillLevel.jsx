@@ -14,6 +14,7 @@ import { authedFetch } from '../services/authedFetch';
 import { pickAuditCavId } from '../services/auditPhoto';
 import { computePhotoRequirement } from '../services/cavPhoto';
 import { libellePoint } from '../services/pointLabel';
+import { texteRdv } from '../services/pointHoraires';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -296,6 +297,13 @@ export default function FillLevel() {
     fraicheurMois,
   });
 
+  // Rendez-vous du point (RG-B6, chantier tournées associations 26/08/2026) :
+  // même bandeau que sur la carte, pour que le chauffeur retrouve le contexte
+  // pendant la saisie du niveau. `null` si le point n'a pas de rendez-vous,
+  // ou si le payload ne le porte pas encore (dégradation silencieuse assumée
+  // — voir services/pointHoraires.js).
+  const rdvTexte = texteRdv(currentPoint?.rdv);
+
   const summaryLines = useMemo(() => {
     const lines = [];
     if (selected) lines.push({ label: 'Niveau', value: `${selected.pct} — ${selected.label}` });
@@ -346,6 +354,20 @@ export default function FillLevel() {
       }
     >
       <div className="space-y-5">
+        {/* Rendez-vous du point (RG-B6, chantier tournées associations
+            26/08/2026) : le même bandeau qu'à l'écran carte, pour garder le
+            contexte pendant la saisie. Rien ne s'affiche si le point n'a pas
+            de rendez-vous (cf. services/pointHoraires.js). */}
+        {rdvTexte && (
+          <div
+            className="flex items-center gap-2 text-[13px] font-bold text-indigo-700 bg-indigo-50 border-2 border-indigo-200 rounded-xl px-3 py-2.5"
+            role="status"
+          >
+            <span className="text-base flex-shrink-0" aria-hidden="true">📅</span>
+            <span>{rdvTexte}</span>
+          </div>
+        )}
+
         {/* 1. Niveau — grille 3x2 avec CAV iconographique */}
         <div>
           <p className="text-[11px] uppercase tracking-wide text-gray-500 font-bold mb-3">

@@ -29,7 +29,10 @@ const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
 const { getScoringConfig } = require('./predictions');
 const fillFactors = require('../../utils/fill-factors');
 const timeEngine = require('../../services/tour-time-engine');
-const { loadLearnedTimesPerCav, learnedTimeFor, timeEngineOptions } = require('./smart-tour');
+const {
+  loadLearnedTimesPerCav, learnedTimeFor, timeEngineOptions,
+  resolveServiceMinutes, ancrageDuPoint,
+} = require('./smart-tour');
 
 // Temps de service moyen par point, ULTIME repli historique (minutes).
 // Il n'est retenu QUE si la variable d'environnement SERVICE_TIME_MIN est
@@ -123,11 +126,19 @@ async function computeAndStorePlannedPassages(tourId) {
   const isAssoc = tour.collection_type === 'association';
 
   // Charger points ordonnés (+ données servant au temps de service et au poids)
+  // Points association : la durée d'arrêt suit la MÊME cascade que
+  // l'estimation (ajustement de la tournée > fiche > réglage global) et le
+  // rendez-vous éventuel ancre l'heure de passage. Sans cela, l'heure prévue
+  // affichée au chauffeur contredirait celle annoncée à la planification.
   const pointsQuery = isAssoc
     ? `SELECT tap.id, tap.association_point_id AS ref_id, ap.name,
-              ap.latitude, ap.longitude, NULL::int AS nb_containers, NULL::float AS predicted_fill_rate
+              ap.latitude, ap.longitude, NULL::int AS nb_containers, NULL::float AS predicted_fill_rate,
+              tap.duree_prevue_min, ap.duree_collecte_min,
+              d.id AS demande_id, d.heure_debut, d.heure_fin, d.tolerance_min
          FROM tour_association_point tap
          JOIN association_points ap ON ap.id = tap.association_point_id
+         LEFT JOIN association_collecte_demandes d
+                ON d.id = tap.demande_id AND d.annulee_le IS NULL
          WHERE tap.tour_id = $1 ORDER BY tap.position`
     : `SELECT tc.id, tc.cav_id AS ref_id, c.name,
               c.latitude, c.longitude, c.nb_containers, tc.predicted_fill_rate
@@ -154,6 +165,7 @@ async function computeAndStorePlannedPassages(tourId) {
     ? new Map()
     : await loadLearnedTimesPerCav(points.map(p => p.ref_id));
 
+  const toleranceRdv = parseFloat(cfg.rdvToleranceMin);
   const enginePoints = points.map((p) => {
     const fill = p.predicted_fill_rate != null && Number.isFinite(parseFloat(p.predicted_fill_rate))
       ? parseFloat(p.predicted_fill_rate)
@@ -165,9 +177,15 @@ async function computeAndStorePlannedPassages(tourId) {
       lat: parseFloat(p.latitude),
       lng: parseFloat(p.longitude),
       serviceMinutes: isAssoc
-        ? defaultService
+        ? resolveServiceMinutes(p, defaultService)
         : learnedTimeFor(learned, p.ref_id, defaultService),
       weightKg: fill != null ? (fill / 100) * fillFactors.getCapacityKg(p.nb_containers) : 0,
+      // Rendez-vous : l'attente éventuelle avant l'ouverture décale TOUS les
+      // points suivants. Les horaires d'accessibilité, eux, ne fabriquent
+      // aucune attente (doctrine) : ils ne sont pas passés ici.
+      anchor: isAssoc && p.heure_debut
+        ? ancrageDuPoint({ _demande: p }, Number.isFinite(toleranceRdv) ? toleranceRdv : 15)
+        : null,
     };
   });
 

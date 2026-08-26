@@ -184,6 +184,7 @@ app.use('/api/tours', require('./routes/tours'));
 app.use('/api/incidents', require('./routes/incidents'));
 app.use('/api/qhse', require('./routes/qhse'));
 app.use('/api/association-points', require('./routes/association-points'));
+app.use('/api/association-demandes', require('./routes/association-demandes'));
 // Lot 4 : Tri + Stock + Production + Facturation + Reporting + Refashion
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/production', require('./routes/production'));

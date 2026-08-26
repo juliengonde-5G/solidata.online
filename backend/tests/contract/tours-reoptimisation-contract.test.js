@@ -17,6 +17,21 @@ jest.mock('../../src/config/database', () => ({
   query: (...a) => mockQuery(...a),
   connect: jest.fn(),
 }));
+// OSRM est simulé au même titre que TomTom. Sans cela, `cachedRouteSegment`
+// sortait RÉELLEMENT sur le réseau : ce fichier passait sur un poste privé
+// d'accès à un serveur OSRM (repli haversine → source « estimation ») et
+// échouait en intégration continue, où l'appel aboutit et renvoie
+// « osrm_facteur_jour ». Un test dont le verdict dépend de la joignabilité d'un
+// serveur public n'est pas un test : c'est un tirage au sort.
+const mockSegment = jest.fn();
+jest.mock('../../src/services/route-cache', () => ({
+  cachedRouteSegment: (...a) => mockSegment(...a),
+  // Renvoie une Map VIDE (« rien en cache »), pas `undefined` : l'appelant en
+  // fait une matrice de tronçons et l'aurait déréférencée.
+  prefetchLegs: async () => new Map(),
+  legKey: (a, b, c, d) => [a, b, c, d].join(','),
+}));
+
 const mockTomtom = jest.fn();
 jest.mock('../../src/services/routing-tomtom', () => ({
   tomtomRouteSequence: (...a) => mockTomtom(...a),
@@ -33,7 +48,7 @@ jest.mock('../../src/routes/tours/planned-passage', () => ({
 }));
 
 const { proposeReoptimization } = require('../../src/routes/tours/reoptimize-service');
-const { haversineDistance } = require('../../src/routes/tours/geo');
+const { haversineDistance, ROAD_FACTOR, resolveAvgSpeedKmh } = require('../../src/routes/tours/geo');
 
 const CENTRE = { lat: 49.4231, lng: 1.0993 };
 
@@ -132,6 +147,20 @@ function installMocks(etat = {}) {
 beforeEach(() => {
   mockQuery.mockReset();
   mockTomtom.mockReset();
+  // Le défaut est posé ICI et non dans installMocks : le service lance un
+  // préchauffage de tronçons « fire-and-forget » qui peut s'exécuter APRÈS la
+  // fin du test, quand le mock vient d'être réinitialisé — un mock nu renvoie
+  // `undefined`, et le `.catch()` de l'appelant explose.
+  //
+  // Par défaut : AUCUN routeur joignable — le repli exact de geo.js
+  // (haversine × ROAD_FACTOR). C'est `source: 'haversine'` qui fait dire à
+  // `mesurerSequence` qu'il n'a pas mesuré ; un test qui veut la voie mesurée
+  // le déclare explicitement (voir « routeur disponible »).
+  mockSegment.mockReset();
+  mockSegment.mockImplementation(async (lat1, lng1, lat2, lng2) => {
+    const km = haversineDistance(lat1, lng1, lat2, lng2) * ROAD_FACTOR;
+    return { distance_km: km, duration_min: (km / resolveAvgSpeedKmh()) * 60, source: 'haversine' };
+  });
 });
 
 describe('proposeReoptimization — décision', () => {
@@ -278,6 +307,18 @@ describe('proposeReoptimization — CO2', () => {
 });
 
 describe('proposeReoptimization — repli honnête', () => {
+  test('routeur disponible : la proposition annonce une mesure, pas une estimation', async () => {
+    installMocks();
+    mockTomtom.mockResolvedValue(null);              // TomTom indisponible…
+    mockSegment.mockImplementation(async (a, b, c, d) => {   // …mais OSRM répond
+      const km = haversineDistance(a, b, c, d) * ROAD_FACTOR;
+      return { distance_km: km, duration_min: (km / resolveAvgSpeedKmh()) * 60, source: 'osrm' };
+    });
+    const r = await proposeReoptimization({ tourId: 42 });
+    if (r.created) expect(r.proposal.source_calcul).toBe('osrm_facteur_jour');
+    else expect(['gain_marginal', 'ordre_deja_optimal']).toContain(r.reason);
+  });
+
   test('routeur muet : la proposition porte « estimation », pas une fausse mesure', async () => {
     installMocks();
     mockTomtom.mockResolvedValue(null); // TomTom indisponible

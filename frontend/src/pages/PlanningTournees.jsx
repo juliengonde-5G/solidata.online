@@ -1,12 +1,53 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar, Truck, User, AlertTriangle, X, Users, Car,
-  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus, Clock,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, PageHeader } from '../components';
+import { LoadingSpinner, PageHeader, Modal } from '../components';
 import CreateTourModal from '../components/tours/CreateTourModal';
 import api from '../services/api';
+
+// Statuts d'une demande de collecte — DÉRIVÉS côté serveur, jamais saisis
+// (contrat §4.2) : traduits en français et distingués visuellement.
+const DEMANDE_STATUT_META = {
+  a_planifier: { label: 'À planifier', cls: 'bg-amber-100 text-amber-700' },
+  planifiee: { label: 'Planifiée', cls: 'bg-blue-100 text-blue-700' },
+  honoree: { label: 'Honorée', cls: 'bg-emerald-100 text-emerald-700' },
+  non_honoree: { label: 'Non honorée', cls: 'bg-red-100 text-red-700' },
+  annulee: { label: 'Annulée', cls: 'bg-slate-200 text-slate-500' },
+};
+
+const EMPTY_DEMANDE_FORM = {
+  association_point_id: '', date_souhaitee: '', heure_debut: '', heure_fin: '',
+  tolerance_min: '', commentaire: '',
+};
+
+// Une DATE PostgreSQL arrive parfois en ISO 'YYYY-MM-DD' (string courte),
+// parfois en datetime sérialisé complet ('2026-08-26T00:00:00.000Z') selon la
+// requête serveur — normalisée ICI UNE fois pour que toutes les comparaisons
+// de date en aval (bascule du planning, égalité de jour) restent fiables.
+// La conversion en UTC est sans risque de dérive : une DATE Postgres est
+// toujours sérialisée à minuit UTC exact du jour concerné.
+function toIsoDate(v) {
+  if (!v) return null;
+  if (typeof v === 'string' && v.length <= 10) return v;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+// Lundi → dimanche de la semaine ISO contenant la date donnée ('YYYY-MM-DD').
+function weekRange(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  const day = d.getDay(); // 0 = dimanche
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = (x) => x.toISOString().slice(0, 10);
+  return { du: fmt(monday), au: fmt(sunday) };
+}
 
 // Badge du mode de planification d'une tournée (IA / modèle / manuelle / association)
 function modeBadge(t) {
@@ -134,6 +175,22 @@ export default function PlanningTournees() {
   // par défaut, dépliables d'un clic (l'affectation elle-même reste autorisée).
   const [showAutresEquipes, setShowAutresEquipes] = useState(false);
 
+  // ── Demandes de collecte associations (RG-B) ──────────────────────────────
+  const [demandes, setDemandes] = useState([]);
+  const [demandesLoading, setDemandesLoading] = useState(false);
+  const [demandesError, setDemandesError] = useState(null);
+  const [assoPointsOptions, setAssoPointsOptions] = useState([]);
+  const [showDemandeForm, setShowDemandeForm] = useState(false);
+  const [demandeForm, setDemandeForm] = useState(EMPTY_DEMANDE_FORM);
+  const [demandeFormSaving, setDemandeFormSaving] = useState(false);
+  const [demandeFormError, setDemandeFormError] = useState(null);
+  const [cancelingId, setCancelingId] = useState(null);
+  // Demande sur laquelle « Planifier » a été cliqué : ouvre CreateTourModal
+  // préremplie (date + point). Si la demande porte sur un autre jour que celui
+  // affiché, on bascule d'abord le planning sur ce jour (les ressources
+  // affichées — véhicules/chauffeurs libres — doivent être celles du bon jour).
+  const [prefillDemande, setPrefillDemande] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -146,6 +203,94 @@ export default function PlanningTournees() {
   }, [date]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadDemandes = useCallback(async () => {
+    setDemandesLoading(true);
+    setDemandesError(null);
+    try {
+      const { du, au } = weekRange(date);
+      const res = await api.get('/association-demandes', { params: { du, au } });
+      const list = (Array.isArray(res.data) ? res.data : []).map((d) => ({
+        ...d,
+        date_souhaitee: toIsoDate(d.date_souhaitee) || d.date_souhaitee,
+      }));
+      setDemandes(list);
+    } catch (err) {
+      console.error('[PlanningTournees] demandes :', err);
+      setDemandesError('Impossible de charger les demandes de collecte');
+      setDemandes([]);
+    }
+    setDemandesLoading(false);
+  }, [date]);
+
+  useEffect(() => { loadDemandes(); }, [loadDemandes]);
+
+  // Associations actives, pour le sélecteur de la nouvelle demande — un seul
+  // point à choisir, une simple liste suffit (pas besoin du CavPicker complet).
+  useEffect(() => {
+    api.get('/association-points', { params: { status: 'active' } })
+      .then((res) => setAssoPointsOptions(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setAssoPointsOptions([]));
+  }, []);
+
+  const tourIdsWithDemande = useMemo(() => {
+    const set = new Set();
+    demandes.forEach((d) => {
+      if (d.tour_id != null && (d.statut === 'planifiee' || d.statut === 'honoree')) set.add(d.tour_id);
+    });
+    return set;
+  }, [demandes]);
+
+  const submitDemande = async (e) => {
+    e.preventDefault();
+    if (!demandeForm.association_point_id || !demandeForm.date_souhaitee || !demandeForm.heure_debut) return;
+    setDemandeFormSaving(true);
+    setDemandeFormError(null);
+    try {
+      await api.post('/association-demandes', {
+        association_point_id: parseInt(demandeForm.association_point_id, 10),
+        date_souhaitee: demandeForm.date_souhaitee,
+        heure_debut: demandeForm.heure_debut,
+        heure_fin: demandeForm.heure_fin || undefined,
+        tolerance_min: demandeForm.tolerance_min ? parseInt(demandeForm.tolerance_min, 10) : undefined,
+        commentaire: demandeForm.commentaire || undefined,
+      });
+      setShowDemandeForm(false);
+      setDemandeForm(EMPTY_DEMANDE_FORM);
+      showToast('Demande de collecte créée', 'success');
+      loadDemandes();
+    } catch (err) {
+      const code = err.response?.data?.code;
+      setDemandeFormError(
+        code === 'DEMANDE_DOUBLON'
+          ? 'Une demande existe déjà pour cette association à cette date.'
+          : (err.response?.data?.error || 'Erreur lors de la création de la demande')
+      );
+    }
+    setDemandeFormSaving(false);
+  };
+
+  const cancelDemande = async (d) => {
+    if (cancelingId) return;
+    setCancelingId(d.id);
+    try {
+      await api.post(`/association-demandes/${d.id}/annuler`, {});
+      showToast('Demande annulée', 'success');
+      await loadDemandes();
+    } catch (err) {
+      showToast(err.response?.data?.error || "Impossible d'annuler la demande", 'error');
+    }
+    setCancelingId(null);
+  };
+
+  // Ouvre la création de tournée préremplie (date + point) depuis une demande
+  // « à planifier » (RG-B2). Si la demande porte sur un jour différent de
+  // celui affiché, on bascule le planning dessus d'abord — la modale n'ouvre
+  // qu'une fois les ressources (véhicules/chauffeurs) du bon jour chargées.
+  const planifierDemande = (d) => {
+    setPrefillDemande(d);
+    if (d.date_souhaitee !== date) setDate(d.date_souhaitee);
+  };
 
   const handleDragStart = (e, target) => {
     e.dataTransfer.effectAllowed = 'copyMove';
@@ -251,6 +396,68 @@ export default function PlanningTournees() {
             </div>
           }
         />
+
+        {/* Demandes de collecte (associations) — semaine affichée (RG-B) */}
+        <div className="card-modern p-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-semibold text-slate-700">Demandes de collecte (associations)</h3>
+              <span className="text-[11px] text-slate-400">semaine du {(() => { const { du } = weekRange(date); return formatHuman(du); })()}</span>
+            </div>
+            <button
+              onClick={() => { setDemandeForm(EMPTY_DEMANDE_FORM); setDemandeFormError(null); setShowDemandeForm(true); }}
+              className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"
+            >
+              <Plus className="w-3.5 h-3.5" /> Nouvelle demande
+            </button>
+          </div>
+          {demandesError && <p className="text-xs text-red-600 mb-2">{demandesError}</p>}
+          {demandesLoading && demandes.length === 0 ? (
+            <p className="text-xs text-slate-400">Chargement…</p>
+          ) : demandes.length === 0 ? (
+            <p className="text-xs text-slate-400">Aucune demande de collecte cette semaine.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {demandes.map((d) => {
+                const meta = DEMANDE_STATUT_META[d.statut] || { label: d.statut, cls: 'bg-slate-100 text-slate-600' };
+                return (
+                  <div key={d.id} className="flex flex-wrap items-center gap-2 text-xs bg-slate-50 rounded-lg px-3 py-2">
+                    <span className="font-semibold text-slate-700 whitespace-nowrap capitalize">{formatHuman(d.date_souhaitee)}</span>
+                    <span className="font-mono text-slate-500 whitespace-nowrap">
+                      {String(d.heure_debut).slice(0, 5)}{d.heure_fin ? `–${String(d.heure_fin).slice(0, 5)}` : ''}
+                    </span>
+                    <span className="text-slate-700 truncate flex-1 min-w-[120px]">{d.association_nom}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${meta.cls}`}>{meta.label}</span>
+                    {d.tour_id != null && <span className="text-[10px] text-slate-400 whitespace-nowrap">tournée #{d.tour_id}</span>}
+                    {d.commentaire && (
+                      <span className="text-slate-400 italic truncate max-w-[160px]" title={d.commentaire}>{d.commentaire}</span>
+                    )}
+                    <div className="ml-auto flex gap-1.5">
+                      {d.statut === 'a_planifier' && (
+                        <button
+                          onClick={() => planifierDemande(d)}
+                          className="px-2 py-1 rounded-md bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700"
+                        >
+                          Planifier
+                        </button>
+                      )}
+                      {(d.statut === 'a_planifier' || d.statut === 'planifiee') && (
+                        <button
+                          onClick={() => cancelDemande(d)}
+                          disabled={cancelingId === d.id}
+                          className="px-2 py-1 rounded-md border border-slate-300 text-slate-600 text-[11px] hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          {cancelingId === d.id ? '…' : 'Annuler'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Grid : resources pool + tours */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -363,6 +570,11 @@ export default function PlanningTournees() {
                     {(() => { const b = modeBadge(tour); return (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${b.cls}`}>{b.label}</span>
                     ); })()}
+                    {tourIdsWithDemande.has(tour.id) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium bg-purple-100 text-purple-700" title="Un rendez-vous de collecte est rattaché à cette tournée">
+                        <Clock className="w-3 h-3" /> RDV
+                      </span>
+                    )}
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                       tour.status === 'in_progress' ? 'bg-orange-100 text-orange-700'
                       : tour.status === 'completed' ? 'bg-emerald-100 text-emerald-700'
@@ -477,6 +689,121 @@ export default function PlanningTournees() {
           onCreated={() => { showToast('Tournée créée', 'success'); load(); }}
         />
       )}
+
+      {/* Création préremplie depuis une demande de collecte (RG-B2) — le
+          planning bascule d'abord sur le jour de la demande (ressources du
+          bon jour), puis la modale s'ouvre. */}
+      {prefillDemande && (
+        data?.date === prefillDemande.date_souhaitee ? (
+          <CreateTourModal
+            date={prefillDemande.date_souhaitee}
+            vehicles={vehicles}
+            drivers={drivers}
+            prefill={{
+              demandeId: prefillDemande.id,
+              associationPointId: prefillDemande.association_point_id,
+              associationPointName: prefillDemande.association_nom,
+              heureLabel: `${String(prefillDemande.heure_debut).slice(0, 5)}${prefillDemande.heure_fin ? `–${String(prefillDemande.heure_fin).slice(0, 5)}` : ''}`,
+            }}
+            onClose={() => setPrefillDemande(null)}
+            onCreated={() => {
+              showToast('Tournée créée depuis la demande', 'success');
+              setPrefillDemande(null);
+              load();
+              loadDemandes();
+            }}
+          />
+        ) : (
+          <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl px-6 py-4 text-sm text-slate-600 shadow-2xl">
+              Chargement du planning du {formatHuman(prefillDemande.date_souhaitee)}…
+            </div>
+          </div>
+        )
+      )}
+
+      {/* Nouvelle demande de collecte (RG-B1) */}
+      <Modal isOpen={showDemandeForm} onClose={() => setShowDemandeForm(false)} title="Nouvelle demande de collecte" size="sm">
+        <form onSubmit={submitDemande} className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-slate-500 block mb-1">Association *</label>
+            <select
+              value={demandeForm.association_point_id}
+              onChange={(e) => setDemandeForm((f) => ({ ...f, association_point_id: e.target.value }))}
+              className="input-modern text-sm"
+              required
+            >
+              <option value="">— Choisir —</option>
+              {assoPointsOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}{p.ville ? ` — ${p.ville}` : ''}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1">Date souhaitée *</label>
+              <input
+                type="date"
+                value={demandeForm.date_souhaitee}
+                onChange={(e) => setDemandeForm((f) => ({ ...f, date_souhaitee: e.target.value }))}
+                className="input-modern text-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1">Heure *</label>
+              <input
+                type="time"
+                value={demandeForm.heure_debut}
+                onChange={(e) => setDemandeForm((f) => ({ ...f, heure_debut: e.target.value }))}
+                className="input-modern text-sm"
+                required
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1">Heure de fin (créneau, facultatif)</label>
+              <input
+                type="time"
+                value={demandeForm.heure_fin}
+                onChange={(e) => setDemandeForm((f) => ({ ...f, heure_fin: e.target.value }))}
+                className="input-modern text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1">Tolérance (min)</label>
+              <input
+                type="number" min="0" max="120"
+                placeholder="15 (défaut)"
+                value={demandeForm.tolerance_min}
+                onChange={(e) => setDemandeForm((f) => ({ ...f, tolerance_min: e.target.value }))}
+                className="input-modern text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 block mb-1">Commentaire</label>
+            <textarea
+              value={demandeForm.commentaire}
+              onChange={(e) => setDemandeForm((f) => ({ ...f, commentaire: e.target.value }))}
+              rows={2}
+              className="input-modern text-sm"
+            />
+          </div>
+          {demandeFormError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{demandeFormError}</p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={() => setShowDemandeForm(false)} className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm hover:bg-slate-50">
+              Annuler
+            </button>
+            <button type="submit" disabled={demandeFormSaving} className="flex-1 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+              {demandeFormSaving ? 'Création…' : 'Créer la demande'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Toast */}
       {toast && (

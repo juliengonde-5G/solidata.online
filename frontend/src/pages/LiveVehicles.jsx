@@ -199,6 +199,25 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+// ── Rendez-vous associations (RG-B6) ────────────────────────────────────────
+// Heure d'une colonne TIME PostgreSQL ('HH:MM' ou 'HH:MM:SS') → 'HH:MM'.
+function fmtHeureTime(t) {
+  if (!t) return null;
+  return String(t).slice(0, 5);
+}
+
+// Écart (minutes) entre l'heure de passage prévue (timestamp complet) et
+// l'heure de rendez-vous demandée (heure seule) — signé : positif = en retard
+// sur le rendez-vous, négatif = en avance. `null` si l'une des deux manque.
+function ecartMinutes(plannedIso, heureDebut) {
+  if (!plannedIso || !heureDebut) return null;
+  const d = new Date(plannedIso);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = String(heureDebut).split(':').map(Number);
+  if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) return null;
+  return (d.getHours() * 60 + d.getMinutes()) - (parts[0] * 60 + parts[1]);
+}
+
 export default function CollectionsLive() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -218,6 +237,9 @@ export default function CollectionsLive() {
   // confirmation n'est pas donnée.
   const [clotureDemandee, setClotureDemandee] = useState(null);
   const [clotureEnCours, setClotureEnCours] = useState(false);
+  // Demandes de collecte du jour (rendez-vous associations) — pour le badge
+  // « RDV » sur les points association d'une tournée en cours (RG-B6).
+  const [demandes, setDemandes] = useState([]);
   const socketRef = useRef(null);
 
   const loadActive = useCallback(async () => {
@@ -237,6 +259,16 @@ export default function CollectionsLive() {
         }
       });
       setLivePositions(initialPositions);
+      // Best-effort : une erreur ici (endpoint absent ou en échec) ne doit
+      // jamais bloquer l'écran principal de collecte en direct.
+      if (res.data.date) {
+        try {
+          const demRes = await api.get('/association-demandes', { params: { du: res.data.date, au: res.data.date } });
+          setDemandes(Array.isArray(demRes.data) ? demRes.data : []);
+        } catch (err) {
+          setDemandes([]);
+        }
+      }
     } catch (err) {
       console.error('[CollectionsLive] active-summary:', err);
     }
@@ -331,6 +363,20 @@ export default function CollectionsLive() {
 
   const tours = data?.tours || [];
   const kpis = data?.kpis || { vehicules_actifs: 0, cav_a_vider: 0, avancement_pct: 0, distance_restante_km: 0 };
+
+  // Rendez-vous associations RATTACHÉS à un passage de tournée en cours —
+  // clé `${tour_id}:${association_point_id}` (un point association = un
+  // rendez-vous au plus par jour, la demande porte l'unicité). Seuls
+  // `planifiee`/`honoree` désignent un rendez-vous réellement rattaché.
+  const demandeParPoint = useMemo(() => {
+    const map = {};
+    demandes.forEach((d) => {
+      if (d.tour_id != null && (d.statut === 'planifiee' || d.statut === 'honoree')) {
+        map[`${d.tour_id}:${d.association_point_id}`] = d;
+      }
+    });
+    return map;
+  }, [demandes]);
 
   // Centre de la carte : moyenne des positions actuelles (ou Rouen)
   const mapCenter = useMemo(() => {
@@ -552,6 +598,8 @@ export default function CollectionsLive() {
                       {validPoints.map((p) => {
                         const isCollected = p.status === 'collected';
                         const isIncident = p.status === 'incident' || p.status === 'skipped';
+                        const demande = tour.collection_type === 'association' ? demandeParPoint[`${tour.id}:${p.cav_id}`] : null;
+                        const ecart = demande ? ecartMinutes(p.planned_passage_time, demande.heure_debut) : null;
                         return (
                           <CircleMarker
                             key={`${tour.id}-${p.id}`}
@@ -573,6 +621,14 @@ export default function CollectionsLive() {
                                 {p.fill_level != null && <p>Remplissage : <strong>{p.fill_level}/5</strong></p>}
                                 {p.planned_passage_time && !isCollected && (
                                   <p className="text-slate-400">Passage prévu : {fmtTime(p.planned_passage_time)}</p>
+                                )}
+                                {demande && (
+                                  <p className="text-purple-700 font-semibold">
+                                    🕐 RDV {fmtHeureTime(demande.heure_debut)}
+                                    {ecart != null && Math.abs(ecart) >= 1 && (
+                                      <span className="font-normal"> ({ecart > 0 ? '+' : ''}{ecart} min vs RDV)</span>
+                                    )}
+                                  </p>
                                 )}
                                 {/* Coordonnées exactes du point, copiables d'un
                                     clic pour les dicter à un chauffeur. */}
@@ -786,7 +842,7 @@ export default function CollectionsLive() {
                           {isExpanded && (
                             <tr>
                               <td colSpan={10} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
-                                <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} />
+                                <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} demandeParPoint={demandeParPoint} />
                               </td>
                             </tr>
                           )}
@@ -838,7 +894,8 @@ function ProgressBar({ pct, color = '#0D9488' }) {
   );
 }
 
-function ExpandedDetail({ tour, color, onRefresh }) {
+function ExpandedDetail({ tour, color, onRefresh, demandeParPoint }) {
+  const isAssociation = tour.collection_type === 'association';
   return (
     <div>
       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2">
@@ -855,7 +912,7 @@ function ExpandedDetail({ tour, color, onRefresh }) {
               <th className="text-right py-1.5 px-2">Heure prévue</th>
               <th className="text-right py-1.5 px-2">Heure réelle</th>
               <th className="text-right py-1.5 px-2">Remplissage</th>
-
+              {isAssociation && <th className="text-left py-1.5 px-2">Rendez-vous</th>}
             </tr>
           </thead>
           <tbody>
@@ -864,6 +921,8 @@ function ExpandedDetail({ tour, color, onRefresh }) {
               const isIncident = p.status === 'incident' || p.status === 'skipped';
               const StatusIco = isCollected ? CheckCircle2 : isIncident ? XCircle : CircleDashed;
               const statusColor = isCollected ? 'text-emerald-600' : isIncident ? 'text-red-500' : 'text-slate-400';
+              const demande = isAssociation ? demandeParPoint?.[`${tour.id}:${p.cav_id}`] : null;
+              const ecart = demande ? ecartMinutes(p.planned_passage_time, demande.heure_debut) : null;
               return (
                 <tr key={p.id} className="border-b border-slate-100">
                   <td className="py-1.5 px-2 font-mono text-slate-400">{p.position}</td>
@@ -882,6 +941,18 @@ function ExpandedDetail({ tour, color, onRefresh }) {
                   <td className="py-1.5 px-2 text-right">
                     {p.fill_level != null ? <span className="font-semibold">{p.fill_level}/5</span> : <span className="text-slate-400">—</span>}
                   </td>
+                  {isAssociation && (
+                    <td className="py-1.5 px-2">
+                      {demande ? (
+                        <span className="inline-flex items-center gap-1 text-purple-700 font-semibold whitespace-nowrap">
+                          RDV {fmtHeureTime(demande.heure_debut)}
+                          {ecart != null && Math.abs(ecart) >= 1 && (
+                            <span className="text-[10px] font-normal text-slate-500">({ecart > 0 ? '+' : ''}{ecart} min)</span>
+                          )}
+                        </span>
+                      ) : <span className="text-slate-300">—</span>}
+                    </td>
+                  )}
                 </tr>
               );
             })}

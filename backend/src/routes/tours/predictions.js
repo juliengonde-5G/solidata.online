@@ -160,6 +160,17 @@ let SCORING_CONFIG = {
   // d'exploitation, pas un effet de bord d'un calcul.
   reoptimAuto: false,
   reoptimAutoGainMinPct: 12,   // seuil, plus élevé, de l'application auto
+
+  // ── Rendez-vous de collecte en association (août 2026) ───────────────
+  // Une association peut demander un passage à heure précise. La fenêtre
+  // effective du rendez-vous est [heure début − tolérance ; heure fin +
+  // tolérance] : arriver 10 min avant 10:30 honore un rendez-vous de 10:30.
+  // Arbitrage client n°4 : ±15 min.
+  rdvToleranceMin: 15,
+  // Arbitrage client n°3 : l'attente devant une association fermée avant son
+  // rendez-vous est du TEMPS DE TRAVAIL (l'équipage est en service), donc
+  // imputée au budget de la journée. Réglable pour rester réversible sans code.
+  attenteCompteTravail: true,
 };
 
 // ──────────────────────────────────────────────────────────────

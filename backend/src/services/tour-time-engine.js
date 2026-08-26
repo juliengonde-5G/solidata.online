@@ -29,6 +29,27 @@
  *     fait au même passage (un SEUL trajet, le déchargement reste du travail).
  *  4. RETOUR FINAL au centre : trajet (travail) + `unloadMinutes` si le
  *     véhicule est chargé.
+ *  5. POINTS À CONTRAINTE HORAIRE (associations, août 2026) — deux champs
+ *     OPTIONNELS par point, tous deux exprimés en minutes d'HORLOGE :
+ *       - `windows` : plages d'accessibilité du jour ([[540,720],…]). `null` =
+ *         horaires INCONNUS (on ne bloque pas sur une information absente) ;
+ *         `[]` = fermé toute la journée. Un service qui ne tient pas dans une
+ *         plage produit une VIOLATION `hors_horaires` — mais JAMAIS d'attente :
+ *         arriver à 11h55 devant un local qui rouvre à 14h ne doit pas
+ *         fabriquer deux heures d'attente silencieuse. Seul l'ancrage attend.
+ *       - `anchor` : fenêtre effective d'un RENDEZ-VOUS ({debutMin, finMin}).
+ *         Une arrivée en avance crée une entrée `attente` explicite (imputée au
+ *         travail ou hors travail selon `attenteCompteTravail`) ; une arrivée
+ *         après la fenêtre produit une violation `rdv_manque`.
+ *     Le moteur SIGNALE (`violations`), il n'élimine jamais un point de
+ *     lui-même : c'est la route appelante qui refuse ou laisse forcer.
+ *
+ * ⚠ DEUX RÉFÉRENTIELS DE TEMPS COEXISTENT — ne jamais les mélanger :
+ *   - minutes ÉCOULÉES depuis le départ : tout ce qui est suffixé `_min` dans
+ *     la timeline et l'estimation (`arrivee_min`, `depart_min`, `fin_service_min`…) ;
+ *   - minutes d'HORLOGE depuis minuit : `windows`, `anchor.debutMin/finMin`,
+ *     `prochain_creneau_min`, `plages`. La conversion est `clockMin()`, le même
+ *     calcul que celui qui décide la pause déjeuner.
  *
  * Toutes les minutes renvoyées sont comptées depuis le DÉPART (élapsé réel,
  * pause incluse) ; `duree_travail_min` en revanche EXCLUT toujours la pause.
@@ -49,11 +70,27 @@ const DEFAULTS = {
   returnThresholdKg: 2000,
   capacityKg: 0,
   maxConsecutiveRejects: 3, // planWithBudget : arrêt du balayage (voir plus bas)
+  // Attente devant un rendez-vous : l'équipage est en service, elle compte donc
+  // dans le budget de travail (arbitrage client 3a, août 2026). Réversible sans
+  // code par le réglage `attenteCompteTravail` d'AdminPredictive.
+  attenteCompteTravail: true,
 };
 
 function num(value, fallback) {
   const n = typeof value === 'string' ? parseFloat(value) : value;
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Coercition défensive d'un booléen de configuration : les réglages admin
+ * transitent par JSON/settings et peuvent arriver en chaîne. Toute valeur
+ * non reconnue retombe sur le défaut (jamais d'interprétation inventée).
+ */
+function coerceBool(value, fallback) {
+  if (value === true || value === false) return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fallback;
 }
 
 function isFiniteCoord(v) {
@@ -114,6 +151,7 @@ function resolveOptions(opts = {}) {
         : Infinity),
     capacityKg: Math.max(0, num(opts.capacityKg, DEFAULTS.capacityKg)),
     maxConsecutiveRejects: Math.max(1, num(opts.maxConsecutiveRejects, DEFAULTS.maxConsecutiveRejects)),
+    attenteCompteTravail: coerceBool(opts.attenteCompteTravail, DEFAULTS.attenteCompteTravail),
     center: {
       lat: num(center.lat, null),
       lng: num(center.lng, null),
@@ -160,6 +198,78 @@ function makeLegResolver(routeLeg, onWarning) {
   };
 }
 
+// ──────────────────────────────────────────────────────────────
+// Fenêtres horaires (minutes d'HORLOGE depuis minuit)
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * Coercition défensive des plages d'accessibilité d'un point.
+ *
+ * Distinction NON négociable : `null` = horaires inconnus (aucun contrôle),
+ * `[]` = fermé toute la journée (tout passage est hors horaires). Une entrée
+ * malformée invalide TOUT le jeu de plages et retombe sur `null` plutôt que
+ * d'être silencieusement écartée : d'une donnée douteuse on ne fabrique pas une
+ * fermeture, qui bloquerait la planification sur une information qu'on n'a pas.
+ *
+ * @returns {Array<[number, number]>|null}
+ */
+function normalizeWindows(raw) {
+  if (raw == null || !Array.isArray(raw)) return null;
+  const out = [];
+  for (const plage of raw) {
+    if (!Array.isArray(plage) || plage.length < 2) return null;
+    const debut = num(plage[0], null);
+    const fin = num(plage[1], null);
+    // Une plage à l'envers (fin < début) ne peut jamais être satisfaite :
+    // la retenir reviendrait à inventer une contrainte impossible.
+    if (!Number.isFinite(debut) || !Number.isFinite(fin) || fin < debut) return null;
+    out.push([debut, fin]);
+  }
+  return out;
+}
+
+/**
+ * Coercition défensive de la fenêtre effective d'un rendez-vous.
+ * Les DEUX bornes sont exigées (l'appelant les produit ensemble, tolérance
+ * comprise) : une borne manquante ne se devine pas, l'ancrage est alors ignoré.
+ * Une fenêtre à l'envers est conservée telle quelle — elle produira un
+ * `rdv_manque` honnête plutôt qu'un élargissement inventé.
+ *
+ * @returns {{debutMin: number, finMin: number}|null}
+ */
+function normalizeAnchor(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const debutMin = num(raw.debutMin, null);
+  const finMin = num(raw.finMin, null);
+  if (!Number.isFinite(debutMin) || !Number.isFinite(finMin)) return null;
+  return { debutMin, finMin };
+}
+
+/**
+ * L'intervalle [debutMin ; finMin] tient-il ENTIÈREMENT dans une plage ?
+ * Plages `null` (inconnues) → true : inconnu n'est pas interdit.
+ */
+function fitsInWindows(debutMin, finMin, windows) {
+  if (windows === null) return true;
+  return windows.some(([d, f]) => debutMin >= d && finMin <= f);
+}
+
+/**
+ * Premier instant d'horloge, à `afterMin` ou plus tard, où un service de
+ * `serviceMinutes` tient entièrement dans une plage. `null` si aucune plage ne
+ * peut l'accueillir (jour fermé, plage plus courte que le service, journée
+ * déjà terminée) — jamais de créneau de remplacement inventé.
+ */
+function nextWindowStart(windows, serviceMinutes, afterMin) {
+  if (!Array.isArray(windows)) return null;
+  let best = null;
+  for (const [debut, fin] of windows) {
+    const start = Math.max(debut, afterMin);
+    if (start + serviceMinutes <= fin && (best === null || start < best)) best = start;
+  }
+  return best;
+}
+
 /** Point d'entrée normalisé (tolère les colonnes SQL en chaîne). */
 function normalizePoint(p, index) {
   return {
@@ -170,6 +280,10 @@ function normalizePoint(p, index) {
     lng: num(p.lng, null),
     serviceMinutes: Math.max(0, num(p.serviceMinutes, 0)),
     weightKg: Math.max(0, num(p.weightKg, 0)),
+    // Contraintes horaires (optionnelles) : un point qui ne les porte pas se
+    // comporte EXACTEMENT comme avant — `null` désactive tout contrôle.
+    windows: normalizeWindows(p.windows),
+    anchor: normalizeAnchor(p.anchor),
     _index: index,
   };
 }
@@ -186,6 +300,14 @@ function initialState(o) {
     loadKg: 0,           // charge courante du véhicule
     peakLoadKg: 0,       // pic de charge avant vidage (→ taux de remplissage)
     collectedKg: 0,      // total collecté sur la journée
+    // Attente devant un rendez-vous. `waitMinutes` sert au SEUL affichage
+    // (`duree_attente_min`) ; `waitOffWorkMinutes` est la part qui n'est PAS
+    // imputée au travail et qu'il faut donc compter à part dans l'élapsé.
+    // Séparer les deux évite de polluer `pause_dejeuner_min`, qui doit rester
+    // la seule pause déjeuner (une attente n'est pas un déjeuner).
+    waitMinutes: 0,
+    waitOffWorkMinutes: 0,
+    violations: [],      // signalements horaires (le moteur ne décide de rien)
     lunchTaken: false,
     unloadStops: 0,      // retours de vidage INTERMÉDIAIRES (hors retour final)
     position: { lat: o.center.lat, lng: o.center.lng, name: o.center.name },
@@ -200,12 +322,29 @@ function cloneState(s) {
     position: { ...s.position },
     timeline: s.timeline.slice(),
     points: s.points.slice(),
+    // Sans cette copie, un candidat REJETÉ par planWithBudget laisserait ses
+    // violations dans l'état committé : on signalerait un problème d'horaires
+    // sur un point qui ne fait finalement pas partie de la tournée.
+    violations: s.violations.slice(),
   };
 }
 
-/** Minutes écoulées depuis le départ (travail + pause). */
+/**
+ * Minutes écoulées depuis le départ (travail + pause + attente hors travail).
+ * L'attente IMPUTÉE AU TRAVAIL est déjà dans `workMinutes` : l'ajouter ici la
+ * compterait deux fois.
+ */
 function elapsed(s) {
-  return s.workMinutes + s.pauseMinutes;
+  return s.workMinutes + s.pauseMinutes + s.waitOffWorkMinutes;
+}
+
+/**
+ * Heure d'horloge simulée, en minutes depuis MINUIT — le référentiel des
+ * fenêtres d'accessibilité et des rendez-vous. Source unique : c'est le même
+ * calcul qui déclenche la pause déjeuner (`lunchDue`).
+ */
+function clockMin(s, o) {
+  return o.startHour * 60 + elapsed(s);
 }
 
 /** La pause déjeuner est-elle due à cet instant ? */
@@ -213,7 +352,7 @@ function lunchDue(s, o) {
   if (s.lunchTaken) return false;
   if (o.lunchBreakMinutes <= 0) return false;
   if (s.workMinutes >= o.lunchAfterMinutes) return true;
-  return (o.startHour * 60 + elapsed(s)) >= o.lunchStartHour * 60;
+  return clockMin(s, o) >= o.lunchStartHour * 60;
 }
 
 /** Ajoute le passage au centre pour la pause déjeuner (vidage si chargé). */
@@ -262,8 +401,13 @@ async function applyUnloadReturn(s, o, resolveLeg) {
 }
 
 /**
- * Ajoute UN point à l'état (pause + vidage préalables si dus, trajet, service).
+ * Ajoute UN point à l'état (pause + vidage préalables si dus, trajet, attente
+ * de rendez-vous, contrôle d'accessibilité, service).
  * Mute `s`. L'appelant décide de committer ou non (cf. planWithBudget).
+ *
+ * ORDRE IMPOSÉ à l'arrivée : ancrage (qui peut faire AVANCER l'horloge), puis
+ * accessibilité (qui n'avance jamais rien), puis service. L'inverse jugerait
+ * les horaires d'ouverture sur une heure d'arrivée que l'attente va corriger.
  */
 async function applyPoint(s, point, o, resolveLeg) {
   if (lunchDue(s, o)) await applyLunch(s, o, resolveLeg);
@@ -275,7 +419,64 @@ async function applyPoint(s, point, o, resolveLeg) {
   const leg = await resolveLeg(s.position, { lat: point.lat, lng: point.lng, name: point.name });
   s.workMinutes += leg.minutes;
   s.distanceKm += leg.km;
+
+  // ── 1. ANCRAGE : rendez-vous pris avec l'association ───────────────────
+  if (point.anchor) {
+    const arriveeClock = clockMin(s, o);
+    if (arriveeClock < point.anchor.debutMin) {
+      // Arrivée en avance : l'attente est EXPLICITE dans la chronologie. Elle
+      // n'est jamais bornée : une attente absurde doit se voir (et faire sauter
+      // le budget) plutôt que d'être rabotée en douce.
+      const attente = point.anchor.debutMin - arriveeClock;
+      const debutAttente = elapsed(s);
+      if (o.attenteCompteTravail) s.workMinutes += attente;
+      else s.waitOffWorkMinutes += attente;
+      s.waitMinutes += attente;
+      s.timeline.push({
+        type: 'attente',
+        name: point.name,
+        arrivee_min: Math.round(debutAttente),
+        depart_min: Math.round(elapsed(s)),
+      });
+    }
+    // Après l'attente éventuelle : le rendez-vous est-il encore tenable ?
+    if (clockMin(s, o) > point.anchor.finMin) {
+      s.violations.push({
+        type: 'rdv_manque',
+        point_id: point.id,
+        point_type: point.type,
+        name: point.name,
+        arrivee_min: Math.round(elapsed(s)),        // ÉLAPSÉ depuis le départ
+        fenetre: { debutMin: point.anchor.debutMin, finMin: point.anchor.finMin }, // HORLOGE
+      });
+    }
+  }
+
   const arrivee = elapsed(s);
+
+  // ── 2. ACCESSIBILITÉ : horaires d'ouverture du local ───────────────────
+  // Le service ENTIER doit tenir dans une plage. Aucune attente n'est générée
+  // ici : un horaire d'ouverture n'est pas un rendez-vous, et faire patienter
+  // une équipe jusqu'à la réouverture sans que personne l'ait décidé serait
+  // pire que de signaler le problème au gestionnaire.
+  if (point.windows !== null) {
+    const debutService = clockMin(s, o);
+    const finService = debutService + point.serviceMinutes;
+    if (!fitsInWindows(debutService, finService, point.windows)) {
+      s.violations.push({
+        type: 'hors_horaires',
+        point_id: point.id,
+        point_type: point.type,
+        name: point.name,
+        arrivee_min: Math.round(arrivee),                              // ÉLAPSÉ
+        fin_service_min: Math.round(arrivee + point.serviceMinutes),   // ÉLAPSÉ
+        plages: point.windows.map(([d, f]) => [d, f]),                 // HORLOGE
+        prochain_creneau_min: nextWindowStart(point.windows, point.serviceMinutes, debutService), // HORLOGE
+      });
+    }
+  }
+
+  // ── 3. Service : mécanique inchangée ──────────────────────────────────
   s.workMinutes += point.serviceMinutes;
   s.loadKg += point.weightKg;
   s.collectedKg += point.weightKg;
@@ -328,7 +529,9 @@ function buildEstimation(s, o, warnings) {
   const budget = Math.round(o.maxWorkMinutes);
   const depassement = Math.max(0, work - budget);
   const startMinutes = o.startHour * 60;
-  const total = Math.round(s.workMinutes + s.pauseMinutes);
+  // `elapsed` et non `work + pause` : une attente NON imputée au travail est du
+  // temps réellement passé, elle doit décaler l'heure de fin.
+  const total = Math.round(elapsed(s));
   const capacite = Math.round(o.capacityKg);
   const avertissements = warnings.slice();
 
@@ -359,6 +562,10 @@ function buildEstimation(s, o, warnings) {
     nb_retours_vidage: s.unloadStops,
     pause_dejeuner_incluse: s.lunchTaken,
     pause_dejeuner_min: Math.round(s.pauseMinutes),
+    // Attente devant un rendez-vous, quelle que soit son imputation : elle est
+    // comptée dans `duree_travail_min` si `attenteCompteTravail`, hors de lui
+    // sinon, mais elle est TOUJOURS dans `duree_totale_min`.
+    duree_attente_min: Math.round(s.waitMinutes),
     heure_depart: minutesToHHMM(startMinutes),
     // Suffixe « (+N j) » quand la fin déborde sur le(s) jour(s) suivant(s)
     // (tournée forcée au-delà du budget) : sans lui, « 08:00 → 05:52 » se lit
@@ -370,6 +577,9 @@ function buildEstimation(s, o, warnings) {
     })(),
     timeline: s.timeline,
     avertissements,
+    // TOUJOURS un tableau (vide = conforme). Le moteur signale, la route
+    // appelante décide de refuser (409) ou de laisser forcer.
+    violations: s.violations.slice(),
   };
 }
 
@@ -420,6 +630,12 @@ async function buildTimeline(points, opts = {}) {
  * est rejeté et le balayage continue (un point plus proche, plus loin dans la
  * liste, peut encore tenir) ; il s'arrête après `maxConsecutiveRejects` refus
  * consécutifs pour ne pas multiplier les appels au routeur.
+ *
+ * La sélection est pilotée par le SEUL budget : un point porteur d'une
+ * violation d'horaires ou de rendez-vous n'est pas éliminé d'office — il est
+ * retenu et sa violation remonte dans l'estimation, à charge de la route d'en
+ * décider (refus 409 forçable). Une attente de rendez-vous, si elle compte dans
+ * le travail, pèse en revanche sur le budget comme n'importe quelle minute.
  *
  * @returns {Promise<{selected: Array, rejected: Array, estimation: object}>}
  *          `selected`/`rejected` contiennent les OBJETS D'ORIGINE (l'appelant y

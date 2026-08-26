@@ -25,8 +25,133 @@ const MODES = [
   },
 ];
 
-export default function CreateTourModal({ date, vehicles, drivers, onClose, onCreated }) {
-  const [mode, setMode] = useState('intelligent');
+// Codes de refus 409 forçables à la création (mêmes règles que le dépassement
+// de durée historique — chantier tournées associations, 26/08/2026).
+const FORCABLE_CODES = ['DUREE_MAX_DEPASSEE', 'ASSOCIATION_HORS_HORAIRES', 'RDV_NON_TENABLE'];
+const FORCE_LABELS = {
+  DUREE_MAX_DEPASSEE: 'le dépassement de la durée de travail maximale',
+  ASSOCIATION_HORS_HORAIRES: "l'horaire hors des plages d'accessibilité d'au moins une association",
+  RDV_NON_TENABLE: 'le rendez-vous non tenable avec cet ordre de passage',
+};
+
+// Minutes d'HORLOGE (depuis minuit) → 'HH:MM'.
+function fmtClockMin(min) {
+  if (min == null || Number.isNaN(min)) return '—';
+  const m = ((Math.round(min) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+// Minutes ÉCOULÉES depuis le départ + heure de départ 'HH:MM' → heure d'horloge.
+function fmtElapsedAsClock(heureDepart, elapsedMin) {
+  if (!heureDepart || elapsedMin == null || Number.isNaN(elapsedMin)) return '—';
+  const parts = String(heureDepart).split(':').map(Number);
+  if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) return '—';
+  return fmtClockMin(parts[0] * 60 + parts[1] + Math.round(elapsedMin));
+}
+
+// Avertissements d'horaires/rendez-vous de l'estimation LIVE, affichés AVANT
+// toute soumission (le refus 409 doit être l'exception, pas la découverte).
+function ViolationsPanel({ estimation, onApplyOrder }) {
+  const violations = estimation?.violations;
+  const ordreSuggere = estimation?.ordre_suggere;
+  const hasOrdre = Array.isArray(ordreSuggere) && ordreSuggere.length > 0;
+  if ((!violations || violations.length === 0) && !hasOrdre) return null;
+  const heureDepart = estimation?.heure_depart;
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+      {violations?.length > 0 && (
+        <>
+          <p className="text-xs font-bold text-amber-800 mb-1.5 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {violations.length} avertissement{violations.length > 1 ? 's' : ''} d'horaires
+          </p>
+          <ul className="text-xs text-amber-800 space-y-1.5">
+            {violations.map((v, i) => (
+              <li key={i} className="bg-white/60 rounded-lg px-2 py-1.5">
+                <span className="font-semibold">{v.name || `Point #${v.point_id}`}</span>
+                {v.type === 'hors_horaires' && (
+                  <>
+                    {' — arrivée prévue '}{fmtElapsedAsClock(heureDepart, v.arrivee_min)}
+                    {', hors des horaires du jour'}
+                    {v.plages?.length
+                      ? ` (${v.plages.map(p => `${fmtClockMin(p[0])}-${fmtClockMin(p[1])}`).join(', ')})`
+                      : ' (fermé ce jour)'}
+                    {v.prochain_creneau_min != null
+                      ? ` — premier créneau compatible : ${fmtClockMin(v.prochain_creneau_min)}`
+                      : ' — aucun créneau compatible ce jour'}
+                  </>
+                )}
+                {v.type === 'rdv_manque' && (
+                  <>
+                    {' — rendez-vous manqué : arrivée prévue '}{fmtElapsedAsClock(heureDepart, v.arrivee_min)}
+                    {v.fenetre ? `, fenêtre ${fmtClockMin(v.fenetre.debutMin)}-${fmtClockMin(v.fenetre.finMin)}` : ''}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {hasOrdre && onApplyOrder && (
+        <button
+          type="button"
+          onClick={() => onApplyOrder(ordreSuggere)}
+          className="mt-2 text-[11px] font-semibold text-amber-800 underline hover:text-amber-900"
+        >
+          Appliquer l'ordre suggéré par le serveur (tient le rendez-vous)
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Liste des points d'un MODÈLE association chargé, avec durée d'arrêt
+// ajustable par point (RG-C2/C3) — la fiche de chaque point n'étant pas
+// exposée par cet endpoint, seule la distinction « ajustée / automatique »
+// est affichable ici (jamais de valeur de repli devinée).
+function AssoTemplatePoints({ points, durations, onDurationChange }) {
+  return (
+    <div className="bg-slate-50 rounded-lg divide-y divide-slate-200 max-h-40 overflow-y-auto">
+      {points.map((p, i) => (
+        <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 text-xs">
+          <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] grid place-items-center flex-shrink-0">{i + 1}</span>
+          <span className="flex-1 min-w-0 truncate text-slate-700">{p.name}</span>
+          <input
+            type="number" min="1" max="480"
+            value={durations?.[p.id] ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const min = raw === '' ? null : Math.min(480, Math.max(1, Math.round(Number(raw)) || 1));
+              onDurationChange(p.id, min);
+            }}
+            placeholder={p.duree_collecte_min != null ? String(p.duree_collecte_min) : 'auto'}
+            aria-label={`Durée d'arrêt pour ${p.name}`}
+            className="w-14 text-[11px] border border-slate-200 rounded px-1.5 py-0.5 text-center"
+          />
+          <span className="text-[10px] text-slate-400">min</span>
+          {/* Provenance de la durée : l'utilisateur doit savoir d'où vient le
+              chiffre qu'il voit. `ap.*` de l'endpoint des points de modèle
+              remonte bien `duree_collecte_min` — sans lui, on ne devine pas. */}
+          <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+            durations?.[p.id] != null && durations[p.id] !== p.duree_collecte_min
+              ? 'bg-indigo-100 text-indigo-700'
+              : p.duree_collecte_min != null ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'
+          }`}>
+            {durations?.[p.id] != null && durations[p.id] !== p.duree_collecte_min
+              ? 'ajustée'
+              : p.duree_collecte_min != null ? 'fiche' : 'réglage global'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function CreateTourModal({ date, vehicles, drivers, onClose, onCreated, prefill }) {
+  const [mode, setMode] = useState(prefill ? 'manual' : 'intelligent');
+  // Sous-mode du mode « manuel » : bornes (CAV) ou associations (RG-C2, et
+  // demande client de préremplissage depuis une demande de collecte).
+  const [manualCollectionType, setManualCollectionType] = useState(prefill ? 'association' : 'cav');
   const [vehicleId, setVehicleId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [routes, setRoutes] = useState([]);
@@ -41,7 +166,12 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
   // Points du modèle association choisi : la création et l'estimation les
   // exigent explicitement (un modèle association ne se résume pas à son id).
   const [assoPoints, setAssoPoints] = useState([]);
-  const [cavIds, setCavIds] = useState([]);
+  // Durée d'arrêt ajustable par point (RG-C2/C3) : { [pointId]: minutes|null }.
+  // `modelDurations` pour un modèle association chargé, `assoDurations` pour
+  // la sélection manuelle d'associations (préremplie par CavPicker).
+  const [modelDurations, setModelDurations] = useState({});
+  const [assoDurations, setAssoDurations] = useState({});
+  const [cavIds, setCavIds] = useState(prefill?.associationPointId ? [prefill.associationPointId] : []);
   const [estimation, setEstimation] = useState(null);
   const [estimating, setEstimating] = useState(false);
   const [estimateError, setEstimateError] = useState(null);
@@ -49,9 +179,17 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(null);
   const [overrun, setOverrun] = useState(null); // estimation du refus 409
+  const [overrunCode, setOverrunCode] = useState(null);
+  const [overrunViolations, setOverrunViolations] = useState([]);
+  const [overrunOrdreSuggere, setOverrunOrdreSuggere] = useState(null);
   const [forceChecked, setForceChecked] = useState(false);
   const [iaResult, setIaResult] = useState(null); // résultat après création IA
   const debounceRef = useRef(null);
+
+  // Demande(s) de collecte rattachées à cette création (RG-B2/B3) — l'unique
+  // demande d'origine quand la modale est ouverte depuis le panneau « Demandes
+  // de collecte » du planning.
+  const attachedDemandeIds = prefill?.demandeId ? [prefill.demandeId] : [];
 
   const freeVehicles = (vehicles || []).filter(v => !v.assigned_tour_id && v.status !== 'maintenance');
   const freeDrivers = (drivers || []).filter(d => !d.assigned_tour_id && !d.is_day_off);
@@ -81,9 +219,10 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
   // Aperçu de la composition du modèle choisi
   useEffect(() => {
     if (mode !== 'standard' || !standardRouteId) {
-      setRoutePreview(null); setAssoPoints([]); return undefined;
+      setRoutePreview(null); setAssoPoints([]); setModelDurations({}); return undefined;
     }
     let cancelled = false;
+    setModelDurations({});
     if (modeleAssocie) {
       api.get(`/tours/association-routes/${standardRouteId}/points`)
         .then(res => {
@@ -121,17 +260,18 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
 
   useEffect(() => {
     setEstimation(null); setEstimateError(null); setOverrun(null); setForceChecked(false);
+    setOverrunCode(null); setOverrunViolations([]); setOverrunOrdreSuggere(null);
     if (!vehicleId) return;
     if (mode === 'standard' && standardRouteId) {
       // `standard_route_id` charge des points CAV côté serveur : pour un modèle
-      // association, il faut envoyer les points eux-mêmes, sinon l'estimation
-      // porterait sur une liste vide.
+      // association, il faut envoyer les points eux-mêmes (avec leur durée
+      // éventuellement ajustée), sinon l'estimation porterait sur une liste vide.
       if (modeleAssocie) {
         if (assoPoints.length > 0) {
           runEstimate({
             date,
             vehicle_id: parseInt(vehicleId, 10),
-            association_point_ids: assoPoints.map(p => p.id),
+            association_points: assoPoints.map(p => ({ id: p.id, duree_min: modelDurations[p.id] ?? null })),
           });
         }
         return undefined;
@@ -140,11 +280,19 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
     } else if (mode === 'manual' && cavIds.length > 0) {
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        runEstimate({ date, vehicle_id: parseInt(vehicleId, 10), cav_ids: cavIds });
+        const payload = { date, vehicle_id: parseInt(vehicleId, 10) };
+        if (manualCollectionType === 'association') {
+          payload.association_points = cavIds.map(id => ({ id, duree_min: assoDurations[id] ?? null }));
+          if (attachedDemandeIds.length) payload.demande_ids = attachedDemandeIds;
+        } else {
+          payload.cav_ids = cavIds;
+        }
+        runEstimate(payload);
       }, 600);
       return () => clearTimeout(debounceRef.current);
     }
-  }, [mode, vehicleId, standardRouteId, cavIds, date, runEstimate, modeleAssocie, assoPoints]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, vehicleId, standardRouteId, cavIds, date, runEstimate, modeleAssocie, assoPoints, modelDurations, manualCollectionType, assoDurations]);
 
   const optimizeOrder = async () => {
     if (!vehicleId || cavIds.length < 2) return;
@@ -174,19 +322,25 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
     if (!canCreate) return;
     setCreating(true);
     setError(null);
+    setOverrunCode(null); setOverrunViolations([]); setOverrunOrdreSuggere(null);
     try {
       const body = { date, vehicle_id: parseInt(vehicleId, 10) };
       if (driverId) body.driver_employee_id = parseInt(driverId, 10);
       if (mode === 'standard') body.standard_route_id = parseInt(standardRouteId, 10);
-      if (mode === 'manual') body.cav_ids = cavIds;
+      if (mode === 'manual' && manualCollectionType !== 'association') body.cav_ids = cavIds;
       if (forceChecked) body.force = true;
 
-      // Un modèle association crée une tournée ASSOCIATION : autre endpoint,
-      // et la liste ordonnée de ses points est exigée par le contrat.
+      // Un modèle association OU une sélection manuelle d'associations créent
+      // une tournée ASSOCIATION : autre endpoint, liste ordonnée de points
+      // (avec durée ajustée) exigée par le contrat.
       let chemin = mode;
       if (mode === 'standard' && modeleAssocie) {
         chemin = 'association';
-        body.association_point_ids = assoPoints.map(p => p.id);
+        body.points = assoPoints.map(p => ({ id: p.id, duree_min: modelDurations[p.id] ?? null }));
+      } else if (mode === 'manual' && manualCollectionType === 'association') {
+        chemin = 'association';
+        body.points = cavIds.map(id => ({ id, duree_min: assoDurations[id] ?? null }));
+        if (attachedDemandeIds.length) body.demande_ids = attachedDemandeIds;
       }
 
       const res = await api.post(`/tours/${chemin}`, body, { timeout: 120000 });
@@ -200,10 +354,13 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
       }
     } catch (err) {
       const data = err.response?.data;
-      if (data?.code === 'DUREE_MAX_DEPASSEE') {
+      if (data?.code && FORCABLE_CODES.includes(data.code)) {
         setOverrun(data.estimation || null);
+        setOverrunCode(data.code);
+        setOverrunViolations(Array.isArray(data.violations) ? data.violations : []);
+        setOverrunOrdreSuggere(Array.isArray(data.ordre_suggere) ? data.ordre_suggere : null);
         setEstimation(data.estimation || null);
-        setError('La tournée dépasse le budget de travail de 6 h — cochez la confirmation pour la créer malgré tout.');
+        setError(data.error || `Création refusée — ${FORCE_LABELS[data.code] || 'confirmation nécessaire'}.`);
       } else {
         setError(data?.error || 'Erreur lors de la création de la tournée');
       }
@@ -264,7 +421,7 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
                   return (
                     <button
                       key={m.key}
-                      onClick={() => { setMode(m.key); setError(null); setOverrun(null); setForceChecked(false); }}
+                      onClick={() => { setMode(m.key); setError(null); setOverrun(null); setOverrunCode(null); setOverrunViolations([]); setOverrunOrdreSuggere(null); setForceChecked(false); }}
                       className={`text-left p-3 rounded-xl border-2 transition ${
                         active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
@@ -361,28 +518,75 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
                   <p className="text-xs text-slate-400">Aucun modèle actif — créez-en dans « Modèles de tournées ».</p>
                 )}
                 {routePreview?.cavs?.length > 0 && (
-                  <div className="bg-slate-50 rounded-lg p-2 text-[11px] text-slate-600 max-h-28 overflow-y-auto">
-                    {routePreview.cavs.map((c, i) => (
-                      <span key={c.cav_id}>{i + 1}. {c.name}{i < routePreview.cavs.length - 1 ? ' → ' : ''}</span>
-                    ))}
-                  </div>
+                  modeleAssocie ? (
+                    <AssoTemplatePoints
+                      points={assoPoints}
+                      durations={modelDurations}
+                      onDurationChange={(id, min) => setModelDurations(prev => ({ ...prev, [id]: min }))}
+                    />
+                  ) : (
+                    <div className="bg-slate-50 rounded-lg p-2 text-[11px] text-slate-600 max-h-28 overflow-y-auto">
+                      {routePreview.cavs.map((c, i) => (
+                        <span key={c.cav_id}>{i + 1}. {c.name}{i < routePreview.cavs.length - 1 ? ' → ' : ''}</span>
+                      ))}
+                    </div>
+                  )
                 )}
+                {modeleAssocie && <ViolationsPanel estimation={estimation} />}
               </div>
             )}
 
             {mode === 'manual' && (
               <div>
-                <p className="text-xs font-medium text-slate-500 uppercase mb-2">Bornes à collecter (dans l'ordre) *</p>
+                {/* Type de collecte du mode manuel — masqué quand la modale est
+                    préremplie depuis une demande de collecte : le point et son
+                    rendez-vous restent attachés à cette création. */}
+                {!prefill && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[11px] font-medium text-slate-500 uppercase">Type</span>
+                    <div className="flex gap-1.5">
+                      {[
+                        { key: 'cav', label: 'Bornes (CAV)' },
+                        { key: 'association', label: 'Associations' },
+                      ].map(ct => (
+                        <button
+                          key={ct.key}
+                          type="button"
+                          onClick={() => { setManualCollectionType(ct.key); setCavIds([]); setEstimation(null); }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
+                            manualCollectionType === ct.key ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                          }`}
+                        >
+                          {ct.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {prefill && (
+                  <div className="mb-2 rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2 text-xs text-indigo-800">
+                    Tournée pré-remplie depuis la demande de collecte de <strong>{prefill.associationPointName}</strong>
+                    {prefill.heureLabel ? ` — rendez-vous ${prefill.heureLabel}` : ''}. Ajoutez d'autres points si besoin.
+                  </div>
+                )}
+                <p className="text-xs font-medium text-slate-500 uppercase mb-2">
+                  {manualCollectionType === 'association' ? "Associations à collecter (dans l'ordre) *" : "Bornes à collecter (dans l'ordre) *"}
+                </p>
                 <CavPicker
                   value={cavIds}
                   onChange={setCavIds}
-                  mode="cav"
-                  onOptimize={optimizeOrder}
+                  mode={manualCollectionType}
+                  onOptimize={manualCollectionType === 'cav' ? optimizeOrder : undefined}
                   optimizing={optimizing}
                   estimation={estimation}
                   estimating={estimating}
                   estimationHint={!vehicleId ? 'Choisissez un véhicule pour calculer la durée prévisionnelle.' : null}
+                  durations={manualCollectionType === 'association' ? assoDurations : undefined}
+                  onDurationChange={manualCollectionType === 'association' ? (id, min) => setAssoDurations(prev => ({ ...prev, [id]: min })) : undefined}
                 />
+                {manualCollectionType === 'association' && (
+                  <ViolationsPanel estimation={estimation} onApplyOrder={(ids) => setCavIds(ids)} />
+                )}
               </div>
             )}
 
@@ -399,15 +603,47 @@ export default function CreateTourModal({ date, vehicles, drivers, onClose, onCr
               <EstimationPanel estimation={estimation} loading={estimating} error={estimateError} />
             )}
 
-            {/* Erreurs + confirmation de dépassement */}
+            {/* Erreurs + confirmation de dépassement / horaires / rendez-vous */}
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{error}</div>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 space-y-1.5">
+                <p>{error}</p>
+                {overrunCode === 'ASSOCIATION_HORS_HORAIRES' && overrunViolations.length > 0 && (
+                  <ul className="space-y-1 list-disc list-inside">
+                    {overrunViolations.map((v, i) => (
+                      <li key={i}>
+                        <strong>{v.name}</strong> — prévu à {v.heure_prevue}, horaires du jour : {(v.plages || []).join(', ') || 'fermé'}
+                        {v.prochain_creneau ? ` · premier créneau compatible : ${v.prochain_creneau}` : ' · aucun créneau compatible ce jour'}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {overrunCode === 'RDV_NON_TENABLE' && overrunViolations.length > 0 && (
+                  <ul className="space-y-1 list-disc list-inside">
+                    {overrunViolations.map((v, i) => (
+                      <li key={i}><strong>{v.name}</strong> — arrivée prévue {v.heure_prevue}, rendez-vous {v.fenetre}</li>
+                    ))}
+                  </ul>
+                )}
+                {overrunCode === 'RDV_NON_TENABLE' && overrunOrdreSuggere && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCavIds(overrunOrdreSuggere);
+                      setError(null); setOverrun(null); setOverrunCode(null); setOverrunViolations([]); setOverrunOrdreSuggere(null);
+                      setForceChecked(false);
+                    }}
+                    className="font-semibold underline hover:no-underline"
+                  >
+                    Appliquer l'ordre suggéré plutôt que forcer
+                  </button>
+                )}
+              </div>
             )}
             {overrun && (
               <label className="flex items-start gap-2 text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3 cursor-pointer">
                 <input type="checkbox" checked={forceChecked} onChange={e => setForceChecked(e.target.checked)} className="mt-0.5" />
                 <span>
-                  Je confirme la création malgré le dépassement
+                  Je confirme la création malgré {FORCE_LABELS[overrunCode] || 'le dépassement'}
                   {overrun.depassement_min ? ` (+${overrun.depassement_min} min au-delà du budget de travail)` : ''}.
                   Le forçage sera tracé sur la tournée.
                 </span>

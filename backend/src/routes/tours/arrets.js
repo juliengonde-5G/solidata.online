@@ -80,11 +80,73 @@ async function centreDeTri(db = pool) {
   return { id: null, adresse: null, ...CENTRE_FALLBACK };
 }
 
-/** Prochaine position libre du programme (CAV et arrêts partagent l'échelle). */
+/**
+ * Les TROIS tables qui composent le programme d'une tournée et partagent la
+ * même échelle de `position` : les bornes (`tour_cav`), les points association
+ * (`tour_association_point`) et les arrêts au centre ou techniques
+ * (`tour_arret_technique`).
+ *
+ * Oublier la troisième était le défaut prouvé sur base réelle le 26/08/2026 :
+ * sur une tournée association de quatre points, le départ du centre ET le
+ * premier point se retrouvaient tous deux en position 1, et le retour de fin
+ * en position 2 — devant presque tous les points restants. Le mobile fusionnant
+ * les listes `arrets` et `cavs` par numéro de position, l'ordre affiché au
+ * chauffeur était faux. Une tournée est un programme unique : ses points n'ont
+ * qu'une seule échelle, quelle que soit la table qui les porte.
+ *
+ * Liste FIGÉE et interne : elle est interpolée dans le SQL (un nom de table ne
+ * se paramètre pas), et ne doit donc jamais accueillir une valeur venue d'une
+ * requête HTTP.
+ */
+const TABLES_PROGRAMME = ['tour_cav', 'tour_association_point', 'tour_arret_technique'];
+
+
+/**
+ * Décale d'un cran les positions du programme pour libérer une place.
+ * `aPartirDe = null` décale la tournée ENTIÈRE (insertion en tête).
+ */
+async function decalerPositions(client, tourId, aPartirDe = null) {
+  for (const table of TABLES_PROGRAMME) {
+    if (aPartirDe == null) {
+      await client.query(`UPDATE ${table} SET position = position + 1 WHERE tour_id = $1`, [tourId]);
+    } else {
+      await client.query(
+        `UPDATE ${table} SET position = position + 1 WHERE tour_id = $1 AND position >= $2`,
+        [tourId, aPartirDe]
+      );
+    }
+  }
+}
+
+/**
+ * Referme le trou laissé par un élément sorti de la file : tout ce qui était
+ * derrière lui remonte d'un cran. `sansArretId` protège l'arrêt en cours de
+ * déplacement, qui ne doit surtout pas se décaler lui-même.
+ */
+async function refermerTrouPositions(client, tourId, position, sansArretId = null) {
+  for (const table of TABLES_PROGRAMME) {
+    if (table === 'tour_arret_technique' && sansArretId != null) {
+      await client.query(
+        `UPDATE tour_arret_technique SET position = position - 1
+          WHERE tour_id = $1 AND position > $2 AND id <> $3`,
+        [tourId, position, sansArretId]
+      );
+    } else {
+      await client.query(
+        `UPDATE ${table} SET position = position - 1 WHERE tour_id = $1 AND position > $2`,
+        [tourId, position]
+      );
+    }
+  }
+}
+
+/** Prochaine position libre du programme (les trois tables partagent l'échelle). */
 async function positionSuivante(db, tourId) {
   const r = await db.query(
     `SELECT COALESCE(MAX(p), 0) + 1 AS suivante FROM (
        SELECT MAX(position) AS p FROM tour_cav WHERE tour_id = $1
+       UNION ALL
+       SELECT MAX(position) AS p FROM tour_association_point WHERE tour_id = $1
        UNION ALL
        SELECT MAX(position) AS p FROM tour_arret_technique WHERE tour_id = $1
      ) x`,
@@ -106,6 +168,9 @@ async function insererApresDernierPointTraite(client, tourId) {
        SELECT position FROM tour_cav
         WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident')
        UNION ALL
+       SELECT position FROM tour_association_point
+        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident')
+       UNION ALL
        SELECT position FROM tour_arret_technique
         WHERE tour_id = $1 AND status IN ('done', 'skipped')
      ) x`,
@@ -113,14 +178,7 @@ async function insererApresDernierPointTraite(client, tourId) {
   );
   const position = (parseInt(r.rows[0].derniere, 10) || 0) + 1;
   // Décalage des points encore à venir : le retour s'insère devant eux.
-  await client.query(
-    'UPDATE tour_cav SET position = position + 1 WHERE tour_id = $1 AND position >= $2',
-    [tourId, position]
-  );
-  await client.query(
-    'UPDATE tour_arret_technique SET position = position + 1 WHERE tour_id = $1 AND position >= $2',
-    [tourId, position]
-  );
+  await decalerPositions(client, tourId, position);
   return position;
 }
 
@@ -190,14 +248,7 @@ async function avancerRetourCentre(client, { tourId, motif, centre }) {
   await client.query(
     'UPDATE tour_arret_technique SET position = -1 WHERE id = $1', [existant.id]
   );
-  await client.query(
-    'UPDATE tour_cav SET position = position - 1 WHERE tour_id = $1 AND position > $2',
-    [tourId, existant.position]
-  );
-  await client.query(
-    'UPDATE tour_arret_technique SET position = position - 1 WHERE tour_id = $1 AND position > $2 AND id <> $3',
-    [tourId, existant.position, existant.id]
-  );
+  await refermerTrouPositions(client, tourId, existant.position, existant.id);
 
   const position = await insererApresDernierPointTraite(client, tourId);
   await client.query(
@@ -257,14 +308,7 @@ async function poserPauseDejeuner(client, tourId, estimation, centre) {
   const nbPointsAvant = timeline.slice(0, index).filter((e) => e && e.type === 'point').length;
   const position = nbPointsAvant + 1;
 
-  await client.query(
-    'UPDATE tour_cav SET position = position + 1 WHERE tour_id = $1 AND position >= $2',
-    [tourId, position]
-  );
-  await client.query(
-    'UPDATE tour_arret_technique SET position = position + 1 WHERE tour_id = $1 AND position >= $2',
-    [tourId, position]
-  );
+  await decalerPositions(client, tourId, position);
 
   const lieu = centre || (await centreDeTri(client));
   const r = await client.query(
@@ -306,12 +350,7 @@ async function poserRetoursAutomatiques(client, tourId, estimation, centre) {
   const existantDepart = await arretEnAttente(client, tourId, 'depart_centre');
   let depart = existantDepart;
   if (!existantDepart) {
-    await client.query(
-      'UPDATE tour_cav SET position = position + 1 WHERE tour_id = $1', [tourId]
-    );
-    await client.query(
-      'UPDATE tour_arret_technique SET position = position + 1 WHERE tour_id = $1', [tourId]
-    );
+    await decalerPositions(client, tourId, null);
     const r = await client.query(
       `INSERT INTO tour_arret_technique (tour_id, lieu_id, libelle, position, motif, status)
        VALUES ($1, $2, $3, 1, 'depart_centre', 'pending')
@@ -356,9 +395,16 @@ async function assurerPassagesCentre(db, tourId) {
     );
     if (deja.rows.length > 0) return { pose: false, motif: 'deja_equipee' };
 
+    // Une tournée association s'entame exactement comme une tournée de bornes :
+    // la garde doit voir les deux familles de points, sinon elle laisse
+    // retoucher le programme d'un chauffeur déjà parti.
     const entamee = await db.query(
       `SELECT 1 FROM tour_cav
-        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident') LIMIT 1`,
+        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident')
+       UNION ALL
+       SELECT 1 FROM tour_association_point
+        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident')
+       LIMIT 1`,
       [tourId]
     );
     if (entamee.rows.length > 0) return { pose: false, motif: 'tournee_entamee' };
@@ -484,7 +530,10 @@ module.exports = {
   LIBELLE_MOTIF,
   SUITE_MOTIF,
   CENTRE_FALLBACK,
+  TABLES_PROGRAMME,
   centreDeTri,
+  decalerPositions,
+  refermerTrouPositions,
   positionSuivante,
   insererApresDernierPointTraite,
   arretEnAttente,

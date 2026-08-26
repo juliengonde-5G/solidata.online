@@ -9,8 +9,12 @@
 //   • changer le chauffeur ou les suiveurs en cours de journée.
 //
 // PRINCIPES
-//  1. Le PROGRAMME d'une tournée est la fusion ordonnée de `tour_cav` et
-//     `tour_arret_technique`, qui partagent l'échelle de `position`.
+//  1. Le PROGRAMME d'une tournée est la fusion ordonnée de `tour_cav`,
+//     `tour_association_point` et `tour_arret_technique`, qui partagent tous
+//     trois l'échelle de `position`. Oublier la table des points association
+//     rendait l'édition en direct INOPÉRANTE sur une tournée association :
+//     l'écran n'y montrait que les arrêts au centre, sans un seul point, et
+//     rien n'y était modifiable (constat L5 du 26/08/2026).
 //  2. Ce qui est FAIT ne bouge plus : un point collecté ou sauté n'est ni
 //     réordonnable ni supprimable — on ne réécrit pas le passé du chauffeur.
 //  3. Toute modification PRÉVIENT le chauffeur : message dans `driver_messages`
@@ -21,6 +25,7 @@
 //   GET    /api/tours/:id/programme
 //   PUT    /api/tours/:id/programme/ordre
 //   POST   /api/tours/:id/programme/cav          DELETE .../cav/:tourCavId
+//   POST   /api/tours/:id/programme/association  DELETE .../association/:tourPointId
 //   POST   /api/tours/:id/programme/arret        DELETE .../arret/:arretId
 //   PATCH  /api/tours/:id/equipe
 //   GET/POST/PUT/DELETE /api/tours/lieux-techniques[/:id]
@@ -41,7 +46,8 @@ const POINT_FIGE = ['collected', 'skipped', 'incident', 'done'];
 async function loadTourEditable(tourId, res) {
   const r = await pool.query(
     `SELECT t.id, t.date, t.status, t.vehicle_id, t.driver_employee_id,
-            t.suiveur1_employee_id, t.suiveur2_employee_id, v.registration
+            t.suiveur1_employee_id, t.suiveur2_employee_id, t.collection_type,
+            v.registration
        FROM tours t LEFT JOIN vehicles v ON v.id = t.vehicle_id
       WHERE t.id = $1`,
     [tourId]
@@ -63,17 +69,80 @@ async function loadTourEditable(tourId, res) {
 }
 
 /**
- * Programme complet et ordonné : points de collecte ET arrêts techniques,
- * fusionnés sur `position`. `editable` dit au front ce qui peut encore bouger.
+ * Les trois familles d'éléments d'un programme et la table qui les porte.
+ * Table FIGÉE : les noms de tables sont interpolés dans le SQL (un identifiant
+ * ne se paramètre pas), aucune valeur venue d'une requête HTTP n'y entre — le
+ * `kind` reçu est toujours confronté à ces clés avant usage.
+ */
+const TABLE_PAR_KIND = Object.freeze({
+  cav: 'tour_cav',
+  association: 'tour_association_point',
+  arret_technique: 'tour_arret_technique',
+});
+
+/** Un point de collecte passe devant un arrêt à position égale. */
+const rangKind = (kind) => (kind === 'arret_technique' ? 1 : 0);
+
+/**
+ * Renumérote le programme ENTIER de 1 à n, ordre relatif conservé.
+ *
+ * Sans elle, retirer un élément laisse un TROU définitif dans l'ordre
+ * (« 1, 2, 3, 4, 6, 7 » pour six points), visible sur la fiche de tournée et
+ * faussant le décalage de la ré-optimisation, qui se cale sur MAX(position).
+ *
+ * Elle porte sur les TROIS tables à la fois : renuméroter la seule table des
+ * bornes réattribuait les positions 1..n aux bornes sans voir les arrêts au
+ * centre, et faisait entrer en collision le départ du matin avec le premier
+ * point — le défaut même que ce chantier corrige.
+ */
+async function renumeroterProgramme(db, tourId) {
+  const r = await db.query(
+    `SELECT id, 'cav'::text AS kind, 0 AS rang, position FROM tour_cav WHERE tour_id = $1
+     UNION ALL
+     SELECT id, 'association'::text, 0, position FROM tour_association_point WHERE tour_id = $1
+     UNION ALL
+     SELECT id, 'arret_technique'::text, 1, position FROM tour_arret_technique WHERE tour_id = $1
+     ORDER BY position, rang, id`,
+    [tourId]
+  );
+  let rang = 0;
+  for (const ligne of r.rows) {
+    rang += 1;
+    if (Number(ligne.position) === rang) continue;
+    await db.query(
+      `UPDATE ${TABLE_PAR_KIND[ligne.kind]} SET position = $2 WHERE id = $1`,
+      [ligne.id, rang]
+    );
+  }
+}
+
+/**
+ * Programme complet et ordonné : points de collecte (bornes ET associations)
+ * ET arrêts techniques, fusionnés sur `position`. `editable` dit au front ce
+ * qui peut encore bouger.
  */
 async function chargerProgramme(tourId) {
-  const [cavs, arrets] = await Promise.all([
+  const [cavs, associations, arrets] = await Promise.all([
     pool.query(
       `SELECT tc.id, tc.cav_id AS ref_id, tc.position, tc.status, tc.fill_level,
               tc.skip_reason, tc.collected_at,
               c.name, c.address, c.commune, c.latitude, c.longitude, c.nb_containers
          FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
         WHERE tc.tour_id = $1`,
+      [tourId]
+    ),
+    // Points association : mêmes clés que les bornes là où c'est possible, pour
+    // que l'écran de pilotage les traite sans cas particulier. `nb_containers`
+    // vaut NULL et non 0 — un point de dépôt n'a pas de conteneurs, et un zéro
+    // se lirait comme un décompte réel.
+    pool.query(
+      `SELECT tap.id, tap.association_point_id AS ref_id, tap.position, tap.status,
+              tap.fill_level, tap.collected_at, tap.notes, tap.planned_passage_time,
+              ap.name, ap.address, ap.ville AS commune, ap.latitude, ap.longitude,
+              NULL::int AS nb_containers
+         FROM tour_association_point tap
+         JOIN association_points ap ON ap.id = tap.association_point_id
+        WHERE tap.tour_id = $1`,
       [tourId]
     ),
     pool.query(
@@ -90,10 +159,15 @@ async function chargerProgramme(tourId) {
 
   const points = [
     ...cavs.rows.map((r) => ({ ...r, kind: 'cav' })),
+    ...associations.rows.map((r) => ({ ...r, kind: 'association' })),
     ...arrets.rows.map((r) => ({ ...r, kind: 'arret_technique' })),
   ]
     .map((p) => ({ ...p, editable: !POINT_FIGE.includes(p.status) }))
-    .sort((a, b) => (a.position - b.position) || (a.kind === 'cav' ? -1 : 1));
+    // Départage stable en cas d'égalité héritée d'une base non rattrapée : un
+    // point de collecte passe devant un arrêt, puis l'identifiant tranche.
+    .sort((a, b) => (a.position - b.position)
+      || (rangKind(a.kind) - rangKind(b.kind))
+      || (a.id - b.id));
 
   return points;
 }
@@ -125,11 +199,13 @@ async function notifierChauffeur(req, tour, message) {
   }
 }
 
-/** Prochaine position libre du programme. */
+/** Prochaine position libre du programme (les trois tables partagent l'échelle). */
 async function positionSuivante(client, tourId) {
   const r = await client.query(
     `SELECT COALESCE(MAX(p), 0) + 1 AS suivante FROM (
        SELECT MAX(position) AS p FROM tour_cav WHERE tour_id = $1
+       UNION ALL
+       SELECT MAX(position) AS p FROM tour_association_point WHERE tour_id = $1
        UNION ALL
        SELECT MAX(position) AS p FROM tour_arret_technique WHERE tour_id = $1
      ) x`,
@@ -137,6 +213,15 @@ async function positionSuivante(client, tourId) {
   );
   return r.rows[0].suivante;
 }
+
+/**
+ * Le type de points qu'accepte une tournée. Mélanger bornes et associations
+ * sur une même tournée n'est pas soutenu par le reste de la chaîne :
+ * l'estimation (`impact.chargerPointsTournee`) lit l'une OU l'autre table, et
+ * les points de l'autre famille disparaîtraient SILENCIEUSEMENT du calcul.
+ * On refuse donc explicitement plutôt que de produire un chiffre faux.
+ */
+const kindAttendu = (tour) => (tour.collection_type === 'association' ? 'association' : 'cav');
 
 // ── GET /api/tours/:id/programme ───────────────────────────────────────────
 router.get('/:id/programme', authorize('ADMIN', 'MANAGER'), async (req, res) => {
@@ -224,7 +309,10 @@ router.put('/:id/programme/ordre', authorize('ADMIN', 'MANAGER'), async (req, re
     for (const k of soumis) {
       const [kind, rawId] = k.split(':');
       const id = parseInt(rawId, 10);
-      const table = kind === 'cav' ? 'tour_cav' : 'tour_arret_technique';
+      // `kind` a déjà été confronté au programme réel juste au-dessus : il ne
+      // peut valoir qu'une des trois clés connues. La table est donc lue dans
+      // la table figée, jamais construite à partir de l'entrée.
+      const table = TABLE_PAR_KIND[kind];
       await client.query(
         `UPDATE ${table} SET position = $1 WHERE id = $2 AND tour_id = $3`,
         [position++, id, tourId]
@@ -262,6 +350,14 @@ router.post('/:id/programme/cav', authorize('ADMIN', 'MANAGER'), async (req, res
   // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
   // entre deux façons de compter, pas l'effet du geste du gestionnaire.
   const estimationAvant = await estimerProgramme(tourId);
+
+  if (kindAttendu(tour) !== 'cav') {
+    return res.status(409).json({
+      error: 'Cette tournée est une tournée d\'associations : on y ajoute un point association, pas une borne.',
+      code: 'TYPE_POINT_INCOMPATIBLE',
+      collection_type: tour.collection_type,
+    });
+  }
 
   const client = await pool.connect();
   try {
@@ -328,19 +424,11 @@ router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), as
     }
 
     await pool.query('DELETE FROM tour_cav WHERE id = $1 AND tour_id = $2', [tourCavId, tourId]);
-    // Renumérotation : sans elle, retirer un point laisse un TROU définitif
-    // dans l'ordre (« 1, 2, 3, 4, 6, 7 » pour six points), visible sur la fiche
-    // de tournée et faussant le calcul de décalage de la ré-optimisation, qui
-    // se cale sur MAX(position). L'ordre relatif est préservé.
-    await pool.query(
-      `WITH ordonne AS (
-         SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) AS rang
-           FROM tour_cav WHERE tour_id = $1
-       )
-       UPDATE tour_cav tc SET position = o.rang
-         FROM ordonne o WHERE o.id = tc.id AND tc.position <> o.rang`,
-      [tourId]
-    );
+    // Renumérotation du programme ENTIER (bornes, points association, arrêts).
+    // La version précédente ne renumérotait que `tour_cav` : elle réattribuait
+    // les rangs 1..n aux seules bornes sans voir les arrêts au centre, et
+    // remettait le premier point en collision avec le départ du matin.
+    await renumeroterProgramme(pool, tourId);
     await pool.query(
       'UPDATE tours SET nb_cav = GREATEST(COALESCE(nb_cav, 1) - 1, 0) WHERE id = $1', [tourId]
     );
@@ -350,6 +438,126 @@ router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), as
     res.json({ ok: true, points: await chargerProgramme(tourId), impact });
   } catch (err) {
     console.error('[TOURS] Erreur retrait de point :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /api/tours/:id/programme/association ──────────────────────────────
+// Ajout d'un point association depuis le référentiel, sur une tournée en cours.
+// Jusqu'ici l'édition en direct ne connaissait que les bornes : une tournée
+// d'associations n'était donc PAS pilotable (constat L5).
+router.post('/:id/programme/association', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  const pointId = parseInt(req.body?.association_point_id, 10);
+  if (!Number.isInteger(tourId) || !Number.isInteger(pointId)) {
+    return res.status(400).json({ error: 'Identifiants invalides' });
+  }
+  const tour = await loadTourEditable(tourId, res);
+  if (!tour) return;
+  if (kindAttendu(tour) !== 'association') {
+    return res.status(409).json({
+      error: 'Cette tournée collecte des bornes : on y ajoute une borne, pas un point association.',
+      code: 'TYPE_POINT_INCOMPATIBLE',
+      collection_type: tour.collection_type,
+    });
+  }
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
+
+  const client = await pool.connect();
+  try {
+    const point = await client.query(
+      'SELECT id, name, status, unavailable_reason FROM association_points WHERE id = $1',
+      [pointId]
+    );
+    if (point.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé' });
+
+    const deja = await client.query(
+      'SELECT id FROM tour_association_point WHERE tour_id = $1 AND association_point_id = $2',
+      [tourId, pointId]
+    );
+    if (deja.rows.length > 0) {
+      return res.status(409).json({
+        error: 'Ce point est déjà au programme de la tournée.', code: 'POINT_DEJA_PRESENT',
+      });
+    }
+
+    await client.query('BEGIN');
+    const position = await positionSuivante(client, tourId);
+    await client.query(
+      `INSERT INTO tour_association_point (tour_id, association_point_id, position, status)
+       VALUES ($1, $2, $3, 'pending')`,
+      [tourId, pointId, position]
+    );
+    // `nb_cav` porte le nombre de points d'une tournée association aussi (posé
+    // à la création par POST /tours/association) : il suit le programme.
+    await client.query('UPDATE tours SET nb_cav = COALESCE(nb_cav, 0) + 1 WHERE id = $1', [tourId]);
+    await client.query('COMMIT');
+
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    const p = point.rows[0];
+    await notifierChauffeur(req, tour,
+      `Nouveau point ajouté à ta tournée : ${p.name}.` + (resume ? ` (${resume})` : ''));
+    // Le référentiel dit si le point n'est pas ouvert : on ne refuse pas — le
+    // gestionnaire sur le terrain en sait plus que la fiche —, mais on le DIT.
+    const avertissement = p.status !== 'active'
+      ? `Attention : ce point est marqué « ${p.status} » au référentiel${p.unavailable_reason ? ` (${p.unavailable_reason})` : ''}.`
+      : null;
+    res.status(201).json({ ok: true, points: await chargerProgramme(tourId), impact, avertissement });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur ajout de point association :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── DELETE /api/tours/:id/programme/association/:tourPointId ───────────────
+router.delete('/:id/programme/association/:tourPointId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  const tourPointId = parseInt(req.params.tourPointId, 10);
+  if (!Number.isInteger(tourId) || !Number.isInteger(tourPointId)) {
+    return res.status(400).json({ error: 'Identifiants invalides' });
+  }
+  const tour = await loadTourEditable(tourId, res);
+  if (!tour) return;
+  // Photographie de l'estimation AVANT la modification. Les deux côtés sont
+  // calculés par la MÊME méthode : sans cela, l'écart mesurerait la différence
+  // entre deux façons de compter, pas l'effet du geste du gestionnaire.
+  const estimationAvant = await estimerProgramme(tourId);
+
+  try {
+    const point = await pool.query(
+      `SELECT tap.status, ap.name
+         FROM tour_association_point tap JOIN association_points ap ON ap.id = tap.association_point_id
+        WHERE tap.id = $1 AND tap.tour_id = $2`,
+      [tourPointId, tourId]
+    );
+    if (point.rows.length === 0) return res.status(404).json({ error: 'Point non trouvé dans cette tournée' });
+    if (POINT_FIGE.includes(point.rows[0].status)) {
+      return res.status(409).json({
+        error: 'Ce point a déjà été traité par le chauffeur : il ne peut plus être retiré.',
+        code: 'POINT_DEJA_TRAITE',
+      });
+    }
+
+    await pool.query('DELETE FROM tour_association_point WHERE id = $1 AND tour_id = $2',
+      [tourPointId, tourId]);
+    await renumeroterProgramme(pool, tourId);
+    await pool.query(
+      'UPDATE tours SET nb_cav = GREATEST(COALESCE(nb_cav, 1) - 1, 0) WHERE id = $1', [tourId]
+    );
+    const impact = await impactApresModification(tourId, estimationAvant);
+    const resume = resumerImpact(impact);
+    await notifierChauffeur(req, tour,
+      `Point retiré de ta tournée : ${point.rows[0].name}. Tu n'as plus à y passer.` + (resume ? ` (${resume})` : ''));
+    res.json({ ok: true, points: await chargerProgramme(tourId), impact });
+  } catch (err) {
+    console.error('[TOURS] Erreur retrait de point association :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -435,6 +643,7 @@ router.delete('/:id/programme/arret/:arretId', authorize('ADMIN', 'MANAGER'), as
     }
 
     await pool.query('DELETE FROM tour_arret_technique WHERE id = $1 AND tour_id = $2', [arretId, tourId]);
+    await renumeroterProgramme(pool, tourId);
     const impact = await impactApresModification(tourId, estimationAvant);
     const resume = resumerImpact(impact);
     await notifierChauffeur(req, tour, `Arrêt retiré de ta tournée : ${arret.rows[0].nom}.` + (resume ? ` (${resume})` : ''));
@@ -660,5 +869,7 @@ router.get('/trafic-public', async (req, res) => {
 
 module.exports = router;
 module.exports.chargerProgramme = chargerProgramme;
+module.exports.renumeroterProgramme = renumeroterProgramme;
+module.exports.TABLE_PAR_KIND = TABLE_PAR_KIND;
 module.exports.STATUTS_MODIFIABLES = STATUTS_MODIFIABLES;
 module.exports.POINT_FIGE = POINT_FIGE;
