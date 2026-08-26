@@ -301,6 +301,11 @@ export async function sendCollect(collect) {
         remballe: !!collect.remballe,
         notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
         client_id: collect.clientId || null,
+        // Points ASSOCIATION : l'arrivée voyage avec le départ. Déclarée hors
+        // ligne, elle n'aurait rien pour partir seule ; ici elle est rejouée
+        // avec son heure d'origine et non celle du rattrapage. Absente sur une
+        // borne de rue — le serveur l'ignore.
+        arrivee_at: collect.arriveeAt || null,
       };
   const res = await authedFetch(`/api/tours/${collect.tourId}/cav/${collect.cavId}/collect-public`, {
     method: 'PUT',

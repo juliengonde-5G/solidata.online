@@ -134,9 +134,16 @@ function construireRequete(filtres = {}) {
       LEFT JOIN LATERAL (
         SELECT tap.tour_id,
                (t.status <> 'completed') AS tournee_ouverte,
-               (tap.collected_at IS NOT NULL
-                 AND tap.collected_at >= b.fenetre_debut
-                 AND tap.collected_at <= b.fenetre_fin) AS dans_fenetre
+               -- Un rendez-vous se tient à l'ARRIVÉE. Jugé sur l'heure de
+               -- départ (collected_at), un équipage ponctuel resté deux
+               -- heures ressortait « non honoré » : le reproche portait sur la
+               -- durée du travail, pas sur la ponctualité. L'arrivée déclarée
+               -- fait donc foi ; sans elle (tournées d'avant le 26/08/2026,
+               -- saisie d'un seul geste), on retombe sur l'heure de départ —
+               -- la seule qu'on ait, jamais une heure reconstituée.
+               (COALESCE(tap.arrived_at, tap.collected_at) IS NOT NULL
+                 AND COALESCE(tap.arrived_at, tap.collected_at) >= b.fenetre_debut
+                 AND COALESCE(tap.arrived_at, tap.collected_at) <= b.fenetre_fin) AS dans_fenetre
         FROM tour_association_point tap
         JOIN tours t ON t.id = tap.tour_id
         WHERE tap.demande_id = b.id

@@ -15,6 +15,7 @@ import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
 import IdentifyCav from './pages/IdentifyCav';
 import FillLevel from './pages/FillLevel';
+import AssociationStop from './pages/AssociationStop';
 import Incident from './pages/Incident';
 import ReturnCentre from './pages/ReturnCentre';
 import WeighIn from './pages/WeighIn';
@@ -49,6 +50,7 @@ function App() {
             <Route path="/qr-scanner" element={<Navigate to="/identify-cav" replace />} />
             <Route path="/qr-unavailable" element={<Navigate to="/identify-cav" replace />} />
             <Route path="/fill-level" element={<FillLevel />} />
+            <Route path="/association-stop" element={<AssociationStop />} />
             <Route path="/incident" element={<Incident />} />
             <Route path="/return-centre" element={<ReturnCentre />} />
             <Route path="/weigh-in" element={<WeighIn />} />

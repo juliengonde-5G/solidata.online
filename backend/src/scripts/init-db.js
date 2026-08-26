@@ -5089,6 +5089,24 @@ async function initDatabase() {
       ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS duree_prevue_min INTEGER;
     `);
 
+    // Arrivée déclarée par l'équipage sur un point ASSOCIATION (26/08/2026).
+    //
+    // Une association n'a pas de QR code : rien n'attestait le passage, et le
+    // seul horodatage existant (`collected_at`) était posé au moment de valider
+    // la collecte — soit, en pratique, au départ. Deux conséquences :
+    //   • la DURÉE RÉELLE de l'arrêt — la donnée même que le module laisse
+    //     ajuster à la main depuis la 2.38.0 — n'était jamais mesurée, donc
+    //     jamais confrontée à l'estimation ;
+    //   • un rendez-vous tenu à l'heure mais suivi d'un arrêt de deux heures
+    //     ressortait « non honoré », puisqu'on le jugeait sur l'heure de départ.
+    // L'arrivée est donc horodatée pour elle-même, et c'est elle qui fait foi
+    // pour le rendez-vous. NULL = arrivée non déclarée (tournées antérieures,
+    // ou saisie faite d'un seul geste) : on retombe alors sur `collected_at`,
+    // jamais sur une heure reconstituée.
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS arrived_at TIMESTAMP;
+    `);
+
     // RG-B1 / RG-B8 — demandes de collecte à horaire précis. Le devenir de la
     // demande (à planifier / planifiée / honorée / non honorée) est DÉRIVÉ des
     // passages rattachés, jamais stocké : `annulee_le` est le seul état posé à

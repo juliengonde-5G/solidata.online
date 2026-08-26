@@ -311,7 +311,8 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
     if (tour.collection_type === 'association') {
       const assoResult = await pool.query(
         `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
-                tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
+                tap.arrived_at, tap.collected_at, tap.duree_prevue_min,
+                tap.fill_level, tap.planned_passage_time, tap.notes,
                 ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
                 ap.contact_phone, ap.contact_info, ap.complement_adresse,
                 -- Consignes d'accès (« sonner au portail », « accès par l'arrière ») :
@@ -372,7 +373,8 @@ router.get('/:id/public', async (req, res) => {
       // Charger les points association
       const assoResult = await pool.query(
         `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
-                tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
+                tap.arrived_at, tap.collected_at, tap.duree_prevue_min,
+                tap.fill_level, tap.planned_passage_time, tap.notes,
                 ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
                 ap.contact_phone, ap.contact_info, ap.complement_adresse,
                 -- Consignes d'accès (« sonner au portail », « accès par l'arrière ») :
@@ -613,6 +615,27 @@ router.put('/:id/start-public', async (req, res) => {
 // (inaccessible, bouché, vide…) sans forcer une saisie de niveau. skip_reason
 // est aligné sur le CHECK de tour_cav et sur la route web execution.js.
 const VALID_SKIP_REASON = ['cav_fermee', 'bouchee', 'acces_impossible', 'proprietaire_absent', 'vide', 'autre'];
+
+/**
+ * Heure d'arrivée proposée par le mobile — acceptée seulement si elle tient
+ * debout, sinon `null` (le serveur s'en remet alors à ce qu'il sait).
+ *
+ * L'appareil du chauffeur porte son horloge, pas la nôtre : un téléphone mal
+ * réglé, une file hors ligne rejouée le lendemain, un fuseau de travers
+ * inscriraient une durée d'arrêt fantaisiste — et cette durée sert justement à
+ * corriger les estimations. On refuse donc le futur (au-delà d'une minute de
+ * dérive d'horloge tolérée) et tout ce qui remonte à plus de 24 h.
+ * Une valeur refusée est IGNORÉE, jamais remplacée par une heure inventée.
+ */
+function heureArriveeAcceptable(valeur) {
+  if (!valeur) return null;
+  const d = new Date(valeur);
+  if (Number.isNaN(d.getTime())) return null;
+  const ecartMs = Date.now() - d.getTime();
+  if (ecartMs < -60 * 1000) return null;              // dans le futur
+  if (ecartMs > 24 * 60 * 60 * 1000) return null;     // plus vieux qu'une journée
+  return d.toISOString();
+}
 // multer laisse passer les requêtes JSON non-multipart (hors ligne, sans
 // photo) — même pattern que incident-public.
 router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo'), async (req, res) => {
@@ -651,22 +674,43 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       // incompatibles pour $1 (varchar dans le SET, text dans les CASE) et
       // refuse la requête (42P08 « inconsistent types deduced ») → 500 sur
       // CHAQUE collecte mobile. Prouvé par bisection sur PostgreSQL 16 réel.
+      // Heure d'arrivée portée par la collecte elle-même : une arrivée déclarée
+      // HORS LIGNE ne peut pas partir seule (rien ne l'attendrait côté file),
+      // elle voyage donc avec le départ, dans le même envoi rejouable. Le
+      // serveur reste maître du reste : `COALESCE` fait primer une arrivée déjà
+      // enregistrée, et une heure invraisemblable est ignorée (voir
+      // `heureArriveeAcceptable`) plutôt que d'inscrire une durée d'arrêt fausse.
+      const arriveeClient = heureArriveeAcceptable(req.body.arrivee_at);
+
       const result = await pool.query(
         `UPDATE tour_association_point SET status = $1::varchar,
          fill_level = $2,
          notes = $3,
          remballe = $4,
          photo_path = COALESCE($5, photo_path),
+         arrived_at = COALESCE(arrived_at, $8::timestamp),
          collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $6 AND association_point_id = $7 RETURNING *`,
         [status,
          status === 'skipped' ? null : fill_level,
          status === 'skipped' ? (notes || (skip_reason ? `Non collecté : ${skip_reason}` : 'Non collecté')) : (notes || null),
          remballe, photo_path,
-         req.params.id, req.params.cavId]
+         req.params.id, req.params.cavId,
+         arriveeClient]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
-      res.json(result.rows[0]);
+      // Durée RÉELLE de l'arrêt, quand les deux bouts sont connus. `null` sans
+      // arrivée déclarée : on ne la reconstitue pas depuis l'estimation, ce
+      // serait mesurer la prévision avec la prévision.
+      const pt = result.rows[0];
+      const dureeReelleMin = (pt.arrived_at && pt.collected_at)
+        ? Math.max(0, Math.round((new Date(pt.collected_at) - new Date(pt.arrived_at)) / 60000))
+        : null;
+      res.json({
+        ...pt,
+        duree_reelle_min: dureeReelleMin,
+        duree_prevue_min: pt.duree_prevue_min ?? null,
+      });
     } else {
       // $1::varchar : même défaut 42P08 que la branche association ci-dessus.
       const result = await pool.query(
@@ -950,6 +994,61 @@ router.post('/:id/arret/:arretId/arrive-public', async (req, res) => {
     });
   } catch (err) {
     console.error('[TOURS] Erreur arrive-public:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /api/tours/:id/association/:pointId/arrivee-public
+ * L'équipage déclare son arrivée chez une association.
+ *
+ * Une borne de rue se prouve par son QR code ; une association n'en a pas, et
+ * jusqu'ici RIEN n'attestait le passage avant la validation de la collecte. Ce
+ * geste comble deux manques d'un coup :
+ *
+ *   • le RENDEZ-VOUS se juge enfin sur l'heure d'ARRIVÉE. Il portait sur
+ *     l'heure de départ, si bien qu'un équipage ponctuel resté deux heures
+ *     ressortait « non honoré » — un reproche adressé à un travail bien fait ;
+ *   • la DURÉE RÉELLE de l'arrêt devient mesurable (arrivée → départ). C'est la
+ *     donnée que le module fait ajuster à la main depuis la 2.38.0, sans jamais
+ *     pouvoir la confronter à ce qui s'est réellement passé.
+ *
+ * IDEMPOTENT : `COALESCE` — la première déclaration fait foi. Un double appui,
+ * un rejeu de la file hors ligne ou un retour en arrière ne repoussent pas
+ * l'heure d'arrivée, sans quoi un arrêt long se raccourcirait tout seul.
+ */
+router.post('/:id/association/:pointId/arrivee-public', async (req, res) => {
+  try {
+    const tourId = parseInt(req.params.id, 10);
+    const pointId = parseInt(req.params.pointId, 10);
+    if (!Number.isInteger(tourId) || !Number.isInteger(pointId)) {
+      return res.status(400).json({ error: 'Identifiant invalide' });
+    }
+
+    const r = await pool.query(
+      `UPDATE tour_association_point
+          SET arrived_at = COALESCE(arrived_at, NOW())
+        WHERE tour_id = $1 AND association_point_id = $2
+        RETURNING id, association_point_id, position, status, arrived_at,
+                  collected_at, duree_prevue_min`,
+      [tourId, pointId]
+    );
+    if (r.rows.length === 0) {
+      return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
+    }
+
+    const p = r.rows[0];
+    res.json({
+      success: true,
+      point_id: p.association_point_id,
+      arrived_at: p.arrived_at,
+      status: p.status,
+      duree_prevue_min: p.duree_prevue_min ?? null,
+      // Déjà collecté : l'écran doit le dire plutôt que de rouvrir un arrêt clos.
+      deja_collecte: p.status === 'collected',
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur arrivee-public (association):', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
