@@ -313,7 +313,13 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
         `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
                 tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
                 ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
-                ap.contact_phone, NULL as nb_containers, NULL as qr_code_data
+                ap.contact_phone, ap.contact_info, ap.complement_adresse,
+                -- Consignes d'accès (« sonner au portail », « accès par l'arrière ») :
+                -- une borne de rue est en libre accès, une association est un local
+                -- tenu par des personnes. Sans ces consignes, le chauffeur reste
+                -- devant un portail fermé et repart parfois sans avoir collecté.
+                ap.horaires_notes,
+                NULL as nb_containers, NULL as qr_code_data
          FROM tour_association_point tap
          JOIN association_points ap ON ap.id = tap.association_point_id
          WHERE tap.tour_id = $1 ORDER BY tap.position`,
@@ -368,7 +374,13 @@ router.get('/:id/public', async (req, res) => {
         `SELECT tap.id, tap.tour_id, tap.association_point_id as cav_id, tap.position, tap.status,
                 tap.fill_level, tap.collected_at, tap.planned_passage_time, tap.notes,
                 ap.name as cav_name, ap.address, ap.ville as commune, ap.latitude, ap.longitude,
-                ap.contact_phone, NULL as nb_containers, NULL as qr_code_data
+                ap.contact_phone, ap.contact_info, ap.complement_adresse,
+                -- Consignes d'accès (« sonner au portail », « accès par l'arrière ») :
+                -- une borne de rue est en libre accès, une association est un local
+                -- tenu par des personnes. Sans ces consignes, le chauffeur reste
+                -- devant un portail fermé et repart parfois sans avoir collecté.
+                ap.horaires_notes,
+                NULL as nb_containers, NULL as qr_code_data
          FROM tour_association_point tap
          JOIN association_points ap ON ap.id = tap.association_point_id
          WHERE tap.tour_id = $1 ORDER BY tap.position`,
