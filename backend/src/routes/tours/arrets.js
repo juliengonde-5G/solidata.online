@@ -325,6 +325,91 @@ async function poserRetoursAutomatiques(client, tourId, estimation, centre) {
 }
 
 /**
+ * Garantit qu'une tournée porte ses trois passages au centre de tri.
+ *
+ * Les tournées planifiées AVANT la mise en place des passages automatiques n'en
+ * portent aucun : leur programme s'arrête aux bornes, et l'équipage n'y voit ni
+ * le départ, ni la pause du midi, ni le retour de fin. Comme une tournée se
+ * planifie souvent une semaine à l'avance, attendre qu'elles soient toutes
+ * consommées laisserait le défaut à l'écran plusieurs jours de suite.
+ *
+ * On les pose donc au DÉMARRAGE, quand la journée commence pour de bon et que
+ * l'estimation peut être refaite sur le programme réellement retenu.
+ *
+ * Une tournée DÉJÀ ENTAMÉE n'est en revanche jamais retouchée : la pause est
+ * placée à une position calculée sur une chronologie théorique, qui tomberait
+ * derrière le chauffeur — donc invisible, exactement le défaut corrigé en
+ * 2.37.1. Dans ce cas, le geste « je rentre » de l'équipage reste la bonne voie.
+ *
+ * Best effort de bout en bout : un programme incomplet ne doit jamais empêcher
+ * une tournée de démarrer.
+ *
+ * @returns {Promise<{pose: boolean, motif?: string, pause?: boolean,
+ *                    estimation_disponible?: boolean}>}
+ */
+async function assurerPassagesCentre(db, tourId) {
+  try {
+    const deja = await db.query(
+      `SELECT 1 FROM tour_arret_technique
+        WHERE tour_id = $1 AND motif = ANY($2::text[]) LIMIT 1`,
+      [tourId, MOTIFS_CENTRE]
+    );
+    if (deja.rows.length > 0) return { pose: false, motif: 'deja_equipee' };
+
+    const entamee = await db.query(
+      `SELECT 1 FROM tour_cav
+        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident') LIMIT 1`,
+      [tourId]
+    );
+    if (entamee.rows.length > 0) return { pose: false, motif: 'tournee_entamee' };
+
+    // Requis ici plutôt qu'en tête de module : `impact` charge le moteur
+    // d'estimation complet, dont le parcours mobile n'a pas besoin.
+    const { estimerProgramme } = require('./impact');
+    const estimation = await estimerProgramme(tourId);
+    if (!estimation) {
+      // La pause du midi vient de la chronologie du moteur : sans estimation,
+      // elle ne sera pas posée. On le DIT — c'est précisément l'étape dont
+      // l'absence a été signalée, elle ne doit pas disparaître en silence.
+      console.warn(
+        `[TOURS] Tournée ${tourId} : estimation indisponible, la pause déjeuner `
+        + 'ne peut pas être placée (départ et retour de fin posés quand même).'
+      );
+    }
+
+    const r = await poserRetoursAutomatiques(db, tourId, estimation, null);
+    return {
+      pose: true,
+      depart: !!r.depart,
+      pause: !!r.pause,
+      fin: !!r.fin,
+      estimation_disponible: estimation != null,
+    };
+  } catch (err) {
+    console.warn(`[TOURS] Passages au centre non posés sur la tournée ${tourId} :`, err.message);
+    return { pose: false, motif: 'erreur' };
+  }
+}
+
+/**
+ * Ce qu'il y a à faire au programme quand une tournée passe « en cours » :
+ * poser les passages manquants, puis acquitter le départ.
+ *
+ * L'ORDRE compte. Acquitter d'abord ne trouverait rien à acquitter, et le
+ * départ posé juste après resterait « à déclarer » — on demanderait au chauffeur
+ * de signaler son arrivée à son propre point de départ.
+ *
+ * Appelé aux QUATRE endroits où une tournée démarre (prise du véhicule,
+ * démarrage mobile, et les deux bascules de statut) : la garde interne fait que
+ * seul le premier passage travaille, les suivants ne coûtent qu'un SELECT.
+ */
+async function preparerProgrammeAuDemarrage(db, tourId) {
+  const pose = await assurerPassagesCentre(db, tourId);
+  await cloturerDepartCentre(db, tourId);
+  return pose;
+}
+
+/**
  * Marque le départ du centre comme fait. Appelé au démarrage de la tournée :
  * l'équipage est au centre, il n'a rien à déclarer de plus.
  */
@@ -408,6 +493,8 @@ module.exports = {
   abandonnerArretsRestants,
   poserRetoursAutomatiques,
   cloturerDepartCentre,
+  assurerPassagesCentre,
+  preparerProgrammeAuDemarrage,
   poserPauseDejeuner,
   poserPauseDejeunerSansBloquer,
   arretsPourMobile,

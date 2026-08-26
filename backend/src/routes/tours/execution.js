@@ -4,6 +4,7 @@ const pool = require('../../config/database');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { ensurePlannedPassages } = require('./planned-passage');
+const { preparerProgrammeAuDemarrage } = require('./arrets');
 const { applyCompletionSideEffects } = require('./completion-effects');
 const { sendPushToRoles } = require('../../services/push-notifications');
 const {
@@ -279,6 +280,9 @@ module.exports = function createExecutionRouter(upload) {
       // Best-effort : calcul des horaires prévisionnels dès le claim (tournée passe in_progress)
       ensurePlannedPassages(req.params.id).catch(err =>
         console.warn('[TOURS] planned-passage (claim) échec :', err.message));
+      // La prise du véhicule est la PREMIÈRE bascule du parcours mobile : c'est
+      // ici que le programme doit être complet, avant même la check-list.
+      await preparerProgrammeAuDemarrage(pool, req.params.id);
 
       res.json(result.rows[0]);
     } catch (err) {
@@ -350,6 +354,7 @@ module.exports = function createExecutionRouter(upload) {
         // Calcul OSRM des horaires prévisionnels (non bloquant, best-effort)
         ensurePlannedPassages(req.params.id).catch(err =>
           console.warn('[TOURS] planned-passage (status) échec :', err.message));
+        await preparerProgrammeAuDemarrage(pool, req.params.id);
       }
 
       // Émettre l'événement Socket.io
