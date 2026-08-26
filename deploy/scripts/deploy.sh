@@ -367,8 +367,12 @@ case "${ACTION}" in
     }
     trap signaler_maintenance_restee EXIT
 
-    bash deploy/scripts/maintenance.sh on "Mise à jour de SOLIDATA en cours"
-    MAINTENANCE_ACTIVE=1
+    if bash deploy/scripts/maintenance.sh on "Mise à jour de SOLIDATA en cours"; then
+        MAINTENANCE_ACTIVE=1
+    else
+        warn "Le mode maintenance n'a pas pu être posé — le déploiement continue."
+        warn "Les utilisateurs verront les erreurs de passerelle habituelles pendant la coupure."
+    fi
 
     log "Étape 4/7 — Redémarrage des services..."
     docker compose -f ${COMPOSE_FILE} up -d
@@ -378,9 +382,32 @@ case "${ACTION}" in
     # fichier a changé : il reste « Running », avec l'ancienne configuration
     # chargée en mémoire. Toute évolution de deploy/nginx/conf.d/ était ainsi
     # récupérée par git pull puis ignorée, sans le moindre signal.
+    # Le conteneur peut venir d'être RECRÉÉ (changement de volume ou de
+    # définition dans le compose). Il démarre alors avec la configuration à
+    # jour, mais son fichier PID n'est pas encore écrit : un « -s reload »
+    # immédiat échoue sur « invalid PID number ». On laisse donc nginx finir de
+    # se lever avant de lui parler.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if docker compose -f ${COMPOSE_FILE} exec -T nginx sh -c '[ -s /var/run/nginx.pid ]' >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+
     if docker compose -f ${COMPOSE_FILE} exec -T nginx nginx -t >/dev/null 2>&1; then
-        docker compose -f ${COMPOSE_FILE} exec -T nginx nginx -s reload
-        log "  Configuration nginx rechargée."
+        # Le rechargement ne doit JAMAIS interrompre le déploiement. Constat du
+        # 26/08/2026 : un « -s reload » lancé sur un conteneur fraîchement
+        # recréé a échoué, et `set -e` a avorté la mise à jour AVANT les
+        # migrations — laissant le site fermé sur une version à moitié
+        # déployée. Or dans ce cas précis il n'y avait rien à recharger : la
+        # configuration du dépôt était déjà celle que nginx venait de lire.
+        if docker compose -f ${COMPOSE_FILE} exec -T nginx nginx -s reload >/dev/null 2>&1; then
+            log "  Configuration nginx rechargée."
+        else
+            warn "  Rechargement nginx impossible — conteneur vraisemblablement recréé à l'instant."
+            warn "  Sans conséquence dans ce cas : il a démarré avec la configuration à jour."
+            warn "  Vérification : docker compose -f ${COMPOSE_FILE} exec nginx nginx -T | head -20"
+        fi
     else
         warn "  Configuration nginx INVALIDE — rechargement refusé, l'ancienne reste active."
         warn "  Diagnostic : docker compose -f ${COMPOSE_FILE} exec nginx nginx -t"
@@ -485,9 +512,12 @@ case "${ACTION}" in
     # Le site rouvre SEULEMENT ici : après les migrations, le health check et
     # le smoke test. Tout échec précédent a interrompu le script, laissant la
     # page de maintenance en place — c'est ce qu'on veut.
-    bash deploy/scripts/maintenance.sh off
-    MAINTENANCE_ACTIVE=0
-    trap - EXIT
+    if bash deploy/scripts/maintenance.sh off; then
+        MAINTENANCE_ACTIVE=0
+        trap - EXIT
+    else
+        error "Le mode maintenance n'a PAS pu être levé : le site reste FERMÉ alors que le déploiement est sain. Levez-le à la main : bash deploy/scripts/maintenance.sh off"
+    fi
 
     # Cleanup
     docker image prune -f
