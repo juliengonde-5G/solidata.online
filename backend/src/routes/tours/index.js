@@ -77,6 +77,7 @@ const eventsAutoRouter = require('./events-auto');
 const statsRouter = require('./stats');
 const liveSummaryRouter = require('./live-summary');
 const activeSummaryRouter = require('./active-summary');
+const rapportRouter = require('./rapport');
 const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
@@ -1720,6 +1721,10 @@ router.use('/', require('./demo'));
 // Mount live-summary route (supervision d'une tournée en cours)
 router.use('/', liveSummaryRouter);
 router.use('/', activeSummaryRouter);
+
+// Mount rapport de tournée (compte rendu consolidé d'une tournée terminée).
+// Monté AVANT crudRouter, dont « /:id » capterait la route.
+router.use('/', rapportRouter);
 
 // Mount reoptimize routes (manager trigger / accept / reject)
 router.use('/', reoptimizeRouter);

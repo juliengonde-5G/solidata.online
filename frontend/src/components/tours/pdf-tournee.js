@@ -16,12 +16,24 @@
  * pas si elle n'a rien de vrai à montrer.
  */
 
+import { libelleTypeIncident, libelleStatutIncident } from '../../utils/incidents';
+
 const STRUCTURE = 'Solidarité Textiles';
 const VERT = '#2D8C4E';
 const VERT_CLAIR = '#8BC540';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cell = (v) => (v == null || v === '' ? '<span class="gris">—</span>' : esc(v));
+
+/**
+ * Tronque sans mentir : le « … » dit qu'il manque quelque chose. Sur une
+ * demi-colonne, un nom long replierait la ligne sur trois et ferait déborder
+ * la page — or c'est la liste ENTIÈRE des points qui doit tenir.
+ */
+const court = (v, max) => {
+  const t = String(v ?? '');
+  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
+};
 
 /**
  * Les points sont nommés « COMMUNE - adresse » dans le référentiel, et la
@@ -178,6 +190,8 @@ body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 8.5px; color: #0F1
 .kpi.alerte .v { color: #B91C1C; }
 .cols { display: flex; gap: 8px; align-items: flex-start; }
 .col-g { flex: 0 0 57%; } .col-d { flex: 1; }
+.cols-dense .col-g { flex: 0 0 67%; }
+.cols-dense table.dense td { line-height: 1.15; }
 h2 { font-size: 8px; text-transform: uppercase; letter-spacing: .6px; color: ${VERT}; font-weight: 800;
      border-bottom: 1px solid #D1DBD4; padding-bottom: 2px; margin: 7px 0 3px; }
 h2:first-child { margin-top: 0; }
@@ -186,6 +200,13 @@ th { font-size: 6.5px; text-transform: uppercase; letter-spacing: .3px; color: #
      padding: 2px 3px; border-bottom: 1px solid #CBD5E1; font-weight: 700; }
 td { padding: 1.6px 3px; border-bottom: 1px solid #F1F5F9; vertical-align: top; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.deux-col { display: flex; gap: 6px; align-items: flex-start; }
+.deux-col > table { flex: 1; min-width: 0; }
+table.dense { font-size: 6.6px; }
+table.dense th { font-size: 5.6px; padding: 1px 2px; }
+table.dense td { padding: 0.7px 2px; }
+table.dense .etat { font-size: 5.6px; }
+table.dense td span.gris[style] { display: none; }
 .rang { color: #94A3B8; font-weight: 700; }
 .ok { color: #15803D; } .moyen { color: #B45309; } .fort { color: #B91C1C; font-weight: 700; }
 .etat { font-size: 6.5px; padding: 0 3px; border-radius: 3px; white-space: nowrap; }
@@ -217,8 +238,30 @@ function ligneKpi(label, valeur, note = null, alerte = false) {
     + `${note ? `<div class="n">${esc(note)}</div>` : ''}</div>`;
 }
 
+/**
+ * Le tableau des points, en UNE ou DEUX colonnes selon leur nombre.
+ *
+ * Une tournée de bornes en compte couramment 40 à 75 : sur une seule colonne,
+ * la page en déborde et la promesse « un rapport, une page » tombe. Plutôt que
+ * de tronquer la liste — c'est le DÉTAIL DE LA COLLECTE qui est demandé, pas un
+ * extrait —, on la coupe en deux colonnes côte à côte et on resserre les lignes.
+ * Le seuil est mesuré, pas deviné : au-delà, le rendu A4 déborde.
+ */
+const SEUIL_DEUX_COLONNES = 26;
+
 function tableauPoints(points) {
   if (!points || points.length === 0) return '<p class="gris">Aucun point au programme.</p>';
+  if (points.length > SEUIL_DEUX_COLONNES) {
+    const milieu = Math.ceil(points.length / 2);
+    // Les rangs sont calculés sur la liste ENTIÈRE avant la coupe : la seconde
+    // colonne continue la numérotation, elle ne recommence pas à 1.
+    return `<div class="deux-col">${unTableau(points.slice(0, milieu), true)}`
+      + `${unTableau(points.slice(milieu), true)}</div>`;
+  }
+  return unTableau(points, false);
+}
+
+function unTableau(points, dense) {
   const lignes = points.map((p, i) => {
     const prevu = frHeure(p.heure_prevue);
     const reel = frHeure(p.heure_reelle);
@@ -227,20 +270,117 @@ function tableauPoints(points) {
     const etat = p.est_arret ? (p.motif_libelle || 'Arrêt') : (ETAT_LABELS[p.statut] || p.statut || '—');
     return `<tr>
       <td class="rang">${p.rang ?? i + 1}</td>
-      <td>${esc(sansCommune(p.nom, p.commune) || p.nom || '—')}${p.commune ? `<br><span class="gris" style="font-size:6.5px">${esc(p.commune)}</span>` : ''}
+      <td>${esc(court(sansCommune(p.nom, p.commune) || p.nom || '—', dense ? 24 : 60))}${p.commune && !dense ? `<br><span class="gris" style="font-size:6.5px">${esc(p.commune)}</span>` : ''}
           ${p.motif_non_collecte ? `<br><span class="moyen" style="font-size:6.5px">${esc(p.motif_non_collecte)}</span>` : ''}</td>
       <td class="num">${prevu ? esc(prevu) : '<span class="gris">—</span>'}</td>
       <td class="num">${reel ? esc(reel) : '<span class="gris">—</span>'}</td>
       <td class="num ${ecartClasse(p.ecart_min)}">${e ? esc(e) : '<span class="gris">—</span>'}</td>
       <td><span class="etat e-${etatCle}">${esc(etat)}</span></td>
-      <td class="num">${p.niveau != null ? `${esc(p.niveau)}/5` : '<span class="gris">—</span>'}</td>
+      ${dense ? '' : `<td class="num">${p.remplissage_pct != null ? `${esc(Math.round(Number(p.remplissage_pct)))} %` : '<span class="gris">—</span>'}</td>`}
     </tr>`;
   }).join('');
-  return `<table><thead><tr>
-      <th style="width:14px">#</th><th>Point</th><th style="width:26px">Prévu</th>
-      <th style="width:26px">Réel</th><th style="width:38px">Écart</th>
-      <th style="width:46px">État</th><th style="width:24px">Niv.</th>
+  // En mode dense, la colonne est deux fois plus étroite : le remplissage et la
+  // commune passent à la trappe plutôt que de replier chaque ligne sur trois.
+  return `<table class="${dense ? 'dense' : ''}"><thead><tr>
+      <th style="width:12px">#</th><th>Point</th><th style="width:24px">Prévu</th>
+      <th style="width:24px">Réel</th><th style="width:32px">Écart</th>
+      <th style="width:40px">État</th>${dense ? '' : '<th style="width:28px">Rempl.</th>'}
     </tr></thead><tbody>${lignes}</tbody></table>`;
+}
+
+/**
+ * SEUL point de contact entre le contrat de `GET /api/tours/:id/rapport` et la
+ * composition de la page.
+ *
+ * Le serveur nomme ses données en anglais, comme tous ses voisins
+ * (`live-summary`, `active-summary`) ; la page, elle, est écrite dans la langue
+ * qu'elle imprime. Plutôt que de disséminer les deux vocabulaires dans cent
+ * lignes de gabarit, la traduction se fait ICI, une fois, à la frontière. Le
+ * jour où l'API bouge, c'est cette fonction qu'on relit — pas le HTML.
+ *
+ * Aucune valeur n'est fabriquée au passage : ce que le serveur ne sait pas
+ * reste `null`, et s'imprimera « — ».
+ */
+export function depuisApi(rep) {
+  const r = rep || {};
+  const t = r.tour || {};
+  const k = r.kpis || {};
+  const gps = r.gps_track || {};
+
+  return {
+    tournee: {
+      id: t.id ?? null,
+      date: t.date ?? null,
+      statut: t.status ?? null,
+      collection_type: t.collection_type ?? null,
+      debut_reel: t.started_at ?? null,
+      fin_reelle: t.completed_at ?? null,
+      km_start: t.km_start ?? null,
+      km_end: t.km_end ?? null,
+      // Le véhicule porte l'identité de la session chauffeur : son immatriculation
+      // est ce que le gestionnaire reconnaît, le nom commercial n'est qu'un appoint.
+      vehicule: t.vehicle
+        ? [t.vehicle.registration, t.vehicle.name].filter(Boolean).join(' — ') || null
+        : null,
+      // `null` assumé et fréquent : une tournée peut partir sans chauffeur
+      // nominatif (« 1 URL = 1 véhicule »), ce n'est pas une donnée manquante.
+      chauffeur: (t.driver && t.driver.name) || null,
+      suiveurs: (t.suiveurs || []).map((s) => s && s.name).filter(Boolean),
+    },
+    indicateurs: {
+      duree_reelle_min: k.duration_min ?? null,
+      duree_estimee_min: k.estimated_duration_min ?? null,
+      distance_reelle_km: k.distance_km ?? null,
+      distance_estimee_km: k.estimated_distance_km ?? null,
+      poids_total_kg: k.total_weight_kg ?? null,
+      poids_motif: k.total_weight_motif ?? null,
+      poids_source: k.total_weight_source ?? null,
+    },
+    points: (r.points || []).map((p) => ({
+      rang: p.rank ?? null,
+      est_arret: p.kind === 'arret_technique',
+      nom: p.name ?? null,
+      commune: p.commune ?? null,
+      statut: p.status ?? null,
+      heure_prevue: p.planned_passage_time ?? null,
+      heure_reelle: p.actual_time ?? p.completed_at ?? null,
+      ecart_min: p.delay_minutes ?? null,
+      // Le remplissage est servi en POURCENTAGE (l'échelle 0-5 du chauffeur y a
+      // déjà été convertie, `fill_source` disant laquelle des deux a servi).
+      remplissage_pct: p.fill_effective_percent ?? null,
+      motif_non_collecte: p.skip_reason_label ?? null,
+      motif_libelle: p.motif_label ?? null,
+      lat: p.latitude ?? null,
+      lng: p.longitude ?? null,
+    })),
+    pesees: (r.weights || []).map((w) => ({
+      heure: w.recorded_at ?? null,
+      poids_kg: w.weight_kg ?? null,
+      intermediaire: !!w.is_intermediate,
+    })),
+    incidents: (r.incidents || []).map((i) => ({
+      heure: i.created_at ?? null,
+      type: i.type ?? null,
+      type_libelle: libelleTypeIncident(i.type),
+      statut: i.status ?? null,
+      statut_libelle: libelleStatutIncident(i.status),
+      description: i.description ?? null,
+      resolution: i.resolution_notes ?? null,
+    })),
+    messages: (r.messages || []).map((m) => ({
+      heure: m.created_at ?? null,
+      // `driver_messages` ne va que du gestionnaire vers le chauffeur : il n'y a
+      // pas de voie retour dans le logiciel, et le rapport ne fait pas semblant.
+      sens: 'gestionnaire',
+      texte: m.message ?? null,
+      lu_le: m.read_at ?? null,
+    })),
+    trace_gps: (gps.positions || []).map((g) => ({ lat: g.latitude, lng: g.longitude })),
+    nb_positions_gps: gps.total_positions ?? null,
+    centre_tri: (r.planned_route && r.planned_route.centre_tri)
+      ? { lat: r.planned_route.centre_tri.latitude, lng: r.planned_route.centre_tri.longitude }
+      : null,
+  };
 }
 
 /**
@@ -292,7 +432,12 @@ export function construireRapportHtml(r) {
     ligneKpi('Incidents', incidents.length || '0', null, incidents.length > 0),
   ].join('');
 
-  const blocPesees = pesees.length === 0 ? '<p class="gris" style="font-size:7.5px">Aucune pesée enregistrée.</p>'
+  // Ne jamais écrire « aucune pesée » sous un poids total affiché : la page se
+  // contredirait. Quand le total vient de la tournée et non d'une pesée
+  // détaillée (reprise manuelle, import, historique d'avant la pesée mobile),
+  // on le DIT — c'est une provenance, pas une absence.
+  const blocPesees = pesees.length === 0
+    ? `<p class="gris" style="font-size:7.5px">${esc(k.poids_motif || 'Aucune pesée enregistrée.')}</p>`
     : `<table><tbody>${pesees.map((p) => `<tr>
         <td class="num" style="width:30px">${cell(frHeure(p.heure))}</td>
         <td class="num"><b>${nb(p.poids_kg, 'kg') || '—'}</b></td>
@@ -329,7 +474,7 @@ export function construireRapportHtml(r) {
   const corps = `
     <div class="identite">${identite}</div>
     <div class="kpis">${kpis}</div>
-    <div class="cols">
+    <div class="cols${points.length > SEUIL_DEUX_COLONNES ? ' cols-dense' : ''}">
       <div class="col-g">
         <h2>Détail de la collecte</h2>
         ${tableauPoints(points)}
@@ -367,7 +512,7 @@ export function printRapportTournee(r) {
   if (!r) return;
   const w = window.open('', '_blank', 'width=880,height=1180');
   if (!w) { alert('Popup bloquée — autorisez les popups pour générer le PDF.'); return; }
-  w.document.write(construireRapportHtml(r));
+  w.document.write(construireRapportHtml(depuisApi(r)));
   w.document.close();
   setTimeout(() => w.print(), 500);
 }
