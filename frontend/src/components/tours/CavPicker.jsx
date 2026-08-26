@@ -357,8 +357,12 @@ export default function CavPicker({
                   </button>
                 </div>
               </div>
-              {/* Durée d'arrêt ajustable (RG-C2/C3) — mode association uniquement */}
-              {mode === 'association' && (
+              {/* Durée d'arrêt ajustable (RG-C2/C3) — mode association, et
+                  uniquement quand l'appelant fournit `onDurationChange` : un
+                  appelant existant qui n'a pas encore adopté ce prop (ex.
+                  RouteTemplates.jsx) garde exactement son affichage actuel,
+                  jamais un champ qui aurait l'air de fonctionner sans agir. */}
+              {mode === 'association' && typeof onDurationChange === 'function' && (
                 <div className="flex items-center gap-1.5 mt-1 pl-7">
                   <input
                     type="number"

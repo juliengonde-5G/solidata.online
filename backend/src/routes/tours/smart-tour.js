@@ -662,18 +662,28 @@ async function estimateFixedRoute({
   if (!Number.isFinite(estimation.duree_attente_min)) estimation.duree_attente_min = 0;
 
   // Suggestion d'ordre : uniquement quand un rendez-vous n'est pas tenu (RG-B4).
+  // Deux passes, dans cet ordre :
+  //   1. un ordre SANS AUCUNE violation — c'est le seul qui serait accepté tel
+  //      quel, donc le seul vraiment utile ;
+  //   2. à défaut, un ordre qui tient au moins les rendez-vous — c'est l'objet
+  //      de la règle. Le reste des violations reste affiché à côté : proposer
+  //      un ordre en taisant ce qu'il ne résout pas serait malhonnête.
   let ordreSuggere = null;
   if (avecSuggestion && estimation.violations.some((v) => v && v.type === 'rdv_manque')) {
-    const propose = await suggererOrdre(
-      ordered.map((p) => ({ ...p, anchor: p._anchor })),
-      {
-        distance: (a, b) => distanceOuCentre(a, b),
-        faisable: async (essai) => {
-          const test = await timeEngine.buildTimeline(pourMoteur(essai), optionsMoteur);
-          return !(test.violations || []).some((v) => v && v.type === 'rdv_manque');
-        },
-      }
-    );
+    const candidats = ordered.map((p) => ({ ...p, anchor: p._anchor }));
+    const simuler = async (essai) => {
+      const test = await timeEngine.buildTimeline(pourMoteur(essai), optionsMoteur);
+      return Array.isArray(test.violations) ? test.violations : [];
+    };
+    const distance = (a, b) => distanceOuCentre(a, b);
+    const sansAucuneViolation = await suggererOrdre(candidats, {
+      distance,
+      faisable: async (essai) => (await simuler(essai)).length === 0,
+    });
+    const propose = sansAucuneViolation || await suggererOrdre(candidats, {
+      distance,
+      faisable: async (essai) => !(await simuler(essai)).some((v) => v && v.type === 'rdv_manque'),
+    });
     if (propose) ordreSuggere = propose.map((p) => p.id);
   }
 
@@ -1081,7 +1091,7 @@ function generateAIExplanation(opts) {
  * Récapitulatif français court d'une estimation, stocké dans
  * `tours.ai_explanation` pour les modes standard / manuel / association.
  */
-function estimationSummary(estimation, { mode, vehicle, forced = false } = {}) {
+function estimationSummary(estimation, { mode, vehicle, forced = false, forcages = [] } = {}) {
   const lines = [];
   const labels = { standard: 'modèle de tournée', manual: 'saisie manuelle', association: 'points association' };
   lines.push(`Tournée créée (${labels[mode] || mode}) pour ${vehicle?.name || vehicle?.registration || 'véhicule'}`);
@@ -1095,6 +1105,10 @@ function estimationSummary(estimation, { mode, vehicle, forced = false } = {}) {
   if (forced) {
     lines.push(`⚠ créée malgré un dépassement de ${estimation.depassement_min} min (forcé)`);
   }
+  // Autres forçages tracés (horaires d'association, rendez-vous non tenable) :
+  // le gestionnaire peut savoir ce que le logiciel ignore, mais la tournée doit
+  // porter la trace de ce qui a été outrepassé.
+  for (const f of (forcages || [])) lines.push(`⚠ ${f}`);
   for (const a of estimation.avertissements) lines.push(`• ${a}`);
   return lines.join('\n');
 }

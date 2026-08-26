@@ -100,8 +100,6 @@ async function centreDeTri(db = pool) {
  */
 const TABLES_PROGRAMME = ['tour_cav', 'tour_association_point', 'tour_arret_technique'];
 
-/** Statuts qui marquent un point de collecte DÉJÀ TRAITÉ par le chauffeur. */
-const STATUTS_POINT_TRAITE = ['collected', 'skipped', 'incident'];
 
 /**
  * Décale d'un cran les positions du programme pour libérer une place.
@@ -533,7 +531,6 @@ module.exports = {
   SUITE_MOTIF,
   CENTRE_FALLBACK,
   TABLES_PROGRAMME,
-  STATUTS_POINT_TRAITE,
   centreDeTri,
   decalerPositions,
   refermerTrouPositions,

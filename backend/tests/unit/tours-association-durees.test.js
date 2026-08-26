@@ -144,20 +144,20 @@ describe('Suggestion d’ordre sous rendez-vous (RG-B4)', () => {
   test('à détour égal, l’ordre soumis départage (le moins de bouleversement possible)', async () => {
     // Géométrie identique dans les deux cas : le point libre (x=3) s'insère
     // entre A (x=2) et B (x=4) ou après B pour EXACTEMENT le même détour (0).
-    // Seule la place que le gestionnaire lui a donnée départage.
-    const A = () => P(1, 2, { debutMin: 540, finMin: 570 });
-    const B = () => P(2, 4, { debutMin: 660, finMin: 690 });
+    // Les deux ancrés sont soumis à l'envers de leurs fenêtres, l'ordre est
+    // donc bien recomposé ; seule la place que le gestionnaire avait donnée au
+    // point libre départage l'égalité.
+    const A = () => P(1, 2, { debutMin: 540, finMin: 570 });   // 09:00
+    const B = () => P(2, 4, { debutMin: 660, finMin: 690 });   // 11:00
     const libre = () => P(3, 3);
 
-    const soumisAuMilieu = await suggererOrdre([A(), libre(), B()], { distance, faisable: toujoursFaisable });
+    const soumisAuMilieu = await suggererOrdre([B(), libre(), A()], { distance, faisable: toujoursFaisable });
     expect(ids(soumisAuMilieu)).toEqual([1, 3, 2]);
 
-    // Même géométrie, point libre soumis EN DERNIER : l'heuristique le laisse
-    // en dernier — l'ordre reconstruit est celui du gestionnaire, il n'y a donc
-    // rien à suggérer (null). Sans la règle de départage, il aurait été
-    // déplacé au milieu sans aucune raison.
-    const soumisALaFin = await suggererOrdre([A(), B(), libre()], { distance, faisable: toujoursFaisable });
-    expect(soumisALaFin).toBeNull();
+    // Même géométrie, point libre soumis EN DERNIER : à détour rigoureusement
+    // égal, il reste en dernier au lieu d'être déplacé au milieu sans raison.
+    const soumisALaFin = await suggererOrdre([B(), A(), libre()], { distance, faisable: toujoursFaisable });
+    expect(ids(soumisALaFin)).toEqual([1, 2, 3]);
   });
 
   test('dépendances manquantes ou liste trop courte → null (jamais d’exception)', async () => {

@@ -126,8 +126,11 @@ async function ecrireFeedbackAssociation(tourId, tour, db = pool) {
   for (const p of observes.rows) {
     try {
       const prediction = await predictAssociationFillRate(p.association_point_id, tour.date);
-      if (!prediction || prediction.method === 'default' || !(prediction.fill > 0)) {
-        // Aucun historique : le moteur n'a rien prédit, il a renvoyé un repli.
+      // Seul critère de rejet : le moteur n'avait AUCUN historique et a renvoyé
+      // son repli (`method: 'default'`, 50 %). Une prédiction basse — jusqu'à
+      // zéro sur un point vidé la veille — reste une prédiction du modèle : la
+      // taire reviendrait à ne lui montrer que ses succès.
+      if (!prediction || prediction.method === 'default' || !Number.isFinite(prediction.fill)) {
         continue;
       }
       await db.query(

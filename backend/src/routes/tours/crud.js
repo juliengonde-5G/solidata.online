@@ -28,10 +28,16 @@ function minutesDeHeure(valeur) {
   return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
 
-/** Minutes d'horloge → 'HH:MM' (suffixe « (+1 j) » au-delà de minuit). */
+/**
+ * Minutes d'horloge → 'HH:MM' (suffixe « (+1 j) » au-delà de minuit).
+ * Une valeur négative n'a pas de représentation horaire pour le module d'agent
+ * A (il renvoie null) : une fenêtre de rendez-vous qui remonte avant minuit
+ * (00:05 − 15 min) est alors ramenée au tour d'horloge par le moteur de temps.
+ */
 function heureDeMinutes(minutes) {
   if (ASSOC_HORAIRES && typeof ASSOC_HORAIRES.hhmmDepuisMinutes === 'function') {
-    return ASSOC_HORAIRES.hhmmDepuisMinutes(minutes);
+    const v = ASSOC_HORAIRES.hhmmDepuisMinutes(minutes);
+    if (v) return v;
   }
   return timeEngine.minutesToHHMM(minutes);
 }

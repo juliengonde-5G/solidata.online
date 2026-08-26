@@ -788,6 +788,25 @@ export default function AdminPredictive() {
             <ParamInput label="Retour de vidage à (% de la capacité du véhicule)" value={config.scoring.vehicleFillReturnPct} onChange={v => updateScoring('vehicleFillReturnPct', v)} />
             <ParamInput label="…ou tous les (kg) — 0 pour désactiver" value={config.scoring.returnEveryKg} onChange={v => updateScoring('returnEveryKg', v)} />
             <ParamInput label="Seuil de saturation d'une borne (%)" value={config.scoring.saturationThresholdPct} onChange={v => updateScoring('saturationThresholdPct', v)} />
+            <ParamInput label="Tolérance de rendez-vous association (min, ± autour de l'heure demandée)" value={config.scoring.rdvToleranceMin} onChange={v => updateScoring('rdvToleranceMin', v)} />
+            <div className="md:col-span-3">
+              <label className="flex items-start gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={config.scoring.attenteCompteTravail !== false}
+                  onChange={e => updateScoring('attenteCompteTravail', e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <strong>Compter l'attente avant un rendez-vous dans le temps de travail.</strong>
+                  <span className="block text-slate-500">
+                    Activé (par défaut) : si l'équipage arrive en avance devant une association avec
+                    rendez-vous, l'attente est comptée dans le budget de 6 h — l'équipage est en service.
+                    Désactivé : cette attente est traitée comme la pause déjeuner, hors budget de travail.
+                  </span>
+                </span>
+              </label>
+            </div>
           </div>
         </Section>
 
