@@ -870,6 +870,47 @@ router.post('/:id/retour-centre-public', async (req, res) => {
   }
 });
 
+/**
+ * Y a-t-il quelque chose à peser au retour au centre ?
+ *
+ * La pesée sert à enregistrer ce que le camion RAPPORTE. Si aucun point n'a été
+ * collecté depuis la dernière pesée, le camion est vide : réclamer une pesée n'a
+ * plus d'objet, et l'équipage n'a d'autre choix que de saisir 0 — ce qui inscrit
+ * au rapport une ligne qui ne dit rien et fait compter une pesée de plus.
+ *
+ * Constat client du 26/08/2026 : vidage à 16 h 29 (980 kg), puis pesée finale à
+ * 0 kg dix minutes plus tard, sans une seule collecte entre les deux.
+ *
+ * EN CAS DE DOUTE, ON RÉPOND OUI. Un point collecté sans horodatage, une requête
+ * en échec, une base incomplète : tout cela redonne `true`. Une pesée de trop est
+ * une question inutile ; une pesée escamotée, c'est du poids perdu pour de bon —
+ * et avec lui le tonnage, le stock et l'apprentissage du moteur.
+ */
+async function peseeAttendue(db, tourId) {
+  try {
+    const r = await db.query(
+      `WITH derniere AS (
+         SELECT MAX(recorded_at) AS le FROM tour_weights WHERE tour_id = $1
+       )
+       SELECT EXISTS (
+         SELECT 1 FROM tour_cav, derniere
+          WHERE tour_cav.tour_id = $1 AND tour_cav.status = 'collected'
+            AND (derniere.le IS NULL OR tour_cav.collected_at IS NULL OR tour_cav.collected_at > derniere.le)
+         UNION ALL
+         SELECT 1 FROM tour_association_point, derniere
+          WHERE tour_association_point.tour_id = $1 AND tour_association_point.status = 'collected'
+            AND (derniere.le IS NULL OR tour_association_point.collected_at IS NULL
+                 OR tour_association_point.collected_at > derniere.le)
+       ) AS attendue`,
+      [tourId]
+    );
+    return r.rows[0]?.attendue !== false;
+  } catch (err) {
+    console.warn(`[TOURS] Pesée attendue indéterminable (tournée ${tourId}) :`, err.message);
+    return true;
+  }
+}
+
 // POST /api/tours/:id/arret/:arretId/arrive-public — l'équipage est arrivé.
 // C'est CE geste, et lui seul, qui ouvre la pesée : tant qu'il n'a pas eu lieu,
 // le camion est en route et la tournée n'a rien à peser.
@@ -893,12 +934,19 @@ router.post('/:id/arret/:arretId/arrive-public', async (req, res) => {
     if (r.rows.length === 0) return res.status(404).json({ error: 'Arrêt non trouvé' });
 
     const arret = r.rows[0];
+    const suite = SUITE_MOTIF[arret.motif] || 'reprise_tournee';
+    // `pesee_attendue` n'a de sens que là où une pesée est proposée. Ailleurs,
+    // la clé est absente plutôt que `true` : une valeur sans objet se tait.
+    const attendue = suite.startsWith('pesee_')
+      ? await peseeAttendue(pool, tourId)
+      : undefined;
     res.json({
       success: true,
       arret_id: arret.id,
       motif: arret.motif,
       arrived_at: arret.arrived_at,
-      suite: SUITE_MOTIF[arret.motif] || 'reprise_tournee',
+      suite,
+      ...(attendue === undefined ? {} : { pesee_attendue: attendue }),
     });
   } catch (err) {
     console.error('[TOURS] Erreur arrive-public:', err);

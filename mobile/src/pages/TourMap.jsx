@@ -351,6 +351,10 @@ export default function TourMap() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      // Le serveur dit s'il y a quelque chose à peser : rien n'a été collecté
+      // depuis la dernière pesée = camion vide, la pesée n'a plus d'objet.
+      // Absent de la réponse (ancien backend) → on garde l'ancien comportement.
+      localStorage.setItem('pesee_attendue', data.pesee_attendue === false ? '0' : '1');
       if (data.suite === 'pesee_intermediaire') {
         localStorage.setItem('intermediate_return', 'true');
         navigate('/weigh-in');

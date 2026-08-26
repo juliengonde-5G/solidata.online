@@ -10,20 +10,41 @@ export default function ReturnCentre() {
   const navigate = useNavigate();
   const tourId = localStorage.getItem('current_tour_id');
 
-  const submit = async () => {
+  // Rien n'a été collecté depuis la dernière pesée : le camion est vide, et lui
+  // demander son poids n'a pas de sens. L'équipage saisissait alors 0, ce qui
+  // inscrivait au rapport une pesée qui ne dit rien.
+  // La pesée reste ATTEIGNABLE en second bouton : on ne l'impose plus, on ne
+  // l'interdit jamais — c'est l'équipage qui est devant le camion, pas nous.
+  const peseeAttendue = localStorage.getItem('pesee_attendue') !== '0';
+
+  const [erreur, setErreur] = useState('');
+
+  const terminer = async (versPesee) => {
     setLoading(true);
+    setErreur('');
     try {
-      await authedFetch(`/api/tours/${tourId}/status-public`, {
+      // C'est la pesée finale qui clôture normalement la tournée (sync.js).
+      // Quand il n'y a rien à peser, la clôture doit donc se faire ICI, sinon la
+      // tournée resterait éternellement « en retour au centre » — et sans elle,
+      // ni tonnage, ni mouvement de stock, ni apprentissage du moteur.
+      const res = await authedFetch(`/api/tours/${tourId}/status-public`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: 'returning',
+          status: versPesee ? 'returning' : 'completed',
           km_end: parseInt(kmEnd, 10) || 0,
           notes,
         }),
       });
-      navigate('/weigh-in');
-    } catch (err) { console.error(err); }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      localStorage.removeItem('pesee_attendue');
+      navigate(versPesee ? '/weigh-in' : '/tour-summary');
+    } catch (err) {
+      // Avant, l'erreur était avalée et l'écran avançait quand même : le
+      // chauffeur croyait sa tournée enregistrée alors qu'elle ne l'était pas.
+      console.error(err);
+      setErreur("Enregistrement impossible. Vérifiez la connexion, puis réessayez — n'avancez pas tant que ce message est affiché.");
+    }
     setLoading(false);
   };
 
@@ -34,22 +55,42 @@ export default function ReturnCentre() {
       onBack={() => navigate('/tour-map')}
       usageHint="operational_stop"
       footer={
-        <div className="primary-action-bar">
+        <div className="primary-action-bar" style={{ display: 'grid', gap: 10 }}>
           <button
             type="button"
-            onClick={submit}
+            onClick={() => terminer(peseeAttendue)}
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 font-extrabold text-lg text-white bg-[var(--color-primary)] active:scale-[0.98] transition-transform disabled:opacity-50"
             style={{ minHeight: 72, borderRadius: 18, boxShadow: '0 8px 22px rgba(13,148,136,0.28)' }}
           >
-            {loading ? 'Enregistrement…' : '→ Passer à la pesée'}
+            {loading ? 'Enregistrement…' : (peseeAttendue ? '→ Passer à la pesée' : '→ Terminer la tournée')}
           </button>
+          {!peseeAttendue && (
+            <button
+              type="button"
+              onClick={() => terminer(true)}
+              disabled={loading}
+              className="w-full font-bold text-base text-[var(--color-primary)] bg-white active:scale-[0.98] transition-transform disabled:opacity-50"
+              style={{ minHeight: 56, borderRadius: 16, border: '2px solid var(--color-primary)' }}
+            >
+              J'ai quand même du textile à peser
+            </button>
+          )}
         </div>
       }
     >
       <div className="mb-4">
         <TourStepBar currentPath="/return-centre" />
       </div>
+      {erreur && (
+        <div
+          role="alert"
+          className="mb-4 rounded-2xl px-4 py-3 text-base font-bold"
+          style={{ background: '#FEE2E2', border: '2px solid #FCA5A5', color: '#991B1B' }}
+        >
+          {erreur}
+        </div>
+      )}
       <div className="space-y-4">
         <div
           className="text-center"
