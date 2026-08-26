@@ -176,6 +176,10 @@ services:
       - ./deploy/nginx/nginx-entrypoint.sh:/nginx-entrypoint.sh:ro
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      # Page de maintenance + fichier témoin ACTIF, écrit sur l'hôte par
+      # deploy/scripts/maintenance.sh. Monté en lecture seule : nginx ne fait
+      # que le lire, à chaque requête (voir conf.d/maintenance-garde.inc).
+      - ./deploy/nginx/maintenance:/etc/nginx/maintenance:ro
       - certbot-etc:/etc/letsencrypt
       - certbot-var:/var/lib/letsencrypt
       - certbot-webroot:/var/www/certbot

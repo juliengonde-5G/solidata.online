@@ -22,3 +22,9 @@ __pycache__/
 
 # Dump Redis local (jamais versionné)
 dump.rdb
+
+# Mode maintenance : témoin posé à l'exécution, jamais versionné.
+deploy/nginx/maintenance/ACTIF
+
+# Mode maintenance : temoin pose a l execution, jamais versionne.
+deploy/nginx/maintenance/ACTIF

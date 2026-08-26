@@ -212,6 +212,71 @@ bash deploy/scripts/restore.sh /opt/solidata.online-backups/db_manual_20260307.d
 bash deploy/scripts/deploy.sh logs backend
 ```
 
+## Mode maintenance
+
+Pendant un déploiement, les conteneurs applicatifs redémarrent. Sans mode
+maintenance, les utilisateurs reçoivent un « 502 Bad Gateway » nu : ni ce qui se
+passe, ni quoi faire, ni combien de temps ça dure.
+
+nginx, lui, **ne redémarre pas** pendant une mise à jour (sa configuration est
+montée depuis le dépôt, son image n'est jamais reconstruite). C'est donc lui qui
+sert la page de maintenance, en **503**, tant que le fichier témoin existe.
+
+### Automatique
+
+`deploy.sh update` s'en charge seul :
+
+| Moment | Ce qui se passe |
+|---|---|
+| Sauvegarde, `git pull`, reconstruction des images | **Site ouvert** — l'ancienne version tourne toujours, la fermer serait une coupure gratuite |
+| Redémarrage des services, migrations, contrôles | **Page de maintenance** |
+| Health check et smoke test **verts** | Site rouvert |
+| Un échec, à n'importe quelle étape | **La page reste affichée**, et le script dit comment la lever |
+
+Ce dernier point est délibéré : mieux vaut une page honnête qu'une application à
+moitié déployée. Le script affiche alors la commande de levée.
+
+`deploy.sh restart` pose et lève la page de la même façon.
+
+### Manuel
+
+```bash
+bash deploy/scripts/maintenance.sh on "Intervention sur la base"
+bash deploy/scripts/maintenance.sh status
+bash deploy/scripts/maintenance.sh off
+```
+
+Le script **vérifie** ce qu'il annonce : il interroge le site à travers nginx et
+dit le code réellement observé. Un mode maintenance qu'on croit actif sans qu'il
+le soit serait pire que pas de mode du tout.
+
+### Ce que la page garantit
+
+- **Navigateurs** : une page en français qui explique la situation et se
+  rouvre toute seule dès que le service répond (elle interroge `/api/health`,
+  avec un espacement progressif pour ne pas marteler le serveur au moment
+  précis où il redémarre).
+- **Applications web et mobile** : du **JSON**, pas du HTML — à la forme
+  `{ "error": …, "code": "MAINTENANCE" }` déjà employée par tout le backend, si
+  bien que les bandeaux d'erreur existants affichent le bon message sans une
+  ligne de code en plus.
+- **Chauffeurs en tournée** : rien n'est perdu. La file hors ligne du mobile ne
+  purge que sur une erreur 4xx ; un 503 est conservé et rejoué au retour du
+  service.
+- **Renouvellement du certificat** : le challenge ACME n'est jamais bloqué
+  (vérifié : 200 avec son jeton, maintenance active).
+- **Vraies pannes** : un 503 venant du backend n'est **pas** intercepté
+  (`proxy_intercept_errors` est off) — une panne applicative continue de se dire
+  elle-même au lieu d'être maquillée en maintenance planifiée.
+
+### Une seule réserve, au premier déploiement
+
+La page est servie depuis un volume Docker qui n'existait pas auparavant. Au
+**tout premier** `deploy.sh update` qui embarque cette fonctionnalité, nginx
+tourne encore sans ce volume : la page ne sera pas affichée, et le script le
+dira explicitement. À partir du déploiement suivant, tout fonctionne.
+
+
 ## Dépannage — 502 Bad Gateway
 
 Un 502 signifie que Nginx ne peut pas joindre le frontend ou le backend. Sur le serveur :
