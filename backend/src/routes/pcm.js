@@ -720,28 +720,10 @@ function calculatePCMProfile(answers) {
   };
 }
 
-// Clé de chiffrement AES-256 — alignée sur les lecteurs du module insertion
-// (insertion/routes.js, insertion-ai.js) qui déchiffrent avec
-// PCM_ENCRYPTION_KEY || JWT_SECRET. Avant ce correctif, pcm.js chiffrait
-// toujours avec JWT_SECRET : dès que PCM_ENCRYPTION_KEY était câblée (v2.0.5),
-// les rapports devenaient illisibles côté insertion.
-const ENCRYPTION_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
-// Clé de repli en lecture : rapports historiques chiffrés avec JWT_SECRET
-const LEGACY_KEY = process.env.JWT_SECRET || 'solidata-pcm-encryption-key';
-
-function encryptReport(report) {
-  return CryptoJS.AES.encrypt(JSON.stringify(report), ENCRYPTION_KEY).toString();
-}
-
-function decryptReport(encrypted) {
-  try {
-    const bytes = CryptoJS.AES.decrypt(encrypted, ENCRYPTION_KEY);
-    const text = bytes.toString(CryptoJS.enc.Utf8);
-    if (text) return JSON.parse(text);
-  } catch { /* tente la clé historique */ }
-  const bytes = CryptoJS.AES.decrypt(encrypted, LEGACY_KEY);
-  return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-}
+// Chiffrement des rapports : source unique partagée avec les lecteurs du
+// module insertion (utils/pcm-crypto.js). Trois implémentations coexistaient,
+// avec chacune sa liste de clés — donc des rapports lisibles ici et pas là.
+const { encryptReport, decryptReport, decryptReportDetaille } = require('../utils/pcm-crypto');
 
 // ══════════════════════════════════════════
 // ROUTES API
@@ -1065,6 +1047,26 @@ router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'R
   }
 });
 
+/**
+ * Reconstruit un rapport depuis les réponses au questionnaire.
+ *
+ * `pcm_answers` n'a jamais été chiffrée — ce sont des choix de réponse, pas une
+ * interprétation — et `calculatePCMProfile` est déterministe. Un rapport dont
+ * la clé est perdue n'est donc pas perdu : il est recalculable.
+ *
+ * Renvoie `null` si la session n'a plus de réponses : dans ce cas il n'y a rien
+ * à reconstruire, et on le dira plutôt que d'inventer un profil.
+ */
+async function reconstruireRapport(sessionId) {
+  if (!sessionId) return null;
+  const r = await pool.query(
+    'SELECT question_number, answer_value FROM pcm_answers WHERE session_id = $1 ORDER BY question_number',
+    [sessionId]
+  );
+  if (r.rows.length === 0) return null;
+  return calculatePCMProfile(r.rows);
+}
+
 // GET /api/pcm/profiles/:candidateId — Profil d'un candidat (déchiffré)
 router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
@@ -1080,15 +1082,56 @@ router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM
     if (result.rows.length === 0) return res.status(404).json({ error: 'Profil non trouvé' });
 
     const row = result.rows[0];
-    const report = decryptReport(row.encrypted_report);
+    const { report: stocke, cle } = decryptReportDetaille(row.encrypted_report);
+
+    let report = stocke;
+    let source = cle === 'courante' ? 'stocke' : (cle ? 'stocke_cle_historique' : null);
+    let avertissement = null;
+
+    if (!report) {
+      // Le rapport chiffré est illisible (clé retirée depuis, contenu tronqué).
+      // Il reste RECONSTRUCTIBLE : les réponses au questionnaire, elles, sont
+      // stockées EN CLAIR, et le calcul du profil est déterministe. On refait
+      // donc le rapport plutôt que de laisser un profil inaccessible.
+      //
+      // Ce qui est reconstruit est ANNONCÉ comme tel, jamais présenté comme
+      // l'original : le moteur de calcul a évolué depuis (correctif de la
+      // v1.2.0 sur la fondation de l'immeuble et la question 7), donc un
+      // recalcul peut différer du rapport d'époque. Les types Base et Phase du
+      // jour du test, eux, sont stockés en clair : on les COMPARE et on le dit
+      // si le recalcul ne retombe pas dessus.
+      const rec = await reconstruireRapport(row.session_id);
+      if (!rec) {
+        return res.status(422).json({
+          error: 'Rapport illisible et non reconstructible',
+          code: 'PCM_ILLISIBLE',
+          detail: "Ce rapport a été chiffré avec une clé qui n'est plus configurée, "
+            + 'et les réponses au questionnaire ne sont plus disponibles pour le recalculer.',
+          hint: "Si l'ancienne clé est connue, la renseigner dans PCM_ENCRYPTION_KEYS_LEGACY "
+            + 'puis relancer le script reparer-rapports-pcm.js.',
+        });
+      }
+      report = rec.report;
+      source = 'recalcule';
+      avertissement = (rec.baseType !== row.base_type || rec.phaseType !== row.phase_type)
+        ? `Rapport recalculé depuis les réponses : le profil obtenu (${rec.baseType}/${rec.phaseType}) `
+          + `diffère de celui enregistré le jour du test (${row.base_type}/${row.phase_type}) — `
+          + 'le moteur de calcul a évolué depuis. Les types affichés sont ceux du jour du test.'
+        : 'Rapport recalculé depuis les réponses au questionnaire : le rapport chiffré '
+          + "d'origine n'est plus lisible. Le profil obtenu est identique à celui du jour du test.";
+    }
 
     res.json({
       id: row.id,
       candidate: { id: row.candidate_id, first_name: row.first_name, last_name: row.last_name, email: row.email },
+      // Les types font foi tels qu'ils ont été établis le jour du test : ils
+      // sont en clair depuis toujours et n'ont jamais dépendu du chiffrement.
       baseType: row.base_type,
       phaseType: row.phase_type,
       riskAlert: row.risk_alert,
       report,
+      report_source: source,
+      avertissement,
       createdAt: row.created_at,
     });
   } catch (err) {
@@ -1098,3 +1141,8 @@ router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM
 });
 
 module.exports = router;
+// Le moteur de calcul est exposé pour le script de réparation : un rapport dont
+// la clé est perdue se reconstruit depuis les réponses (jamais chiffrées, elles),
+// et ce calcul ne doit exister qu'à UN endroit — un second moteur divergerait
+// au premier ajustement de pondération.
+module.exports.calculatePCMProfile = calculatePCMProfile;

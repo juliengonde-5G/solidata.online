@@ -248,6 +248,7 @@ export default function PersonalityMatrix() {
   };
 
   const loadProfile = async (candidateId) => {
+    setErreur('');
     try {
       const [profRes, ansRes] = await Promise.all([
         api.get(`/pcm/profiles/${candidateId}`),
@@ -256,7 +257,18 @@ export default function PersonalityMatrix() {
       setSelectedProfile(profRes.data);
       setRawAnswers(ansRes.data?.answers || null);
       setView('profile');
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      // L'échec était AVALÉ : le clic sur « Voir profil » ne produisait
+      // strictement rien — ni ouverture, ni message. L'utilisateur en
+      // concluait que la page ne chargeait pas, sans le moindre indice.
+      console.error(err);
+      const d = err?.response?.data;
+      setErreur(
+        d?.detail ? `${d.error} — ${d.detail}${d.hint ? ` (${d.hint})` : ''}`
+          : d?.error ? `${d.error} (profil ${candidateId})`
+            : `Profil ${candidateId} : impossible d'ouvrir le rapport (${err?.response?.status || 'réseau'}).`
+      );
+    }
   };
 
   const handleExportResults = useCallback(() => {
@@ -420,6 +432,18 @@ export default function PersonalityMatrix() {
                 </button>
               </div>
             </div>
+
+            {/* Provenance du rapport. Un rapport RECALCULÉ depuis les réponses
+                n'est pas le rapport d'époque : le moteur de calcul a évolué
+                depuis (v1.2.0). On le dit au lieu de le faire passer pour
+                l'original — c'est ce qui distingue une restitution d'une
+                reconstitution. */}
+            {selectedProfile.avertissement && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span className="font-semibold">Rapport reconstitué — </span>
+                {selectedProfile.avertissement}
+              </div>
+            )}
 
             <div className="card-modern p-6">
               <h2 className="text-xl font-bold mb-4">

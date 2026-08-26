@@ -3403,13 +3403,12 @@ router.get('/:employeeId', async (req, res) => {
           [candidate.id]
         );
         if (pcmRes.rows[0]?.encrypted_report) {
-          const bytes = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, PCM_KEY);
-          pcmReport = bytes.toString(CryptoJS.enc.Utf8);
-          if (!pcmReport && process.env.JWT_SECRET && PCM_KEY !== process.env.JWT_SECRET) {
-            // Rapports historiques chiffrés avec JWT_SECRET (avant alignement clé PCM)
-            const legacy = CryptoJS.AES.decrypt(pcmRes.rows[0].encrypted_report, process.env.JWT_SECRET);
-            pcmReport = legacy.toString(CryptoJS.enc.Utf8);
-          }
+          // Source unique des clés (utils/pcm-crypto.js) : cet endroit gardait
+          // sa propre liste à deux clés, si bien qu'un rapport ancien pouvait
+          // être lisible dans le module PCM et pas ici.
+          const { decryptReport } = require('../../utils/pcm-crypto');
+          const objet = decryptReport(pcmRes.rows[0].encrypted_report);
+          pcmReport = objet ? JSON.stringify(objet) : null;
         }
       } catch (err) { /* pcm might not exist */ }
     }

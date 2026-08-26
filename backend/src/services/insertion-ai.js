@@ -129,18 +129,13 @@ async function getEmployeeInsertionData(employeeId) {
   // Déchiffrer le rapport PCM si disponible
   let pcmData = null;
   if (pcmReport.rows[0]?.encrypted_report) {
-    try {
-      const CryptoJS = require('crypto-js');
-      const key = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
-      let decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, key).toString(CryptoJS.enc.Utf8);
-      if (!decrypted && process.env.JWT_SECRET && key !== process.env.JWT_SECRET) {
-        // Rapports historiques chiffrés avec JWT_SECRET (avant alignement clé PCM)
-        decrypted = CryptoJS.AES.decrypt(pcmReport.rows[0].encrypted_report, process.env.JWT_SECRET).toString(CryptoJS.enc.Utf8);
-      }
-      pcmData = JSON.parse(decrypted);
-    } catch {
-      pcmData = { base_type: pcmReport.rows[0].base_type, phase_type: pcmReport.rows[0].phase_type };
-    }
+    // Source unique des clés (utils/pcm-crypto.js) : cet endroit gardait sa
+    // propre liste à deux clés, d'où des rapports lisibles ailleurs et pas ici.
+    // Rapport illisible → on retombe sur les types Base/Phase, stockés EN CLAIR
+    // et donc toujours disponibles : mieux vaut un contexte réduit qu'aucun.
+    const { decryptReport } = require('../utils/pcm-crypto');
+    pcmData = decryptReport(pcmReport.rows[0].encrypted_report)
+      || { base_type: pcmReport.rows[0].base_type, phase_type: pcmReport.rows[0].phase_type };
   }
 
   // Déchiffrement applicatif des champs sensibles du diagnostic (santé) —
