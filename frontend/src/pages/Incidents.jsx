@@ -4,21 +4,13 @@ import { AlertTriangle, Filter, RefreshCw, X, CheckCircle2, Clock, Image as Imag
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, Modal, ErrorState } from '../components';
 import api from '../services/api';
+import { INCIDENT_TYPE_LABELS, INCIDENT_STATUS_LABELS } from '../utils/incidents';
 
 // Libellés métier (FR). Alignés sur l'enum SQL incidents.type.
-const TYPE_LABELS = {
-  cav_problem: 'CAV dégradée',
-  environment: 'CAV inaccessible / environnement',
-  vehicle_breakdown: 'Panne véhicule',
-  accident: 'Accident',
-  other: 'Autre',
-};
-const STATUS_LABELS = {
-  open: 'Ouvert',
-  in_progress: 'En cours',
-  resolved: 'Résolu',
-  closed: 'Clôturé',
-};
+// Libellés partagés avec le compte rendu de tournée : une seule table, pour
+// qu'un type ne puisse pas se nommer différemment d'un écran à l'autre.
+const TYPE_LABELS = INCIDENT_TYPE_LABELS;
+const STATUS_LABELS = INCIDENT_STATUS_LABELS;
 const STATUS_COLORS = {
   open: 'bg-red-100 text-red-700 border-red-200',
   in_progress: 'bg-amber-100 text-amber-700 border-amber-200',
