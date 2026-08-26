@@ -21,6 +21,9 @@ import { libelleTypeIncident, libelleStatutIncident } from '../../utils/incident
 const STRUCTURE = 'Solidarité Textiles';
 const VERT = '#2D8C4E';
 const VERT_CLAIR = '#8BC540';
+// Le trajet réellement parcouru ne peut pas être vert : c'est la couleur des
+// pastilles de points, et les deux se confondaient sur la carte.
+const BLEU = '#1D4ED8';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cell = (v) => (v == null || v === '' ? '<span class="gris">—</span>' : esc(v));
@@ -104,7 +107,7 @@ const ecartClasse = (e) => {
 
 const estCoord = (p) => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
 
-function carteSvg({ previsionnel = [], reel = [], centre = null }, L = 330, H = 235) {
+function carteSvg({ previsionnel = [], reel = [], centre = null }, L = 330, Hmax = 330) {
   const prev = (previsionnel || []).filter(estCoord).map((p) => ({ ...p, lat: +p.lat, lng: +p.lng }));
   const trace = (reel || []).filter(estCoord).map((p) => ({ lat: +p.lat, lng: +p.lng }));
   const c = estCoord(centre) ? { lat: +centre.lat, lng: +centre.lng } : null;
@@ -123,7 +126,13 @@ function carteSvg({ previsionnel = [], reel = [], centre = null }, L = 330, H = 
   const yMin = Math.min(...lats); const yMax = Math.max(...lats);
   const pad = 14;
   const eX = (xMax - xMin) || 1e-6; const eY = (yMax - yMin) || 1e-6;
-  const ech = Math.min((L - 2 * pad) / eX, (H - 2 * pad) / eY);
+  // La hauteur SUIT la forme du territoire au lieu d'être figée : sur une
+  // tournée étirée du nord au sud, un cadre fixe laissait deux larges bandes
+  // blanches de part et d'autre et écrasait le tracé au milieu — la carte
+  // occupait le tiers de sa boîte. On part de la largeur disponible et on en
+  // déduit la hauteur, bornée pour que la page tienne toujours sur A4.
+  const ech = Math.min((L - 2 * pad) / eX, (Hmax - 2 * pad) / eY);
+  const H = Math.round(Math.max(120, Math.min(Hmax, ech * eY + 2 * pad)));
   const dx = (L - ech * eX) / 2; const dy = (H - ech * eY) / 2;
   const X = (p) => dx + (p.lng * kx - xMin) * ech;
   const Y = (p) => H - (dy + (p.lat - yMin) * ech); // le nord vers le haut
@@ -138,13 +147,21 @@ function carteSvg({ previsionnel = [], reel = [], centre = null }, L = 330, H = 
 
   const morceaux = [`<rect x="0" y="0" width="${L}" height="${H}" fill="#FBFCFB" stroke="#E2E8F0"/>`];
 
-  if (prev.length > 1) {
-    morceaux.push(`<path d="${chemin(prev)}" fill="none" stroke="#94A3B8" stroke-width="1.4"
-      stroke-dasharray="5 3" stroke-linejoin="round"/>`);
-  }
+  // ORDRE ET COULEURS — le défaut signalé le 26/08/2026 : « je ne vois pas la
+  // trace du trajet réalisé ». Elle était bien là, mais du MÊME vert que les
+  // pastilles de points, et le chauffeur passant par ses points dans l'ordre,
+  // elle se superposait presque exactement au prévisionnel qu'elle recouvrait.
+  // Deux traits verts l'un sur l'autre ne font qu'un seul trait à l'œil.
+  // Désormais : le trajet réalisé est BLEU et large, posé en premier ; le
+  // prévisionnel repasse EN POINTILLÉ PAR-DESSUS, donc reste lisible là où les
+  // deux coïncident, et l'écart saute aux yeux là où ils divergent.
   if (trace.length > 1) {
-    morceaux.push(`<path d="${chemin(trace)}" fill="none" stroke="${VERT}" stroke-width="1.8"
-      stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`);
+    morceaux.push(`<path d="${chemin(trace)}" fill="none" stroke="${BLEU}" stroke-width="2.6"
+      stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>`);
+  }
+  if (prev.length > 1) {
+    morceaux.push(`<path d="${chemin(prev)}" fill="none" stroke="#475569" stroke-width="1.2"
+      stroke-dasharray="4 3" stroke-linejoin="round"/>`);
   }
   prev.forEach((p, i) => {
     const collecte = p.statut === 'collected';
@@ -463,8 +480,8 @@ export function construireRapportHtml(r) {
   const blocCarte = carte
     ? `${carte}
        <div class="legende">
-         <span><i style="border-top:2px dashed #94A3B8"></i>Prévisionnel (ordre de passage)</span>
-         <span><i style="border-top:2px solid ${VERT}"></i>Trajet réellement parcouru</span>
+         <span><i style="border-top:2px dashed #475569"></i>Prévisionnel (ordre de passage)</span>
+         <span><i style="border-top:3px solid ${BLEU}"></i>Trajet réellement parcouru</span>
        </div>
        <p class="note">Le tracé prévisionnel relie les points dans l'ordre planifié, à vol d'oiseau : il montre
        l'ordre, pas les rues empruntées. Le trajet réalisé vient des relevés GPS du véhicule${
