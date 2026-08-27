@@ -61,7 +61,17 @@ function normaliserDate(valeur) {
   if (valeur == null) return null;
   if (valeur instanceof Date) {
     if (Number.isNaN(valeur.getTime())) return null;
-    return valeur.toISOString().slice(0, 10);
+    // Composantes LOCALES, jamais `toISOString()`. node-postgres construit les
+    // colonnes DATE et TIMESTAMP (sans fuseau) en heure LOCALE : une date du
+    // 1er septembre arrive donc à minuit local, et `toISOString()` la
+    // renverrait au 31 août dès que le serveur n'est pas en UTC. Le curseur
+    // `prochaine_echeance`, relu à chaque passage, reculerait d'un jour à
+    // chaque exécution — et la vérification anti-doublon chercherait la
+    // veille de la date réellement enregistrée.
+    const y = valeur.getFullYear();
+    const mo = String(valeur.getMonth() + 1).padStart(2, '0');
+    const d = String(valeur.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${d}`;
   }
   const s = String(valeur).trim();
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -85,33 +95,51 @@ function ajouterJours(dateStr, n) {
   return dt.toISOString().slice(0, 10);
 }
 
+/** Quantième d'une date 'YYYY-MM-DD' (1-31), ou null si elle est illisible. */
+function jourDuMois(dateStr) {
+  const base = normaliserDate(dateStr);
+  return base ? Number(base.slice(8, 10)) : null;
+}
+
 /**
- * Ajoute n mois CALENDAIRES à une date 'YYYY-MM-DD', avec ramenage au dernier
- * jour du mois quand le quantième n'existe pas (31 janvier + 1 mois = 28 ou 29
- * février). `setUTCMonth` seul déborderait sur le 3 mars — ce qui décalerait
- * définitivement toutes les échéances suivantes.
+ * Ajoute n mois CALENDAIRES à une date 'YYYY-MM-DD'.
+ *
+ * Deux pièges, tous deux traités ici :
+ *  1. Le quantième peut ne pas exister dans le mois cible : le 31 janvier + 1
+ *     mois vaut le 28 (ou 29) février. `setUTCMonth` seul déborderait sur le
+ *     3 mars, décalant définitivement toute la série.
+ *  2. Le ramenage ne doit pas être DÉFINITIF. En repartant du résultat ramené,
+ *     une commande mensuelle du 31 deviendrait « le 28 de chaque mois » pour
+ *     toujours après un seul mois de février. `jourAncre` — le quantième de la
+ *     commande d'origine — est donc réappliqué à chaque pas : février est
+ *     ramené au 28, mars retrouve le 31.
  */
-function ajouterMois(dateStr, n) {
+function ajouterMois(dateStr, n, jourAncre = null) {
   const base = normaliserDate(dateStr);
   if (base == null) return null;
   const [y, m, d] = base.split('-').map(Number);
+  const ancre = Number.isFinite(Number(jourAncre)) && Number(jourAncre) >= 1 && Number(jourAncre) <= 31
+    ? Math.floor(Number(jourAncre))
+    : d;
   const cible = new Date(Date.UTC(y, m - 1 + n, 1));
   const anneeCible = cible.getUTCFullYear();
   const moisCible = cible.getUTCMonth();
   const dernierJour = new Date(Date.UTC(anneeCible, moisCible + 1, 0)).getUTCDate();
-  const jour = Math.min(d, dernierJour);
+  const jour = Math.min(ancre, dernierJour);
   return new Date(Date.UTC(anneeCible, moisCible, jour)).toISOString().slice(0, 10);
 }
 
 /**
  * Échéance suivante à partir d'une date, selon la fréquence.
+ * `jourAncre` (quantième de la commande d'origine) n'a de sens que pour le pas
+ * mensuel ; il est ignoré pour les pas en jours.
  * Renvoie null si la fréquence n'est pas récurrente ou la date illisible.
  */
-function avancerEcheance(dateStr, frequence) {
+function avancerEcheance(dateStr, frequence, jourAncre = null) {
   const pas = PAS_RECURRENCE[frequence];
   if (!pas) return null;
   if (pas.jours) return ajouterJours(dateStr, pas.jours);
-  return ajouterMois(dateStr, pas.mois);
+  return ajouterMois(dateStr, pas.mois, jourAncre);
 }
 
 /** Libellé français d'une fréquence (pour les messages et l'UI). */
@@ -151,7 +179,7 @@ function calculerEcheances(modele, options = {}) {
     return { ...vide, motif: 'fréquence non récurrente' };
   }
 
-  const aujourdhui = normaliserDate(options.aujourdhui) || new Date().toISOString().slice(0, 10);
+  const aujourdhui = normaliserDate(options.aujourdhui) || normaliserDate(new Date());
   const horizonJours = Number.isFinite(Number(options.horizonJours)) && Number(options.horizonJours) > 0
     ? Math.floor(Number(options.horizonJours))
     : HORIZON_DEFAUT_JOURS;
@@ -160,6 +188,11 @@ function calculerEcheances(modele, options = {}) {
   const dateCommande = normaliserDate(modele.date_commande);
   const finRecurrence = normaliserDate(modele.date_fin_recurrence);
 
+  // Quantième de référence d'un modèle MENSUEL : celui de la commande
+  // d'origine. Sans lui, un mensuel du 31 « collerait » au 28 dès le premier
+  // février traversé, et n'en repartirait jamais (voir ajouterMois).
+  const jourAncre = jourDuMois(dateCommande) ?? jourDuMois(modele.prochaine_echeance);
+
   // Curseur de départ : la prochaine échéance stockée, sinon « date de la
   // commande d'origine + un pas » (le modèle lui-même EST la 1re occurrence).
   let curseur = normaliserDate(modele.prochaine_echeance);
@@ -167,7 +200,7 @@ function calculerEcheances(modele, options = {}) {
     if (dateCommande == null) {
       return { ...vide, motif: 'date de commande illisible — échéances non calculables' };
     }
-    curseur = avancerEcheance(dateCommande, frequence);
+    curseur = avancerEcheance(dateCommande, frequence, jourAncre);
     if (curseur == null) return { ...vide, motif: 'échéance de départ non calculable' };
   }
 
@@ -192,7 +225,7 @@ function calculerEcheances(modele, options = {}) {
     } else {
       echeances.push(curseur);
     }
-    curseur = avancerEcheance(curseur, frequence);
+    curseur = avancerEcheance(curseur, frequence, jourAncre);
   }
 
   // Récurrence arrivée à son terme → plus aucune échéance à venir.
@@ -265,11 +298,67 @@ async function creneauOccupe(executor, { lieu_chargement, date_debut, date_fin }
 }
 
 /**
+ * Signale aux responsables d'exploitation les commandes créées SANS créneau de
+ * chargement — correctif du 27/08.
+ *
+ * DÉFAUT CORRIGÉ : le refus de poser une préparation (aucun gabarit, créneau
+ * occupé) est une décision saine, et son motif était bien renvoyé dans
+ * `ignorees`. Mais `ignorees` n'était rendu QUE dans la modale de génération
+ * manuelle. Dans le chemin réellement automatique — le job, trois fois par
+ * jour — le motif n'allait que dans `job_runs` : personne ne le voyait.
+ *
+ * Cas nominal du client : une commande hebdomadaire toute neuve n'a, par
+ * construction, aucun gabarit de préparation. Semaine après semaine, la fille
+ * était créée en `en_attente` et son créneau n'était jamais posé, sans que le
+ * responsable logistique en soit averti — et au kanban, elle est
+ * indiscernable d'une commande en attente ordinaire.
+ *
+ * Require PARESSEUX sous try/catch : la messagerie est un canal de CONFORT.
+ * Son absence (module non déployé, table non migrée) ne doit jamais faire
+ * échouer une génération de commandes. Même pattern que `notifierGestionnaires`
+ * de routes/tours/index.js.
+ */
+function signalerPreparationsNonPosees(ignorees) {
+  // Ne remontent QUE les échéances réellement matérialisées sans créneau : un
+  // modèle en échec ou une occurrence déjà générée n'appelle aucune action de
+  // la logistique.
+  const sansCreneau = (ignorees || []).filter((i) => i && i.date && MOTIFS_PREPARATION.some((m) => String(i.motif || '').startsWith(m)));
+  if (sansCreneau.length === 0) return;
+  try {
+    const { envoyerMessageSystemeRoles } = require('./messagerie');
+    if (typeof envoyerMessageSystemeRoles !== 'function') return;
+    // Une ligne par commande concernée : le responsable doit savoir LAQUELLE
+    // ouvrir, pas seulement qu'« il y a un problème quelque part ».
+    const lignes = sansCreneau.slice(0, 10).map(
+      (i) => `• ${i.reference_parent || 'commande récurrente'} du ${i.date} — ${i.motif}`
+    );
+    const reste = sansCreneau.length - lignes.length;
+    const texte = `${sansCreneau.length} commande(s) récurrente(s) créée(s) sans créneau de chargement :\n`
+      + lignes.join('\n')
+      + (reste > 0 ? `\n• … et ${reste} autre(s)` : '')
+      + '\nLa commande reste en attente : le créneau est à poser à la main.';
+    Promise.resolve(envoyerMessageSystemeRoles(['ADMIN', 'MANAGER'], {
+      texte, source: 'recurrence', lien: '/exutoires-commandes',
+    })).catch((err) => console.warn('[RECURRENCE] Messagerie interne indisponible :', err.message));
+  } catch (err) {
+    console.warn('[RECURRENCE] Service de messagerie absent, signalement non doublé :', err.message);
+  }
+}
+
+/** Préfixes des motifs qui relèvent de la PRÉPARATION (et pas de la commande). */
+const MOTIFS_PREPARATION = ['aucun gabarit', 'gabarit incomplet', 'créneau occupé', 'créneau non calculable'];
+
+/**
  * Génère les occurrences dues de tous les modèles récurrents actifs.
  *
  * @param {object} options
  *   - horizonJours : force l'horizon (sinon settings, sinon 30)
  *   - simulation   : true → AUCUNE écriture, mêmes listes en réponse
+ *   - notifier     : true → signale par la messagerie interne les commandes
+ *                    créées sans créneau de chargement. Le job planifié le
+ *                    demande ; la génération MANUELLE ne le fait pas — l'écran
+ *                    montre déjà `ignorees` dans sa modale, un message en plus
+ *                    ferait doublon avec ce que l'utilisateur vient de lire.
  * @returns {Promise<{ok:boolean, generees:Array, preparations:Array,
  *                     ignorees:Array, horizon_jours:number, modeles_examines:number,
  *                     simulation:boolean}>}
@@ -279,6 +368,7 @@ async function creneauOccupe(executor, { lieu_chargement, date_debut, date_fin }
  */
 async function genererCommandesRecurrentes(options = {}) {
   const simulation = options.simulation === true;
+  const notifier = options.notifier === true && !simulation;
   const resultat = {
     ok: true,
     generees: [],
@@ -295,7 +385,7 @@ async function genererCommandesRecurrentes(options = {}) {
       : await lireHorizonJours();
     resultat.horizon_jours = horizonJours;
 
-    const aujourdhui = normaliserDate(options.aujourdhui) || new Date().toISOString().slice(0, 10);
+    const aujourdhui = normaliserDate(options.aujourdhui) || normaliserDate(new Date());
 
     // Modèles éligibles — définition dérivée du contrat §8.1.
     // `recurrence_suspendue` peut ne pas exister sur une base non migrée : la
@@ -432,6 +522,10 @@ async function genererCommandesRecurrentes(options = {}) {
       }
     }
 
+    // Best effort, APRÈS toutes les transactions : un canal de confort ne
+    // s'intercale jamais dans une écriture métier.
+    if (notifier) signalerPreparationsNonPosees(resultat.ignorees);
+
     return resultat;
   } catch (err) {
     console.error('[RECURRENCE] Erreur génération :', err);
@@ -507,6 +601,7 @@ module.exports = {
   // Purs (testés sans base)
   calculerEcheances,
   avancerEcheance,
+  jourDuMois,
   ajouterJours,
   ajouterMois,
   normaliserDate,
@@ -515,6 +610,10 @@ module.exports = {
   bornesPreparation,
   PAS_RECURRENCE,
   HORIZON_DEFAUT_JOURS,
+  // Signalement des commandes créées sans créneau (correctif 27/08) — exporté
+  // pour que le tri des motifs soit testable sans passer par tout le moteur.
+  signalerPreparationsNonPosees,
+  MOTIFS_PREPARATION,
   // Accès base (exposés pour les routes)
   lireHorizonJours,
 };

@@ -618,8 +618,17 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
 // @param {string} args.sessionId fil de conversation ('msg-<conversation_id>' côté messagerie)
 // @param {string} [args.username] identifiant de connexion, pour `chatbot_history`
 //                 (optionnel : résolu en base s'il n'est pas fourni)
+// @param {boolean} [args.journaliser] écrire dans `chatbot_history` (défaut true).
+//
+// `journaliser: false` — correctif du 27/08. Un échange passé par la MESSAGERIE
+// est déjà stocké dans `messagerie_messages`, qui a une rétention réelle
+// (`messagerie.retention_jours`, purge planifiée journalisée). L'écrire une
+// seconde fois dans `chatbot_history`, table sans aucune purge, aurait fait
+// survivre le contenu à la durée ANNONCÉE au registre RGPD — un écart créé par
+// le nouveau flux d'alimentation, pas par la table elle-même.
+// Le widget SolidataBot, lui, continue de journaliser : c'est sa seule trace.
 // @returns {Promise<{reply: string, response_time_ms: number}>}
-async function traiterMessageBot({ userId, role, message, sessionId, username = null }) {
+async function traiterMessageBot({ userId, role, message, sessionId, username = null, journaliser = true }) {
   const texte = typeof message === 'string' ? message.trim() : '';
   if (!texte) {
     const err = new Error('Message requis');
@@ -648,20 +657,24 @@ async function traiterMessageBot({ userId, role, message, sessionId, username = 
 
   // Journal d'usage. `username` est résolu en base UNIQUEMENT s'il n'a pas été
   // fourni : les deux appelants le connaissent déjà (aucune requête en plus).
-  let nomCompte = username;
-  if (nomCompte == null) {
-    try {
-      const r = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
-      nomCompte = r.rows[0] ? r.rows[0].username : null;
-    } catch (err) {
-      console.error('[SolidataBot] Identifiant de compte illisible :', err.message);
+  // Rien de tout cela n'a lieu quand l'appelant ne journalise pas : la
+  // résolution du nom de compte n'aurait alors aucune destination.
+  if (journaliser) {
+    let nomCompte = username;
+    if (nomCompte == null) {
+      try {
+        const r = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+        nomCompte = r.rows[0] ? r.rows[0].username : null;
+      } catch (err) {
+        console.error('[SolidataBot] Identifiant de compte illisible :', err.message);
+      }
     }
+    pool.query(
+      `INSERT INTO chatbot_history (user_id, username, session_id, user_message, bot_reply, response_time_ms)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, nomCompte, sessionId, userMessage, reply, responseTimeMs]
+    ).catch(err => console.error('[SolidataBot] Log error:', err.message));
   }
-  pool.query(
-    `INSERT INTO chatbot_history (user_id, username, session_id, user_message, bot_reply, response_time_ms)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [userId, nomCompte, sessionId, userMessage, reply, responseTimeMs]
-  ).catch(err => console.error('[SolidataBot] Log error:', err.message));
 
   return { reply, response_time_ms: responseTimeMs };
 }

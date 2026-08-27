@@ -35,6 +35,12 @@ const jetonWeb = (id, username, role, first, last) => jwt.sign(
 
 const ADMIN = jetonWeb(1, 'admin', 'ADMIN', 'Julien', 'Gondé');
 const TRIEUR = jetonWeb(3, 'ctrieur', 'COLLABORATEUR', 'Karim', 'Benali');
+// Rôles à PÉRIMÈTRE RESTREINT (correctif 27/08) : AUTORITE est l'accès EXTERNE
+// en lecture seule créé en vague 2 (auditeur Refashion / Métropole) ; FINANCE
+// et DPO peuvent être tenus par un prestataire (cabinet comptable, DPO
+// externalisé). Aucun des trois n'a à disposer de l'annuaire interne complet.
+const AUDITEUR = jetonWeb(8, 'auditeur', 'AUTORITE', 'Claire', 'Renaud');
+const COMPTA = jetonWeb(9, 'compta', 'FINANCE', 'Paul', 'Marchand');
 // Jeton chauffeur : compte 5 PARTAGÉ, identité réelle = véhicule 1.
 const CHAUFFEUR = jwt.sign(
   { id: 5, userId: 5, username: `driver_${VEHICULE}`, role: 'COLLABORATEUR', vehicle_id: VEHICULE },
@@ -51,7 +57,16 @@ beforeAll(() => {
   app.use('/api/messages', require('../../src/routes/messages'));
 });
 
-beforeEach(() => { mockQuery.mockReset(); mockClient.release.mockReset(); });
+beforeEach(() => {
+  mockQuery.mockReset();
+  mockClient.release.mockReset();
+  // La liste des rôles à périmètre restreint est mise en cache 60 s : sans
+  // purge, le premier test imposerait la sienne à tous les suivants.
+  require('../../src/routes/messages').resetRolesRestreintsCache();
+  // Idem pour le plafond d'envoi par identité : sans purge, les envois d'un
+  // test compteraient dans le quota du suivant.
+  require('../../src/routes/messages').resetPlafondEnvoi();
+});
 
 const get = (t, url) => request(app).get(url).set('Authorization', `Bearer ${t}`);
 const post = (t, url, body) => request(app).post(url).set('Authorization', `Bearer ${t}`).send(body || {});
@@ -495,16 +510,31 @@ describe('POST /conversations', () => {
     expect(r.body.code).toBe('DESTINATAIRE_NON_AUTORISE');
   });
 
-  it('CHAUFFEUR → utilisateur hors exploitation : 403 motivé', async () => {
+  // ANTI-ÉNUMÉRATION (correctif 27/08) : depuis un jeton VÉHICULE, un compte
+  // existant mais hors exploitation renvoyait 403 quand un identifiant
+  // inexistant renvoyait 404 — deux réponses discriminantes qui permettaient de
+  // balayer les identifiants et de cartographier les comptes, leur activité et
+  // leur niveau de responsabilité. Le jeton chauffeur est la crédential la plus
+  // exposée du parc (raccourci permanent sur un téléphone d'équipage) : il
+  // reçoit désormais la MÊME réponse dans les deux cas.
+  it('CHAUFFEUR → utilisateur hors exploitation : 404 indiscernable d’un identifiant inconnu', async () => {
     mockQuery.mockImplementation((sql) => {
       if (/FROM users u/.test(String(sql))) {
         return Promise.resolve({ rows: [{ id: 3, username: 'ctrieur', is_active: true, base_role: 'COLLABORATEUR' }] });
       }
       return Promise.resolve({ rows: [] });
     });
-    const r = await post(CHAUFFEUR, '/api/messages/conversations', { destinataire: { type: 'utilisateur', user_id: 3 } });
-    expect(r.status).toBe(403);
-    expect(r.body.code).toBe('DESTINATAIRE_NON_AUTORISE');
+    const existant = await post(CHAUFFEUR, '/api/messages/conversations', { destinataire: { type: 'utilisateur', user_id: 3 } });
+    expect(existant.status).toBe(404);
+    expect(existant.body.code).toBe('DESTINATAIRE_INCONNU');
+
+    // Contre-épreuve : l'identifiant qui n'existe PAS doit rendre exactement la
+    // même chose. C'est l'égalité des deux réponses qui ferme l'énumération —
+    // pas le code 404 pris isolément.
+    mockQuery.mockImplementation(() => Promise.resolve({ rows: [] }));
+    const inexistant = await post(CHAUFFEUR, '/api/messages/conversations', { destinataire: { type: 'utilisateur', user_id: 4242 } });
+    expect(inexistant.status).toBe(existant.status);
+    expect(inexistant.body).toEqual(existant.body);
   });
 
   it('CHAUFFEUR → MANAGER : autorisé, et c’est le VÉHICULE qui devient participant', async () => {
@@ -584,5 +614,125 @@ describe('routes/chat — extraction sans changement de comportement', () => {
     for (let i = 0; i < 21; i += 1) codes.push((await envoyer()).status);   // eslint-disable-line no-await-in-loop
     expect(codes.slice(0, 20).every((c) => c === 503)).toBe(true);
     expect(codes[20]).toBe(429);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PÉRIMÈTRE DES RÔLES EXTERNES (correctif du 27/08)
+// ───────────────────────────────────────────────────────────────────────────
+// DÉFAUT CORRIGÉ : le filtre de contacts ne visait que les équipages. Un compte
+// AUTORITE — créé PRÉCISÉMENT comme un accès externe en lecture seule (auditeur
+// Refashion / Métropole) — obtenait l'annuaire interne complet des salariés
+// actifs et tout le parc de véhicules, et pouvait ouvrir une conversation
+// privée avec n'importe qui. La garde manquait côté serveur, pas seulement au
+// menu.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('rôles à périmètre restreint (AUTORITE, FINANCE, DPO)', () => {
+  const usersEtVehicules = () => {
+    mockQuery.mockImplementation((sql) => {
+      const t = String(sql);
+      if (/FROM users u/.test(t)) {
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'MANAGER' }] });
+      }
+      if (/FROM vehicles/.test(t)) {
+        return Promise.resolve({ rows: [{ id: 1, registration: 'AB-123-CD', name: 'Camion 1' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+  };
+
+  it('AUTORITE : annuaire borné aux ADMIN/MANAGER, aucun véhicule listé', async () => {
+    usersEtVehicules();
+    const r = await get(AUDITEUR, '/api/messages/contacts');
+    expect(r.status).toBe(200);
+    expect(r.body.contacts.every((c) => c.type === 'utilisateur')).toBe(true);
+    // Le parc n'est même pas interrogé : rien à filtrer côté client.
+    expect(appelSql(/FROM vehicles/)).toBeUndefined();
+    const appel = appelSql(/FROM users u/);
+    expect(appel[1][2]).toBe(true);                       // drapeau « périmètre restreint »
+    expect(String(appel[0])).toMatch(/IN \('ADMIN', 'MANAGER'\)/);
+  });
+
+  it('FINANCE : même borne que l’auditeur', async () => {
+    usersEtVehicules();
+    const r = await get(COMPTA, '/api/messages/contacts');
+    expect(r.status).toBe(200);
+    expect(appelSql(/FROM users u/)[1][2]).toBe(true);
+    expect(appelSql(/FROM vehicles/)).toBeUndefined();
+  });
+
+  it('un rôle INTERNE garde l’annuaire complet (aucune régression)', async () => {
+    usersEtVehicules();
+    const r = await get(TRIEUR, '/api/messages/contacts');
+    expect(r.status).toBe(200);
+    expect(appelSql(/FROM users u/)[1][2]).toBe(false);
+    expect(r.body.contacts.some((c) => c.type === 'vehicule')).toBe(true);
+  });
+
+  it('AUTORITE → salarié hors exploitation : 403 motivé (la garde n’est pas qu’au menu)', async () => {
+    mockQuery.mockImplementation((sql) => {
+      if (/FROM users u/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ id: 3, username: 'ctrieur', is_active: true, base_role: 'COLLABORATEUR' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await post(AUDITEUR, '/api/messages/conversations', { destinataire: { type: 'utilisateur', user_id: 3 } });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('DESTINATAIRE_NON_AUTORISE');
+    // Un compte web est identifié : il doit COMPRENDRE le refus, sinon il le
+    // prendra pour un défaut de l'application (contrairement au jeton chauffeur,
+    // à qui l'on rend un 404 indiscernable — voir plus haut).
+    expect(r.body.error).toMatch(/responsables d'exploitation/i);
+  });
+
+  it('AUTORITE → MANAGER : autorisé (le canal reste utile)', async () => {
+    mockQuery.mockImplementation((sql, params) => {
+      const t = String(sql);
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(t)) return Promise.resolve({ rows: [] });
+      if (/FROM users u/.test(t) && /LEFT JOIN custom_roles/.test(t)) {
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', is_active: true, base_role: 'MANAGER' }] });
+      }
+      if (/INSERT INTO messagerie_conversations/.test(t) || /FROM messagerie_conversations/.test(t)) {
+        return Promise.resolve({ rows: [{ id: 30, type: 'directe', titre: null, cle_unique: 'directe:u2:u8', created_at: null, dernier_message_at: null }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await post(AUDITEUR, '/api/messages/conversations', { destinataire: { type: 'utilisateur', user_id: 2 } });
+    expect(r.status).toBe(200);
+  });
+
+  it('AUTORITE → véhicule : 403 (pas de consigne à un équipage en tournée)', async () => {
+    mockDb({});
+    const r = await post(AUDITEUR, '/api/messages/conversations', { destinataire: { type: 'vehicule', vehicle_id: 1 } });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('DESTINATAIRE_NON_AUTORISE');
+  });
+
+  it('la liste est PARAMÉTRABLE : un réglage qui vide AUTORITE lui rend l’annuaire', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const t = String(sql);
+      if (/FROM settings WHERE key = 'messagerie\.roles_perimetre_restreint'/.test(t)) {
+        return Promise.resolve({ rows: [{ value: '["DPO"]' }] });
+      }
+      if (/FROM users u/.test(t)) return Promise.resolve({ rows: [] });
+      if (/FROM vehicles/.test(t)) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await get(AUDITEUR, '/api/messages/contacts');
+    expect(r.status).toBe(200);
+    expect(appelSql(/FROM users u/)[1][2]).toBe(false);
+  });
+
+  it('réglage illisible : la garde reste ARMÉE sur le défaut, jamais désactivée en silence', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const t = String(sql);
+      if (/FROM settings WHERE key = 'messagerie\.roles_perimetre_restreint'/.test(t)) {
+        return Promise.resolve({ rows: [{ value: 'ceci n est pas du JSON' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await get(AUDITEUR, '/api/messages/contacts');
+    expect(r.status).toBe(200);
+    expect(appelSql(/FROM users u/)[1][2]).toBe(true);
   });
 });

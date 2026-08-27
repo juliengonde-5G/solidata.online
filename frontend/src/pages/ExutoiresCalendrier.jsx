@@ -254,6 +254,18 @@ export default function ExutoiresCalendrier() {
             ) : viewMode === 'mensuel' ? (
               /* Monthly calendar grid */
               <div className="card-modern overflow-hidden">
+                {/* Légende : sans elle, une pastille creuse se lit comme un défaut
+                    d'affichage plutôt que comme une échéance encore prévisionnelle. */}
+                <div className="flex flex-wrap items-center gap-4 px-3 py-2 border-b border-gray-200 bg-gray-50 text-[11px] text-gray-600">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-gray-500" />
+                    Commande ferme (chargement planifié)
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full border-2 border-dashed border-gray-500" />
+                    Échéance prévue par une commande récurrente — pas encore créée
+                  </span>
+                </div>
                 {/* Day headers */}
                 <div className="grid grid-cols-7 border-b border-gray-200">
                   {JOURS.map((jour) => (
@@ -291,11 +303,19 @@ export default function ExutoiresCalendrier() {
                               <div className="flex flex-wrap gap-0.5">
                                 {dayExps.slice(0, 6).map((exp, ei) => {
                                   const tp = Array.isArray(exp.type_produit) ? exp.type_produit[0] : exp.type_produit;
-                                  return (
+                                  // Pastille pleine = commande ferme ; contour seul =
+                                  // échéance simplement PROJETÉE par une récurrence.
+                                  return exp.projete ? (
+                                    <div
+                                      key={ei}
+                                      className={`w-2.5 h-2.5 rounded-full border-2 border-dashed ${(TYPE_COLORS[tp] || 'bg-gray-400').replace('bg-', 'border-')}`}
+                                      title={`Prévue par récurrence — ${TYPES_PRODUIT[tp] || tp} — ${exp.client || ''}`}
+                                    />
+                                  ) : (
                                     <div
                                       key={ei}
                                       className={`w-2.5 h-2.5 rounded-full ${TYPE_COLORS[tp] || 'bg-gray-400'}`}
-                                      title={`${TYPES_PRODUIT[tp] || tp} — ${exp.client || ''}`}
+                                      title={`Commande ferme — ${TYPES_PRODUIT[tp] || tp} — ${exp.client || ''}`}
                                     />
                                   );
                                 })}
@@ -395,6 +415,7 @@ export default function ExutoiresCalendrier() {
                                   <thead>
                                     <tr className="border-b border-gray-200">
                                       <th className="text-left py-2 pr-4 font-medium text-gray-500">Réf. commande</th>
+                                      <th className="text-left py-2 pr-4 font-medium text-gray-500">Nature</th>
                                       <th className="text-left py-2 pr-4 font-medium text-gray-500">Client</th>
                                       <th className="text-left py-2 pr-4 font-medium text-gray-500">Produit</th>
                                       <th className="text-left py-2 pr-4 font-medium text-gray-500">Date expédition</th>
@@ -405,6 +426,21 @@ export default function ExutoiresCalendrier() {
                                     {sem.expeditions.map((exp, idx) => (
                                       <tr key={idx} className="border-b border-gray-100 last:border-b-0">
                                         <td className="py-2 pr-4 text-gray-900 font-medium">{exp.commande_ref || '—'}</td>
+                                        {/* Une PROJECTION n'est pas une commande : elle n'existe
+                                            nulle part, ne bloque aucun créneau et peut encore
+                                            changer. Les confondre ferait compter deux fois le
+                                            même chargement. */}
+                                        <td className="py-2 pr-4">
+                                          {exp.projete ? (
+                                            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-dashed border-violet-300">
+                                              Prévue (récurrence)
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                              Commande ferme
+                                            </span>
+                                          )}
+                                        </td>
                                         <td className="py-2 pr-4 text-gray-700">{exp.client || '—'}</td>
                                         <td className="py-2 pr-4">
                                           <span className="inline-flex items-center gap-1">

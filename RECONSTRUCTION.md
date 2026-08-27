@@ -3,6 +3,15 @@
 > **Référentiel principal du projet :** [DOCUMENTATION_TECHNIQUE.md](./DOCUMENTATION_TECHNIQUE.md) — document de référence officiel (architecture, stack, déploiement, API).
 >
 > Ce fichier (RECONSTRUCTION.md) est un **pack de reconstruction** généré le 2026-03-07 : il détaille le schéma BDD, les routes et la logique métier pour reconstruire l’application depuis zéro. À utiliser en complément de la documentation technique.
+>
+> **Mise à jour (26 août 2026, audit lot L8).** Le panorama de modules et de pages du §1
+> ci-dessous date de la version initiale (v1.0.0, 15 modules) et n'a **pas** été tenu à jour au
+> fil des évolutions — le périmètre réel est aujourd'hui de **33 modules fonctionnels** (voir
+> `CLAUDE.md` §5 pour la liste exhaustive et à jour, et §6 pour les 80+ tables). Seules l'Étape 5
+> (base de données) et la doctrine de sauvegarde ont été vérifiées et corrigées dans cette passe ;
+> le reste du document (structure de fichiers, dépendances, table des modules) reste une **photo
+> historique** utile pour comprendre le socle d'origine, pas une référence à jour du périmètre
+> actuel.
 
 ---
 
@@ -1682,7 +1691,9 @@ node src/scripts/init-db.js             # 1er passage : crée users, employees e
 node src/scripts/migrate-exutoires.js   # clients / commandes / preparations / controles / factures (FK users+employees)
 node src/scripts/migrate-finance.js     # financial_exercises / financial_gl_entries / budgets / ... (FK users)
 node src/scripts/init-db.js             # 2e passage : complète le backfill → « Base de données initialisée avec succès ! »
-node src/scripts/migrate-v2.js          # Complements schema v2 (si present)
+
+# Optionnel — index de performance (non auto-appliqué, cf. note ci-dessous) :
+node src/scripts/migrate-indexes.js
 
 # Seeds (optionnels, necessitent les fichiers source)
 npm run db:seed-cav        # Import CAV (necessite KML)
@@ -1699,6 +1710,70 @@ npm run db:seed-production # Import production (necessite Excel)
 > (idempotent) : `users`/`employees` **et** les tables exutoires/finance sont déjà
 > présentes, donc `init-db` réussit d'un seul passage. La séquence ci-dessus ne concerne
 > que la **reconstruction complète** depuis zéro.
+>
+> **Correction (audit lot L8, 26 août 2026).** `backend/src/scripts/migrate-v2.js`
+> **n'existe pas** dans le dépôt (vérifié) — il ne doit plus être mentionné comme une étape de
+> reconstruction. `deploy.sh` teste sa présence avant de l'appeler (`if [ -f ... ]`) et ne fait
+> donc rien s'il est absent ; ce garde-fou est déjà en place côté script, il manquait ici.
+>
+> **`migrate-exutoires.js` / `migrate-finance.js` / `migrate-cav-sensors.js` sont aussi
+> auto-appliqués à CHAQUE démarrage du backend** (`backend/src/index.js`, fonction
+> `initOnStartup`, idempotents — `IF NOT EXISTS` / `DO $$ … EXCEPTION WHEN duplicate_column`),
+> mais **seulement si le schéma compte déjà au moins 5 tables** ; sur une base réellement vide
+> (0 table), seul `init-db.js` est déclenché automatiquement au premier boot. C'est pour cette
+> raison précise que la séquence manuelle ci-dessus (avec le 2e passage d'`init-db.js` après les
+> migrations) reste la procédure **prouvée** pour une reconstruction from-scratch en une fois —
+> un simple redémarrage du conteneur backend après le premier boot peut suffire en pratique
+> (le schéma dépasse alors 5 tables et la branche de migration automatique s'exécute), mais ce
+> n'est pas ce qui a été vérifié.
+>
+> **`migrate-indexes.js`, en revanche, n'est PAS auto-appliqué** par `index.js` — c'est un
+> script autonome (`pool.end()` + `process.exit()` en fin d'exécution, pensé pour un lancement
+> manuel unique) qui pose des index de performance additionnels (GPS, tournées, mouvements de
+> stock…). Il est idempotent (`CREATE INDEX IF NOT EXISTS`) et sans risque à relancer, mais doit
+> être exécuté à la main après le schéma de base — il ne fait pas partie du panorama historique
+> `init-db → migrations → init-db` décrit plus haut.
+
+### Sauvegardes — quoi restaurer avec quoi
+
+**Deux mécanismes de sauvegarde coexistent, à formats INCOMPATIBLES entre eux — ne jamais
+mélanger un fichier de l'un avec l'outil de restauration de l'autre :**
+
+| | Applicatif (`/admin-db`) | Scripts serveur (`deploy/scripts/`) |
+|---|---|---|
+| Déclenchement | Bouton « Sauvegarder » de `/admin-db` (ADMIN), ou job planifié `autoDatabaseBackup` (mardi & vendredi 04h Paris) | `deploy/scripts/backup.sh` — appelé automatiquement à l'**étape 1/7** de `deploy.sh update` (type `manual`, conservé 90 j), et par le cron `deploy/crontab.txt` (`daily`, 2h, conservé 30 j) **une fois le cron installé** (voir plus bas) |
+| Format | SQL **texte brut** (`pg_dump --no-owner --no-acl`, sans `--format=`) | Archive PostgreSQL **custom** (`pg_dump --format=custom`) |
+| Fichiers | `solidata_backup_*.sql` (manuel), `auto_solidata_*.sql` (job, rétention glissante des 8 derniers auto — réglable `AUTO_BACKUP_RETENTION`, les manuels ne sont jamais purgés automatiquement) | `db_daily_*.dump.gz` / `db_manual_*.dump.gz` |
+| Stockage | Volume Docker nommé `solidata-backups-v2`, monté sur `/app/backups` du conteneur `solidata-api` | Répertoire hôte `/opt/solidata.online-backups` (hors de `/opt/solidata.online`, donc survit à un `git clean`/reset du dépôt applicatif) |
+| Restaurer avec | Bouton « Restaurer » de `/admin-db` (`psql -f <fichier.sql>`) | `bash deploy/scripts/restore.sh <fichier.dump.gz>` (`pg_restore --clean --if-exists`) |
+| Couvre les uploads (`/app/uploads`) ? | **Non** — `pg_dump` seul, base de données uniquement | **Oui** — `tar czf` du volume `solidata-uploads` en plus du dump (`uploads_<type>_<date>.tar.gz`) |
+
+Un fichier `.sql` (texte) donné à `restore.sh` échoue (`pg_restore` attend une archive binaire
+`--format=custom`) ; un fichier `.dump` donné au bouton « Restaurer » de `/admin-db` échoue de
+même (`psql -f` attend du SQL texte). **Vérifiez toujours l'extension avant de choisir l'outil.**
+
+**`pg_dump` couvre par construction toute nouvelle table.** Les deux mécanismes appellent
+`pg_dump` **sans liste de tables** (`-t`/`--table`) : ils dumpent la base entière. Toute table
+ajoutée via `init-db.js` — y compris les tables neuves de ce chantier (`messagerie_*`,
+`chaine_layouts`, `chaine_layout_postes`, `tour_gps_stops`, colonnes additives sur
+`commandes_exutoires`/`pennylane_config`/`clients_exutoires`) — est donc automatiquement
+sauvegardée par les deux chaînes dès sa création en base, **sans aucune modification de script
+requise**.
+
+**Un troisième script, `backup-s3.sh` (sauvegarde off-site Scaleway/S3-compatible, sommes
+SHA-256, alerte webhook en cas d'échec), existe dans `deploy/scripts/` mais n'est PAS référencé
+dans `deploy/crontab.txt`** — il exige `/etc/solidata-backup.env` (credentials S3) et une
+installation manuelle du cron pour tourner. Sans lui, aucune copie des sauvegardes ne quitte le
+serveur : `deploy/backups`, `solidata-backups-v2` et `/opt/solidata.online-backups` vivent tous
+sur le même disque Scaleway.
+
+**Vérification recommandée après une reconstruction ou un changement de serveur** : le cron
+n'est **pas** réinstallé automatiquement — `deploy/scripts/init-server.sh` exécute `crontab -r`
+(purge le crontab) pendant la préparation du serveur et ne réinstalle rien ; c'est l'Étape 5 du
+`deploy/DEPLOIEMENT.md` (`crontab deploy/crontab.txt`) qui doit être rejouée à la main. Sans
+cette étape, la sauvegarde quotidienne 2h, le health-check 5 min, le renouvellement SSL et le
+nettoyage des logs ne tournent pas — seule la sauvegarde `manual` embarquée dans
+`deploy.sh update` (étape 1/7) continue de s'exécuter à chaque déploiement.
 
 ### Etape 6 : Frontend
 1. `main.jsx` + `App.jsx` (routes)
@@ -1726,7 +1801,9 @@ docker compose exec backend node src/scripts/init-db.js || true   # 1er passage 
 docker compose exec backend node src/scripts/migrate-exutoires.js
 docker compose exec backend node src/scripts/migrate-finance.js
 docker compose exec backend node src/scripts/init-db.js           # 2e passage : succès complet
-docker compose exec backend node src/scripts/migrate-v2.js
+# migrate-v2.js n'existe pas dans ce dépôt (audit lot L8, 26 août 2026) — ne pas l'appeler.
+# Optionnel : index de performance additionnels (non auto-appliqués) :
+docker compose exec backend node src/scripts/migrate-indexes.js
 ```
 
 ### Etape 9 : Verification

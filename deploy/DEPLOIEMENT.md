@@ -212,6 +212,44 @@ bash deploy/scripts/restore.sh /opt/solidata.online-backups/db_manual_20260307.d
 bash deploy/scripts/deploy.sh logs backend
 ```
 
+## Vérifier les sauvegardes
+
+Deux chaînes de sauvegarde coexistent (détail complet et doctrine de restauration dans
+`RECONSTRUCTION.md` § « Sauvegardes — quoi restaurer avec quoi ») — à ne **jamais** mélanger
+(formats incompatibles entre les deux) :
+
+1. **Applicative** (`/admin-db`, écran ADMIN + job planifié `autoDatabaseBackup` mardi/vendredi
+   4h Paris) — SQL texte brut, stocké dans le volume Docker `solidata-backups-v2`
+   (`/app/backups` du conteneur `solidata-api`), restauré depuis le même écran.
+2. **Serveur** (`deploy/scripts/backup.sh`) — archive PostgreSQL `--format=custom`, stockée dans
+   `/opt/solidata.online-backups` (hors du dépôt applicatif). Déclenchée automatiquement à
+   chaque `deploy.sh update` (type `manual`, conservée 90 j) **et** par le cron quotidien
+   (`daily`, 2h, conservée 30 j) **une fois le cron installé** :
+
+```bash
+# Le cron n'est PAS réinstallé automatiquement : deploy/scripts/init-server.sh purge le
+# crontab existant (crontab -r) pendant la préparation du serveur sans le reposer. À rejouer
+# après toute reconstruction de serveur, ou pour vérifier qu'il est bien en place :
+crontab -l | grep backup.sh || crontab deploy/crontab.txt
+
+# Contrôler que les deux chaînes produisent effectivement des fichiers récents :
+docker exec solidata-api ls -lh /app/backups | tail -5          # chaîne applicative (.sql)
+ls -lh /opt/solidata.online-backups/db_daily_*.dump.gz | tail -5 # chaîne serveur (.dump.gz)
+```
+
+Sans le cron installé, seule la sauvegarde `manual` de `deploy.sh update` continue de
+s'exécuter (à chaque mise à jour) — la sauvegarde quotidienne 2h, le health-check 5 min, le
+renouvellement SSL et le nettoyage des logs ne tournent pas. Un troisième script,
+`deploy/scripts/backup-s3.sh` (copie **off-site** vers un bucket S3-compatible Scaleway,
+sommes SHA-256, alerte webhook), existe mais n'est **pas** référencé dans `deploy/crontab.txt` —
+son activation (credentials dans `/etc/solidata-backup.env`, entrées cron dédiées) est un choix
+d'exploitation à faire manuellement si une copie hors serveur est requise ; sans lui, les trois
+emplacements de sauvegarde (`deploy/backups`, `solidata-backups-v2`, `/opt/solidata.online-backups`)
+vivent tous sur le même disque.
+
+Les deux chaînes appellent `pg_dump` sans liste de tables : toute table ajoutée via
+`init-db.js` est donc sauvegardée par construction, sans script à mettre à jour.
+
 ## Mode maintenance
 
 Pendant un déploiement, les conteneurs applicatifs redémarrent. Sans mode

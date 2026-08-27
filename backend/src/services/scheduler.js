@@ -8,6 +8,15 @@
  * - Veille sectorielle auto-feed news
  */
 const pool = require('../config/database');
+// Messagerie interne (lot L1) : canal qui S'AJOUTE aux notifications existantes
+// (Brevo, push, driver_messages) — aucune de ces fonctions ne lève (§2.1).
+// Require PARESSEUX obligatoire : services/messagerie charge middleware/auth,
+// dont le cache des rôles personnalisés interroge la base DÈS le require —
+// la première requête émise par ce module doit rester le verrou advisory de
+// runAllJobs (contrat vérifié par tests/unit/services/scheduler.test.js).
+const messagerie = () => require('./messagerie');
+// Commandes exutoires récurrentes (lot L7) — génération des occurrences à venir.
+const { genererCommandesRecurrentes } = require('./commandes-recurrence');
 
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
@@ -198,6 +207,15 @@ async function checkAppointmentReminders() {
           console.error(`[SCHEDULER] Erreur rappel J-1 candidat #${c.id}:`, err.message);
         }
       }
+      // Doublage messagerie (§11.4) : un candidat n'a PAS de compte ERP — la
+      // notification interne va aux utilisateurs qui suivent le recrutement.
+      // UNE fois par candidat (hors boucle des triggers), best effort.
+      try {
+        await messagerie().envoyerMessageSystemeRoles(['ADMIN', 'RH'], {
+          texte: `Entretien demain à ${new Date(c.appointment_date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} : ${c.first_name} ${(c.last_name || '').toUpperCase()}`,
+          source: 'recrutement', lien: '/candidates',
+        });
+      } catch (err) { console.warn('[SCHEDULER] Messagerie (rappel J-1) ignorée :', err.message); }
     }
   } catch (err) {
     console.error('[SCHEDULER] Erreur checkAppointmentReminders:', err.message);
@@ -251,6 +269,22 @@ async function checkContractEndings() {
             console.error(`[SCHEDULER] Erreur contrat employe #${emp.id}:`, err.message);
           }
         }
+        // Doublage messagerie (§11.4), UNE fois par salarié, best effort.
+        try {
+          // Le salarié lui-même s'il a un compte (les fiches viennent de la paie :
+          // le plus souvent il n'en a pas — envoyerMessageSysteme le DIT alors, il
+          // n'invente aucun destinataire de repli).
+          const perso = await messagerie().envoyerMessageSysteme({
+            destinataire_employee_id: emp.id,
+            texte: `Votre contrat se termine le ${new Date(emp.end_date).toLocaleDateString('fr-FR')} (dans ${days} jours).`,
+            source: 'rh', lien: '/employees',
+          });
+          if (!perso.ok) console.log(`[SCHEDULER] Contrat J-${days} — pas de compte pour #${emp.id} : ${perso.motif}`);
+          await messagerie().envoyerMessageSystemeRoles(['ADMIN', 'RH'], {
+            texte: `Fin de contrat J-${days} : ${(emp.last_name || '').toUpperCase()} ${emp.first_name} — ${new Date(emp.end_date).toLocaleDateString('fr-FR')}`,
+            source: 'rh', lien: '/employees',
+          });
+        } catch (err) { console.warn('[SCHEDULER] Messagerie (fin de contrat) ignorée :', err.message); }
       }
     }
   } catch (err) {
@@ -1490,6 +1524,70 @@ async function purgeOldGpsPositions() {
   }
 }
 
+/** Rétention de gps_positions, en jours. Plafond de tout ce qui en dérive. */
+const GPS_RETENTION_JOURS = 90;
+
+/**
+ * Purge des arrêts de tournée détectés (`tour_gps_stops`) — correctif du 27/08.
+ *
+ * DÉFAUT CORRIGÉ : la table a été livrée sans rétention. Or ses lignes sont
+ * DÉRIVÉES de `gps_positions`, purgée à 90 jours ci-dessus au titre de la
+ * proportionnalité. Sans ce job, la trace brute disparaissait pendant que les
+ * arrêts qu'on en avait extraits — position, heure, durée, tournée, véhicule,
+ * donc conducteur affecté — se conservaient indéfiniment. Une purge de source
+ * qui ne protège rien n'est pas une purge.
+ *
+ * RÈGLE : la rétention est paramétrable (`collecte.arrets_retention_jours`)
+ * mais BORNÉE à celle de la source. On peut la raccourcir, jamais l'allonger
+ * au-delà de 90 jours : la donnée dérivée ne survit pas au relevé dont elle
+ * est tirée, et un réglage mal saisi ne doit pas pouvoir renverser la règle.
+ *
+ * Journalisée UNIQUEMENT si elle a supprimé quelque chose (pattern
+ * `badgeusePurgeRetention` / `purgeMessagerieRetention`) : un journal qui se
+ * remplit de « 0 » chaque jour noie les vraies purges.
+ */
+async function purgeArretsGps() {
+  let retentionJours = GPS_RETENTION_JOURS;
+  try {
+    const r = await pool.query("SELECT value FROM settings WHERE key = 'collecte.arrets_retention_jours'");
+    const brut = r.rows[0] ? parseInt(r.rows[0].value, 10) : NaN;
+    if (Number.isInteger(brut) && brut > 0) {
+      retentionJours = Math.min(brut, GPS_RETENTION_JOURS);
+      if (brut > GPS_RETENTION_JOURS) {
+        console.warn(`[SCHEDULER] Arrêts GPS : rétention réglée à ${brut} j, ramenée à ${GPS_RETENTION_JOURS} j `
+          + '(plafond de la source gps_positions — une donnée dérivée ne survit pas à son relevé).');
+      }
+    }
+  } catch (err) {
+    console.warn('[SCHEDULER] Réglage collecte.arrets_retention_jours illisible, repli 90 j :', err.message);
+  }
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM tour_gps_stops WHERE debut < NOW() - ($1 || ' days')::interval",
+      [String(retentionJours)]
+    );
+    if (result.rowCount > 0) {
+      console.log(`[SCHEDULER] Arrêts GPS : ${result.rowCount} arrêt(s) supprimé(s) (> ${retentionJours} jours)`);
+      await pool.query(
+        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
+         VALUES (NULL, 'AUTO_PURGE_ARRETS_GPS', 'tour_gps_stops', 0, $1)`,
+        [JSON.stringify({ rows_deleted: result.rowCount, retention_days: retentionJours, plafond_source_days: GPS_RETENTION_JOURS })]
+      ).catch((e) => console.error('[SCHEDULER] Journalisation purge arrêts GPS impossible :', e.message));
+    }
+    return { ok: true, arrets_supprimes: result.rowCount || 0, retention_jours: retentionJours };
+  } catch (err) {
+    // Base non migrée (table absente) : on le dit, on ne fait pas échouer le
+    // tour de jobs pour autant.
+    if (err && err.code === '42P01') {
+      console.warn('[SCHEDULER] Table tour_gps_stops absente (base non migrée) — purge des arrêts ignorée.');
+      return { ok: false, motif: 'table tour_gps_stops absente', arrets_supprimes: 0, retention_jours: retentionJours };
+    }
+    console.error('[SCHEDULER] Erreur purgeArretsGps:', err.message);
+    return { ok: false, motif: err.message, arrets_supprimes: 0, retention_jours: retentionJours };
+  }
+}
+
 /**
  * Purge des refresh tokens expirés (audit vague 3, item 3.C-4).
  * Jusqu'ici, les jetons expirés n'étaient supprimés qu'au démarrage (init-db) ;
@@ -2061,7 +2159,17 @@ async function runAllJobs() {
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
     await runInstrumented('purgeInsertionDossiers', purgeInsertionDossiers);
     await runInstrumented('purgeOldGpsPositions', purgeOldGpsPositions);
+    // Immédiatement APRÈS la purge de la trace : les arrêts en sont dérivés,
+    // les voir purgés dans le même passage rend la règle lisible au journal.
+    await runInstrumented('purgeArretsGps', purgeArretsGps);
     await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
+    await runInstrumented('purgeMessagerieRetention', () => messagerie().purgeMessagerieRetention());
+    // `notifier: true` — c'est le SEUL chemin réellement automatique : une
+    // commande créée sans créneau de chargement doit être signalée dans la
+    // messagerie, sinon son motif ne vit que dans `job_runs` et personne ne le
+    // voit (correctif du 27/08). La génération manuelle, elle, affiche déjà les
+    // motifs dans sa modale.
+    await runInstrumented('genererCommandesRecurrentes', () => genererCommandesRecurrentes({ notifier: true }));
     await runInstrumented('refreshMaterializedViews', refreshMaterializedViews);
     await runInstrumented('scanBoutiqueCSVFolders', scanBoutiqueCSVFolders);
     await runInstrumented('collectBoutiqueWeather', collectBoutiqueWeather);
@@ -2108,6 +2216,12 @@ module.exports = {
   // (simulation sans suppression) : exposé pour les tests et pour un contrôle
   // avant première application en production.
   badgeusePurgeRetention,
+  // Purge RGPD de la messagerie interne (lot L1) — exposée pour les tests.
+  // Wrapper du require paresseux (voir en-tête) : même signature, même retour.
+  purgeMessagerieRetention: (...args) => messagerie().purgeMessagerieRetention(...args),
+  // Purge RGPD des arrêts de tournée dérivés des relevés GPS (correctif 27/08)
+  // — exposée pour l'observabilité (monitoring.js) et les tests.
+  purgeArretsGps,
   checkBadgeuseDevices,
   syncBadgeuseSocial,
   syncBadgeusePresse,

@@ -32,6 +32,32 @@ const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
 const { centreDeTri, LIBELLE_MOTIF } = require('./arrets');
 
+/**
+ * Journalise la consultation du compte rendu — BEST EFFORT (correctif 27/08).
+ *
+ * POURQUOI ICI ET NULLE PART AILLEURS : les points d'accès dédiés aux arrêts
+ * (`/arrets-gps`, `/analyse-gps/cav-durees`) ne renvoient AUCUN nom de
+ * conducteur. Ce compte rendu est la seule surface qui présente, dans le MÊME
+ * document, l'identité du conducteur et ses arrêts géolocalisés minute par
+ * minute — et il est imprimable en PDF, donc extractible de l'application.
+ *
+ * L'arbitrage retenu (tracé au registre RGPD, init-db.js §1.6 bis) est de
+ * CONSERVER le nom : un compte rendu de tournée qui tait qui conduisait est
+ * inexploitable en exploitation, et l'anonymiser ne masquerait rien (la
+ * tournée et le véhicule désignent la personne). La contrepartie est la trace
+ * de consultation, sur le modèle des consultations individuelles du module
+ * Temps & Présence — on sait qui a regardé quoi, et quand.
+ *
+ * Une panne de journal n'empêche jamais la lecture : l'échec est logué.
+ */
+function journaliserConsultationRapport(req, tourId, contexte) {
+  const uid = req.user && req.user.id != null ? req.user.id : null;
+  pool.query(
+    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+    [uid, 'RAPPORT_TOURNEE_CONSULTE', 'tours', tourId, JSON.stringify(contexte || {})]
+  ).catch((err) => console.error('[TOURS] Journalisation de la consultation du rapport impossible :', err.message));
+}
+
 // Nombre de positions GPS renvoyées au maximum (cf. échantillonnage plus bas).
 const GPS_ECHANTILLON_CIBLE = 300;
 
@@ -691,6 +717,24 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       warnings.push(`Données indisponibles pour : ${degraded.join(', ')}.`);
     }
 
+    // Le document réunit-il des positions horodatées ET l'identité de celui qui
+    // conduisait ? C'est cette CONJONCTION qui fait la sensibilité — un rapport
+    // sans conducteur affecté (cas fréquent : le mobile s'authentifie par un
+    // lien de véhicule) ne l'a pas, et une tournée sans arrêt détecté non plus.
+    const contientDonneesLocalisationNominatives = (arretsGps.arrets || []).length > 0
+      && (t.driver_employee_id != null || (t.driver_name != null && String(t.driver_name).trim() !== ''));
+
+    // Trace de consultation (contrepartie de l'arbitrage « on garde le nom »).
+    // Best effort, jamais bloquant : le rapport part de toute façon.
+    journaliserConsultationRapport(req, tourId, {
+      date: t.date ?? null,
+      vehicle_id: t.vehicle_id ?? null,
+      driver_employee_id: t.driver_employee_id ?? null,
+      nb_arrets_gps: (arretsGps.arrets || []).length,
+      arrets_source: arretsGps.source || 'indisponible',
+      geolocalisation_nominative: contientDonneesLocalisationNominatives,
+    });
+
     res.json({
       generated_at: new Date().toISOString(),
       tour: {
@@ -744,6 +788,19 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         rayon_m: arretsGps.rayon_m ?? null,
         nb_inconnus: (arretsGps.arrets || []).filter((a) => a.type === 'inconnu').length,
       },
+      // Mention de confidentialité — présente UNIQUEMENT quand le document
+      // réunit effectivement des arrêts géolocalisés ET un conducteur nommé.
+      // La rendre inconditionnelle la banaliserait : une page qui avertit à
+      // chaque fois n'avertit plus. `null` = ce rapport n'a rien à déclarer.
+      confidentialite: contientDonneesLocalisationNominatives
+        ? {
+          niveau: 'geolocalisation_nominative',
+          mention: 'Document contenant des données de géolocalisation rattachées à un conducteur identifié. '
+            + "Usage réservé au pilotage de l'exploitation (ajustement des temps de vidage et des durées de tournée) — "
+            + 'jamais au décompte du temps de travail. Diffusion limitée aux responsables d\'exploitation. '
+            + 'Consultation journalisée. Arrêts conservés au maximum 90 jours, comme les relevés GPS dont ils sont issus.',
+        }
+        : null,
       // Blocs dont la lecture a échoué (base non migrée, table absente) : le
       // rapport reste servi, amputé, mais il le DIT.
       degraded,

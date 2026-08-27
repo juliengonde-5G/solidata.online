@@ -107,6 +107,11 @@ const JOB_SCHEDULE = {
   // est un manquement de conformité, d'où sa présence ici.
   checkBadgeuseDevices:           { label: 'Postes badgeuse silencieux (> 15 min)', cadence: '3×/jour',        maxAgeHours: DAILY },
   badgeusePurgeRetention:         { label: 'Purge RGPD badgeuse (conservation)', cadence: '3×/jour',           maxAgeHours: DAILY },
+  // Chantier 26/08 : purge de la messagerie interne (rétention
+  // `messagerie.retention_jours`) et génération des occurrences des commandes
+  // exutoires récurrentes — sans déclaration ici, un arrêt passerait inaperçu.
+  purgeMessagerieRetention:       { label: 'Purge RGPD messagerie',             cadence: '3×/jour',            maxAgeHours: DAILY },
+  genererCommandesRecurrentes:    { label: 'Génération commandes exutoires récurrentes', cadence: '3×/jour',   maxAgeHours: DAILY },
   // No-op silencieux tant qu'aucun jeton Meta n'est configuré : le job tourne,
   // mais l'écran d'information se contente alors des contenus partagés à la main.
   syncBadgeuseSocial:             { label: 'Réseaux sociaux — écran badgeuse',  cadence: '3×/jour',            maxAgeHours: DAILY },
@@ -120,6 +125,10 @@ const JOB_SCHEDULE = {
   autoFeedNews:                   { label: 'Veille sectorielle (fil actu)',     cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredCandidates:         { label: 'Purge RGPD candidats > 24 mois',    cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeOldGpsPositions:           { label: 'Purge RGPD GPS > 90 jours',         cadence: '3×/jour',            maxAgeHours: DAILY },
+  // Correctif du 27/08 : les arrêts détectés DÉRIVENT de gps_positions. Déclaré
+  // ici pour qu'un arrêt de ce job se voie — sans lui, la purge de la source
+  // ci-dessus ne protégerait plus rien.
+  purgeArretsGps:                 { label: 'Purge RGPD arrêts de tournée',      cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredRefreshTokens:      { label: 'Purge refresh tokens expirés',      cadence: '3×/jour',            maxAgeHours: DAILY },
   refreshMaterializedViews:       { label: 'Refresh vues matérialisées',        cadence: '3×/jour',            maxAgeHours: DAILY },
   scanBoutiqueCSVFolders:         { label: 'Scan CSV caisse boutiques',         cadence: '3×/jour + 20h',      maxAgeHours: DAILY },

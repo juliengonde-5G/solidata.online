@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight, AlertTriangle } from 'lucide-react';
+import { Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight, AlertTriangle, Clock } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, Section, EmptyState, ErrorState } from '../components';
 import CavPicker from '../components/tours/CavPicker';
@@ -597,6 +597,9 @@ export default function Tours() {
           </div>
         </Section>
 
+        {/* Temps de vidage mesuré, par conteneur et par niveau de remplissage */}
+        <TempsVidagePanel />
+
         {/* Wizard Modal */}
         <Modal isOpen={showWizard} onClose={() => setShowWizard(false)} title={`Nouvelle tournée — Étape ${Math.min(wizardStep, totalSteps)}/${totalSteps}`} size="xl">
               {/* Progress */}
@@ -1026,6 +1029,159 @@ function fmtDur(min) {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${h}h${String(m).padStart(2, '0')}`;
+}
+
+// ── Temps de vidage mesuré, croisé au taux de remplissage ──────────────────
+//
+// Le module fait AJUSTER la durée d'arrêt à la main depuis la 2.38.0 (fiche du
+// point, réglage global) sans qu'aucun écran n'ait jamais pu confronter ce
+// réglage au terrain. Ce tableau est cette confrontation : pour chaque borne,
+// le temps réellement passé sur place — mesuré sur la trace GPS — en face du
+// niveau de remplissage relevé ce jour-là par le chauffeur.
+//
+// Une combinaison jamais observée est ABSENTE du tableau. Elle ne vaut pas
+// zéro : « on n'a jamais mesuré cette borne pleine » et « cette borne pleine se
+// vide en zéro minute » sont deux affirmations très différentes.
+function TempsVidagePanel() {
+  const [ouvert, setOuvert] = useState(false);
+  const [mois, setMois] = useState(6);
+  const [data, setData] = useState(null);
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState(null);
+
+  useEffect(() => {
+    if (!ouvert) return;
+    let annule = false;
+    setChargement(true); setErreur(null);
+    api.get('/tours/analyse-gps/cav-durees', { params: { mois } })
+      .then(({ data: d }) => { if (!annule) setData(d); })
+      .catch((e) => { if (!annule) { setData(null); setErreur(e.response?.data?.error || 'Les temps de vidage n’ont pas pu être chargés.'); } })
+      .finally(() => { if (!annule) setChargement(false); });
+    return () => { annule = true; };
+  }, [ouvert, mois]);
+
+  // Une ligne par borne, une colonne par niveau relevé : c'est la lecture qui
+  // sert à décider (« au-dessus de 3/5, il faut cinq minutes de plus »).
+  const { bornes, niveaux } = useMemo(() => {
+    const lignes = data?.lignes || [];
+    const parBorne = new Map();
+    const vus = new Set();
+    for (const l of lignes) {
+      if (!parBorne.has(l.cav_id)) parBorne.set(l.cav_id, { cav_id: l.cav_id, cav_nom: l.cav_nom, cases: new Map(), passages: 0 });
+      const b = parBorne.get(l.cav_id);
+      b.cases.set(l.fill_level == null ? 'nc' : l.fill_level, l);
+      b.passages += l.nb_passages || 0;
+      vus.add(l.fill_level == null ? 'nc' : l.fill_level);
+    }
+    const ordre = [...vus].sort((a, b) => {
+      if (a === 'nc') return 1; if (b === 'nc') return -1; return a - b;
+    });
+    return { bornes: [...parBorne.values()], niveaux: ordre };
+  }, [data]);
+
+  return (
+    <div className="mt-6 rounded-card bg-white border border-slate-200 shadow-card">
+      <button
+        type="button"
+        onClick={() => setOuvert((o) => !o)}
+        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left"
+      >
+        <span className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-teal-600" />
+          <span className="font-bold text-slate-800">Temps de vidage mesuré par conteneur</span>
+          <span className="text-xs text-slate-400 hidden sm:inline">
+            — durée réelle des arrêts GPS, croisée au taux de remplissage relevé
+          </span>
+        </span>
+        <span className="text-xs font-semibold text-teal-700">{ouvert ? 'Masquer' : 'Afficher'}</span>
+      </button>
+
+      {ouvert && (
+        <div className="px-5 pb-5">
+          <div className="flex items-center gap-2 mb-3">
+            <label className="text-xs font-medium text-slate-500">Période</label>
+            <select
+              value={mois}
+              onChange={(e) => setMois(Number(e.target.value))}
+              className="text-xs border border-slate-300 rounded-lg px-2 py-1"
+            >
+              {[3, 6, 12, 24].map((m) => <option key={m} value={m}>{m} mois</option>)}
+            </select>
+          </div>
+
+          {erreur && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">{erreur}</div>
+          )}
+
+          {chargement ? (
+            <p className="text-xs text-slate-400 italic">Chargement des mesures…</p>
+          ) : bornes.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">
+              {data?.motif || 'Aucune mesure disponible sur la période.'}
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full text-xs">
+                  <thead className="text-[10px] uppercase text-slate-500 bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="text-left py-2 px-2">Conteneur</th>
+                      {niveaux.map((n) => (
+                        <th key={n} className="text-right py-2 px-2">
+                          {n === 'nc' ? 'Niveau non relevé' : `${n}/5`}
+                        </th>
+                      ))}
+                      <th className="text-right py-2 px-2">Passages</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bornes.map((b) => (
+                      <tr key={b.cav_id} className="border-b border-slate-100">
+                        <td className="py-1.5 px-2 text-slate-700">{b.cav_nom || `Conteneur #${b.cav_id}`}</td>
+                        {niveaux.map((n) => {
+                          const c = b.cases.get(n);
+                          return (
+                            <td key={n} className="py-1.5 px-2 text-right tabular-nums">
+                              {c ? (
+                                <span title={`${c.nb_passages} passage(s) · médiane ${fmtDur(c.duree_mediane_min)}`}>
+                                  <span className="font-semibold text-slate-700">{fmtDur(c.duree_moyenne_min)}</span>
+                                  <span className="text-slate-400 text-[10px] ml-1">×{c.nb_passages}</span>
+                                </span>
+                              ) : (
+                                /* Case jamais observée : vide, jamais « 0 min ». */
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td className="py-1.5 px-2 text-right tabular-nums text-slate-500">{b.passages}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-2">
+                Durée moyenne d'immobilisation (médiane et nombre de passages au survol), mesurée sur les arrêts
+                GPS figés à la clôture des tournées. Une case vide signifie qu'aucun passage n'a été mesuré à ce
+                niveau de remplissage — ce n'est pas une durée nulle.
+              </p>
+              {/* Dire ce que ce tableau NE fait PAS. Sans cette phrase, un
+                  lecteur pressé conclut que le moteur d'estimation est déjà
+                  calé sur ces durées — alors qu'il lit toujours les temps de
+                  collecte appris par proximité GPS, qui ignorent le taux de
+                  remplissage. La mesure existe ; le réglage reste manuel. */}
+              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 mt-1.5">
+                <strong>Ces durées ne pilotent encore aucune estimation.</strong> Elles servent à régler à la main
+                la durée d'arrêt (fiche du conteneur, ou Administration → Moteur prédictif) : le calcul des
+                horaires prévisionnels continue de s'appuyer sur les temps de collecte appris, qui ne tiennent pas
+                compte du taux de remplissage.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TourDetailPanel({ tour, onClose }) {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import SolidataBot from './SolidataBot';
+import MessagerieDock from './messagerie/MessagerieDock';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import {
@@ -11,8 +12,8 @@ import {
   Handshake, Warehouse, Scale, Activity, Radio,
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
-  TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, ShoppingCart,
-  GraduationCap, Shirt, Fingerprint, MapPinned,
+  TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, MessageCircle, ShoppingCart,
+  GraduationCap, Shirt, Fingerprint, MapPinned, Workflow,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -108,6 +109,7 @@ const NAV_TREE = [
     children: [
       { label: 'Feuille de production', path: '/production', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Chaîne de tri', path: '/chaine-tri', icon: ArrowUpDown, roles: ['ADMIN', 'MANAGER'] },
+      { label: 'Configurateur de chaîne', path: '/tri/configurateur', icon: Workflow, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Saisie exécution', path: '/tri/execution', icon: ScanLine, roles: ['ADMIN', 'MANAGER'] },
       { label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'MANAGER', 'COLLABORATEUR'] },
       { label: 'Référentiel tri', path: '/admin/tri', icon: ListChecks, roles: ['ADMIN'] },
@@ -159,7 +161,7 @@ const NAV_TREE = [
         label: 'Affectations',
         icon: Calendar,
         children: [
-          { label: 'Planning hebdo', path: '/planning-hebdo', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
+          { label: 'Planning hebdo', path: '/planning-hebdo', icon: ClipboardList, roles: ['ADMIN', 'MANAGER', 'RH'] },
           { label: 'Pointage', path: '/pointage', icon: IdCard, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Heures de travail', path: '/work-hours', icon: Clock, roles: ['ADMIN', 'RH'] },
         ],
@@ -406,6 +408,16 @@ const NAV_TREE = [
       { label: 'Temps & Présence', path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'MANAGER'] },
     ],
   },
+  {
+    // Messagerie interne (chantier 26/08) — lien direct de 1er niveau, visible
+    // de TOUS les rôles connectés (roles: null, comme /news) : le périmètre de
+    // participation est contrôlé côté serveur, pas par le menu.
+    id: 'messagerie',
+    label: 'Messagerie',
+    path: '/messagerie',
+    icon: MessageCircle,
+    roles: null,
+  },
 ];
 
 // Filtre récursif par rôle ; un nœud "groupe" disparaît si tous ses enfants disparaissent.
@@ -535,6 +547,12 @@ export default function Layout({ children }) {
       </div>
 
       <SolidataBot />
+      {/* Le dock suit la MÊME habilitation que l'entrée de menu (clé
+          `messagerie` du catalogue) : masquer la section sans masquer la
+          pastille flottante laisserait une porte d'entrée juste à côté de la
+          porte qu'on vient de fermer. Le périmètre de participation reste
+          contrôlé côté serveur — ceci n'est que la cohérence de l'écran. */}
+      {canAccessModule('messagerie') && <MessagerieDock />}
     </div>
   );
 }

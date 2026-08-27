@@ -6,6 +6,7 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const stateMachine = require('../services/state-machine');
+const recurrence = require('../services/commandes-recurrence');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 router.use(autoLogActivity('commande_exutoire'));
@@ -81,10 +82,28 @@ function hasStockProof({ prepExpediee, stockSortie }) {
 router.get('/', async (req, res) => {
   try {
     const { statut, client_id, type_produit, date_from, date_to } = req.query;
+    // `reference_parent` / `nb_occurrences` : la récurrence n'a pas de colonne
+    // « est_modèle » (statut DÉRIVÉ, contrat §12.7). L'écran a donc besoin de
+    // savoir, pour chaque ligne, si elle EST un modèle (occurrences filles) ou
+    // si elle a ÉTÉ générée par un modèle (référence du parent).
+    // `creneau_a_poser` (correctif du 27/08) : une occurrence générée
+    // automatiquement dont la préparation N'A PAS PU être posée (aucun gabarit,
+    // créneau occupé) reste en `en_attente` — au kanban, elle est alors
+    // indiscernable d'une commande en attente ordinaire, et le motif ne vivait
+    // que dans le journal du job. Le drapeau est DÉRIVÉ (fille + aucune
+    // préparation + pas encore engagée) : rien à stocker, donc rien qui puisse
+    // se désynchroniser. Poser le créneau à la main l'éteint tout seul.
     let query = `
-      SELECT c.*, cl.raison_sociale
+      SELECT c.*, cl.raison_sociale,
+             parent.reference AS reference_parent,
+             (SELECT COUNT(*)::int FROM commandes_exutoires f WHERE f.commande_parent_id = c.id) AS nb_occurrences,
+             (c.commande_parent_id IS NOT NULL
+              AND c.statut IN ('en_attente', 'confirmee')
+              AND NOT EXISTS (SELECT 1 FROM preparations_expedition p WHERE p.commande_id = c.id)
+             ) AS creneau_a_poser
       FROM commandes_exutoires c
       JOIN clients_exutoires cl ON c.client_id = cl.id
+      LEFT JOIN commandes_exutoires parent ON parent.id = c.commande_parent_id
       WHERE 1=1
     `;
     const params = [];
@@ -223,13 +242,165 @@ router.get('/co2', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════
+// RÉCURRENCE (lot L7, contrat §8.2)
+// ──────────────────────────────────────────
+// Constat à l'origine : `commandes_exutoires.frequence` était saisie à l'écran
+// depuis la création de la table et RIEN ne la lisait — une commande déclarée
+// « hebdomadaire » se comportait exactement comme une commande unique. Le
+// moteur vit dans services/commandes-recurrence.js (fonctions pures testées
+// sans base) ; ces routes ne font que l'exposer.
+// ══════════════════════════════════════════
+
+// POST /api/commandes-exutoires/recurrence/generer[?simulation=1]
+// Déclenchement manuel de la génération (le job planifié appelle le MÊME
+// service). `simulation=1` n'écrit rien : c'est l'aperçu avant application.
+router.post('/recurrence/generer', async (req, res) => {
+  try {
+    const simulation = req.query.simulation === '1' || req.body?.simulation === true;
+    const horizonBrut = req.query.horizon_jours ?? req.body?.horizon_jours;
+    const horizonJours = horizonBrut != null && String(horizonBrut).trim() !== ''
+      ? parseInt(String(horizonBrut), 10)
+      : null;
+    if (horizonBrut != null && String(horizonBrut).trim() !== '' && (!Number.isFinite(horizonJours) || horizonJours <= 0)) {
+      return res.status(400).json({ error: 'Horizon invalide (nombre de jours > 0 attendu)', code: 'HORIZON_INVALIDE' });
+    }
+
+    const bilan = await recurrence.genererCommandesRecurrentes({ simulation, horizonJours });
+    if (!bilan.ok) {
+      // Le moteur ne jette pas : il rend son motif. On le transmet tel quel
+      // plutôt que de le masquer derrière un « Erreur serveur ».
+      return res.status(500).json({ error: bilan.motif || 'Génération impossible', code: 'RECURRENCE_ECHEC', ...bilan });
+    }
+    res.json(bilan);
+  } catch (err) {
+    console.error('[COMMANDES-EXUTOIRES] Erreur génération récurrence :', err);
+    res.status(500).json({ error: 'Erreur serveur', code: 'ERREUR_SERVEUR' });
+  }
+});
+
+// PATCH /api/commandes-exutoires/:id/recurrence — suspendre / reprendre.
+// Seuls les MODÈLES sont concernés : suspendre une occurrence déjà générée
+// n'aurait aucun effet (elle existe), et laisser croire le contraire serait
+// pire que le refus.
+router.patch('/:id/recurrence', [
+  body('recurrence_suspendue').isBoolean().withMessage('recurrence_suspendue doit être un booléen'),
+], validate, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'Identifiant de commande invalide', code: 'ID_INVALIDE' });
+    }
+    const suspendue = req.body.recurrence_suspendue === true;
+
+    const current = await pool.query(
+      'SELECT id, reference, frequence, commande_parent_id, statut FROM commandes_exutoires WHERE id = $1',
+      [id]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Commande exutoire non trouvee', code: 'COMMANDE_INTROUVABLE' });
+    }
+    const cmd = current.rows[0];
+    if (!recurrence.estModeleRecurrent(cmd)) {
+      return res.status(409).json({
+        error: cmd.commande_parent_id != null
+          ? "Cette commande est une occurrence générée : la récurrence se pilote sur la commande d'origine."
+          : "Cette commande n'est pas récurrente (fréquence « unique ») — il n'y a pas de récurrence à suspendre.",
+        code: 'PAS_UN_MODELE_RECURRENT',
+      });
+    }
+
+    const result = await pool.query(
+      'UPDATE commandes_exutoires SET recurrence_suspendue = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [suspendue, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err && err.code === '42703') {
+      // Colonne absente : base non migrée. Le dire, plutôt qu'un 500 opaque.
+      return res.status(503).json({
+        error: 'Récurrence indisponible : la base de données n\'est pas à jour (colonne recurrence_suspendue absente).',
+        code: 'BASE_NON_MIGREE',
+      });
+    }
+    console.error('[COMMANDES-EXUTOIRES] Erreur suspension récurrence :', err);
+    res.status(500).json({ error: 'Erreur serveur', code: 'ERREUR_SERVEUR' });
+  }
+});
+
+// GET /api/commandes-exutoires/:id/occurrences — filles matérialisées + état
+// de la récurrence du modèle.
+router.get('/:id/occurrences', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'Identifiant de commande invalide', code: 'ID_INVALIDE' });
+    }
+    const current = await pool.query(
+      `SELECT id, reference, frequence, commande_parent_id, date_commande, date_fin_recurrence, statut
+         FROM commandes_exutoires WHERE id = $1`,
+      [id]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Commande exutoire non trouvee', code: 'COMMANDE_INTROUVABLE' });
+    }
+    const cmd = current.rows[0];
+
+    const filles = await pool.query(
+      `SELECT c.id, c.reference, c.date_commande, c.statut, c.tonnage_prevu,
+              p.id AS preparation_id, p.date_expedition, p.statut_preparation
+         FROM commandes_exutoires c
+         LEFT JOIN preparations_expedition p ON p.commande_id = c.id
+        WHERE c.commande_parent_id = $1
+        ORDER BY c.date_commande`,
+      [id]
+    );
+
+    // `prochaine_echeance` / `recurrence_suspendue` peuvent manquer sur une base
+    // non migrée : on renvoie null + le motif plutôt qu'un faux « jamais ».
+    let prochaine_echeance = null;
+    let recurrence_suspendue = null;
+    let motif_indisponible = null;
+    try {
+      const etat = await pool.query(
+        'SELECT prochaine_echeance, recurrence_suspendue FROM commandes_exutoires WHERE id = $1',
+        [id]
+      );
+      prochaine_echeance = etat.rows[0]?.prochaine_echeance ?? null;
+      recurrence_suspendue = etat.rows[0]?.recurrence_suspendue ?? false;
+    } catch (err) {
+      if (err && err.code === '42703') motif_indisponible = 'base non à jour (colonnes de récurrence absentes)';
+      else throw err;
+    }
+
+    res.json({
+      commande_id: cmd.id,
+      reference: cmd.reference,
+      est_modele_recurrent: recurrence.estModeleRecurrent(cmd),
+      frequence: cmd.frequence,
+      frequence_libelle: recurrence.libelleFrequence(cmd.frequence),
+      date_fin_recurrence: cmd.date_fin_recurrence,
+      prochaine_echeance,
+      recurrence_suspendue,
+      motif_indisponible,
+      occurrences: filles.rows,
+    });
+  } catch (err) {
+    console.error('[COMMANDES-EXUTOIRES] Erreur occurrences :', err);
+    res.status(500).json({ error: 'Erreur serveur', code: 'ERREUR_SERVEUR' });
+  }
+});
+
 // GET /api/commandes-exutoires/:id
 router.get('/:id', async (req, res) => {
   try {
     const orderResult = await pool.query(
-      `SELECT c.*, cl.raison_sociale
+      `SELECT c.*, cl.raison_sociale,
+              parent.reference AS reference_parent,
+              (SELECT COUNT(*)::int FROM commandes_exutoires f WHERE f.commande_parent_id = c.id) AS nb_occurrences
        FROM commandes_exutoires c
        JOIN clients_exutoires cl ON c.client_id = cl.id
+       LEFT JOIN commandes_exutoires parent ON parent.id = c.commande_parent_id
        WHERE c.id = $1`,
       [req.params.id]
     );
@@ -283,7 +454,9 @@ router.post('/', [
 
     await client.query('BEGIN');
 
-    const reference = await generateReference();
+    // Générateur appelé SUR la connexion de la transaction : lu depuis le pool,
+    // le MAX ignorerait les lignes non encore commitées.
+    const reference = await generateReference(client);
 
     const result = await client.query(
       `INSERT INTO commandes_exutoires (reference, client_id, type_produit, date_commande, prix_tonne, tonnage_prevu, frequence, date_fin_recurrence, notes, statut)
@@ -492,3 +665,7 @@ module.exports = router;
 // Helpers purs exposés pour les tests unitaires (item 38b — garde stock « expediee »)
 module.exports.stockProofRequired = stockProofRequired;
 module.exports.hasStockProof = hasStockProof;
+// Générateur de référence partagé : services/commandes-recurrence.js le RÉUTILISE
+// (contrat §8.1 « réutilisé, pas recopié ») pour que les occurrences générées
+// portent la même numérotation CMD-AAAA-NNNN que les commandes saisies à la main.
+module.exports.generateReference = generateReference;

@@ -631,6 +631,29 @@ router.get('/analyse-gps/cav-durees', authorize('ADMIN', 'MANAGER'), async (req,
   }
 });
 
+// ── Cache court de l'affichage (correctif du 27/08) ────────────────────────
+//
+// Le tableau de suivi interroge cet endpoint UNE FOIS PAR TOURNÉE ACTIVE,
+// toutes les 30 s. Sur une tournée en cours, chaque appel relit `gps_positions`
+// (jusqu'à 20 000 lignes) et recharge le contexte des points — soit, avec
+// quatre camions émettant toutes les 10 s, quatre relectures de plusieurs
+// milliers de lignes deux fois par minute sur un DEV1-S, et un coût qui croît
+// avec le parc ET avec l'heure de la journée.
+//
+// 60 secondes de mémoire suffisent à absorber le rythme d'interrogation sans
+// jamais rendre un chiffre périmé à l'œil : un arrêt dure au minimum le seuil
+// de détection (5 min par défaut). Même durée et même pattern que le cache de
+// `/cav/map`. Écriture volontairement absente : ce cache ne sert QUE la
+// lecture ; le recalcul explicite (POST) l'invalide.
+const CACHE_AFFICHAGE_MS = 60000;
+const cacheAffichage = new Map();
+
+/** Purge du cache — exposée pour les tests et appelée après un recalcul. */
+function invaliderCacheArrets(tourId) {
+  if (tourId == null) cacheAffichage.clear();
+  else cacheAffichage.delete(tourId);
+}
+
 /** GET /api/tours/:id/arrets-gps — les arrêts d'une tournée. */
 router.get('/:id/arrets-gps', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
@@ -638,11 +661,21 @@ router.get('/:id/arrets-gps', authorize('ADMIN', 'MANAGER'), async (req, res) =>
     if (!Number.isInteger(tourId) || tourId <= 0) {
       return res.status(400).json({ error: 'Identifiant de tournée invalide', code: 'TOUR_INVALIDE' });
     }
+    const enCache = cacheAffichage.get(tourId);
+    if (enCache && enCache.expire > Date.now()) return res.json(enCache.valeur);
+
     const t = await pool.query('SELECT id, status FROM tours WHERE id = $1', [tourId]);
     if (t.rows.length === 0) {
       return res.status(404).json({ error: 'Tournée non trouvée', code: 'TOUR_INTROUVABLE' });
     }
-    res.json(await arretsPourAffichage(tourId, t.rows[0].status, pool));
+    const valeur = await arretsPourAffichage(tourId, t.rows[0].status, pool);
+    // Une réponse « indisponible » n'est PAS mise en cache : elle traduit un
+    // incident (table absente, lecture en échec) qu'on ne veut pas figer une
+    // minute de plus que nécessaire.
+    if (valeur.source !== 'indisponible') {
+      cacheAffichage.set(tourId, { valeur, expire: Date.now() + CACHE_AFFICHAGE_MS });
+    }
+    res.json(valeur);
   } catch (err) {
     console.error('[TOURS] Erreur arrets-gps :', err);
     res.status(500).json({ error: 'Erreur serveur', code: 'ARRETS_GPS' });
@@ -676,6 +709,9 @@ router.post('/:id/arrets-gps/recalcul', authorize('ADMIN', 'MANAGER'), async (re
     if (!r.ok) {
       return res.status(500).json({ error: r.motif || 'Recalcul impossible', code: 'RECALCUL_ECHEC' });
     }
+    // Le recalcul est un geste EXPLICITE : le gestionnaire doit voir son
+    // résultat tout de suite, pas la version d'il y a une minute.
+    invaliderCacheArrets(tourId);
     const contexte = await chargerContexte(tourId, pool);
     res.json({
       ok: true,
@@ -703,5 +739,8 @@ module.exports.chargerContexte = chargerContexte;
 module.exports.habillerArrets = habillerArrets;
 module.exports.lireReglages = lireReglages;
 module.exports.resetReglagesCache = resetReglagesCache;
+// Cache court de l'affichage (correctif 27/08) : purgeable entre deux tests,
+// sans quoi le premier imposerait sa réponse aux suivants.
+module.exports.invaliderCacheArrets = invaliderCacheArrets;
 module.exports.RAYON_CENTRE_M = RAYON_CENTRE_M;
 module.exports.REGLAGES = REGLAGES;

@@ -333,10 +333,14 @@ export default function CollectionsLive() {
         const res = await api.get(`/tours/${t.id}/arrets-gps`);
         return [t.id, res.data];
       } catch (err) {
-        return [t.id, null];
+        // JAMAIS avalé : la tournée garde son motif, le panneau déplié
+        // l'affiche en bandeau. « Aucun arrêt » et « les arrêts n'ont pas pu
+        // être chargés » ne veulent pas dire la même chose, et la seconde
+        // phrase ne doit pas se lire comme la première.
+        return [t.id, { erreur: err.response?.data?.error || "Les arrêts GPS n'ont pas pu être chargés." }];
       }
     }));
-    setArretsParTournee(Object.fromEntries(resultats.filter(([, v]) => v)));
+    setArretsParTournee(Object.fromEntries(resultats));
   }, []);
   loadArretsRef.current = loadArrets;
 
@@ -1046,6 +1050,121 @@ function ExpandedDetail({ tour, color, onRefresh, demandeParPoint, arretsGps }) 
 
       {/* Canal manager → chauffeur (item 62) */}
       <TourMessagePanel tour={tour} />
+    </div>
+  );
+}
+
+// ── Arrêts détectés sur la trace GPS ───────────────────────────────────────
+//
+// Ce que le camion a fait de son TEMPS, là où la carte ne montre qu'une
+// position : un véhicule immobilisé quarante minutes y ressemble trait pour
+// trait à un véhicule qui roule. Les arrêts sont recalculés à la volée tant que
+// la tournée n'est pas close — ils ne sont figés qu'à la clôture.
+function ArretsGpsPanel({ bloc }) {
+  // Trois états à ne pas confondre : pas encore chargé, échec de chargement,
+  // et chargé mais vide. Les présenter pareil ferait passer une panne pour une
+  // journée sans arrêt.
+  if (!bloc) {
+    return (
+      <div className="mt-4">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Arrêts détectés (GPS)</h4>
+        <p className="text-xs text-slate-400 italic">Chargement des arrêts…</p>
+      </div>
+    );
+  }
+  if (bloc.erreur) {
+    return (
+      <div className="mt-4">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Arrêts détectés (GPS)</h4>
+        <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">{bloc.erreur}</div>
+      </div>
+    );
+  }
+
+  const arrets = Array.isArray(bloc.arrets) ? bloc.arrets : [];
+  const inconnus = arrets.filter((a) => a.type === 'inconnu').length;
+
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+          <Clock className="w-3.5 h-3.5" />
+          Arrêts détectés (GPS)
+          {bloc.seuil_min != null && (
+            <span className="normal-case font-normal text-slate-400">
+              — immobilisations de {bloc.seuil_min} min ou plus
+            </span>
+          )}
+        </h4>
+        {inconnus > 0 && (
+          <span className="text-[11px] font-semibold text-orange-800 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">
+            {inconnus} hors programme
+          </span>
+        )}
+      </div>
+
+      {arrets.length === 0 ? (
+        /* Motif explicite plutôt qu'une zone vide : « aucun arrêt de cette
+           durée » et « aucun relevé GPS » n'ont pas les mêmes conséquences. */
+        <p className="text-xs text-slate-400 italic">
+          {bloc.motif || 'Aucun arrêt de cette durée détecté pour l’instant.'}
+        </p>
+      ) : (
+        <>
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full text-xs">
+              <thead className="text-[10px] uppercase text-slate-500 bg-slate-50 border-b border-slate-200 sticky top-0">
+                <tr>
+                  <th className="text-left py-1.5 px-2">Début</th>
+                  <th className="text-right py-1.5 px-2">Durée</th>
+                  <th className="text-left py-1.5 px-2">Lieu</th>
+                  <th className="text-left py-1.5 px-2">Carte</th>
+                </tr>
+              </thead>
+              <tbody>
+                {arrets.map((a, i) => (
+                  <tr
+                    key={`${a.debut}-${i}`}
+                    /* L'arrêt qu'aucun point du programme n'explique est celui
+                       qu'on cherche : il se voit sans être lu. */
+                    className={`border-b border-slate-100 ${a.type === 'inconnu' ? 'bg-amber-50/60' : ''}`}
+                  >
+                    <td className="py-1.5 px-2 text-slate-600 whitespace-nowrap">{fmtTime(a.debut)}</td>
+                    <td className="py-1.5 px-2 text-right font-semibold tabular-nums whitespace-nowrap">
+                      {fmtDuration(a.duree_min)}
+                    </td>
+                    <td className="py-1.5 px-2">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase mr-1.5 ${
+                        ARRET_TYPE_STYLE[a.type] || ARRET_TYPE_STYLE.inconnu}`}>
+                        {ARRET_TYPE_LABELS[a.type] || a.type}
+                      </span>
+                      <span className="text-slate-700">{a.cav_nom || a.association_nom || ''}</span>
+                    </td>
+                    <td className="py-1.5 px-2">
+                      {a.latitude != null && a.longitude != null ? (
+                        <a
+                          href={`https://www.openstreetmap.org/?mlat=${a.latitude}&mlon=${a.longitude}#map=18/${a.latitude}/${a.longitude}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="text-teal-600 hover:text-teal-700 hover:underline"
+                          title={fmtGps(a.latitude, a.longitude) || undefined}
+                        >
+                          Voir
+                        </a>
+                      ) : <span className="text-slate-400">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">
+            {bloc.source === 'table'
+              ? 'Arrêts figés à la clôture de la tournée.'
+              : 'Tournée en cours : arrêts recalculés à chaque rafraîchissement, non figés en base. Le dernier arrêt n’a pas encore de fin.'}
+            {inconnus > 0 && ' Les arrêts « non identifiés » ne correspondent à aucun point du programme.'}
+          </p>
+        </>
+      )}
     </div>
   );
 }

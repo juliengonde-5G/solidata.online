@@ -39,6 +39,74 @@ const DOC_TYPE_OPTIONS = [
   { value: 'autre', label: 'Autre document' },
 ];
 
+// ── Carte d'état du véhicule ───────────────────────────────────────────────
+// Le chauffeur POINTE les dégâts sur un schéma du camion : la donnée stockée
+// est un couple (x, y) relatif à une vue, entre 0 et 1. Les restituer en texte
+// — « choc, vue arrière » — perd exactement ce que le geste apportait :
+// l'ENDROIT. Deux chocs à l'arrière ne se réparent pas de la même façon selon
+// qu'ils sont sur la porte ou sur le pare-chocs.
+const DEGAT_VUES = [
+  ['avant', 'Avant'], ['arriere', 'Arrière'], ['gauche', 'Côté gauche'], ['droit', 'Côté droit'],
+];
+const DEGAT_COULEURS = {
+  rayure: 'bg-amber-500', choc: 'bg-red-600', bris: 'bg-red-900', autre: 'bg-slate-500',
+};
+const DEGAT_LIBELLES = { rayure: 'Rayure', choc: 'Choc', bris: 'Bris', autre: 'Autre' };
+
+/**
+ * Les quatre vues du camion avec les dégâts reportés à leur place.
+ * Rend `null` quand aucun dégât n'est exploitable : quatre cadres vides
+ * occuperaient la place d'une information sans en être une.
+ */
+function CarteDegats({ degats }) {
+  const pts = (degats || []).filter(
+    (d) => d && Number.isFinite(Number(d.x)) && Number.isFinite(Number(d.y))
+  );
+  if (pts.length === 0) return null;
+
+  return (
+    <div>
+      <p className="font-semibold text-slate-700 mb-2 text-sm">Carte d'état — emplacement des dégâts</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {DEGAT_VUES.map(([cle, libelle]) => {
+          const sur = pts.filter((d) => d.vue === cle);
+          return (
+            <div key={cle}>
+              <p className="text-[10px] uppercase text-slate-500 mb-1">{libelle}</p>
+              <div className="relative w-full aspect-[3/2] rounded-md border border-slate-300 bg-slate-50 overflow-hidden">
+                {sur.map((d, i) => (
+                  <span
+                    key={i}
+                    className={`absolute w-3 h-3 rounded-full ring-2 ring-white ${DEGAT_COULEURS[d.type] || DEGAT_COULEURS.autre}`}
+                    style={{
+                      left: `${Math.max(0, Math.min(1, Number(d.x))) * 100}%`,
+                      top: `${Math.max(0, Math.min(1, Number(d.y))) * 100}%`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                    title={`${DEGAT_LIBELLES[d.type] || d.type}${d.commentaire ? ` : ${d.commentaire}` : ''}`}
+                  />
+                ))}
+                {sur.length === 0 && (
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-300">
+                    rien à signaler
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-3 mt-2">
+        {Object.entries(DEGAT_LIBELLES).map(([cle, libelle]) => (
+          <span key={cle} className="inline-flex items-center gap-1 text-[10px] text-slate-500">
+            <span className={`w-2.5 h-2.5 rounded-full ${DEGAT_COULEURS[cle]}`} />{libelle}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const emptyForm = {
   registration: '', name: '', brand: '', model: '', type: 'utilitaire',
   max_capacity_kg: 3500, tare_weight_kg: '', current_km: 0,
@@ -530,17 +598,46 @@ export default function Vehicles() {
                       <span><span className="font-semibold">Remarque du chauffeur :</span> {etatDeclare.notes}</span>
                     </div>
                   )}
-                  {etatDeclare.degats?.length > 0 && (
+                  {/* Ce qui appelle une action, NOMMÉ. Le compteur seul oblige
+                      à rouvrir le questionnaire pour savoir quel point a été
+                      refusé — ce que personne ne fait avant de laisser partir
+                      le camion. */}
+                  {etatDeclare.detail_disponible && etatDeclare.points_non_valides?.length > 0 && (
                     <div className="text-sm">
-                      <p className="font-semibold text-slate-700 mb-1">Dégâts relevés</p>
-                      <ul className="space-y-1">
-                        {etatDeclare.degats.map((d, i) => (
-                          <li key={i} className="text-slate-600 text-xs bg-red-50 border border-red-100 rounded px-2 py-1">
-                            <span className="font-medium">{d.type}</span> — vue {d.vue}
-                            {d.commentaire ? ` : ${d.commentaire}` : ''}
+                      <p className="font-semibold text-amber-800 mb-1">Points non validés au départ</p>
+                      <ul className="flex flex-wrap gap-1.5">
+                        {etatDeclare.points_non_valides.map((p, i) => (
+                          <li key={p.id || i} className="text-xs bg-amber-50 border border-amber-200 rounded px-2 py-1 text-amber-900 font-medium">
+                            {p.libelle || p.id}
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  )}
+                  {etatDeclare.detail_disponible && etatDeclare.points_non_valides?.length === 0 && (
+                    <p className="text-xs text-emerald-700">
+                      {etatDeclare.points_verifies} point{etatDeclare.points_verifies > 1 ? 's' : ''} vérifié
+                      {etatDeclare.points_verifies > 1 ? 's' : ''}, aucun défaut signalé.
+                    </p>
+                  )}
+                  {etatDeclare.degats?.length > 0 && (
+                    <div className="text-sm space-y-3">
+                      {/* L'emplacement d'abord, la liste ensuite : le schéma
+                          répond à « où », la liste à « quoi ». */}
+                      <CarteDegats degats={etatDeclare.degats} />
+                      <div>
+                        <p className="font-semibold text-slate-700 mb-1">Dégâts relevés</p>
+                        <ul className="space-y-1">
+                          {etatDeclare.degats.map((d, i) => (
+                            <li key={i} className="text-slate-600 text-xs bg-red-50 border border-red-100 rounded px-2 py-1">
+                              <span className="font-medium">{DEGAT_LIBELLES[d.type] || d.type}</span>
+                              {' — '}
+                              {(DEGAT_VUES.find(([c]) => c === d.vue) || [null, d.vue])[1]}
+                              {d.commentaire ? ` : ${d.commentaire}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
                   )}
                 </div>

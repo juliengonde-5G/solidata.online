@@ -45,10 +45,34 @@ export default function ComposerMessage({ onSend, onMentionSelect, sending = fal
     return () => clearTimeout(debounceRef.current);
   }, [mentionQuery]);
 
+  const MOTIF_MENTION = /(?:^|\s)@([^\s@]*)$/;
+
   function detecterMention(value, curseur) {
     const avant = value.slice(0, curseur);
-    const m = avant.match(/(?:^|\s)@([^\s@]*)$/);
+    const m = avant.match(MOTIF_MENTION);
     return m ? m[1] : null;
+  }
+
+  /**
+   * Retire le fragment « @… » en cours de frappe, et LUI SEUL.
+   *
+   * Correctif du 27/08 : sélectionner un contact vidait tout le champ. Qui
+   * tapait « Bonjour @jul » puis choisissait le contact perdait son « Bonjour »
+   * sans le moindre avertissement — le « @ » ouvre la conversation privée, il
+   * n'a pas à effacer la phrase qui l'entoure. Le reste du texte suit donc dans
+   * la conversation qui s'ouvre (le composeur n'est pas remonté d'une
+   * conversation à l'autre).
+   *
+   * L'espace qui précède le « @ » est conservé : « Bonjour @jul » → « Bonjour ».
+   */
+  function retirerFragmentMention(value, curseur) {
+    const avant = value.slice(0, curseur);
+    const m = avant.match(MOTIF_MENTION);
+    if (!m) return value;
+    // m.index pointe sur l'espace (ou le début) ; le « @ » est juste après,
+    // sauf en début de chaîne où le groupe non capturant est vide.
+    const debutArobase = m.index + (m[0].startsWith('@') ? 0 : 1);
+    return value.slice(0, debutArobase) + value.slice(curseur);
   }
 
   function autoResize(el) {
@@ -70,10 +94,22 @@ export default function ComposerMessage({ onSend, onMentionSelect, sending = fal
 
   async function selectionnerMention(contact) {
     fermerMention();
-    setText('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.focus();
+    // On ne retire QUE le « @… » en cours de frappe : la phrase déjà saisie
+    // suit dans la conversation qui s'ouvre, au lieu d'être perdue.
+    const el = textareaRef.current;
+    const curseur = el ? el.selectionStart : text.length;
+    const restant = retirerFragmentMention(text, curseur);
+    setText(restant);
+    if (el) {
+      el.style.height = 'auto';
+      el.focus();
+      // Le curseur se replace là où le fragment a été retiré, pas en fin de
+      // texte : sans ça, une saisie en milieu de phrase repartirait de la fin.
+      const position = restant.length - (text.length - curseur);
+      requestAnimationFrame(() => {
+        try { el.setSelectionRange(position, position); } catch { /* champ démonté */ }
+        autoResize(el);
+      });
     }
     try {
       await onMentionSelect?.(contact);

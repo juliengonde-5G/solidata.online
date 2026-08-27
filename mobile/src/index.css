@@ -207,6 +207,26 @@
     padding-top: calc(1rem + var(--sync-banner-h, 44px) + var(--message-banner-h, 72px));
   }
 
+  /* MODE DÉMO — réserve de place manquante (correctif du 27/08).
+     Le bandeau « MODE DÉMO — FORMATION » est lui aussi en `position: fixed` :
+     les bandeaux qui le suivent glissaient bien dessous (règles `top:` plus
+     haut), mais AUCUNE règle ne réservait sa hauteur à l'en-tête — situation
+     antérieure à ce chantier. En formation, `.screen-header` restait donc
+     partiellement recouvert. Les trois combinaisons sont désormais couvertes,
+     chacune en cumulant les hauteurs RÉELLEMENT mesurées (jamais devinées). */
+  body.demo-mode-on .screen-header {
+    padding-top: calc(1rem + var(--demo-banner-h, 64px));
+  }
+  body.demo-mode-on.sync-banner-on .screen-header {
+    padding-top: calc(1rem + var(--demo-banner-h, 64px) + var(--sync-banner-h, 44px));
+  }
+  body.demo-mode-on.message-banner-on .screen-header {
+    padding-top: calc(1rem + var(--demo-banner-h, 64px) + var(--message-banner-h, 72px));
+  }
+  body.demo-mode-on.sync-banner-on.message-banner-on .screen-header {
+    padding-top: calc(1rem + var(--demo-banner-h, 64px) + var(--sync-banner-h, 44px) + var(--message-banner-h, 72px));
+  }
+
   /* Badge local de statut d'action (envoyé / en attente / à renvoyer). */
   .action-badge {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;

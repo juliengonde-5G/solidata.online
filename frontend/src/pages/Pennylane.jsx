@@ -21,6 +21,13 @@ export default function Pennylane() {
   const [syncingTx, setSyncingTx] = useState(false);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  // Résultat de l'import des factures (lot L7) : affiché en bandeau, jamais en
+  // `alert()` — et « 0 » y est expliqué au lieu d'être asséné.
+  const [invoiceResult, setInvoiceResult] = useState(null);
+  const [invoiceError, setInvoiceError] = useState('');
+  // Période facultative : le curseur automatique suffit au quotidien, mais il
+  // faut pouvoir remonter plus loin après un incident ou une reprise.
+  const [invoiceSince, setInvoiceSince] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [balances, setBalances] = useState(null);
   const [configForm, setConfigForm] = useState({
@@ -89,12 +96,16 @@ export default function Pennylane() {
   // Le flux PUSH « Solidata → Pennylane » a été retiré le 03/05/2026 (doctrine PULL-only).
   const syncInvoices = async () => {
     setSyncing(true);
+    setInvoiceResult(null);
+    setInvoiceError('');
     try {
-      const res = await api.post('/pennylane/sync/customer-invoices');
-      alert(res.data.message || 'Import des factures clients terminé.');
+      const res = await api.post('/pennylane/sync/customer-invoices',
+        invoiceSince ? { since: invoiceSince } : {});
+      setInvoiceResult(res.data);
       loadAll();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erreur lors de l\'import des factures clients');
+      console.error(err);
+      setInvoiceError(err.response?.data?.error || "L'import des factures clients a échoué.");
     }
     setSyncing(false);
   };
@@ -221,6 +232,74 @@ export default function Pennylane() {
               )}
             </div>
           )}
+          {canEdit && (
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Factures clients — importer depuis le <span className="text-slate-400">(facultatif)</span>
+                </label>
+                <input
+                  type="date"
+                  value={invoiceSince}
+                  onChange={(e) => setInvoiceSince(e.target.value)}
+                  className="input-modern text-sm"
+                />
+              </div>
+              {invoiceSince && (
+                <button onClick={() => setInvoiceSince('')} className="btn-ghost text-xs mb-1">
+                  Revenir au suivi automatique
+                </button>
+              )}
+              <p className="text-xs text-slate-500 mb-2 max-w-md">
+                Laissé vide, l'import reprend là où le précédent import de factures s'était arrêté.
+                Renseignez une date pour reprendre plus loin en arrière.
+              </p>
+            </div>
+          )}
+
+          {/* Résultat de l'import des factures — un « 0 » n'est jamais laissé nu. */}
+          {invoiceError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p className="font-semibold">Import des factures impossible</p>
+              <p className="mt-1">{invoiceError}</p>
+            </div>
+          )}
+          {invoiceResult && (
+            <div className={`mb-4 rounded-lg border p-3 text-sm ${
+              invoiceResult.recuperees === 0
+                ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+            }`}>
+              <p className="font-semibold">
+                {invoiceResult.recuperees === 0 ? 'Aucune facture reçue de Pennylane' : 'Import terminé'}
+              </p>
+              <p className="mt-1">{invoiceResult.message}</p>
+              {invoiceResult.recuperees === 0 && (
+                <p className="mt-2 text-xs">
+                  Deux vérifications : la période demandée contient-elle bien des factures, et
+                  ces factures sont-elles <strong>finalisées</strong> (l'API Pennylane ne renvoie pas
+                  les brouillons) ? Le bouton « Diagnostic factures » de la page de configuration
+                  interroge Pennylane sans aucun filtre de date pour trancher.
+                </p>
+              )}
+              {invoiceResult.periode && (
+                <p className="mt-1 text-xs opacity-80">
+                  Période interrogée : du {new Date(invoiceResult.periode.du).toLocaleDateString('fr-FR')} au{' '}
+                  {new Date(invoiceResult.periode.au).toLocaleDateString('fr-FR')}
+                  {invoiceResult.since_source ? ` (${invoiceResult.since_source})` : ''}.
+                </p>
+              )}
+              {/* Curseur non avancé : la période reste ouverte. Sans cette
+                  phrase, l'utilisateur qui lit « 3 en erreur » croit avoir
+                  perdu 3 factures — alors qu'elles seront redemandées. */}
+              {invoiceResult.curseur_avance === false && invoiceResult.curseur_motif && (
+                <p className="mt-2 rounded bg-white/60 px-2 py-1 text-xs">
+                  <strong>La période reste à reprendre :</strong> {invoiceResult.curseur_motif}.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Test connexion */}
             {canEdit && (
@@ -251,7 +330,13 @@ export default function Pennylane() {
               </div>
               <div className="text-left">
                 <p className="font-medium text-sm">{syncing ? 'Import en cours...' : 'Importer les factures clients'}</p>
-                <p className="text-xs text-slate-400">Depuis Pennylane (contrôle facturation)</p>
+                <p className="text-xs text-slate-400">
+                  {invoiceSince
+                    ? `Depuis le ${new Date(invoiceSince).toLocaleDateString('fr-FR')}`
+                    : status?.last_invoice_sync
+                      ? `Depuis le dernier import (${new Date(status.last_invoice_sync).toLocaleDateString('fr-FR')})`
+                      : 'Premier import : 90 derniers jours'}
+                </p>
               </div>
             </button>
             )}

@@ -43,9 +43,13 @@ const TABLE_COLUMNS = {
   mise_en_situation: ['id', 'candidate_id'],
   recruitment_documents: ['id', 'candidate_id'],
   candidate_history: ['id', 'candidate_id', 'comment'],
+  // Chantier 26/08 — messagerie interne (correctif d'anonymisation du 27/08).
+  messagerie_messages: ['id', 'conversation_id', 'auteur_type', 'auteur_user_id', 'auteur_vehicle_id', 'texte', 'type', 'source', 'lien', 'created_at'],
+  messagerie_mentions: ['id', 'message_id', 'user_id', 'vehicle_id'],
+  messagerie_participants: ['id', 'conversation_id', 'user_id', 'vehicle_id', 'dernier_lu_message_id'],
 };
 
-function makeMockClient() {
+function makeMockClient(userIdLie = null) {
   const calls = [];
   return {
     calls,
@@ -60,6 +64,12 @@ function makeMockClient() {
       if (tblMatch) {
         const table = params[0];
         return { rows: TABLE_COLUMNS[table] ? [{ x: 1 }] : [] };
+      }
+      // Résolution du compte lié au salarié : la messagerie ne connaît que
+      // `users.id`. `userIdLie = null` simule une fiche de paie sans compte —
+      // le cas le plus courant, et celui où il n'y a rien à anonymiser.
+      if (/SELECT user_id FROM employees WHERE id = \$1/i.test(sql)) {
+        return { rows: [{ user_id: userIdLie }] };
       }
       return { rows: [] };
     },
@@ -219,5 +229,57 @@ describe('anonymization — snapshots probants (revue Codex PR#73)', () => {
     const del = dataSql(client.calls).find((s) => /DELETE FROM insertion_milestones_history/i.test(s));
     expect(del).toBeDefined();
     expect(del).toMatch(/WHERE milestone_id IN \(SELECT id FROM insertion_milestones WHERE employee_id = \$1\)/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MESSAGERIE INTERNE (correctif du 27/08)
+// ───────────────────────────────────────────────────────────────────────────
+// Le chantier du 26/08 a créé les tables `messagerie_*` sans étendre ce
+// service. Après anonymisation, les messages du salarié gardaient leur texte
+// ET leur `auteur_user_id` : ils restaient nominatifs par jointure sur `users`,
+// jusqu'à l'échéance de rétention (365 jours). Le droit à l'effacement ne
+// s'exerce pas « dans un an ».
+// ═══════════════════════════════════════════════════════════════════════════
+describe('anonymization — messagerie interne', () => {
+  it('neutralise le contenu ET coupe le lien à la personne', async () => {
+    const client = makeMockClient(42);
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+
+    const maj = sqls.find((s) => /UPDATE messagerie_messages/i.test(s));
+    expect(maj).toBeDefined();
+    // Les deux gestes comptent : vider le texte sans couper `auteur_user_id`
+    // laisserait la personne identifiable ; couper le lien sans vider le texte
+    // laisserait le contenu.
+    expect(maj).toMatch(/texte = '\[message anonymisé\]'/);
+    expect(maj).toMatch(/auteur_user_id = NULL/);
+    expect(maj).toMatch(/WHERE auteur_user_id = \$1/);
+    // Le paramètre est bien le COMPTE, pas l'identifiant de fiche salarié.
+    const appel = client.calls.find((c) => /UPDATE messagerie_messages/i.test(c.sql));
+    expect(appel.params).toEqual([42]);
+  });
+
+  it('supprime mentions et participations du compte', async () => {
+    const client = makeMockClient(42);
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    expect(sqls.some((s) => /DELETE FROM messagerie_mentions WHERE user_id = \$1/i.test(s))).toBe(true);
+    expect(sqls.some((s) => /DELETE FROM messagerie_participants WHERE user_id = \$1/i.test(s))).toBe(true);
+  });
+
+  it('le message n’est PAS supprimé : le fil resterait incompréhensible pour les autres', async () => {
+    const client = makeMockClient(42);
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    expect(sqls.some((s) => /DELETE FROM messagerie_messages/i.test(s))).toBe(false);
+  });
+
+  it('salarié SANS compte utilisateur : aucune écriture, aucun rattachement inventé', async () => {
+    // Cas le plus courant — les fiches viennent de la paie et n'ont pas de compte.
+    const client = makeMockClient(null);
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    expect(sqls.some((s) => /messagerie_/i.test(s))).toBe(false);
   });
 });

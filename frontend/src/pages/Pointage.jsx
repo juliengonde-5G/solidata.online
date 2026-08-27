@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, DateRangePicker } from '../components';
-import { Fingerprint } from 'lucide-react';
+import { Fingerprint, Info } from 'lucide-react';
 import api from '../services/api';
 import { formatEmployeeName } from '../utils/names';
 
@@ -129,6 +130,31 @@ export default function Pointage() {
           subtitle="Gestion des badgeages et suivi des heures"
           icon={Fingerprint}
         />
+
+        {/* Module historique (audit lot L8, 26 août 2026) — informatif, aucune fonction retirée.
+            Le module Temps & Présence (badgeuse RFID, module 33) est appelé à remplacer ce
+            module de pointage, mais sa mise en service reste conditionnée à la consultation
+            préalable du CSE et à l'information des salariés (voir docs/badgeuse/JOURNAL.md et
+            l'ADR-0003). Tant que cette mise en service n'a pas eu lieu, Pointage reste la SEULE
+            source des heures `work_hours` consommées par les KPI RH et les absences du planning
+            — la badgeuse n'y écrit rien (ADR-0003). */}
+        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm text-blue-900">
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Module historique</p>
+            <p className="mt-0.5 text-blue-800">
+              Le module « Temps &amp; Présence » (badgeuse RFID, module 33) est appelé à
+              remplacer ce module de pointage à terme, mais sa mise en service reste
+              conditionnée à la consultation préalable du CSE et à l'information des salariés.
+              Tant que cette mise en service n'a pas eu lieu, Pointage reste la seule source des
+              heures utilisées par les KPI RH et les absences du planning — aucune fonction n'est
+              retirée ici.
+            </p>
+            <Link to="/badgeuse" className="inline-block mt-2 font-medium text-blue-700 hover:text-blue-900 hover:underline">
+              Découvrir le module Temps &amp; Présence →
+            </Link>
+          </div>
+        </div>
 
         {/* Onglets */}
         <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 overflow-x-auto">

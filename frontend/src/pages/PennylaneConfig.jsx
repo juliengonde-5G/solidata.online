@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, KeyRound, CheckCircle2, XCircle, RefreshCw, Activity } from 'lucide-react';
+import { Settings, KeyRound, CheckCircle2, XCircle, RefreshCw, Activity, Stethoscope } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, Section, useToast } from '../components';
 import api from '../services/api';
@@ -12,6 +12,10 @@ export default function PennylaneConfig() {
   const [testResult, setTestResult] = useState(null);
   const [status, setStatus] = useState(null);
   const [history, setHistory] = useState([]);
+  // Diagnostic de la remontée des factures (lot L7).
+  const [diag, setDiag] = useState(null);
+  const [diagErr, setDiagErr] = useState('');
+  const [diagBusy, setDiagBusy] = useState(false);
   const [form, setForm] = useState({
     api_key: '',
     company_id: '',
@@ -82,6 +86,27 @@ export default function PennylaneConfig() {
     setTesting(false);
   }
 
+  /**
+   * Interroge Pennylane SANS filtre de date, sur une page courte.
+   * C'est le seul moyen de trancher, EN PRODUCTION, entre « le dossier
+   * comptable ne contient pas de facture client », « elles sont à l'état
+   * brouillon » et « la clé API n'a pas l'habilitation ». Hors production,
+   * aucune clé réelle n'existe : le diagnostic ne peut donc pas être joué.
+   */
+  async function diagnostiquerFactures() {
+    setDiagBusy(true);
+    setDiag(null);
+    setDiagErr('');
+    try {
+      const res = await api.get('/pennylane/sync/diagnostic-invoices');
+      setDiag(res.data);
+    } catch (err) {
+      console.error(err);
+      setDiagErr(err.response?.data?.error || 'Le diagnostic des factures a échoué.');
+    }
+    setDiagBusy(false);
+  }
+
   if (loading) return <Layout><LoadingSpinner size="lg" /></Layout>;
 
   const configured = !!status?.configured;
@@ -111,15 +136,29 @@ export default function PennylaneConfig() {
               okLabel="Activée"
               koLabel="Désactivée"
             />
+            {/* `/pennylane/status` renvoie `last_sync` — la tuile lisait
+                `last_sync_at`, une clé qui n'existe pas dans la réponse, et
+                affichait donc « — » en permanence. */}
             <div className="card-modern p-4 flex items-center justify-between">
               <span className="text-xs text-slate-500">Dernière synchro</span>
               <span className="text-sm font-medium text-slate-700">
-                {status?.last_sync_at ? new Date(status.last_sync_at).toLocaleString('fr-FR') : '—'}
+                {status?.last_sync ? new Date(status.last_sync).toLocaleString('fr-FR') : '—'}
               </span>
             </div>
           </div>
 
-          <div className="mt-3 flex items-center gap-2">
+          {/* Les factures ont leur PROPRE curseur : le confondre avec la synchro
+              générale est exactement ce qui bloquait leur import. */}
+          <div className="mt-3 card-modern p-4 flex items-center justify-between">
+            <span className="text-xs text-slate-500">Dernier import des factures clients</span>
+            <span className="text-sm font-medium text-slate-700">
+              {status?.last_invoice_sync
+                ? new Date(status.last_invoice_sync).toLocaleDateString('fr-FR')
+                : <span className="text-slate-400 italic">jamais — le prochain import remontera de 90 jours</span>}
+            </span>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={test}
@@ -129,12 +168,80 @@ export default function PennylaneConfig() {
               <RefreshCw className={`w-4 h-4 ${testing ? 'animate-spin' : ''}`} />
               {testing ? 'Test en cours…' : 'Tester la connexion'}
             </button>
+            <button
+              type="button"
+              onClick={diagnostiquerFactures}
+              disabled={diagBusy || !configured}
+              title="Interroge Pennylane SANS filtre de date et affiche ce qui revient vraiment"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50"
+            >
+              <Stethoscope className={`w-4 h-4 ${diagBusy ? 'animate-pulse' : ''}`} />
+              {diagBusy ? 'Diagnostic…' : 'Diagnostic factures'}
+            </button>
             {testResult && (
               <span className={`text-xs px-2 py-1 rounded ${testResult.connected ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                 {testResult.connected ? `OK — ${testResult.company || 'Pennylane'}` : (testResult.error || 'Erreur')}
               </span>
             )}
           </div>
+
+          {/* Résultat du diagnostic : ce que Pennylane renvoie RÉELLEMENT. */}
+          {diagErr && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p className="font-semibold">Diagnostic impossible</p>
+              <p className="mt-1">{diagErr}</p>
+            </div>
+          )}
+          {diag && (
+            <div className={`mt-3 rounded-lg border p-3 text-sm ${
+              diag.recuperees_sur_cette_page === 0
+                ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+            }`}>
+              <p className="font-semibold">
+                Diagnostic — {diag.recuperees_sur_cette_page} facture(s) sur la première page,
+                sans aucun filtre de date
+              </p>
+              {diag.raison && <p className="mt-2 text-xs leading-relaxed">{diag.raison}</p>}
+              {diag.total_estime != null && (
+                <p className="mt-1 text-xs opacity-80">Total estimé côté Pennylane : {diag.total_estime}.</p>
+              )}
+              {diag.total_estime_note && <p className="mt-1 text-xs opacity-80">{diag.total_estime_note}</p>}
+              {diag.exemples?.length > 0 && (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left opacity-70">
+                        <th className="py-1 pr-3 font-medium">N° facture</th>
+                        <th className="py-1 pr-3 font-medium">Date</th>
+                        <th className="py-1 pr-3 font-medium">Statut</th>
+                        <th className="py-1 pr-3 font-medium">Montant</th>
+                        <th className="py-1 font-medium">Client</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diag.exemples.map((e) => (
+                        <tr key={e.id} className="border-t border-black/5">
+                          <td className="py-1 pr-3 font-mono">{e.invoice_number || '—'}</td>
+                          <td className="py-1 pr-3">{e.date ? new Date(e.date).toLocaleDateString('fr-FR') : '—'}</td>
+                          <td className="py-1 pr-3">{e.draft ? 'Brouillon' : (e.status || '—')}</td>
+                          <td className="py-1 pr-3">{e.amount != null ? `${e.amount} €` : '—'}</td>
+                          <td className="py-1">{e.customer || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {diag.curseur_factures && (
+                <p className="mt-2 text-xs opacity-80">
+                  Curseur des factures : {diag.curseur_factures.date
+                    ? new Date(diag.curseur_factures.date).toLocaleDateString('fr-FR')
+                    : 'aucun'} ({diag.curseur_factures.source}).
+                </p>
+              )}
+            </div>
+          )}
         </Section>
 
         {/* Formulaire config */}

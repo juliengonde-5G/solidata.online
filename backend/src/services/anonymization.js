@@ -338,6 +338,71 @@ async function anonymizeEmployee(client, id) {
       }
     }
   }
+
+  // ── Messagerie interne (correctif du 27/08) ─────────────────────────────
+  //
+  // DÉFAUT CORRIGÉ : le chantier du 26/08 a créé les tables `messagerie_*`
+  // sans étendre ce service. Après anonymisation d'un salarié, les messages
+  // qu'il avait écrits gardaient leur texte intégral ET leur `auteur_user_id`
+  // — donc restaient nominatifs par simple jointure sur `users`, jusqu'à
+  // l'échéance de rétention (365 jours par défaut). Le droit à l'effacement ne
+  // s'exerce pas « dans un an ».
+  //
+  // Le précédent du dépôt est explicite (2.11.0) : l'anonymisation a été
+  // étendue aux tables du lot insertion, y compris à la purge des snapshots
+  // probants — « le RGPD prime sur l'audit interne ».
+  //
+  // Le message n'est pas SUPPRIMÉ mais neutralisé : le fil resterait sinon
+  // incompréhensible pour ses autres participants (des réponses sans question).
+  // Ce qui disparaît, c'est le contenu et le lien à la personne.
+  await anonymiserMessagerie(client, id);
 }
 
-module.exports = { anonymizeCandidate, anonymizeEmployee };
+/**
+ * Neutralise l'empreinte d'un salarié dans la messagerie interne.
+ *
+ * Le salarié est identifié par son COMPTE (`employees.user_id`) : la messagerie
+ * ne connaît que `users.id`. Un salarié sans compte utilisateur — le cas le
+ * plus courant, les fiches venant de la paie — n'a rien à anonymiser ici, et
+ * on ne fabrique aucun rattachement.
+ *
+ * Résilient comme le reste du service : table absente (base non migrée) →
+ * on passe, sans faire échouer toute l'anonymisation pour autant.
+ */
+async function anonymiserMessagerie(client, employeeId) {
+  if (!(await tableExists(client, 'messagerie_messages'))) return;
+
+  let userId = null;
+  try {
+    const cols = await existingColumns(client, 'employees');
+    if (!cols.has('user_id')) return;
+    const r = await client.query('SELECT user_id FROM employees WHERE id = $1', [employeeId]);
+    userId = r.rows[0] ? r.rows[0].user_id : null;
+  } catch (_) { return; }
+  if (userId == null) return;
+
+  // 1. Contenu et auteur des messages. `auteur_user_id = NULL` coupe le lien à
+  //    `users` ; le texte est remplacé par un marqueur explicite plutôt que
+  //    vidé — une bulle vide se lit comme un défaut d'affichage.
+  await client.query(
+    `UPDATE messagerie_messages
+        SET texte = '[message anonymisé]', auteur_user_id = NULL
+      WHERE auteur_user_id = $1`,
+    [userId]
+  );
+
+  // 2. Mentions le désignant : plus rien à désigner.
+  if (await tableExists(client, 'messagerie_mentions')) {
+    await client.query('DELETE FROM messagerie_mentions WHERE user_id = $1', [userId]);
+  }
+
+  // 3. Participations : la personne sort des conversations (elle n'y lira plus
+  //    rien, son compte étant par ailleurs désactivé). La conversation elle-même
+  //    subsiste pour ses autres participants ; celles devenues vides seront
+  //    ramassées par la purge de rétention.
+  if (await tableExists(client, 'messagerie_participants')) {
+    await client.query('DELETE FROM messagerie_participants WHERE user_id = $1', [userId]);
+  }
+}
+
+module.exports = { anonymizeCandidate, anonymizeEmployee, anonymiserMessagerie };

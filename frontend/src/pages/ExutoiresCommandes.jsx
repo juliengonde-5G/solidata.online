@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Inbox, Package, Truck, CheckCircle2,
   ArrowUpRight, Calendar, Building2,
+  Repeat, Pause, Play, Sparkles, AlertTriangle,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, KanbanBoard, StatusBadge, ErrorState } from '../components';
@@ -46,7 +47,30 @@ const STATUTS = {
   cloturee: { label: 'Clôturée', color: 'bg-green-100 text-green-700' },
   annulee: { label: 'Annulée', color: 'bg-red-100 text-red-700' },
 };
-const FREQUENCES = { unique: 'Unique', hebdomadaire: 'Hebdomadaire', bi_mensuel: 'Bi-mensuel', mensuel: 'Mensuel' };
+const FREQUENCES = { unique: 'Unique', hebdomadaire: 'Hebdomadaire', bi_mensuel: 'Bi-mensuel (tous les 14 jours)', mensuel: 'Mensuel' };
+
+// Un MODÈLE récurrent est la commande d'origine : fréquence répétée ET aucun
+// parent. C'est un statut DÉRIVÉ — aucune colonne « est_modèle » en base, donc
+// rien qui puisse se désynchroniser de la réalité.
+const estModeleRecurrent = (cmd) => !!cmd && cmd.frequence && cmd.frequence !== 'unique' && !cmd.commande_parent_id;
+const estOccurrenceGeneree = (cmd) => !!cmd && !!cmd.commande_parent_id;
+
+const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+
+/**
+ * Rythme de passage, DÉDUIT de la date de la commande d'origine — il n'est pas
+ * saisi séparément : un « jour préféré » stocké à part pourrait contredire la
+ * date réelle de la commande, et c'est elle qui pilote le calcul des échéances.
+ */
+function libelleRythme(frequence, dateCommande) {
+  if (!frequence || frequence === 'unique' || !dateCommande) return null;
+  const d = new Date(dateCommande);
+  if (Number.isNaN(d.getTime())) return null;
+  if (frequence === 'hebdomadaire') return `tous les ${JOURS_SEMAINE[d.getDay()]}`;
+  if (frequence === 'bi_mensuel') return `tous les 14 jours, un ${JOURS_SEMAINE[d.getDay()]}`;
+  if (frequence === 'mensuel') return `le ${d.getDate()} de chaque mois`;
+  return null;
+}
 
 // Regroupement des 9 statuts de workflow en 4 colonnes kanban
 // (mirror du visuel ticket board Open/Pending/Resolved/Closed).
@@ -141,6 +165,12 @@ export default function ExutoiresCommandes() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
+  // Récurrence (lot L7)
+  const [occurrences, setOccurrences] = useState(null);
+  const [recurrenceBusy, setRecurrenceBusy] = useState(false);
+  const [generation, setGeneration] = useState(null);   // aperçu ou bilan de génération
+  const [generationErr, setGenerationErr] = useState('');
+
   // Filters
   const [filterStatut, setFilterStatut] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -223,13 +253,61 @@ export default function ExutoiresCommandes() {
 
   const openDetail = async (commande) => {
     setActionError('');
+    setOccurrences(null);
     try {
       const res = await api.get(`/commandes-exutoires/${commande.id}`);
       setShowDetail(res.data);
+      if (estModeleRecurrent(res.data)) loadOccurrences(res.data.id);
     } catch (err) {
       console.error(err);
       setShowDetail(commande);
     }
+  };
+
+  // ── Récurrence ────────────────────────────────────────────────────────────
+  const loadOccurrences = async (commandeId) => {
+    try {
+      const res = await api.get(`/commandes-exutoires/${commandeId}/occurrences`);
+      setOccurrences(res.data);
+    } catch (err) {
+      console.error(err);
+      setActionError(err.response?.data?.error || "Impossible de charger les occurrences de cette commande récurrente.");
+    }
+  };
+
+  const toggleRecurrence = async (commande, suspendre) => {
+    setActionError('');
+    setRecurrenceBusy(true);
+    try {
+      await api.patch(`/commandes-exutoires/${commande.id}/recurrence`, { recurrence_suspendue: suspendre });
+      const res = await api.get(`/commandes-exutoires/${commande.id}`);
+      setShowDetail(res.data);
+      await loadOccurrences(commande.id);
+      loadCommandes();
+    } catch (err) {
+      console.error(err);
+      setActionError(err.response?.data?.error || (suspendre ? "La suspension a échoué." : "La reprise a échoué."));
+    }
+    setRecurrenceBusy(false);
+  };
+
+  /**
+   * `simulation` = aperçu sans aucune écriture. On la propose systématiquement
+   * avant l'application : générer des commandes et des créneaux de chargement
+   * est une décision d'exploitation, pas un clic anodin.
+   */
+  const genererOccurrences = async (simulation) => {
+    setGenerationErr('');
+    setRecurrenceBusy(true);
+    try {
+      const res = await api.post(`/commandes-exutoires/recurrence/generer${simulation ? '?simulation=1' : ''}`);
+      setGeneration({ ...res.data, simulation });
+      if (!simulation) { loadCommandes(); loadStats(); }
+    } catch (err) {
+      console.error(err);
+      setGenerationErr(err.response?.data?.error || "La génération des commandes récurrentes a échoué.");
+    }
+    setRecurrenceBusy(false);
   };
 
   const fetchPrice = async (clientId, types) => {
@@ -413,6 +491,35 @@ export default function ExutoiresCommandes() {
           <Building2 className="w-3.5 h-3.5 text-slate-400 inline mr-1 -mt-0.5" />
           {clientName}
         </p>
+        {/* Récurrence : le modèle et ses occurrences ne se lisent pas de la même
+            façon. Le badge dit LEQUEL des deux on regarde. */}
+        {estModeleRecurrent(cmd) && (
+          <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+            <Repeat className="w-3 h-3" />
+            Modèle récurrent · {FREQUENCES[cmd.frequence] || cmd.frequence}
+            {cmd.recurrence_suspendue ? ' (suspendu)' : ''}
+          </span>
+        )}
+        {estOccurrenceGeneree(cmd) && (
+          <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">
+            <Sparkles className="w-3 h-3" />
+            Générée automatiquement{cmd.reference_parent ? ` · ${cmd.reference_parent}` : ''}
+          </span>
+        )}
+        {/* Créneau de chargement non posé : le moteur a refusé (aucun gabarit
+            de préparation, ou créneau occupé) et a laissé la commande en
+            attente. Sans ce badge, elle est indiscernable d'une commande en
+            attente ordinaire — c'est exactement ce qui la faisait passer
+            inaperçue semaine après semaine. */}
+        {cmd.creneau_a_poser === true && (
+          <span
+            className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800"
+            title="Aucune préparation d'expédition n'est rattachée à cette commande : le créneau de chargement reste à poser à la main."
+          >
+            <AlertTriangle className="w-3 h-3" />
+            Créneau de chargement à poser
+          </span>
+        )}
         {types.length > 0 && (
           <p className="text-[11px] text-slate-500 mt-1 truncate">
             {types.map((t) => TYPES_PRODUIT[t] || t).join(' · ')}
@@ -445,10 +552,21 @@ export default function ExutoiresCommandes() {
         title="Commandes Logistiques"
         subtitle="Pipeline des commandes clients → expéditions"
         headerActions={
-          <button onClick={openCreate} className="btn-primary text-sm flex items-center gap-1.5">
-            <ArrowUpRight className="w-4 h-4" />
-            Nouvelle commande
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => genererOccurrences(true)}
+              disabled={recurrenceBusy}
+              title="Voir les commandes que la récurrence créerait, sans rien enregistrer"
+              className="btn-ghost text-sm flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Repeat className="w-4 h-4" />
+              Commandes récurrentes
+            </button>
+            <button onClick={openCreate} className="btn-primary text-sm flex items-center gap-1.5">
+              <ArrowUpRight className="w-4 h-4" />
+              Nouvelle commande
+            </button>
+          </div>
         }
         kpis={kpiList}
         search={{
@@ -585,15 +703,38 @@ export default function ExutoiresCommandes() {
                 </select>
               </div>
               {form.frequence !== 'unique' && (
-                <div>
-                  <label className="text-xs text-gray-500">Date fin de récurrence</label>
-                  <input
-                    type="date"
-                    value={form.date_fin_recurrence}
-                    onChange={e => setForm({ ...form, date_fin_recurrence: e.target.value })}
-                    className="input-modern mt-1"
-                  />
-                </div>
+                <>
+                  {/* Le jour de passage n'est pas un champ à part : il DÉCOULE de
+                      la date de commande ci-dessus. Un « jour préféré » saisi
+                      séparément pourrait la contredire, et c'est bien la date de
+                      commande qui pilote le calcul des échéances. */}
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <Repeat className="w-3.5 h-3.5" />
+                      Commande récurrente
+                    </p>
+                    <p className="mt-1">
+                      {libelleRythme(form.frequence, form.date_commande)
+                        ? <>Passage <strong>{libelleRythme(form.frequence, form.date_commande)}</strong>, déduit de la date de commande.
+                          Pour changer de jour, modifiez la date de commande.</>
+                        : <>Renseignez la date de commande ci-dessus : c'est elle qui fixe le jour de passage.</>}
+                    </p>
+                    <p className="mt-1">
+                      Les commandes suivantes et leur créneau de chargement sont créés automatiquement.
+                      Une préparation n'est posée que si un transporteur et un lieu ont déjà été saisis
+                      sur cette commande et que le créneau est libre — rien n'est deviné.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Date fin de récurrence <span className="text-gray-400">(facultatif — sans fin si vide)</span></label>
+                    <input
+                      type="date"
+                      value={form.date_fin_recurrence}
+                      onChange={e => setForm({ ...form, date_fin_recurrence: e.target.value })}
+                      className="input-modern mt-1"
+                    />
+                  </div>
+                </>
               )}
               <div>
                 <label className="text-xs text-gray-500">Notes</label>
@@ -614,6 +755,111 @@ export default function ExutoiresCommandes() {
               </button>
             </div>
           </form>
+        </Modal>
+
+        {/* Génération des commandes récurrentes — aperçu PUIS application */}
+        <Modal
+          isOpen={!!generation || !!generationErr}
+          onClose={() => { setGeneration(null); setGenerationErr(''); }}
+          title="Commandes récurrentes"
+          size="lg"
+        >
+          {generationErr && (
+            <div className="mb-4">
+              <ErrorState variant="card" title="Génération impossible" message={generationErr} />
+            </div>
+          )}
+          {generation && (
+            <>
+              <div className={`rounded-lg p-3 text-sm mb-4 border ${generation.simulation ? 'bg-slate-50 border-slate-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                <p className="font-semibold">
+                  {generation.simulation ? 'Aperçu — rien n\'a été enregistré' : 'Commandes créées'}
+                </p>
+                <p className="mt-1 text-gray-700">
+                  {generation.modeles_examines} commande(s) récurrente(s) examinée(s) sur un horizon de{' '}
+                  {generation.horizon_jours} jours.{' '}
+                  <strong>{generation.generees?.length || 0}</strong>{' '}
+                  {generation.simulation ? 'commande(s) seraient créées' : 'commande(s) créée(s)'},{' '}
+                  <strong>{generation.preparations?.length || 0}</strong> créneau(x) de chargement positionné(s).
+                </p>
+              </div>
+
+              {(generation.generees?.length || 0) === 0 && (generation.ignorees?.length || 0) === 0 && (
+                <p className="text-sm text-gray-600">
+                  Rien à générer : aucune commande récurrente active n'a d'échéance dans l'horizon,
+                  ou tout est déjà créé.
+                </p>
+              )}
+
+              {(generation.generees?.length || 0) > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-gray-600 mb-2">
+                    {generation.simulation ? 'Seraient créées' : 'Créées'}
+                  </h3>
+                  <div className="max-h-56 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-gray-500">
+                          <th className="py-1 pr-2 font-medium">Date</th>
+                          <th className="py-1 pr-2 font-medium">Référence</th>
+                          <th className="py-1 font-medium">Commande d'origine</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {generation.generees.map((g, i) => (
+                          <tr key={`${g.parent_id}-${g.date_commande}-${i}`} className="border-t border-slate-100">
+                            <td className="py-1 pr-2">{formatDate(g.date_commande)}</td>
+                            <td className="py-1 pr-2 font-mono">{g.reference}</td>
+                            <td className="py-1 font-mono text-gray-500">{g.reference_parent || `#${g.parent_id}`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Ce qui n'a PAS été fait est dit, avec son motif — jamais escamoté. */}
+              {(generation.ignorees?.length || 0) > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-gray-600 mb-2">Non générées — motif</h3>
+                  <div className="max-h-56 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 p-2">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {generation.ignorees.map((ig, i) => (
+                          <tr key={i} className="border-t border-amber-100 first:border-0">
+                            <td className="py-1 pr-2 whitespace-nowrap">{ig.date ? formatDate(ig.date) : '—'}</td>
+                            <td className="py-1 pr-2 font-mono text-gray-500 whitespace-nowrap">{ig.reference_parent || `#${ig.parent_id}`}</td>
+                            <td className="py-1 text-amber-900">{ig.motif}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={() => { setGeneration(null); setGenerationErr(''); }}
+                  className="flex-1 btn-ghost"
+                >
+                  Fermer
+                </button>
+                {generation.simulation && (generation.generees?.length || 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => genererOccurrences(false)}
+                    disabled={recurrenceBusy}
+                    className="flex-1 btn-primary text-sm disabled:opacity-50"
+                  >
+                    Créer ces {generation.generees.length} commande(s)
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </Modal>
 
         {/* Detail modal */}
@@ -670,6 +916,122 @@ export default function ExutoiresCommandes() {
                   )}
                 </div>
               </div>
+
+              {/* ── Occurrence générée : d'où elle vient ─────────────────── */}
+              {estOccurrenceGeneree(showDetail) && (
+                <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
+                  <p className="flex items-center gap-1.5 font-semibold text-sky-800">
+                    <Sparkles className="w-4 h-4" />
+                    Commande générée automatiquement
+                  </p>
+                  <p className="text-sky-700 mt-1">
+                    Issue de la commande récurrente{' '}
+                    <span className="font-mono font-semibold">{showDetail.reference_parent || `#${showDetail.commande_parent_id}`}</span>.
+                    Pour arrêter les prochaines, ouvrez la commande d'origine et suspendez sa récurrence — annuler
+                    celle-ci ne suspend rien.
+                  </p>
+                </div>
+              )}
+
+              {/* ── Modèle récurrent : pilotage ───────────────────────────── */}
+              {estModeleRecurrent(showDetail) && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
+                    <Repeat className="w-4 h-4 text-violet-600" />
+                    Récurrence
+                  </h3>
+                  <div className={`rounded-lg p-3 text-sm border ${showDetail.recurrence_suspendue ? 'bg-amber-50 border-amber-200' : 'bg-violet-50 border-violet-200'}`}>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-gray-500">Rythme :</span>{' '}
+                        <span className="font-medium">
+                          {FREQUENCES[showDetail.frequence] || showDetail.frequence}
+                          {libelleRythme(showDetail.frequence, showDetail.date_commande)
+                            && ` — ${libelleRythme(showDetail.frequence, showDetail.date_commande)}`}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Prochaine échéance :</span>{' '}
+                        {/* Jamais de date inventée : tant que la génération n'a
+                            pas tourné, on dit qu'on ne sait pas encore. */}
+                        <span className="font-medium">
+                          {occurrences?.motif_indisponible
+                            ? <span className="text-amber-700">indisponible ({occurrences.motif_indisponible})</span>
+                            : occurrences?.prochaine_echeance
+                              ? formatDate(occurrences.prochaine_echeance)
+                              : <span className="text-gray-500 italic">non encore calculée</span>}
+                        </span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-gray-500">État :</span>{' '}
+                        <span className="font-medium">
+                          {showDetail.recurrence_suspendue
+                            ? 'Suspendue — aucune nouvelle commande ne sera créée'
+                            : 'Active — les prochaines commandes sont créées automatiquement'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {showDetail.recurrence_suspendue ? (
+                        <button
+                          onClick={() => toggleRecurrence(showDetail, false)}
+                          disabled={recurrenceBusy}
+                          className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Play className="w-3.5 h-3.5" /> Reprendre la récurrence
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => toggleRecurrence(showDetail, true)}
+                          disabled={recurrenceBusy}
+                          className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Pause className="w-3.5 h-3.5" /> Suspendre la récurrence
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="mt-3 border-t border-violet-200 pt-2">
+                      <p className="text-xs font-semibold text-gray-600 mb-1">
+                        Commandes déjà générées{occurrences ? ` (${occurrences.occurrences.length})` : ''}
+                      </p>
+                      {!occurrences && <p className="text-xs text-gray-500">Chargement…</p>}
+                      {occurrences && occurrences.occurrences.length === 0 && (
+                        <p className="text-xs text-gray-500 italic">Aucune commande générée pour l'instant.</p>
+                      )}
+                      {occurrences && occurrences.occurrences.length > 0 && (
+                        <div className="max-h-48 overflow-y-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-left text-gray-500">
+                                <th className="py-1 pr-2 font-medium">Référence</th>
+                                <th className="py-1 pr-2 font-medium">Date</th>
+                                <th className="py-1 pr-2 font-medium">Statut</th>
+                                <th className="py-1 font-medium">Expédition</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {occurrences.occurrences.map((o) => (
+                                <tr key={o.id} className="border-t border-violet-100">
+                                  <td className="py-1 pr-2 font-mono">{o.reference}</td>
+                                  <td className="py-1 pr-2">{formatDate(o.date_commande)}</td>
+                                  <td className="py-1 pr-2">{STATUTS[o.statut]?.label || o.statut}</td>
+                                  <td className="py-1">
+                                    {o.date_expedition
+                                      ? formatDate(o.date_expedition)
+                                      : <span className="text-gray-400 italic">pas de préparation</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Préparation d'expédition (préparations_expedition) — v1-3 : champs réels de l'API */}
               {showDetail.preparation && (

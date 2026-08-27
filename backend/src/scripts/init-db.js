@@ -8047,9 +8047,23 @@ async function initDatabase() {
     // fois, sans que rien ne le signale.
     const reglagesChantier0826 = [
       ['messagerie.retention_jours', '365', 'messagerie'],   // purge planifiée des messages
+      // Rôles dont le carnet d'adresses est borné aux responsables
+      // d'exploitation (correctif du 27/08). AUTORITE est l'accès EXTERNE en
+      // lecture seule (auditeur Refashion / Métropole) ; FINANCE et DPO peuvent
+      // être tenus par un prestataire. C'est un arbitrage d'ORGANISATION : la
+      // Direction le change ici, sans toucher au code. Un équipage reste borné
+      // en tout état de cause (règle d'identité, pas de rôle).
+      ['messagerie.roles_perimetre_restreint', '["AUTORITE","FINANCE","DPO"]', 'messagerie'],
       ['collecte.arret_seuil_min', '5', 'collecte'],         // durée minimale d'un arrêt GPS retenu
       ['collecte.arret_rayon_m', '40', 'collecte'],          // rayon de stationnarité du cluster GPS
       ['collecte.arret_rattachement_m', '80', 'collecte'],   // rayon de rattachement CAV/association
+      // Rétention des arrêts détectés (correctif du 27/08). ALIGNÉE sur celle
+      // de leur SOURCE `gps_positions` (90 j, purgeOldGpsPositions) : une
+      // donnée DÉRIVÉE d'un relevé de géolocalisation ne doit jamais survivre
+      // au relevé lui-même — sinon la purge de proportionnalité de la source
+      // ne protège plus rien. La valeur est modifiable à l'écran, mais le job
+      // de purge la BORNE à 90 j : on ne peut pas l'allonger par mégarde.
+      ['collecte.arrets_retention_jours', '90', 'collecte'],
       ['exutoires.recurrence_horizon_jours', '30', 'exutoires'], // horizon de génération des occurrences
     ];
     let reglagesCrees0826 = 0;
@@ -8091,6 +8105,39 @@ async function initDatabase() {
       );
     `);
     console.log('[INIT-DB] Registre RGPD — traitement « Messagerie interne » ✓');
+
+    // ── §1.6 bis — Registre RGPD : analyse des arrêts de tournée ────────────
+    // Correctif du 27/08. `tour_gps_stops` est une donnée DÉRIVÉE de
+    // `gps_positions` : on ne stocke plus la trace, mais les points d'arrêt
+    // qu'on en a extraits, avec leur durée. C'est une donnée de
+    // géolocalisation à part entière, et elle reste rattachable à une personne
+    // par `tours.driver_employee_id` — l'omettre du registre serait une
+    // surveillance non déclarée.
+    //
+    // Deux garde-fous portés par le code et NOMMÉS ici pour qu'ils soient
+    // opposables : (1) la rétention est bornée à celle de la source (90 j,
+    // job purgeArretsGps, action AUTO_PURGE_ARRETS_GPS) — une donnée dérivée
+    // ne survit jamais au relevé dont elle est tirée ; (2) la seule surface
+    // qui présente les arrêts À CÔTÉ du nom du conducteur (le compte rendu de
+    // tournée) journalise sa consultation dans rgpd_audit_log, sur le modèle
+    // des consultations individuelles de la badgeuse.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Analyse des arrêts de tournée (géolocalisation des véhicules de collecte)',
+        'Mesurer la durée réelle des arrêts d''un véhicule de collecte afin d''ajuster les temps de vidage par conteneur et les estimations de durée de tournée, et d''expliquer les écarts entre le programme prévu et la journée réellement effectuée. Aucune finalité de contrôle individuel du temps de travail : le décompte des heures relève du module Pointage et des exports de paie, jamais de cette table.',
+        'Intérêt légitime (organisation et optimisation des tournées de collecte)',
+        'Chauffeurs-collecteurs et équipages. Les arrêts sont enregistrés au niveau du VÉHICULE et de la TOURNÉE ; ils deviennent rattachables à une personne lorsqu''un conducteur est affecté à la tournée (tours.driver_employee_id).',
+        'Position (latitude, longitude), horodatage de début et de fin de l''arrêt, durée, et rattachement éventuel au point de collecte le plus proche (conteneur, point association, centre de tri) ou mention « inconnu ». Données DÉRIVÉES des relevés gps_positions, aucune trace continue conservée ici.',
+        'Responsables d''exploitation (ADMIN, MANAGER) uniquement, dans les écrans de suivi de collecte et le compte rendu de tournée.',
+        'Rétention paramétrable par le réglage « collecte.arrets_retention_jours », BORNÉE à celle des relevés GPS source (90 jours) : la donnée dérivée ne peut jamais survivre au relevé dont elle est tirée. Purge planifiée journalisée dans rgpd_audit_log (AUTO_PURGE_ARRETS_GPS).',
+        'Lecture réservée aux rôles ADMIN et MANAGER (authenticate + authorize), requêtes SQL paramétrées. Les points d''accès dédiés (arrêts d''une tournée, temps de vidage par conteneur) ne renvoient AUCUN nom de conducteur. La seule restitution qui présente les arrêts à côté de l''identité du conducteur est le compte rendu de tournée : sa consultation est journalisée dans rgpd_audit_log (RAPPORT_TOURNEE_CONSULTE), sur le modèle des consultations individuelles du module Temps & Présence.'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Analyse des arrêts de tournée (géolocalisation des véhicules de collecte)'
+      );
+    `);
+    console.log('[INIT-DB] Registre RGPD — traitement « Analyse des arrêts de tournée » ✓');
 
     // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL

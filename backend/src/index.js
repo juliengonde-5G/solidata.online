@@ -195,6 +195,7 @@ app.use('/api/production', require('./routes/production'));
 app.use('/api/reporting', require('./routes/reporting'));
 app.use('/api/exports', require('./routes/exports'));
 app.use('/api/tri', require('./routes/tri'));
+app.use('/api/chaine-config', require('./routes/chaine-config'));
 app.use('/api/produits-finis', require('./routes/produits-finis'));
 app.use('/api/etiquettes', require('./routes/etiquettes'));
 app.use('/api/expeditions', require('./routes/expeditions'));

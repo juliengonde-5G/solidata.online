@@ -177,9 +177,14 @@ describe('forme de la réponse', () => {
     });
     const r = await get();
     expect(r.status).toBe(200);
+    // Liste EXHAUSTIVE, et qui doit le rester : le générateur PDF lit cette
+    // réponse telle quelle. `arrets_gps` s'y ajoute le 26/08/2026 (bloc des
+    // arrêts détectés sur la trace GPS), `confidentialite` le 27/08/2026
+    // (mention portée par le document quand il réunit des arrêts géolocalisés
+    // ET un conducteur nommé).
     expect(Object.keys(r.body).sort()).toEqual([
-      'checklist', 'degraded', 'end_of_day', 'generated_at', 'gps_track',
-      'incidents', 'kpis', 'messages', 'planned_route', 'points', 'tour',
+      'arrets_gps', 'checklist', 'confidentialite', 'degraded', 'end_of_day', 'generated_at',
+      'gps_track', 'incidents', 'kpis', 'messages', 'planned_route', 'points', 'tour',
       'warnings', 'weights',
     ]);
 
@@ -465,5 +470,94 @@ describe('résilience', () => {
     const r = await get();
     expect(r.body.checklist).toBeNull();
     expect(r.body.end_of_day).toBeNull();
+  });
+});
+
+// ── Confidentialité et trace de consultation (correctif 27/08) ─────────────
+//
+// Le compte rendu est la SEULE surface qui présente, dans le même document,
+// l'identité du conducteur et ses arrêts géolocalisés — et il part en PDF hors
+// de l'application. L'arbitrage retenu conserve le nom (un rapport anonyme
+// serait inexploitable, et la tournée désigne de toute façon la personne) et le
+// compense par une mention portée par le document et une trace de consultation.
+describe('géolocalisation nominative : mention portée et consultation journalisée', () => {
+  const ARRET = {
+    id: 1, debut: '2026-08-20T08:10:00.000Z', fin: '2026-08-20T08:22:00.000Z',
+    duree_min: '12.0', latitude: 49.45, longitude: 1.05, type: 'cav',
+    cav_id: 55, cav_nom: 'LE HOULME - Rue A', association_point_id: null, association_nom: null,
+  };
+
+  /** Routage de mock enrichi des arrêts figés en base (tournée close). */
+  function mockAvecArrets(opts = {}, arretsRows = [ARRET]) {
+    mockDb(opts);
+    const base = mockQuery.getMockImplementation();
+    mockQuery.mockImplementation((sql, params) => {
+      if (/FROM tour_gps_stops s/.test(String(sql))) return Promise.resolve({ rows: arretsRows });
+      return base(sql, params);
+    });
+  }
+
+  const journalisations = () => mockQuery.mock.calls.filter(
+    ([s]) => /INSERT INTO rgpd_audit_log/.test(String(s))
+  );
+
+  test('arrêts détectés + conducteur nommé → mention explicite et trace RGPD', async () => {
+    mockAvecArrets();
+    const r = await get();
+    expect(r.status).toBe(200);
+    expect(r.body.arrets_gps.arrets).toHaveLength(1);
+    expect(r.body.confidentialite).toMatchObject({ niveau: 'geolocalisation_nominative' });
+    // La mention doit dire l'usage ET le non-usage : c'est ce qui la rend
+    // opposable. Un simple « document confidentiel » n'apprendrait rien.
+    expect(r.body.confidentialite.mention).toMatch(/géolocalisation/i);
+    expect(r.body.confidentialite.mention).toMatch(/temps de travail/i);
+
+    const traces = journalisations();
+    expect(traces).toHaveLength(1);
+    const [, params] = traces[0];
+    expect(params[0]).toBe(1);                       // user_id du lecteur
+    expect(params[1]).toBe('RAPPORT_TOURNEE_CONSULTE');
+    expect(params[2]).toBe('tours');
+    expect(params[3]).toBe(TOUR_ID);
+    const details = JSON.parse(params[4]);
+    expect(details).toMatchObject({
+      driver_employee_id: 21, nb_arrets_gps: 1, geolocalisation_nominative: true,
+    });
+  });
+
+  test('aucun arrêt détecté → aucune mention inventée, mais la consultation reste tracée', async () => {
+    mockDb();
+    const r = await get();
+    expect(r.status).toBe(200);
+    // Pas de bande d'avertissement sur un document qui n'a rien à déclarer :
+    // un avertissement systématique cesse d'avertir.
+    expect(r.body.confidentialite).toBeNull();
+    const traces = journalisations();
+    expect(traces).toHaveLength(1);
+    expect(JSON.parse(traces[0][1][4])).toMatchObject({
+      nb_arrets_gps: 0, geolocalisation_nominative: false,
+    });
+  });
+
+  test('arrêts détectés MAIS aucun conducteur affecté → pas de mention nominative', async () => {
+    // Cas fréquent : le mobile s'authentifie par un lien de véhicule, la
+    // tournée roule sans fiche employé. Rien de nominatif à signaler.
+    mockAvecArrets({ tour: { ...TOUR_CAV, driver_employee_id: null, driver_name: null } });
+    const r = await get();
+    expect(r.status).toBe(200);
+    expect(r.body.arrets_gps.arrets).toHaveLength(1);
+    expect(r.body.confidentialite).toBeNull();
+  });
+
+  test('journal indisponible : le rapport part quand même (best effort)', async () => {
+    mockAvecArrets();
+    const base = mockQuery.getMockImplementation();
+    mockQuery.mockImplementation((sql, params) => {
+      if (/INSERT INTO rgpd_audit_log/.test(String(sql))) return Promise.reject(new Error('journal HS'));
+      return base(sql, params);
+    });
+    const r = await get();
+    expect(r.status).toBe(200);
+    expect(r.body.confidentialite).not.toBeNull();
   });
 });

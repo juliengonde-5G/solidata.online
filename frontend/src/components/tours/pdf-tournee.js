@@ -293,6 +293,10 @@ table.mini th { font-size: 5.6px; padding: 1px 2px; }
 table.mini td { padding: 0.8px 2px; }
 .pied { margin-top: 7px; padding-top: 4px; border-top: 1px solid #E2E8F0; font-size: 6.5px; color: #94A3B8;
         display: flex; justify-content: space-between; }
+/* Mention de confidentialité : discrète mais lisible, au-dessus du pied de
+   page — deux lignes au maximum, elle ne doit jamais pousser sur une 2e page. */
+.confid { margin-top: 5px; padding: 3px 5px; border-left: 2px solid #B45309; background: #FFFBEB;
+          font-size: 5.9px; line-height: 1.25; color: #78350F; }
 @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 `;
 
@@ -315,8 +319,13 @@ function ligneKpi(label, valeur, note = null, alerte = false) {
  * de tronquer la liste — c'est le DÉTAIL DE LA COLLECTE qui est demandé, pas un
  * extrait —, on la coupe en deux colonnes côte à côte et on resserre les lignes.
  * Le seuil est mesuré, pas deviné : au-delà, le rendu A4 déborde.
+ *
+ * Il a été RABAISSÉ de 26 à 22 le 26/08/2026, à la mesure : la page porte
+ * désormais une bande de plus (vérification du camion, fin de tournée, arrêts
+ * GPS) et une colonne de plus au tableau. Le budget d'une page A4 n'a pas
+ * changé, lui — c'est donc le seuil qui devait bouger.
  */
-const SEUIL_DEUX_COLONNES = 26;
+const SEUIL_DEUX_COLONNES = 22;
 
 function tableauPoints(points) {
   if (!points || points.length === 0) return '<p class="gris">Aucun point au programme.</p>';
@@ -495,6 +504,13 @@ export function depuisApi(rep) {
       motif: (r.arrets_gps && r.arrets_gps.motif) || null,
       seuil_min: (r.arrets_gps && r.arrets_gps.seuil_min) ?? null,
     },
+    // Mention de confidentialité posée par le SERVEUR, et seulement quand le
+    // document réunit effectivement des arrêts géolocalisés et un conducteur
+    // nommé. Le PDF quitte l'application : la mention doit voyager avec lui,
+    // sinon la feuille imprimée ne dit plus rien de son propre usage.
+    // `null` = ce rapport n'a rien à déclarer, et on n'imprime alors aucune
+    // bande d'avertissement — un avertissement systématique ne s'avertit plus.
+    confidentialite: (r.confidentialite && r.confidentialite.mention) || null,
     trace_gps: (gps.positions || []).map((g) => ({ lat: g.latitude, lng: g.longitude })),
     nb_positions_gps: gps.total_positions ?? null,
     centre_tri: (r.planned_route && r.planned_route.centre_tri)
@@ -564,21 +580,36 @@ export function construireRapportHtml(r) {
         <td class="gris" style="font-size:6.5px">${p.intermediaire ? 'intermédiaire' : 'finale'}</td>
       </tr>`).join('')}</tbody></table>`;
 
+  // Les événements et les messages sont des blocs de HAUTEUR LIBRE : trois
+  // incidents longuement décrits suffisaient à faire déborder la page — et la
+  // promesse « un rapport, une page » avec elle. La liste des POINTS, elle,
+  // reste entière (c'est le détail de la collecte qui est demandé) ; ici, on
+  // borne et on DIT combien manquent, plutôt que de couper en silence.
+  //
+  // Deux au lieu de trois quand le tableau des points passe en deux colonnes :
+  // une tournée de soixante-dix bornes remplit déjà la page à elle seule, et
+  // c'est le DÉTAIL DE LA COLLECTE qui prime — il ne se tronque jamais.
+  const MAX_BLOCS = points.length > SEUIL_DEUX_COLONNES ? 2 : 3;
+  const reste = (n, sing, plur) => (n <= 0 ? ''
+    : `<p class="note">+ ${n} ${n > 1 ? plur : sing} — voir la fiche de la tournée.</p>`);
+
   const blocIncidents = incidents.length === 0 ? '<p class="gris" style="font-size:7.5px">Aucun événement déclaré.</p>'
-    : incidents.map((i) => `<div class="bloc rouge">
+    : incidents.slice(0, MAX_BLOCS).map((i) => `<div class="bloc rouge">
         <span class="h">${cell(frHeure(i.heure))}</span>
         <span class="t">${esc(i.type_libelle || i.type || 'Événement')}</span>
-        ${i.description ? `<div>${esc(i.description)}</div>` : ''}
-        <div class="gris">Statut : ${esc(i.statut_libelle || i.statut || '—')}${i.resolution ? ` · ${esc(i.resolution)}` : ''}</div>
-      </div>`).join('');
+        ${i.description ? `<div>${esc(court(i.description, 150))}</div>` : ''}
+        <div class="gris">Statut : ${esc(i.statut_libelle || i.statut || '—')}${i.resolution ? ` · ${esc(court(i.resolution, 90))}` : ''}</div>
+      </div>`).join('')
+      + reste(incidents.length - MAX_BLOCS, 'autre événement déclaré', 'autres événements déclarés');
 
   const blocMessages = messages.length === 0 ? '<p class="gris" style="font-size:7.5px">Aucun message échangé.</p>'
-    : messages.map((m) => `<div class="bloc">
+    : messages.slice(0, MAX_BLOCS).map((m) => `<div class="bloc">
         <span class="h">${cell(frHeure(m.heure))}</span>
         <span class="t">${m.sens === 'chauffeur' ? 'Chauffeur' : 'Gestionnaire'}</span>
-        <div>${esc(m.texte || '—')}</div>
+        <div>${esc(court(m.texte || '—', 150))}</div>
         ${m.lu_le ? `<div class="gris">Lu à ${esc(frHeure(m.lu_le) || '—')}</div>` : ''}
-      </div>`).join('');
+      </div>`).join('')
+      + reste(messages.length - MAX_BLOCS, 'autre message échangé', 'autres messages échangés');
 
   const blocCarte = carte
     ? `${carte}
@@ -707,6 +738,7 @@ export function construireRapportHtml(r) {
         ${blocArrets}
       </div>
     </div>
+    ${r && r.confidentialite ? `<div class="confid"><b>Confidentialité — </b>${esc(r.confidentialite)}</div>` : ''}
     <div class="pied">
       <span>${esc(STRUCTURE)} — rapport de tournée n° ${esc(t.id ?? '—')}</span>
       <span>Édité le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>

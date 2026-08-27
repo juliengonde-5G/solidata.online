@@ -23,6 +23,7 @@ const Production = lazy(() => import('./pages/Production'));
 const ChaineTri = lazy(() => import('./pages/ChaineTri'));
 const TriExecution = lazy(() => import('./pages/TriExecution'));
 const AdminTri = lazy(() => import('./pages/AdminTri'));
+const ChaineConfigurateur = lazy(() => import('./pages/ChaineConfigurateur'));
 const Stock = lazy(() => import('./pages/Stock'));
 const ProduitsFinis = lazy(() => import('./pages/ProduitsFinis'));
 const EtiquetteGenerer = lazy(() => import('./pages/EtiquetteGenerer'));
@@ -67,6 +68,7 @@ const AdminCollaboratorsImport = lazy(() => import('./pages/AdminCollaboratorsIm
 const ReportingMetropole = lazy(() => import('./pages/ReportingMetropole'));
 const FillRateMap = lazy(() => import('./pages/FillRateMap'));
 const NewsFeed = lazy(() => import('./pages/NewsFeed'));
+const Messagerie = lazy(() => import('./pages/Messagerie'));
 const Pointage = lazy(() => import('./pages/Pointage'));
 const ExutoiresCommandes = lazy(() => import('./pages/ExutoiresCommandes'));
 const ExutoiresPreparation = lazy(() => import('./pages/ExutoiresPreparation'));
@@ -199,7 +201,7 @@ function App() {
               {/* Écran ETI (REC-UX-06) : un écran, un salarié, accessible par lien direct */}
               <Route path="/insertion/renouvellement/:milestoneId" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><RenouvellementETI /></ProtectedRoute>} />
               <Route path="/admin/insertion" element={<ProtectedRoute roles={['ADMIN']}><AdminInsertion /></ProtectedRoute>} />
-              <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningHebdo /></ProtectedRoute>} />
+              <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><PlanningHebdo /></ProtectedRoute>} />
               <Route path="/pointage" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Pointage /></ProtectedRoute>} />
 
               {/* Collecte */}
@@ -222,6 +224,7 @@ function App() {
               <Route path="/chaine-tri" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ChaineTri /></ProtectedRoute>} />
               <Route path="/tri/execution" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><TriExecution /></ProtectedRoute>} />
               <Route path="/admin/tri" element={<ProtectedRoute roles={['ADMIN']}><AdminTri /></ProtectedRoute>} />
+              <Route path="/tri/configurateur" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ChaineConfigurateur /></ProtectedRoute>} />
               <Route path="/stock" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Stock /></ProtectedRoute>} />
               <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ProduitsFinis /></ProtectedRoute>} />
               <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'COLLABORATEUR']}><EtiquetteGenerer /></ProtectedRoute>} />
@@ -307,6 +310,7 @@ function App() {
               <Route path="/admin-associations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAssociations /></ProtectedRoute>} />
               <Route path="/admin-collaborators-import" element={<ProtectedRoute roles={['ADMIN', 'RH']}><AdminCollaboratorsImport /></ProtectedRoute>} />
               <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
+              <Route path="/messagerie" element={<ProtectedRoute><Messagerie /></ProtectedRoute>} />
 
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

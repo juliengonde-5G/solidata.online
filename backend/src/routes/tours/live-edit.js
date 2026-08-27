@@ -197,6 +197,18 @@ async function notifierChauffeur(req, tour, message) {
   } catch (err) {
     console.warn('[TOURS] Diffusion temps réel ignorée :', err.message);
   }
+  // Canal qui S'AJOUTE à driver_messages (arbitrage §12.3) : la consigne arrive
+  // aussi dans la messagerie du VÉHICULE. Require paresseux + best effort : une
+  // messagerie indisponible ne doit jamais faire échouer la modification du programme.
+  try {
+    const { envoyerMessageSysteme } = require('../../services/messagerie');
+    const envoi = await envoyerMessageSysteme({
+      destinataire_vehicle_id: tour.vehicle_id, texte: message, source: 'programme',
+    });
+    if (!envoi.ok) console.warn('[TOURS] Consigne non déposée en messagerie :', envoi.motif);
+  } catch (err) {
+    console.warn('[TOURS] Messagerie indisponible :', err.message);
+  }
 }
 
 /** Prochaine position libre du programme (les trois tables partagent l'échelle). */

@@ -39,6 +39,9 @@ export default function ExutoiresControleFacturation() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  // Période facultative + compte-rendu honnête de la dernière synchro (lot L7).
+  const [since, setSince] = useState('');
+  const [syncResult, setSyncResult] = useState(null);
   const [stats, setStats] = useState(null);
   const [factures, setFactures] = useState([]);
   const [orphans, setOrphans] = useState([]);
@@ -74,9 +77,14 @@ export default function ExutoiresControleFacturation() {
 
   const sync = async () => {
     setSyncing(true);
+    setSyncResult(null);
     try {
-      const r = await api.post('/pennylane/sync/customer-invoices', {});
-      toast.success(r.data?.message || 'Synchronisation terminée');
+      const r = await api.post('/pennylane/sync/customer-invoices', since ? { since } : {});
+      setSyncResult(r.data);
+      // Une synchro qui ne ramène rien n'est PAS un succès à annoncer en vert :
+      // le bandeau ci-dessous explique quoi vérifier.
+      if (r.data?.recuperees === 0) toast.error(r.data?.message || 'Aucune facture reçue de Pennylane');
+      else toast.success(r.data?.message || 'Synchronisation terminée');
       await load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur de synchronisation Pennylane');
@@ -148,16 +156,64 @@ export default function ExutoiresControleFacturation() {
           subtitle="Rapprochement des factures Pennylane avec les commandes — alerte non-bloquante en cas d'écart de pesée"
           icon={FileCheck}
           actions={
-            <button
-              onClick={sync}
-              disabled={syncing}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Synchro…' : 'Synchroniser Pennylane'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-slate-500">
+                Depuis le
+                <input
+                  type="date"
+                  value={since}
+                  onChange={(e) => setSince(e.target.value)}
+                  title="Laissé vide, la synchronisation reprend là où la précédente s'était arrêtée."
+                  className="ml-2 px-2 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700"
+                />
+              </label>
+              <button
+                onClick={sync}
+                disabled={syncing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Synchro…' : 'Synchroniser Pennylane'}
+              </button>
+            </div>
           }
         />
+
+        {/* Compte-rendu de la dernière synchronisation. « 0 » n'est pas une
+            information suffisante : on dit la période et ce qu'il faut vérifier. */}
+        {syncResult && (
+          <div className={`rounded-lg border p-3 text-sm ${
+            syncResult.recuperees === 0
+              ? 'border-amber-200 bg-amber-50 text-amber-900'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+          }`}>
+            <p className="font-semibold">
+              {syncResult.recuperees === 0 ? 'Aucune facture renvoyée par Pennylane' : 'Synchronisation terminée'}
+            </p>
+            <p className="mt-1">{syncResult.message}</p>
+            {syncResult.recuperees === 0 && (
+              <p className="mt-2 text-xs">
+                Vérifiez la période demandée, et que les factures concernées sont bien
+                <strong> finalisées</strong> : l'API Pennylane ne renvoie pas les brouillons.
+              </p>
+            )}
+            {syncResult.periode && (
+              <p className="mt-1 text-xs opacity-80">
+                Période interrogée : du {new Date(syncResult.periode.du).toLocaleDateString('fr-FR')} au{' '}
+                {new Date(syncResult.periode.au).toLocaleDateString('fr-FR')}
+                {syncResult.since_source ? ` (${syncResult.since_source})` : ''}.
+              </p>
+            )}
+            {/* Curseur non avancé : rien n'est perdu, la période sera reprise.
+                Le dire évite de conclure d'un « en erreur » qu'une facture a
+                définitivement disparu. */}
+            {syncResult.curseur_avance === false && syncResult.curseur_motif && (
+              <p className="mt-2 rounded bg-white/60 px-2 py-1 text-xs">
+                <strong>La période reste à reprendre :</strong> {syncResult.curseur_motif}.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* KPIs */}
         {stats && (

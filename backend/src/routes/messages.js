@@ -25,7 +25,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, resolveBaseRole } = require('../middleware/auth');
 const { driverVehicleIdFromToken } = require('./tours/driver-session');
 const messagerie = require('../services/messagerie');
 
@@ -39,6 +39,100 @@ const {
 const LIMITE_MESSAGES_DEFAUT = 50;
 const LIMITE_MESSAGES_MAX = 200;
 const CONTACTS_MAX = 20;
+
+// ── Périmètre restreint (correctif du 27/08) ───────────────────────────────
+//
+// DÉFAUT CORRIGÉ : le filtre par rôle de `GET /contacts` ne visait que les
+// équipages. Un compte AUTORITE — créé en vague 2 PRÉCISÉMENT comme un accès
+// EXTERNE en lecture seule (auditeur Refashion, Métropole) — obtenait donc
+// l'annuaire interne complet des salariés actifs et tout le parc de véhicules
+// comme contacts, et pouvait ouvrir une conversation privée avec n'importe
+// qui. Le périmètre serveur protégeait les conversations EXISTANTES, pas le
+// droit d'en ouvrir une.
+//
+// Règle retenue : un rôle de périmètre restreint dialogue avec ses
+// interlocuteurs d'exploitation (ADMIN/MANAGER) et avec eux seuls — exactement
+// la règle déjà écrite pour les équipages. Elle est appliquée à l'annuaire ET
+// à l'ouverture de conversation : une garde de menu ne protège rien.
+//
+// La liste est PARAMÉTRABLE (`messagerie.roles_perimetre_restreint`, JSON) :
+// c'est un arbitrage d'organisation, pas une constante technique. FINANCE et
+// DPO y figurent par défaut parce que ces deux rôles peuvent être tenus par un
+// prestataire extérieur (cabinet comptable, DPO externalisé) ; la Direction
+// peut les en retirer sans toucher au code.
+const ROLES_RESTREINTS_DEFAUT = ['AUTORITE', 'FINANCE', 'DPO'];
+const RESTREINTS_TTL_MS = 60000;
+let restreintsCache = { valeur: null, expire: 0 };
+
+/** Rôles de base à périmètre restreint. Lecture mise en cache 60 s. */
+async function rolesRestreints() {
+  const maintenant = Date.now();
+  if (restreintsCache.valeur && restreintsCache.expire > maintenant) return restreintsCache.valeur;
+  let valeur = ROLES_RESTREINTS_DEFAUT;
+  try {
+    const r = await pool.query("SELECT value FROM settings WHERE key = 'messagerie.roles_perimetre_restreint'");
+    if (r.rows[0] && r.rows[0].value) {
+      const brut = JSON.parse(r.rows[0].value);
+      // Un réglage illisible ou vide ne DÉSARME jamais la garde en silence :
+      // on ne l'accepte que s'il décrit réellement une liste de rôles.
+      if (Array.isArray(brut) && brut.every((x) => typeof x === 'string')) {
+        valeur = brut.map((x) => x.trim().toUpperCase()).filter(Boolean);
+      }
+    }
+  } catch (err) {
+    console.warn('[MESSAGERIE] Réglage messagerie.roles_perimetre_restreint illisible, repli sur le défaut :', err.message);
+  }
+  restreintsCache = { valeur, expire: maintenant + RESTREINTS_TTL_MS };
+  return valeur;
+}
+
+/** Purge du cache — exposée pour les tests (sans elle, un test impose ses rôles aux suivants). */
+function resetRolesRestreintsCache() { restreintsCache = { valeur: null, expire: 0 }; }
+
+// ── Plafond d'envoi PAR IDENTITÉ (correctif du 27/08) ──────────────────────
+//
+// Seul le plafond global d'index.js s'appliquait ici : 1 000 requêtes par
+// quart d'heure et PAR IP. Derrière un proxy d'entreprise, l'IP est partagée —
+// ce n'est donc pas la bonne unité de compte. Un compte authentifié pouvait
+// écrire ~1 000 messages de 4 000 caractères en quinze minutes dans une même
+// conversation, chacun déclenchant une émission Socket.IO à tous les
+// participants et jusqu'à 10 mentions, soit autant d'insertions et de
+// notifications système.
+//
+// Le compteur porte donc sur l'IDENTITÉ DE MESSAGERIE (utilisateur ou
+// véhicule), même unité que le périmètre. Fenêtre glissante en mémoire, comme
+// `checkRateLimit` de chat.js — pas de dépendance nouvelle, et un plafond
+// par instance suffit largement pour un usage humain (60 messages/minute,
+// c'est un message par seconde sans discontinuer).
+const ENVOI_FENETRE_MS = 60000;
+const ENVOI_MAX_PAR_FENETRE = 60;
+const envoisParIdentite = new Map();
+
+/** Vrai si l'envoi est autorisé ; incrémente le compteur au passage. */
+function autoriserEnvoi(cle) {
+  const maintenant = Date.now();
+  const entree = envoisParIdentite.get(cle);
+  if (!entree || maintenant - entree.debut > ENVOI_FENETRE_MS) {
+    envoisParIdentite.set(cle, { debut: maintenant, nb: 1 });
+    return true;
+  }
+  entree.nb += 1;
+  return entree.nb <= ENVOI_MAX_PAR_FENETRE;
+}
+
+// Nettoyage périodique — sans lui, la table garde une entrée par identité
+// jamais revenue. `unref()` : ce minuteur ne doit pas retenir le processus
+// (ni faire traîner une suite de tests).
+const nettoyageEnvois = setInterval(() => {
+  const maintenant = Date.now();
+  for (const [cle, e] of envoisParIdentite) {
+    if (maintenant - e.debut > ENVOI_FENETRE_MS * 2) envoisParIdentite.delete(cle);
+  }
+}, 5 * 60 * 1000);
+if (typeof nettoyageEnvois.unref === 'function') nettoyageEnvois.unref();
+
+/** Purge du compteur — exposée pour les tests. */
+function resetPlafondEnvoi() { envoisParIdentite.clear(); }
 
 router.use(authenticate);
 
@@ -55,7 +149,24 @@ function identite(req) {
     return { type: 'vehicule', user_id: null, vehicle_id: vehicleId, chauffeur: true };
   }
   const uid = req.user && req.user.id != null ? req.user.id : (req.user ? req.user.userId : null);
-  return { type: 'utilisateur', user_id: uid != null ? parseInt(uid, 10) : null, vehicle_id: null, chauffeur: false };
+  return {
+    type: 'utilisateur',
+    user_id: uid != null ? parseInt(uid, 10) : null,
+    vehicle_id: null,
+    chauffeur: false,
+    base_role: resolveBaseRole(req.user ? req.user.role : null),
+  };
+}
+
+/**
+ * Cette identité est-elle bornée aux responsables d'exploitation ?
+ * Vrai pour un équipage (règle d'origine) ET pour les rôles de périmètre
+ * restreint (correctif du 27/08).
+ */
+async function perimetreRestreint(moi) {
+  if (moi.chauffeur) return true;
+  if (!moi.base_role) return false;
+  return (await rolesRestreints()).includes(moi.base_role);
 }
 
 /** Salle Socket.IO de l'identité courante. */
@@ -258,6 +369,10 @@ router.post('/conversations', async (req, res) => {
     if (!dest || typeof dest !== 'object' || !dest.type) {
       return res.status(400).json({ error: 'Destinataire requis', code: 'DESTINATAIRE_REQUIS' });
     }
+    // Même règle qu'à l'annuaire, appliquée à l'OUVERTURE : filtrer la liste
+    // des contacts sans garder l'ouverture laisserait passer un identifiant
+    // saisi à la main.
+    const restreint = await perimetreRestreint(moi);
 
     let type;
     let participants;
@@ -298,9 +413,25 @@ router.post('/conversations', async (req, res) => {
           code: 'DESTINATAIRE_COMPTE_PARTAGE',
         });
       }
-      if (moi.chauffeur && !['ADMIN', 'MANAGER'].includes(u.rows[0].base_role)) {
+      if (restreint && !['ADMIN', 'MANAGER'].includes(u.rows[0].base_role)) {
+        // ANTI-ÉNUMÉRATION (correctif 27/08) — depuis un jeton VÉHICULE, ce
+        // refus était distinct du 404 « identifiant inconnu » : un porteur du
+        // lien chauffeur (la crédential la plus exposée du parc — raccourci
+        // permanent sur un téléphone d'équipage) pouvait balayer les
+        // identifiants et cartographier les comptes existants, leur activité
+        // et leur niveau de responsabilité. On lui rend désormais la MÊME
+        // réponse que pour un identifiant inexistant : on ne révèle pas
+        // l'existence d'une ressource à qui n'y a pas droit (règle déjà
+        // appliquée par `refusPerimetre`).
+        //
+        // Depuis un compte web (rôle externe), le 403 explicite est conservé :
+        // l'utilisateur est identifié et doit comprendre POURQUOI c'est refusé,
+        // sans quoi il croira à un défaut de l'application.
+        if (moi.chauffeur) {
+          return res.status(404).json({ error: 'Destinataire inconnu ou inactif', code: 'DESTINATAIRE_INCONNU' });
+        }
         return res.status(403).json({
-          error: "Depuis le véhicule, vous pouvez écrire aux responsables d'exploitation",
+          error: "Votre profil vous permet d'écrire aux responsables d'exploitation (administrateurs et managers)",
           code: 'DESTINATAIRE_NON_AUTORISE',
         });
       }
@@ -312,6 +443,15 @@ router.post('/conversations', async (req, res) => {
       if (moi.chauffeur) {
         return res.status(403).json({
           error: "Depuis le véhicule, vous ne pouvez pas écrire à un autre véhicule",
+          code: 'DESTINATAIRE_NON_AUTORISE',
+        });
+      }
+      // Un rôle externe (auditeur, consultation financière) n'a pas à donner de
+      // consigne à un équipage en tournée : les véhicules ne figurent déjà plus
+      // dans son annuaire, l'ouverture est refusée de même.
+      if (restreint) {
+        return res.status(403).json({
+          error: "Votre profil ne permet pas d'écrire à un véhicule en tournée",
           code: 'DESTINATAIRE_NON_AUTORISE',
         });
       }
@@ -424,6 +564,16 @@ router.post('/conversations/:id/messages', async (req, res) => {
     }
     const p = await participation(conversationId, moi);
     if (!p) return refusPerimetre(res);
+
+    // Plafond d'envoi PAR IDENTITÉ. Placé APRÈS la garde de périmètre : un
+    // non-participant ne doit pas pouvoir consommer le quota de quelqu'un
+    // d'autre, ni apprendre quoi que ce soit d'un 429 plutôt que d'un 403.
+    if (!autoriserEnvoi(salleDe(moi))) {
+      return res.status(429).json({
+        error: `Trop de messages envoyés (${ENVOI_MAX_PAR_FENETRE} par minute au maximum) — patientez un instant`,
+        code: 'TROP_DE_MESSAGES',
+      });
+    }
 
     const brut = req.body ? req.body.texte : null;
     const texte = typeof brut === 'string' ? brut.trim() : '';
@@ -602,6 +752,13 @@ async function repondreBot({ conversationId, texte, req }) {
     const sortie = await traiterMessageBot({
       userId: uid, role: req.user.role, username: req.user.username,
       message: texte, sessionId: `msg-${conversationId}`,
+      // `journaliser: false` (correctif du 27/08) — l'échange est déjà écrit
+      // dans `messagerie_messages`, qui a une rétention réelle et purgée. Le
+      // doubler dans `chatbot_history`, table sans aucune purge, l'aurait fait
+      // survivre à la durée annoncée au registre RGPD pour la messagerie.
+      // Ici le FIL fait foi ; le widget SolidataBot, lui, continue de
+      // journaliser puisque c'est sa seule trace.
+      journaliser: false,
     });
     reply = sortie.reply;
   } catch (err) {
@@ -691,9 +848,14 @@ router.post('/conversations/:id/lu', async (req, res) => {
 // Champs MINIMAUX : identifiant, nom d'affichage, rôle. Jamais d'adresse
 // électronique, de téléphone ni d'aucune donnée de fiche salarié — cette route
 // est ouverte à TOUS les rôles connectés, y compris aux équipages.
+//
+// Le filtre de périmètre restreint (équipages ET rôles externes, cf. en-tête)
+// s'applique ICI : l'annuaire interne complet n'est pas un dû du seul fait
+// d'être connecté.
 router.get('/contacts', async (req, res) => {
   try {
     const moi = identite(req);
+    const restreint = await perimetreRestreint(moi);
     const q = replierAccents(req.query.q || '');
 
     const utilisateurs = await pool.query(
@@ -708,13 +870,14 @@ router.get('/contacts', async (req, res) => {
           AND ($2::text = '' OR ${SQL_REPLI("COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '') || ' ' || u.username")} LIKE '%' || $2::text || '%')
         ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.username
         LIMIT $4`,
-      [moi.chauffeur ? null : moi.user_id, q, moi.chauffeur, CONTACTS_MAX]
+      [moi.chauffeur ? null : moi.user_id, q, restreint, CONTACTS_MAX]
     );
 
-    // Un équipage ne dialogue pas avec les autres camions : ses interlocuteurs
-    // sont les responsables d'exploitation (contrat §2.2).
+    // Ni un équipage ni un rôle externe ne dialogue avec les camions : leurs
+    // interlocuteurs sont les responsables d'exploitation (contrat §2.2, étendu
+    // aux rôles de périmètre restreint le 27/08).
     let vehicules = { rows: [] };
-    if (!moi.chauffeur) {
+    if (!restreint) {
       vehicules = await pool.query(
         `SELECT id, registration, name
            FROM vehicles
@@ -795,3 +958,10 @@ module.exports = router;
 module.exports.identite = identite;
 module.exports.titreAffiche = titreAffiche;
 module.exports.fusionnerContacts = fusionnerContacts;
+// Périmètre restreint (correctif 27/08) : le cache de 60 s doit être purgeable
+// entre deux tests, sans quoi le premier imposerait sa liste de rôles aux suivants.
+module.exports.resetRolesRestreintsCache = resetRolesRestreintsCache;
+module.exports.ROLES_RESTREINTS_DEFAUT = ROLES_RESTREINTS_DEFAUT;
+// Plafond d'envoi par identité (correctif 27/08) : purgeable entre deux tests.
+module.exports.resetPlafondEnvoi = resetPlafondEnvoi;
+module.exports.ENVOI_MAX_PAR_FENETRE = ENVOI_MAX_PAR_FENETRE;

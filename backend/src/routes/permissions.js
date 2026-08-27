@@ -87,6 +87,13 @@ const MODULE_CATALOG = [
   // Module 33 : « Temps & Présence » (badgeuse). Clé d'habilitation propre —
   // le module 25 « Pointage » legacy garde la sienne (ADR-0003).
   { key: 'badgeuse', label: 'Temps & Présence (badgeuse)' },
+  // Messagerie interne (chantier 26/08). La section existait dans Layout.jsx
+  // avec l'id 'messagerie' mais MANQUAIT ici : elle était donc la SEULE de la
+  // barre latérale qu'un ADMIN ne pouvait pas masquer — le garde-fou de
+  // l'application ne s'y appliquait pas. Le périmètre de participation reste
+  // contrôlé côté serveur (routes/messages.js) ; cette clé permet en plus de
+  // retirer complètement l'accès à un rôle, comme pour tout autre module.
+  { key: 'messagerie', label: 'Messagerie interne' },
   { key: 'admin', label: 'Administration' },
 ];
 const MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

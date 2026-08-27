@@ -266,6 +266,14 @@ async function enrichGLCategories(exerciseId, apiKey) {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    // Curseur DÉDIÉ à la synchronisation des factures clients. `init-db.js` pose
+    // la même colonne, mais SEULEMENT si la table existe déjà : sur une base
+    // NEUVE, `pennylane_config` naît ICI, au montage du routeur — donc APRÈS le
+    // dernier passage d'init-db de la séquence de reconstruction. Sans cet
+    // ALTER, la table de première installation n'aurait pas la colonne et
+    // `syncCustomerInvoicesAuto` échouerait en 42703 jusqu'au déploiement
+    // suivant. Idempotent : sur une base existante, la colonne est déjà là.
+    await pool.query(`ALTER TABLE pennylane_config ADD COLUMN IF NOT EXISTS last_invoice_sync_at TIMESTAMP;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pennylane_sync_log (
         id SERIAL PRIMARY KEY,
@@ -528,14 +536,57 @@ async function recomputeFactureEcart(client, factureId) {
 // Utilisable sans contexte HTTP (scheduler). Incrémental : {since} explicite,
 // sinon depuis last_sync_at, sinon 90 jours en arrière. Idempotent (skip / mise à
 // jour sur pennylane_invoice_id). Renvoie le compte-rendu d'import.
+/**
+ * Lit le curseur DÉDIÉ des factures clients.
+ *
+ * CAUSE RACINE DU « 0 FACTURE REMONTÉE » (lot L7, contrat §8.3) : cette
+ * fonction lisait `pennylane_config.last_sync_at`, colonne PARTAGÉE par le test
+ * de connexion, la synchro du Grand Livre et celle des transactions — qui la
+ * repoussent tous à `NOW()`. Le job GL tournant chaque jour, le curseur des
+ * factures valait donc toujours « hier » : le bouton « Importer les factures »
+ * ne demandait à Pennylane que les factures datées d'hier ou d'aujourd'hui, et
+ * une facture émise la semaine précédente n'était JAMAIS vue. Aucune erreur
+ * n'était levée — le compte-rendu affichait simplement « 0 importée(s) ».
+ *
+ * Correctif : colonne dédiée `last_invoice_sync_at`, que SEULE la synchro des
+ * factures écrit. Repli 90 jours si elle est nulle (première synchro).
+ * La colonne est récente : si la base n'est pas encore migrée, on retombe sur
+ * le repli 90 jours plutôt que de faire échouer l'import.
+ */
+// Ne LÈVE JAMAIS : c'est une lecture informative. Un curseur illisible doit
+// faire retomber la synchro sur son repli documenté (90 j) et laisser l'écran
+// d'état s'afficher — pas transformer une page de statut en erreur 500. Le
+// motif est toujours rendu dans `source`, donc rien n'est masqué.
+async function lireCurseurFactures() {
+  try {
+    const cfg = await pool.query('SELECT last_invoice_sync_at FROM pennylane_config LIMIT 1');
+    const brut = cfg?.rows?.[0]?.last_invoice_sync_at;
+    if (!brut) return { date: null, source: 'aucun curseur — première synchronisation' };
+    const d = new Date(brut);
+    if (Number.isNaN(d.getTime())) return { date: null, source: 'curseur illisible' };
+    return { date: d.toISOString().split('T')[0], source: 'dernière synchronisation des factures' };
+  } catch (err) {
+    if (err && err.code === '42703') {
+      return { date: null, source: 'colonne last_invoice_sync_at absente (base non à jour)' };
+    }
+    console.warn('[PENNYLANE] Curseur des factures non lisible :', err.message);
+    return { date: null, source: `curseur non lisible (${err.message})` };
+  }
+}
+
 async function syncCustomerInvoicesAuto({ since, userId } = {}) {
   const { apiKey } = await getActiveApiKey();
 
-  // Date de référence : {since} forcé, sinon depuis le dernier sync, sinon 90 j
-  const cfg = await pool.query('SELECT last_sync_at FROM pennylane_config LIMIT 1');
-  const sinceDate = since || (cfg.rows[0]?.last_sync_at
-    ? new Date(cfg.rows[0].last_sync_at).toISOString().split('T')[0]
-    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+  // Date de référence : {since} explicite prioritaire, sinon le curseur DÉDIÉ
+  // aux factures, sinon 90 jours en arrière.
+  const REPLI_JOURS = 90;
+  const curseur = since ? { date: null, source: null } : await lireCurseurFactures();
+  const sinceDate = since
+    || curseur.date
+    || new Date(Date.now() - REPLI_JOURS * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const sinceSource = since
+    ? 'période demandée'
+    : (curseur.date ? curseur.source : `${curseur.source} → repli ${REPLI_JOURS} jours`);
 
   const syncLog = await pool.query(
     `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, created_by)
@@ -549,7 +600,15 @@ async function syncCustomerInvoicesAuto({ since, userId } = {}) {
     ]);
     const allInvoices = await fetchAllPages('/customer_invoices', apiKey, { filter });
 
-    const results = { imported: 0, updated: 0, matched: 0, unmatched: 0, errors: 0, details: [] };
+    const results = {
+      imported: 0, updated: 0, matched: 0, unmatched: 0, errors: 0, details: [],
+      // `recuperees` = ce que Pennylane a RÉELLEMENT renvoyé. Sans lui, « 0
+      // importée(s) » ne distingue pas « Pennylane n'a rien renvoyé » de
+      // « tout était déjà présent » : deux situations qui n'appellent pas du
+      // tout la même action de l'utilisateur.
+      recuperees: allInvoices.length,
+      deja_presentes: 0,
+    };
     const client = await pool.connect();
     try {
       for (const inv of allInvoices) {
@@ -638,6 +697,7 @@ async function syncCustomerInvoicesAuto({ since, userId } = {}) {
               await recomputeFactureEcart(client, existing.rows[0].id);
             }
             results.updated++;
+            results.deja_presentes++;
           }
           await client.query('COMMIT');
         } catch (err) {
@@ -657,9 +717,56 @@ async function syncCustomerInvoicesAuto({ since, userId } = {}) {
        WHERE id = $4`,
       [results.errors > 0 ? 'partial' : 'completed', results.imported + results.updated, JSON.stringify(results), syncLogId]
     );
-    await pool.query('UPDATE pennylane_config SET last_sync_at = NOW()');
+    // ── Curseur ────────────────────────────────────────────────────────────
+    // Curseur DÉDIÉ : on n'écrit surtout PAS `last_sync_at`, partagé avec le
+    // Grand Livre et les transactions (c'est ce partage qui cassait l'import).
+    //
+    // ET ON NE L'AVANCE QU'EN CAS DE SUCCÈS COMPLET (correctif du 27/08).
+    // L'avancer inconditionnellement reproduisait le défaut que ce lot répare,
+    // simplement déplacé : la boucle ci-dessus fait un ROLLBACK par facture en
+    // erreur, mais le curseur repartait quand même de NOW(). Une facture datée
+    // d'avant et tombée en erreur n'était PLUS JAMAIS redemandée à Pennylane,
+    // et la synchro suivante annonçait honnêtement « 0 récupérée » — exactement
+    // le symptôme signalé par le client.
+    //
+    // Curseur figé = la période sera redemandée au prochain passage. Les
+    // factures déjà importées y sont reconnues par `pennylane_invoice_id` et
+    // simplement mises à jour : redemander ne coûte qu'un peu de réseau, alors
+    // qu'avancer trop tôt perd une facture pour de bon.
+    let curseurAvance = false;
+    let curseurMotif = null;
+    if (results.errors > 0) {
+      curseurMotif = `${results.errors} facture(s) en erreur — la période sera redemandée au prochain passage`;
+      console.warn(`[PENNYLANE] Curseur des factures NON avancé : ${curseurMotif}.`);
+    } else {
+      try {
+        await pool.query('UPDATE pennylane_config SET last_invoice_sync_at = NOW()');
+        curseurAvance = true;
+      } catch (err) {
+        if (err && err.code === '42703') {
+          curseurMotif = 'colonne last_invoice_sync_at absente (base non à jour) — repli 90 jours au prochain passage';
+          console.warn(`[PENNYLANE] ${curseurMotif}.`);
+        } else { throw err; }
+      }
+    }
 
-    return { ...results, since: sinceDate, syncLogId };
+    const auJour = new Date().toISOString().split('T')[0];
+    return {
+      ...results,
+      since: sinceDate,
+      since_source: sinceSource,
+      periode: { du: sinceDate, au: auJour },
+      // Alias français du contrat §8.3, à côté des clés historiques
+      // (`imported`/`matched`/`errors`) que consomment déjà les écrans en place.
+      importees: results.imported,
+      rapprochees: results.matched,
+      erreurs: results.errors,
+      // L'écran doit pouvoir dire à l'utilisateur que la période reste ouverte :
+      // sans ça, il conclut d'un « 3 en erreur » qu'il a perdu 3 factures.
+      curseur_avance: curseurAvance,
+      curseur_motif: curseurMotif,
+      syncLogId,
+    };
   } catch (err) {
     try {
       await pool.query(`UPDATE pennylane_sync_log SET status = 'error', completed_at = NOW(), details = $1 WHERE id = $2`,
@@ -675,14 +782,425 @@ async function syncCustomerInvoicesAuto({ since, userId } = {}) {
 // automatiquement UNIQUEMENT si la référence de commande est sans ambiguïté.
 router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const results = await syncCustomerInvoicesAuto({ since: req.body?.since, userId: req.user.id });
-    res.json({
-      message: `Synchronisation terminée — ${results.imported} importée(s), ${results.updated} mise(s) à jour, ${results.matched} rapprochée(s) auto, ${results.unmatched} à rapprocher manuellement, ${results.errors} erreur(s)`,
-      ...results,
-    });
+    const since = req.body?.since ? String(req.body.since).slice(0, 10) : undefined;
+    if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      return res.status(400).json({ error: 'Date de début invalide (format attendu AAAA-MM-JJ)', code: 'SINCE_INVALIDE' });
+    }
+    const results = await syncCustomerInvoicesAuto({ since, userId: req.user.id });
+
+    // Message HONNÊTE : « 0 importée(s) » tout court laissait croire à une
+    // panne alors que le cas le plus fréquent est « rien de neuf sur la
+    // période ». On distingue donc les deux, et on dit d'où vient la période.
+    const message = results.recuperees === 0
+      ? `Aucune facture renvoyée par Pennylane sur la période du ${results.periode.du} au ${results.periode.au}.`
+      : `Synchronisation terminée — ${results.recuperees} facture(s) reçue(s) de Pennylane : ${results.imported} importée(s), ${results.deja_presentes} déjà présente(s), ${results.matched} rapprochée(s) automatiquement, ${results.unmatched} à rapprocher manuellement, ${results.errors} erreur(s).`;
+    res.json({ message, ...results });
   } catch (err) {
     console.error('[PENNYLANE] Erreur sync customer-invoices :', err);
-    res.status(err.statusCode || 500).json({ error: err.message || 'Erreur synchronisation' });
+    res.status(err.statusCode || 500).json({ error: err.message || 'Erreur synchronisation', code: 'SYNC_FACTURES_ECHEC' });
+  }
+});
+
+// GET /api/pennylane/sync/diagnostic-invoices — Diagnostic de la remontée des
+// factures clients (ADMIN, contrat §8.3, pattern « Diagnostic transaction » VAK).
+//
+// POURQUOI : la cause racine du « 0 facture » (curseur partagé, corrigée
+// ci-dessus) est établie par lecture du code ; la piste « Pennylane ne renvoie
+// pas les brouillons par défaut » ne peut PAS être tranchée hors production —
+// il faut une vraie clé API et un vrai dossier comptable. Cet appel interroge
+// donc l'API SANS AUCUN filtre de date, sur une page courte, et rend ce qu'il
+// voit vraiment. Si la liste revient vide ici, le problème n'est plus chez nous.
+//
+// Aucun secret n'est renvoyé : ni la clé API, ni la charge Pennylane brute —
+// seulement une liste blanche de champs par facture.
+router.get('/sync/diagnostic-invoices', authorize('ADMIN'), async (req, res) => {
+  const constate = {
+    endpoint: 'GET /api/external/v2/customer_invoices',
+    filtre_date: 'aucun (diagnostic)',
+    entete_api: 'X-Use-2026-API-Changes: true',
+  };
+  try {
+    const { apiKey } = await getActiveApiKey();
+
+    // Page courte et SANS filtre : on veut savoir si l'API renvoie quoi que ce soit.
+    const result = await pennylaneRequest('GET', '/customer_invoices?limit=20', apiKey);
+    constate.statut_http = result.status;
+
+    if (result.status !== 200) {
+      const raison = result.status === 401 || result.status === 403
+        ? "Clé API refusée par Pennylane (401/403) : vérifiez la clé et ses habilitations « customer_invoices »."
+        : `Pennylane a répondu ${result.status}.`;
+      await journaliserDiagnostic(req.user.id, { ...constate, raison }, 'error');
+      return res.status(502).json({ error: raison, code: 'PENNYLANE_REFUS', ...constate });
+    }
+
+    const items = Array.isArray(result.data) ? result.data : (result.data?.items || result.data?.data || []);
+    const totalEstime = Number.isFinite(Number(result.data?.total_count))
+      ? Number(result.data.total_count)
+      : (result.data?.has_more ? null : items.length);
+
+    // Liste blanche stricte des champs exposés.
+    const exemples = items.slice(0, 3).map((inv) => ({
+      id: inv.id ?? null,
+      invoice_number: inv.invoice_number ?? inv.number ?? null,
+      date: inv.date ? String(inv.date).slice(0, 10) : null,
+      status: inv.status ?? null,
+      draft: inv.draft ?? null,
+      amount: inv.amount ?? inv.currency_amount ?? null,
+      customer: inv.customer?.name ?? inv.customer_name ?? null,
+    }));
+
+    let raison = null;
+    if (items.length === 0) {
+      // On ne tranche pas : on énumère ce qui reste possible, et on le dit.
+      raison = "Pennylane n'a renvoyé AUCUNE facture, même sans filtre de date. "
+        + "Trois causes possibles, à vérifier dans cet ordre : (1) le dossier comptable rattaché à cette clé API ne contient pas de facture CLIENT (les factures fournisseurs sont un autre endpoint) ; "
+        + "(2) les factures existent mais sont à l'état BROUILLON — l'API v2 ne renvoie par défaut que les factures finalisées ; "
+        + "(3) la clé API n'a pas l'habilitation de lecture des factures clients.";
+    }
+
+    const reponse = {
+      ...constate,
+      total_estime: totalEstime,
+      total_estime_note: totalEstime == null ? "Pennylane n'expose pas de compteur total : d'autres pages existent." : null,
+      recuperees_sur_cette_page: items.length,
+      exemples,
+      raison,
+      curseur_factures: await lireCurseurFactures(),
+    };
+    await journaliserDiagnostic(req.user.id, reponse, items.length === 0 ? 'partial' : 'completed');
+    res.json(reponse);
+  } catch (err) {
+    console.error('[PENNYLANE] Erreur diagnostic factures :', err);
+    await journaliserDiagnostic(req.user?.id, { ...constate, erreur: err.message }, 'error');
+    res.status(err.statusCode || 500).json({ error: err.message || 'Diagnostic impossible', code: 'DIAGNOSTIC_ECHEC', ...constate });
+  }
+});
+
+// Trace le diagnostic dans pennylane_sync_log (best-effort : un journal
+// indisponible ne doit jamais masquer le résultat du diagnostic).
+async function journaliserDiagnostic(userId, details, statut) {
+  try {
+    await pool.query(
+      `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, details, completed_at, created_by)
+       VALUES ('diagnostic_invoices', 'pull', $1, $2, $3, NOW(), $4)`,
+      [statut, Number(details?.recuperees_sur_cette_page) || 0, JSON.stringify(details || {}), userId || null]
+    );
+  } catch (err) {
+    console.warn('[PENNYLANE] Diagnostic non journalisé :', err.message);
+  }
+}
+
+// ══════════════════════════════════════════
+// CLIENTS DEPUIS PENNYLANE (lot L7, contrat §8.3) — PULL SEUL
+// ──────────────────────────────────────────
+// Le référentiel comptable fait foi côté Pennylane ; SOLIDATA l'importe et le
+// rapproche, il ne le renvoie jamais (doctrine PULL-only du module 23).
+// Aucune suppression, aucun écrasement d'un champ saisi dans l'ERP.
+// ══════════════════════════════════════════
+
+/**
+ * Normalise une raison sociale pour le rapprochement : casse, accents,
+ * ponctuation légère et espaces multiples neutralisés.
+ * FONCTION PURE — la comparaison seule est normalisée, jamais l'affichage.
+ */
+function normaliserNomClient(nom) {
+  if (nom == null) return '';
+  return String(nom)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // accents (marques combinantes)
+    .toUpperCase()
+    .replace(/[’']/g, ' ')                        // apostrophes typographiques
+    .replace(/[.,;:!?"()\[\]/\\-]/g, ' ')              // ponctuation
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Projette un client Pennylane sur les colonnes de `clients_exutoires`.
+ * FONCTION PURE (aucune E/S) — testée sans réseau ni base.
+ *
+ * DOCTRINE : une information absente reste VIDE, jamais devinée. Les colonnes
+ * `adresse`/`code_postal`/`ville`/`contact_nom`/`contact_email` sont NOT NULL
+ * dans le schéma : on y met la chaîne vide (« non renseigné »), qui se corrige
+ * à l'écran — et surtout PAS une adresse ou un e-mail fabriqués.
+ * Le code postal n'est retenu que s'il a bien 5 chiffres (la colonne est
+ * VARCHAR(5) : tronquer un code étranger le rendrait FAUX au lieu d'absent) ;
+ * le SIRET seulement s'il a 14 chiffres.
+ */
+function extraireClientPennylane(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = raw.id != null ? String(raw.id) : null;
+  if (!id) return null;
+
+  const adr = raw.billing_address || raw.address || raw.delivery_address || {};
+  const nomComplet = [raw.first_name, raw.last_name].filter(Boolean).join(' ').trim();
+  const nom = raw.name || raw.company_name || nomComplet || null;
+
+  const emails = Array.isArray(raw.emails) ? raw.emails.filter(Boolean) : [];
+  const email = raw.email || raw.billing_email || emails[0] || '';
+
+  const cpBrut = String(adr.postal_code || raw.postal_code || '').trim();
+  const codePostal = /^\d{5}$/.test(cpBrut) ? cpBrut : '';
+
+  const siretBrut = String(raw.reg_no || raw.siret || raw.registration_number || '').replace(/\D/g, '');
+  const siret = siretBrut.length === 14 ? siretBrut : null;
+
+  return {
+    pennylane_customer_id: id,
+    nom,
+    nom_normalise: normaliserNomClient(nom),
+    siret,
+    adresse: String(adr.address || adr.street || raw.address_line || '').trim(),
+    code_postal: codePostal,
+    code_postal_brut: cpBrut || null,
+    ville: String(adr.city || raw.city || '').trim(),
+    contact_nom: String(nomComplet || raw.contact_name || '').trim(),
+    contact_email: String(email).trim().slice(0, 255),
+    contact_telephone: String(raw.phone || raw.phone_number || '').trim().slice(0, 20) || null,
+  };
+}
+
+/**
+ * Récupère au plus `maxItems` clients Pennylane en suivant le curseur v2.
+ * Le filtre/limite est renvoyé à CHAQUE page (exigence documentée de la
+ * pagination par curseur Pennylane).
+ */
+async function fetchCustomersLimited(apiKey, maxItems) {
+  const items = [];
+  let cursor = null;
+  let pages = 0;
+  let hasMore = false;
+  while (items.length < maxItems && pages < 50) {
+    const qs = new URLSearchParams({ limit: String(Math.min(100, maxItems - items.length)) });
+    if (cursor) qs.set('cursor', cursor);
+    const result = await pennylaneRequest('GET', `/customers?${qs.toString()}`, apiKey);
+    if (result.status !== 200) {
+      throw Object.assign(
+        new Error(`Pennylane a répondu ${result.status} sur /customers : ${typeof result.data === 'string' ? result.data.slice(0, 200) : JSON.stringify(result.data).slice(0, 200)}`),
+        { statusCode: result.status === 401 || result.status === 403 ? 502 : 502 }
+      );
+    }
+    const page = Array.isArray(result.data) ? result.data : (result.data?.items || result.data?.customers || result.data?.data || []);
+    items.push(...page);
+    hasMore = Boolean(result.data?.has_more && result.data?.next_cursor);
+    if (!hasMore) break;
+    cursor = result.data.next_cursor;
+    pages++;
+    await new Promise((r) => setTimeout(r, 350)); // throttle ~3 req/s
+  }
+  return { items: items.slice(0, maxItems), has_more: hasMore };
+}
+
+// GET /api/pennylane/customers?limit= — Prévisualisation (lecture seule).
+// Renvoie ce que Pennylane expose ET le rapprochement PRÉVU avec l'ERP, pour
+// que l'utilisateur voie ce qui sera créé avant de valider quoi que ce soit.
+router.get('/customers', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const limitBrut = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(limitBrut) && limitBrut > 0 ? Math.min(limitBrut, 500) : 100;
+
+    const { apiKey } = await getActiveApiKey();
+    const { items, has_more } = await fetchCustomersLimited(apiKey, limit);
+    const clients = items.map(extraireClientPennylane).filter(Boolean);
+
+    const locaux = await chargerClientsLocaux();
+    const apercu = clients.map((c) => {
+      const decision = deciderRapprochement(c, locaux);
+      return {
+        pennylane_customer_id: c.pennylane_customer_id,
+        nom: c.nom,
+        ville: c.ville || null,
+        code_postal: c.code_postal || null,
+        siret: c.siret,
+        operation: decision.operation,
+        client_exutoire_id: decision.client?.id ?? null,
+        client_exutoire_nom: decision.client?.raison_sociale ?? null,
+        candidats: decision.candidats || null,
+      };
+    });
+
+    res.json({
+      recuperes: clients.length,
+      has_more,
+      limite_appliquee: limit,
+      resume: {
+        a_creer: apercu.filter((a) => a.operation === 'creer').length,
+        a_relier: apercu.filter((a) => a.operation === 'relier').length,
+        deja_lies: apercu.filter((a) => a.operation === 'inchange').length,
+        ambigus: apercu.filter((a) => a.operation === 'ambigu').length,
+      },
+      clients: apercu,
+    });
+  } catch (err) {
+    console.error('[PENNYLANE] Erreur lecture clients :', err);
+    res.status(err.statusCode || 500).json({ error: err.message || 'Lecture des clients impossible', code: 'CLIENTS_LECTURE_ECHEC' });
+  }
+});
+
+/** Charge le référentiel local (actifs ET inactifs : on ne recrée pas un client désactivé). */
+async function chargerClientsLocaux() {
+  const SQL = (avecPennylane) => `
+    SELECT id, raison_sociale, siret, adresse, code_postal, ville,
+           contact_nom, contact_email, contact_telephone, actif
+           ${avecPennylane ? ', pennylane_customer_id, pennylane_customer_name' : ''}
+      FROM clients_exutoires`;
+  try {
+    const r = await pool.query(SQL(true));
+    return r.rows;
+  } catch (err) {
+    if (err && err.code === '42703') {
+      const r = await pool.query(SQL(false));
+      return r.rows.map((c) => ({ ...c, pennylane_customer_id: null, pennylane_customer_name: null }));
+    }
+    throw err;
+  }
+}
+
+/**
+ * Décide, pour UN client Pennylane, ce qu'il faut faire côté ERP. FONCTION PURE.
+ * Cascade : identifiant Pennylane → nom normalisé → création.
+ * Un nom qui rapproche PLUSIEURS clients est déclaré `ambigu` et n'est PAS
+ * tranché au hasard : deux clients homonymes fusionnés silencieusement
+ * mélangeraient leurs commandes et leurs factures.
+ */
+function deciderRapprochement(pennylaneClient, clientsLocaux) {
+  if (!pennylaneClient) return { operation: 'ignore', motif: 'client Pennylane illisible' };
+
+  const parId = clientsLocaux.find((c) => c.pennylane_customer_id && String(c.pennylane_customer_id) === pennylaneClient.pennylane_customer_id);
+  if (parId) return { operation: 'inchange', client: parId, mode: 'identifiant Pennylane' };
+
+  if (!pennylaneClient.nom_normalise) {
+    return { operation: 'ignore', motif: 'client Pennylane sans raison sociale — non importable' };
+  }
+
+  const parNom = clientsLocaux.filter(
+    (c) => !c.pennylane_customer_id && normaliserNomClient(c.raison_sociale) === pennylaneClient.nom_normalise
+  );
+  if (parNom.length === 1) return { operation: 'relier', client: parNom[0], mode: 'nom normalisé' };
+  if (parNom.length > 1) {
+    return {
+      operation: 'ambigu',
+      candidats: parNom.map((c) => ({ id: c.id, raison_sociale: c.raison_sociale, ville: c.ville })),
+      motif: `${parNom.length} clients de l'ERP portent ce nom — rapprochement non tranché`,
+    };
+  }
+  return { operation: 'creer' };
+}
+
+// POST /api/pennylane/customers/import — Import / rapprochement (jamais destructif).
+router.post('/customers/import', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const syncLog = await pool.query(
+    `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, created_by)
+     VALUES ('customers', 'pull', 'in_progress', 0, $1) RETURNING id`,
+    [req.user.id]
+  );
+  const syncLogId = syncLog.rows[0].id;
+  try {
+    const limitBrut = parseInt(req.body?.limit, 10);
+    const limit = Number.isFinite(limitBrut) && limitBrut > 0 ? Math.min(limitBrut, 1000) : 500;
+
+    const { apiKey } = await getActiveApiKey();
+    const { items, has_more } = await fetchCustomersLimited(apiKey, limit);
+    const clients = items.map(extraireClientPennylane).filter(Boolean);
+    const locaux = await chargerClientsLocaux();
+
+    const bilan = { recuperes: clients.length, crees: 0, relies: 0, inchanges: 0, ignores: 0, erreurs: 0, ambigus: [], details: [], has_more };
+
+    for (const c of clients) {
+      const decision = deciderRapprochement(c, locaux);
+      try {
+        if (decision.operation === 'ambigu') {
+          bilan.ambigus.push({ pennylane_customer_id: c.pennylane_customer_id, nom: c.nom, motif: decision.motif, candidats: decision.candidats });
+          continue;
+        }
+        if (decision.operation === 'ignore') { bilan.ignores++; continue; }
+
+        if (decision.operation === 'inchange') {
+          // Le nom d'affichage Pennylane peut avoir changé : on le rafraîchit
+          // (colonne miroir), sans jamais toucher à la raison sociale de l'ERP.
+          await pool.query(
+            'UPDATE clients_exutoires SET pennylane_customer_name = $1, updated_at = NOW() WHERE id = $2',
+            [c.nom, decision.client.id]
+          );
+          bilan.inchanges++;
+          continue;
+        }
+
+        if (decision.operation === 'relier') {
+          // COALESCE/NULLIF : on ne comble QUE les champs vides de l'ERP.
+          // Un contact saisi par un utilisateur n'est jamais écrasé par
+          // l'annuaire comptable (pattern import Malibou).
+          const maj = await pool.query(
+            `UPDATE clients_exutoires SET
+               pennylane_customer_id = $1,
+               pennylane_customer_name = $2,
+               siret             = COALESCE(NULLIF(siret, ''), $3),
+               adresse           = COALESCE(NULLIF(adresse, ''), $4),
+               code_postal       = COALESCE(NULLIF(code_postal, ''), $5),
+               ville             = COALESCE(NULLIF(ville, ''), $6),
+               contact_nom       = COALESCE(NULLIF(contact_nom, ''), $7),
+               contact_email     = COALESCE(NULLIF(contact_email, ''), $8),
+               contact_telephone = COALESCE(NULLIF(contact_telephone, ''), $9),
+               updated_at = NOW()
+             WHERE id = $10 RETURNING id, raison_sociale`,
+            [c.pennylane_customer_id, c.nom, c.siret, c.adresse, c.code_postal, c.ville,
+              c.contact_nom, c.contact_email, c.contact_telephone, decision.client.id]
+          );
+          decision.client.pennylane_customer_id = c.pennylane_customer_id;
+          bilan.relies++;
+          bilan.details.push({ operation: 'relie', id: maj.rows[0].id, nom: maj.rows[0].raison_sociale, pennylane_customer_id: c.pennylane_customer_id });
+          continue;
+        }
+
+        // Création. `type_client` reste sur le défaut 'recycleur' du schéma :
+        // Pennylane ne connaît pas cette nomenclature métier et la deviner
+        // serait une valeur inventée — c'est à l'utilisateur de la qualifier.
+        const ins = await pool.query(
+          `INSERT INTO clients_exutoires
+             (raison_sociale, siret, adresse, code_postal, ville, contact_nom, contact_email, contact_telephone,
+              actif, pennylane_customer_id, pennylane_customer_name)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, $9, $10)
+           RETURNING id, raison_sociale`,
+          [c.nom, c.siret, c.adresse, c.code_postal, c.ville, c.contact_nom, c.contact_email,
+            c.contact_telephone, c.pennylane_customer_id, c.nom]
+        );
+        locaux.push({
+          id: ins.rows[0].id, raison_sociale: c.nom, pennylane_customer_id: c.pennylane_customer_id,
+          siret: c.siret, adresse: c.adresse, code_postal: c.code_postal, ville: c.ville,
+          contact_nom: c.contact_nom, contact_email: c.contact_email, contact_telephone: c.contact_telephone, actif: true,
+        });
+        bilan.crees++;
+        bilan.details.push({ operation: 'cree', id: ins.rows[0].id, nom: ins.rows[0].raison_sociale, pennylane_customer_id: c.pennylane_customer_id });
+      } catch (err) {
+        if (err && err.code === '42703') throw err; // base non migrée : échec global explicite
+        bilan.erreurs++;
+        bilan.details.push({ operation: 'erreur', nom: c.nom, pennylane_customer_id: c.pennylane_customer_id, erreur: err.message });
+        console.error('[PENNYLANE] Import client en échec', c.pennylane_customer_id, err.message);
+      }
+    }
+
+    await pool.query(
+      `UPDATE pennylane_sync_log SET status = $1, completed_at = NOW(), records_count = $2, details = $3 WHERE id = $4`,
+      [bilan.erreurs > 0 ? 'partial' : 'completed', bilan.crees + bilan.relies, JSON.stringify(bilan), syncLogId]
+    );
+
+    const message = bilan.recuperes === 0
+      ? "Aucun client renvoyé par Pennylane — vérifiez que la clé API a bien l'habilitation « customers »."
+      : `${bilan.recuperes} client(s) reçu(s) : ${bilan.crees} créé(s), ${bilan.relies} rapproché(s), ${bilan.inchanges} déjà lié(s), ${bilan.ambigus.length} ambigu(s) laissé(s) de côté, ${bilan.erreurs} erreur(s).`;
+    res.json({ message, ...bilan });
+  } catch (err) {
+    try {
+      await pool.query(`UPDATE pennylane_sync_log SET status = 'error', completed_at = NOW(), details = $1 WHERE id = $2`,
+        [JSON.stringify({ error: err.message }), syncLogId]);
+    } catch (_) { /* best-effort */ }
+    console.error('[PENNYLANE] Erreur import clients :', err);
+    if (err && err.code === '42703') {
+      return res.status(503).json({
+        error: "Import indisponible : la base n'est pas à jour (colonnes pennylane_customer_id / pennylane_customer_name absentes de clients_exutoires).",
+        code: 'BASE_NON_MIGREE',
+      });
+    }
+    res.status(err.statusCode || 500).json({ error: err.message || 'Import des clients impossible', code: 'CLIENTS_IMPORT_ECHEC' });
   }
 });
 
@@ -1064,11 +1582,18 @@ router.get('/status', authorize('ADMIN', 'MANAGER', 'FINANCE'), async (req, res)
     const mappingsCount = await pool.query('SELECT COUNT(*) as total FROM pennylane_mappings');
     const lastSync = await pool.query('SELECT * FROM pennylane_sync_log ORDER BY started_at DESC LIMIT 1');
 
+    // Curseur DÉDIÉ aux factures, exposé À CÔTÉ de `last_sync` : ces deux dates
+    // ne veulent pas dire la même chose, et les confondre est précisément le
+    // défaut corrigé dans ce lot.
+    const curseurFactures = await lireCurseurFactures();
+
     res.json({
       configured: config.rows.length > 0,
       active: config.rows[0]?.is_active || false,
       company_id: config.rows[0]?.company_id || null,
       last_sync: config.rows[0]?.last_sync_at || null,
+      last_invoice_sync: curseurFactures.date,
+      last_invoice_sync_source: curseurFactures.source,
       total_mappings: parseInt(mappingsCount.rows[0].total),
       last_sync_log: lastSync.rows[0] || null,
     });
@@ -1300,3 +1825,8 @@ module.exports.syncTransactionsAuto = syncTransactionsAuto;
 module.exports.syncCustomerInvoicesAuto = syncCustomerInvoicesAuto;
 module.exports.extractCommandeReferences = extractCommandeReferences;
 module.exports.autoMatchCommande = autoMatchCommande;
+// Helpers PURS du lot L7 (clients Pennylane) — exposés pour les tests unitaires :
+// ils ne touchent ni le réseau ni la base.
+module.exports.normaliserNomClient = normaliserNomClient;
+module.exports.extraireClientPennylane = extraireClientPennylane;
+module.exports.deciderRapprochement = deciderRapprochement;

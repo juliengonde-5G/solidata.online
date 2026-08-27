@@ -233,6 +233,17 @@ chown -R ${DEPLOY_USER}:${DEPLOY_USER} /opt/solidata.online-backups
 # cette exception, chaque déploiement s'arrêterait à la mise à jour du code.
 git config --global --add safe.directory ${APP_DIR} 2>/dev/null || true
 
+# --- Crontab applicatif ---
+# La purge fait « crontab -r » plus haut mais rien ne réinstallait
+# deploy/crontab.txt : backup.sh quotidien, health-check et renouvellement
+# certbot ne tournaient qu'après une étape manuelle facilement oubliée
+# (constat audit L8, rapports/evolutions-2026-08-26/AUDITS.md §3).
+# Installé ICI — après le clone — car le fichier n'existe pas encore au
+# moment de la purge. Best effort : un échec est signalé, jamais bloquant.
+echo "  [Cron] Installation crontab applicatif (deploy/crontab.txt)..."
+crontab "${APP_DIR}/deploy/crontab.txt" 2>/dev/null \
+  || echo "  [Cron] AVERTISSEMENT : crontab non installé — poser à la main : crontab ${APP_DIR}/deploy/crontab.txt"
+
 # --- 7. Swap (si < 2Go RAM) ---
 echo "[7/9] Vérification swap..."
 TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')

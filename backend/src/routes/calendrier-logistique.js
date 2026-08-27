@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+// Source UNIQUE du pas de récurrence : réécrire une variante ici est
+// exactement ce qui a produit le défaut corrigé plus bas (valeurs fantômes).
+const { avancerEcheance, normaliserDate, jourDuMois, PAS_RECURRENCE } = require('../services/commandes-recurrence');
 
 router.use(authenticate, authorize('ADMIN', 'MANAGER'));
 
@@ -86,49 +89,98 @@ router.get('/', async (req, res) => {
       [date_from, date_to]
     );
 
-    // 2. Get active recurring commandes to project future dates
-    const recurringResult = await pool.query(
-      `SELECT c.id, c.reference, c.type_produit, c.tonnage_prevu, c.prix_tonne,
-              c.frequence, c.date_commande, c.date_fin_recurrence,
-              cl.raison_sociale
-       FROM commandes_exutoires c
-       JOIN clients_exutoires cl ON c.client_id = cl.id
-       WHERE c.frequence != 'unique'
-         AND c.statut NOT IN ('annulee', 'cloturee')`,
-      []
-    );
+    // 2. Modèles récurrents ACTIFS, pour projeter les échéances à venir.
+    //
+    // DEUX DÉFAUTS CORRIGÉS ICI (lot L7, contrat §8.2) :
+    //  (a) Les fréquences testées — « bimensuelle », « mensuelle »,
+    //      « trimestrielle » — N'EXISTENT PAS dans le CHECK SQL de
+    //      `commandes_exutoires.frequence`, dont les seules valeurs sont
+    //      `unique | hebdomadaire | bi_mensuel | mensuel`. Seul l'hebdomadaire
+    //      était donc projeté : un contrat mensuel n'apparaissait NULLE PART au
+    //      calendrier prévisionnel, sans le moindre message.
+    //  (b) L'anti-double-compte comparait `preparation.commande_id` à l'id du
+    //      MODÈLE. Or une occurrence matérialisée est une commande FILLE : sa
+    //      préparation porte l'id de la fille, jamais celui du modèle. La clé ne
+    //      pouvait donc jamais correspondre — une occurrence réellement créée
+    //      était comptée DEUX FOIS (une fois réelle, une fois projetée).
+    //      On saute désormais toute date déjà matérialisée par une fille.
+    //
+    // `recurrence_suspendue` est une colonne récente : sur une base non encore
+    // migrée la requête est rejouée sans elle plutôt que de rendre tout le
+    // calendrier indisponible.
+    const SQL_MODELES = (avecSuspension) => `
+      SELECT c.id, c.reference, c.type_produit, c.tonnage_prevu, c.prix_tonne,
+             c.frequence, c.date_commande, c.date_fin_recurrence,
+             cl.raison_sociale
+      FROM commandes_exutoires c
+      JOIN clients_exutoires cl ON c.client_id = cl.id
+      WHERE c.frequence != 'unique'
+        AND c.commande_parent_id IS NULL
+        AND c.statut NOT IN ('annulee', 'cloturee')
+        ${avecSuspension ? 'AND COALESCE(c.recurrence_suspendue, false) = false' : ''}`;
+
+    let recurringResult;
+    try {
+      recurringResult = await pool.query(SQL_MODELES(true));
+    } catch (err) {
+      if (err && err.code === '42703') {
+        console.warn('[CALENDRIER-LOGISTIQUE] Colonne recurrence_suspendue absente (base non migrée) — projection sans filtre de suspension.');
+        recurringResult = await pool.query(SQL_MODELES(false));
+      } else {
+        throw err;
+      }
+    }
+
+    // Occurrences DÉJÀ matérialisées (commandes filles) : elles apparaissent
+    // comme de vraies commandes, il ne faut pas les reprojeter par-dessus.
+    const modeleIds = recurringResult.rows.map((c) => c.id);
+    const datesMaterialisees = new Set();
+    if (modeleIds.length > 0) {
+      const filles = await pool.query(
+        `SELECT commande_parent_id, date_commande
+           FROM commandes_exutoires
+          WHERE commande_parent_id = ANY($1::int[])`,
+        [modeleIds]
+      );
+      for (const f of filles.rows) {
+        const d = normaliserDate(f.date_commande);
+        if (d) datesMaterialisees.add(`${f.commande_parent_id}-${d}`);
+      }
+    }
+    // Une préparation déjà planifiée sur le modèle lui-même vaut aussi
+    // matérialisation pour cette date (cas d'avant la récurrence automatique).
+    for (const p of preparationsResult.rows) {
+      const d = normaliserDate(p.date_expedition);
+      if (d) datesMaterialisees.add(`${p.commande_id}-${d}`);
+    }
 
     // Project recurring commande dates into the range
     const projectedExpeditions = [];
     for (const cmd of recurringResult.rows) {
-      const intervalDays = cmd.frequence === 'hebdomadaire' ? 7
-        : cmd.frequence === 'bimensuelle' ? 14
-        : cmd.frequence === 'mensuelle' ? 30
-        : cmd.frequence === 'trimestrielle' ? 90
-        : null;
+      if (!PAS_RECURRENCE[cmd.frequence]) continue; // fréquence inconnue : rien d'inventé
 
-      if (!intervalDays) continue;
+      const rangeStart = normaliserDate(date_from);
+      const rangeEnd = normaliserDate(date_to);
+      const debut = normaliserDate(cmd.date_commande);
+      if (!rangeStart || !rangeEnd || !debut) continue;
 
-      let nextDate = new Date(cmd.date_commande);
-      const rangeStart = new Date(date_from);
-      const rangeEnd = new Date(date_to);
-      const recurrenceEnd = cmd.date_fin_recurrence ? new Date(cmd.date_fin_recurrence) : rangeEnd;
-      const effectiveEnd = recurrenceEnd < rangeEnd ? recurrenceEnd : rangeEnd;
+      const finRecurrence = normaliserDate(cmd.date_fin_recurrence);
+      const effectiveEnd = finRecurrence && finRecurrence < rangeEnd ? finRecurrence : rangeEnd;
 
-      // Advance nextDate to the range start
-      while (nextDate < rangeStart) {
-        nextDate.setDate(nextDate.getDate() + intervalDays);
+      // Quantième de référence pour le pas mensuel (cf. ajouterMois) : sans lui
+      // un mensuel du 31 se figerait au 28 après le premier février projeté.
+      const jourAncre = jourDuMois(debut);
+
+      // Avancer jusqu'au début de la fenêtre. La date de la commande d'origine
+      // EST la première occurrence : on part d'elle, puis on avance d'un pas.
+      let nextDate = debut;
+      let garde = 0;
+      while (nextDate && nextDate < rangeStart && garde++ < 2000) {
+        nextDate = avancerEcheance(nextDate, cmd.frequence, jourAncre);
       }
 
-      // Check if this projected date already has a preparation
-      const existingPrepCommandeIds = new Set(
-        preparationsResult.rows.map(p => `${p.commande_id}-${formatDate(new Date(p.date_expedition))}`)
-      );
-
-      while (nextDate <= effectiveEnd) {
-        const dateStr = formatDate(nextDate);
-        const key = `${cmd.id}-${dateStr}`;
-        if (!existingPrepCommandeIds.has(key)) {
+      while (nextDate && nextDate <= effectiveEnd && garde++ < 2000) {
+        if (!datesMaterialisees.has(`${cmd.id}-${nextDate}`)) {
           projectedExpeditions.push({
             commande_id: cmd.id,
             reference: cmd.reference,
@@ -136,12 +188,11 @@ router.get('/', async (req, res) => {
             tonnage_prevu: cmd.tonnage_prevu,
             prix_tonne: cmd.prix_tonne,
             raison_sociale: cmd.raison_sociale,
-            date_expedition: dateStr,
+            date_expedition: nextDate,
             is_projected: true
           });
         }
-        nextDate = new Date(nextDate);
-        nextDate.setDate(nextDate.getDate() + intervalDays);
+        nextDate = avancerEcheance(nextDate, cmd.frequence, jourAncre);
       }
     }
 

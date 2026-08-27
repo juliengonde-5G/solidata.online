@@ -457,27 +457,11 @@ function sanitizeDegats(input) {
   return clean.length > 0 ? clean : null;
 }
 
-/**
- * Notification des gestionnaires par la MESSAGERIE INTERNE, en plus du push.
- *
- * `require` PARESSEUX et sous try/catch, délibérément : le service de
- * messagerie est livré en parallèle par un autre lot. S'il n'est pas encore
- * déployé, un `require` en tête de fichier ferait échouer TOUT le module des
- * tournées — donc le parcours chauffeur — pour un canal de confort. Ici, son
- * absence dégrade sur un avertissement et rien d'autre.
- *
- * Jamais bloquant : cette fonction n'attend pas et ne rejette jamais.
- */
-function notifierGestionnaires({ texte, source, lien = null }) {
-  try {
-    const { envoyerMessageSystemeRoles } = require('../../services/messagerie');
-    if (typeof envoyerMessageSystemeRoles !== 'function') return;
-    Promise.resolve(envoyerMessageSystemeRoles(['ADMIN', 'MANAGER'], { texte, source, lien }))
-      .catch((err) => console.warn('[TOURS] Messagerie interne indisponible :', err.message));
-  } catch (err) {
-    console.warn('[TOURS] Service de messagerie absent, notification non doublée :', err.message);
-  }
-}
+// Notification des gestionnaires par la MESSAGERIE INTERNE, en plus du push.
+// Le geste a été extrait dans `./notifier` (correctif du 27/08) : il servait
+// ici, et il manquait à la fin de tournée et aux propositions de
+// ré-optimisation. Une seule implémentation, donc un seul périmètre à tenir.
+const { notifierGestionnaires } = require('./notifier');
 
 /**
  * Ce que la vérification du camion a relevé d'ANORMAL, sous une forme que le

@@ -34,6 +34,7 @@ const { CENTRE_TRI_LAT, CENTRE_TRI_LNG, getContextForDate } = require('./context
 const { getScoringConfig } = require('./predictions');
 const { computeAndStorePlannedPassages } = require('./planned-passage');
 const { sendPushToRoles } = require('../../services/push-notifications');
+const { notifierGestionnaires } = require('./notifier');
 const { prefetchLegs, cachedRouteSegment } = require('../../services/route-cache');
 const { tomtomRouteSequence } = require('../../services/routing-tomtom');
 const { emissionsVehicule } = require('../../services/vehicle-emissions');
@@ -427,13 +428,22 @@ async function proposeReoptimization({
   )).catch(() => {});
 
   if (!proposal.applique_automatiquement) {
+    const detail = `Gain ${proposal.gain_percent}% (${proposal.old_distance_km} → ${proposal.new_distance_km} km`
+      + `${co2Evite !== null ? `, ${co2Evite} kg CO2 évités` : ''}) — motif ${triggerReason}`;
     sendPushToRoles(['ADMIN', 'MANAGER'], {
       title: `Ré-optim. proposée — Tournée #${tourId}`,
-      body: `Gain ${proposal.gain_percent}% (${proposal.old_distance_km} → ${proposal.new_distance_km} km`
-        + `${co2Evite !== null ? `, ${co2Evite} kg CO2 évités` : ''}) — motif ${triggerReason}`,
+      body: detail,
       tag: `reopt-${tourId}`,
       data: { url: '/collections-live', tourId },
     }).catch(() => {});
+    // Doublage dans la messagerie interne (correctif du 27/08). Une proposition
+    // qui n'est pas VUE ne sert à rien : elle attend une décision humaine
+    // (Appliquer / Ignorer) et se périme avec la tournée.
+    notifierGestionnaires({
+      texte: `Ordre de passage — tournée #${tourId} : une réorganisation est proposée. ${detail}`,
+      source: 'reoptimisation',
+      lien: '/collections-live',
+    });
   }
 
   return { created: true, proposal };

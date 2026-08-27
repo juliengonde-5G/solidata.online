@@ -41,10 +41,19 @@ jest.mock('../../src/middleware/activity-logger', () => ({
   autoLogActivity: () => (req, res, next) => next(),
   logActivity: () => {},
 }));
+// La messagerie interne est un canal de CONFORT branché par require paresseux :
+// on vérifie qu'il est bien sollicité, jamais qu'il conditionne quoi que ce soit.
+const mockMessagerieRoles = jest.fn().mockResolvedValue({ ok: true, envoyes: 2 });
+jest.mock('../../src/services/messagerie', () => ({
+  envoyerMessageSystemeRoles: (...a) => mockMessagerieRoles(...a),
+  envoyerMessageSysteme: jest.fn().mockResolvedValue({ ok: true }),
+}));
 
 const express = require('express');
 const request = require('supertest');
-const { resetReglagesCache } = require('../../src/routes/tours/analyse-gps');
+const { resetReglagesCache, invaliderCacheArrets } = require('../../src/routes/tours/analyse-gps');
+const { enregistrerArretsGps } = require('../../src/routes/tours/completion-effects');
+const { sendPushToRoles } = require('../../src/services/push-notifications');
 
 const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
 const managerToken = jwt.sign({ id: 2, username: 'manager', role: 'MANAGER' }, JWT_SECRET, { expiresIn: '1h' });
@@ -73,9 +82,14 @@ beforeEach(() => {
   mockQuery.mockReset();
   mockClient.query.mockReset().mockResolvedValue({ rows: [] });
   mockClient.release.mockReset();
+  mockMessagerieRoles.mockClear();
+  sendPushToRoles.mockClear();
   // Les réglages sont mis en cache 60 s : sans purge, le premier test imposerait
   // ses seuils à tous les suivants.
   resetReglagesCache();
+  // Idem pour le cache d'affichage des arrêts (correctif 27/08, 60 s aussi) :
+  // sans purge, la réponse d'un test serait resservie au suivant.
+  invaliderCacheArrets();
 });
 
 const LAT = 49.4231;
@@ -314,6 +328,126 @@ describe('Réglages lus dans settings, jamais en dur', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CLÔTURE — c'est là, et seulement là, que les arrêts se figent
+// ═══════════════════════════════════════════════════════════════════════════
+describe('Clôture d’une tournée : les arrêts sont figés en base', () => {
+  test('les arrêts détectés sont enregistrés et le nombre est rendu', async () => {
+    mockDb([
+      [/SELECT id, vehicle_id, is_demo FROM tours/, [{ id: 8, vehicle_id: 3, is_demo: false }]],
+      [/FROM gps_positions/, TRACE_BORNE],
+      ...CONTEXTE,
+    ]);
+    await expect(enregistrerArretsGps(8)).resolves.toBe(1);
+    const sql = mockClient.query.mock.calls.map(([s]) => String(s));
+    expect(sql.some((s) => /INSERT INTO tour_gps_stops/.test(s))).toBe(true);
+    // À la clôture, la ligne dit d'où elle vient : « cloture », pas « recalcul ».
+    const insert = mockClient.query.mock.calls.find(([s]) => /INSERT INTO tour_gps_stops/.test(String(s)));
+    expect(insert[1][insert[1].length - 1]).toBe('cloture');
+  });
+
+  test('un échec d’analyse ne fait JAMAIS échouer la clôture (dont dépendent tonnage et stock)', async () => {
+    // Table absente sur une base non migrée : l'écriture rejette.
+    mockDb([
+      [/SELECT id, vehicle_id, is_demo FROM tours/, [{ id: 8, vehicle_id: 3, is_demo: false }]],
+      [/FROM gps_positions/, TRACE_BORNE],
+      ...CONTEXTE,
+    ]);
+    mockClient.query.mockImplementation((sql) => (
+      /tour_gps_stops/.test(String(sql))
+        ? Promise.reject(Object.assign(new Error('relation "tour_gps_stops" does not exist'), { code: '42P01' }))
+        : Promise.resolve({ rows: [] })
+    ));
+    await expect(enregistrerArretsGps(8)).resolves.toBe(0);
+  });
+
+  test('une tournée illisible dégrade sur 0, sans rejeter', async () => {
+    mockDb([[/SELECT id, vehicle_id/, []]]);
+    await expect(enregistrerArretsGps(4242)).resolves.toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANOMALIES DE LA VÉRIFICATION DU CAMION — elles remontent comme un incident
+// ═══════════════════════════════════════════════════════════════════════════
+describe('POST /api/tours/:id/checklist-public — remontée des anomalies', () => {
+  // Jeton chauffeur : l'identité de la session est le VÉHICULE (« 1 URL = 1
+  // véhicule »), pas un compte nominatif.
+  const driverToken = jwt.sign(
+    { id: 5, username: 'driver_3', role: 'COLLABORATEUR', vehicle_id: 3 }, JWT_SECRET, { expiresIn: '1h' }
+  );
+
+  const CHECKLIST_DB = (demo = false) => ([
+    [/FROM vehicle_checklists\s+WHERE vehicle_id/, []],
+    [/INSERT INTO vehicle_checklists/, []],
+    [/SELECT is_demo FROM tours/, [{ is_demo: demo }]],
+    [/SELECT registration, name FROM vehicles/, [{ registration: 'AB-123-CD', name: 'Renault Master' }]],
+    [/FROM messages_prevention/, []],
+  ]);
+
+  const poster = (corps, token = driverToken) => request(app)
+    .post('/api/tours/8/checklist-public').set('Authorization', `Bearer ${token}`).send(corps);
+
+  const CONFORME = [{ id: 'feux', libelle: 'Feux', ok: true }, { id: 'pneus', libelle: 'Pneus', ok: true }];
+
+  test('un point non validé alerte les gestionnaires sur LES DEUX canaux', async () => {
+    mockDb(CHECKLIST_DB());
+    const r = await poster({
+      vehicle_id: 3, exterior_ok: true, fuel_level: '3/4', km_start: 145200,
+      reponses: [{ id: 'feux', libelle: 'Feux', ok: false }, { id: 'pneus', libelle: 'Pneus', ok: true }],
+      degats: [], notes: 'Feu arrière gauche hors service',
+    });
+    expect(r.status).toBe(200);
+
+    expect(sendPushToRoles).toHaveBeenCalledTimes(1);
+    expect(sendPushToRoles.mock.calls[0][0]).toEqual(['ADMIN', 'MANAGER']);
+    expect(sendPushToRoles.mock.calls[0][1].body).toContain('AB-123-CD');
+
+    expect(mockMessagerieRoles).toHaveBeenCalledTimes(1);
+    const [roles, msg] = mockMessagerieRoles.mock.calls[0];
+    expect(roles).toEqual(['ADMIN', 'MANAGER']);
+    expect(msg.source).toBe('checklist');
+    // Le message doit NOMMER le point refusé : un compteur nu obligerait le
+    // gestionnaire à rouvrir le questionnaire pour savoir quoi faire.
+    expect(msg.texte).toContain('Feux');
+    expect(msg.texte).toContain('Feu arrière gauche hors service');
+  });
+
+  test('un dégât seul suffit, même quand tous les points sont validés', async () => {
+    mockDb(CHECKLIST_DB());
+    const r = await poster({
+      vehicle_id: 3, exterior_ok: true, fuel_level: 'plein', km_start: 1,
+      reponses: CONFORME, degats: [{ vue: 'arriere', x: 0.4, y: 0.6, type: 'choc' }],
+    });
+    expect(r.status).toBe(200);
+    expect(mockMessagerieRoles).toHaveBeenCalledTimes(1);
+    expect(mockMessagerieRoles.mock.calls[0][1].texte).toMatch(/dégât/i);
+  });
+
+  test('camion conforme → PERSONNE n’est dérangé', async () => {
+    mockDb(CHECKLIST_DB());
+    const r = await poster({
+      vehicle_id: 3, exterior_ok: true, fuel_level: '1/2', km_start: 1,
+      reponses: CONFORME, degats: [],
+    });
+    expect(r.status).toBe(200);
+    expect(sendPushToRoles).not.toHaveBeenCalled();
+    expect(mockMessagerieRoles).not.toHaveBeenCalled();
+  });
+
+  test('tournée de DÉMO : un exercice de formation ne réveille personne', async () => {
+    mockDb(CHECKLIST_DB(true));
+    const r = await poster({
+      vehicle_id: 3, exterior_ok: true, fuel_level: '1/2', km_start: 1,
+      reponses: [{ id: 'feux', libelle: 'Feux', ok: false }],
+      degats: [{ vue: 'avant', x: 0.1, y: 0.1, type: 'bris' }],
+    });
+    expect(r.status).toBe(200);
+    expect(sendPushToRoles).not.toHaveBeenCalled();
+    expect(mockMessagerieRoles).not.toHaveBeenCalled();
+  });
+});
+
 describe('Tournée de DÉMONSTRATION', () => {
   test('aucun arrêt analysé : un exercice de formation ne dit rien du terrain', async () => {
     mockDb([
@@ -326,5 +460,71 @@ describe('Tournée de DÉMONSTRATION', () => {
     expect(r.status).toBe(200);
     expect(r.body.arrets).toEqual([]);
     expect(mockQuery.mock.calls.some(([s]) => /FROM gps_positions/.test(String(s)))).toBe(false);
+  });
+});
+
+// ── Cache court de l'affichage (correctif du 27/08) ───────────────────────
+//
+// Le tableau de suivi interroge cet endpoint une fois PAR TOURNÉE ACTIVE,
+// toutes les 30 s, et chaque appel relit `gps_positions` (jusqu'à 20 000
+// lignes) puis recharge le contexte des points. Quatre camions émettant toutes
+// les 10 s, c'est quatre relectures de plusieurs milliers de lignes deux fois
+// par minute sur un DEV1-S — un coût qui croît avec le parc ET avec l'heure.
+describe('cache d’affichage : le suivi n’est plus un N+1', () => {
+  const lecturesGps = () => mockQuery.mock.calls.filter(([s]) => /FROM gps_positions/.test(String(s))).length;
+
+  test('deux appels rapprochés → UNE seule relecture de la trace GPS', async () => {
+    mockDb([
+      [/SELECT id, status FROM tours/, [{ id: 7, status: 'in_progress' }]],
+      [/SELECT id, vehicle_id, is_demo FROM tours/, [{ id: 7, vehicle_id: 3, is_demo: false }]],
+      [/FROM gps_positions/, TRACE_BORNE],
+      ...CONTEXTE,
+    ]);
+
+    const a = await request(app).get('/api/tours/7/arrets-gps').set('Authorization', `Bearer ${adminToken}`);
+    const apresPremier = lecturesGps();
+    const b = await request(app).get('/api/tours/7/arrets-gps').set('Authorization', `Bearer ${adminToken}`);
+
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(apresPremier).toBe(1);
+    expect(lecturesGps()).toBe(1);
+    // Et surtout : la réponse servie est la MÊME, pas une version dégradée.
+    expect(b.body).toEqual(a.body);
+  });
+
+  test('une autre tournée n’est jamais servie depuis le cache d’une première', async () => {
+    mockDb([
+      [/SELECT id, status FROM tours/, [{ id: 7, status: 'in_progress' }]],
+      [/SELECT id, vehicle_id, is_demo FROM tours/, [{ id: 7, vehicle_id: 3, is_demo: false }]],
+      [/FROM gps_positions/, TRACE_BORNE],
+      ...CONTEXTE,
+    ]);
+    await request(app).get('/api/tours/7/arrets-gps').set('Authorization', `Bearer ${adminToken}`);
+    await request(app).get('/api/tours/8/arrets-gps').set('Authorization', `Bearer ${adminToken}`);
+    expect(lecturesGps()).toBe(2);
+  });
+
+  test('un état « indisponible » n’est PAS mis en cache : un incident ne se fige pas', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const t = String(sql);
+      if (/SELECT id, status FROM tours/.test(t)) return Promise.resolve({ rows: [{ id: 9, status: 'in_progress' }] });
+      if (/SELECT id, vehicle_id, is_demo FROM tours/.test(t)) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [] });
+    });
+    const a = await request(app).get('/api/tours/9/arrets-gps').set('Authorization', `Bearer ${adminToken}`);
+    expect(a.body.source).toBe('indisponible');
+
+    // La tournée redevient lisible : la réponse suivante doit le refléter tout
+    // de suite, sans attendre l'expiration d'un cache d'échec.
+    mockDb([
+      [/SELECT id, status FROM tours/, [{ id: 9, status: 'in_progress' }]],
+      [/SELECT id, vehicle_id, is_demo FROM tours/, [{ id: 9, vehicle_id: 3, is_demo: false }]],
+      [/FROM gps_positions/, TRACE_BORNE],
+      ...CONTEXTE,
+    ]);
+    const b = await request(app).get('/api/tours/9/arrets-gps').set('Authorization', `Bearer ${adminToken}`);
+    expect(b.body.source).toBe('live');
+    expect(b.body.arrets).toHaveLength(1);
   });
 });

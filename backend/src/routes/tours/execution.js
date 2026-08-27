@@ -7,6 +7,7 @@ const { ensurePlannedPassages } = require('./planned-passage');
 const { preparerProgrammeAuDemarrage } = require('./arrets');
 const { applyCompletionSideEffects } = require('./completion-effects');
 const { sendPushToRoles } = require('../../services/push-notifications');
+const { notifierGestionnaires } = require('./notifier');
 const {
   driverVehicleIdFromToken,
   resolveDriverEmployeeId,
@@ -365,14 +366,24 @@ module.exports = function createExecutionRouter(upload) {
       if (status === 'completed' || status === 'cancelled') {
         const tour = result.rows[0];
         const label = status === 'completed' ? 'terminée' : 'annulée';
+        const detail = tour.total_weight_kg
+          ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
+          : 'Voir le détail de la tournée';
         sendPushToRoles(['ADMIN', 'MANAGER'], {
           title: `Tournée #${req.params.id} ${label}`,
-          body: tour.total_weight_kg
-            ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
-            : 'Voir le détail de la tournée',
+          body: detail,
           tag: `tour-${req.params.id}-${status}`,
           data: { url: '/collections-live', tourId: parseInt(req.params.id, 10) },
         }).catch(() => {});
+        // Doublage dans la messagerie interne (correctif du 27/08) : la fin de
+        // tournée y manquait alors que les incidents et les anomalies de
+        // checklist y arrivaient déjà. Un gestionnaire qui prend la messagerie
+        // pour son canal de notifications ne voyait pas passer la clôture.
+        notifierGestionnaires({
+          texte: `Tournée #${req.params.id} ${label} — ${detail}`,
+          source: 'tournee',
+          lien: '/collections-live',
+        });
       }
 
       res.json(result.rows[0]);
