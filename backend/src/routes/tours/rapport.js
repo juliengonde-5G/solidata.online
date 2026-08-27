@@ -31,6 +31,9 @@ const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
 const { centreDeTri, LIBELLE_MOTIF } = require('./arrets');
+// Répartition du poids pesé entre les points : LA MÊME règle qu'à la clôture
+// (`completion-effects.js`), pour que le rapport ne contredise pas la base.
+const { repartirPoids } = require('./sacs');
 
 /**
  * Journalise la consultation du compte rendu — BEST EFFORT (correctif 27/08).
@@ -231,10 +234,22 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       // `tour_association_point` n'a PAS de colonne skip_reason : le motif de
       // saut d'un point association est consigné dans `notes` par le mobile.
       // On expose donc null plutôt qu'un motif fabriqué.
-      soft(
+      // Repli minimal SANS `nb_sacs` : sur une base non migrée, un compte rendu
+      // doit continuer à imprimer ses points association. Sans ce repli, une
+      // colonne manquante ferait disparaître tout le programme d'une tournée.
+      softAvecRepli(
         `SELECT tap.id, tap.association_point_id AS ref_id, tap.position, tap.status,
                 tap.fill_level, NULL::double precision AS fill_percent,
-                NULL::varchar AS skip_reason, tap.remballe,
+                NULL::varchar AS skip_reason, tap.remballe, tap.nb_sacs,
+                tap.collected_at, tap.arrived_at, tap.notes, tap.planned_passage_time,
+                ap.name, ap.address, ap.ville AS commune, ap.latitude, ap.longitude,
+                NULL::int AS nb_containers
+           FROM tour_association_point tap
+           JOIN association_points ap ON ap.id = tap.association_point_id
+          WHERE tap.tour_id = $1`,
+        `SELECT tap.id, tap.association_point_id AS ref_id, tap.position, tap.status,
+                tap.fill_level, NULL::double precision AS fill_percent,
+                NULL::varchar AS skip_reason, tap.remballe, NULL::int AS nb_sacs,
                 tap.collected_at, tap.arrived_at, tap.notes, tap.planned_passage_time,
                 ap.name, ap.address, ap.ville AS commune, ap.latitude, ap.longitude,
                 NULL::int AS nb_containers
@@ -326,6 +341,16 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         lieu_categorie: estArret ? (p.categorie ?? null) : null,
         duree_prevue_min: estArret ? num(p.duree_min) : null,
         remballe: p.remballe ?? null,
+        // Nombre de sacs déclaré par l'équipage au départ d'une association.
+        // `null` = non déclaré, `0` = déclaré, rien chargé : le compte rendu
+        // doit pouvoir imprimer « — » dans un cas et « 0 sac » dans l'autre.
+        // Toujours `null` sur une borne de rue, qui ne se compte pas en sacs.
+        nb_sacs: p.kind === 'association' ? num(p.nb_sacs) : null,
+        // Poids attribué à ce point — renseigné plus bas, une fois le total
+        // pesé de la tournée connu (§7ter). Déclaré ici pour que la forme de
+        // l'objet ne dépende pas d'un bloc qui peut dégrader.
+        estimated_weight_kg: null,
+        estimated_weight_source: null,
         notes: p.notes ?? null,
       };
     });
@@ -656,6 +681,48 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       else if (p.kind === 'association') p.stop_duration_min = arrondi(dureeParAsso.get(p.ref_id) ?? null);
       else p.stop_duration_min = null;
     }
+
+    // ── 7ter. Poids attribué à chaque point collecté.
+    //
+    // Le camion est pesé au centre, jamais point par point : ce chiffre est une
+    // ESTIMATION, et le rapport le nomme comme telle. Sa qualité dépend
+    // entièrement de la clé employée — d'où la provenance exposée à côté :
+    //   • `prorata_sacs`  : clé OBSERVÉE (poids pesé ÷ total des sacs déclarés) ;
+    //   • `parts_egales`  : repli, avec son motif, quand la déclaration manque
+    //                       ou est incomplète.
+    // La règle est celle de `sacs.repartirPoids`, LA MÊME qui a servi à écrire
+    // `tonnage_history_association` à la clôture : le rapport ne peut donc pas
+    // contredire la base. Recalculée ici, et non relue, parce qu'une tournée
+    // encore en cours n'a rien écrit dans l'historique et doit malgré tout
+    // pouvoir s'imprimer.
+    const collectesAvecPoids = pointsCollecte
+      .filter((p) => p.status === 'collected')
+      .map((p) => ({ point_id: p.id, nb_sacs: p.nb_sacs }));
+    const repartitionPoids = repartirPoids(collectesAvecPoids, kpis.total_weight_kg);
+    const poidsParPointId = new Map(repartitionPoids.parts.map((x) => [x.point_id, x.poids_kg]));
+    for (const p of points) {
+      const kg = poidsParPointId.get(p.id);
+      if (kg === undefined) continue;
+      p.estimated_weight_kg = arrondi(kg);
+      p.estimated_weight_source = repartitionPoids.mode;
+    }
+
+    // Sacs de la tournée : seuls les points ASSOCIATION en déclarent. Sur une
+    // tournée de bornes tout reste `null`, et l'écran n'affiche rien plutôt
+    // qu'un « 0 sac » qui se lirait comme une journée à vide.
+    const sacsDeclares = pointsCollecte
+      .filter((p) => p.kind === 'association' && p.nb_sacs !== null);
+    kpis.nb_sacs_total = sacsDeclares.length > 0
+      ? sacsDeclares.reduce((s, p) => s + p.nb_sacs, 0)
+      : null;
+    kpis.nb_points_avec_sacs = sacsDeclares.length;
+    kpis.nb_points_sans_sacs = repartitionPoids.nb_points_sans_declaration;
+    // Poids moyen d'un sac : le chiffre que le métier attend pour juger une
+    // collecte. `null` — jamais 0 — dès que la clé n'a pas pu s'appliquer ; le
+    // motif dit alors pourquoi, au lieu de laisser croire à des sacs vides.
+    kpis.poids_moyen_par_sac_kg = arrondi(repartitionPoids.poids_par_sac_kg, 2);
+    kpis.repartition_poids_source = repartitionPoids.mode;
+    kpis.repartition_poids_motif = repartitionPoids.motif;
 
     const suiveurs = [
       { id: t.suiveur1_employee_id ?? null, name: t.suiveur1_name ?? null },

@@ -289,6 +289,18 @@ export async function addPendingCollect(data) {
     cavId: data.cavId,
     action,
     fillLevel: action === 'skip' ? null : data.fillLevel,
+    // Pourcentage réel du palier choisi (bornes) et heure d'ARRIVÉE déclarée
+    // (associations). `sendCollect` les envoie tous les deux — mais la file ne
+    // les gardait pas : une collecte rejouée après une coupure repartait sans
+    // eux, et le serveur retombait sur l'échelle 0-5 pour l'un, sur l'heure du
+    // rattrapage pour l'autre. Ils voyagent désormais avec le reste.
+    fillPercent: action === 'skip' ? null : (data.fillPercent ?? null),
+    arriveeAt: data.arriveeAt || null,
+    // Nombre de SACS chargés chez une association (08/2026). `null` = non
+    // déclaré, `0` = déclaré, rien chargé : `??` et non `||`, sinon zéro sac
+    // deviendrait « non déclaré » et le point sortirait de la répartition du
+    // poids. Toujours `null` sur un point sauté — il n'y a rien à compter.
+    nbSacs: action === 'skip' ? null : (data.nbSacs ?? null),
     skipReason: action === 'skip' ? (data.skipReason || null) : null,
     anomaly: data.anomaly || null,
     notes: data.notes || null,

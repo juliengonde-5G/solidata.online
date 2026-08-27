@@ -42,6 +42,9 @@
 
 const pool = require('../config/database');
 const { pointsCollectes, ecrireTonnage } = require('../routes/tours/completion-effects');
+// Même règle de répartition que la clôture : le script ne recalcule rien de son
+// côté, il lit la décision de la source unique (cf. routes/tours/sacs.js).
+const { repartirPoids } = require('../routes/tours/sacs');
 
 /** Analyse des arguments — fonction PURE, testée sans base. */
 function parseArgs(argv) {
@@ -147,12 +150,26 @@ async function main() {
       }
 
       const poids = parseFloat(t.total_weight_kg);
-      const parPoint = Math.round((poids / t.points_collectes) * 100) / 100;
+      // La simulation doit annoncer EXACTEMENT ce que fera `--apply`. Depuis que
+      // le poids se répartit au prorata des sacs déclarés, un décompte « N points
+      // × X kg » serait un mensonge dès qu'une association a chargé plus que sa
+      // voisine : on simulerait 3 × 100 kg pour écrire ensuite 40/200/60. On
+      // interroge donc la MÊME fonction pure que la clôture (`repartirPoids`),
+      // sur les mêmes points — une lecture, aucune écriture.
+      const pointsSimules = await pointsCollectes(t, t.id);
+      const repartition = repartirPoids(pointsSimules, poids);
+      const arrondi = (v) => Math.round(Number(v) * 100) / 100;
+      const detail = repartition.mode === 'prorata_sacs'
+        ? `${repartition.nb_points} point(s), ${repartition.total_sacs} sac(s) `
+          + `→ ${arrondi(repartition.poids_par_sac_kg)} kg par sac (total ${poids} kg)`
+        : `${repartition.nb_points} point(s) × ${arrondi(poids / (repartition.nb_points || 1))} kg `
+          + `(total ${poids} kg) — ${repartition.motif || 'parts égales'}`;
+
       if (!opts.apply) {
         bilan.traitees += 1;
         bilan.lignes += t.points_collectes;
         bilan.kg += poids;
-        console.log(`  + ${etiquette} : ${t.points_collectes} point(s) × ${parPoint} kg (total ${poids} kg)`);
+        console.log(`  + ${etiquette} : ${detail}`);
         continue;
       }
 
@@ -165,7 +182,7 @@ async function main() {
         bilan.traitees += 1;
         bilan.lignes += ecrites;
         bilan.kg += poids;
-        console.log(`  + ${etiquette} : ${ecrites} ligne(s) de tonnage écrite(s) (${parPoint} kg par point)`);
+        console.log(`  + ${etiquette} : ${ecrites} ligne(s) de tonnage écrite(s) — ${detail}`);
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         bilan.erreurs += 1;

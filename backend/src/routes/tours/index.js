@@ -67,6 +67,9 @@ function uploadPhotoOr400(mw) {
 // Fraîcheur de la photo du CAV — seuil paramétrable `collecte.photo_fraicheur_mois`.
 const { getPhotoFraicheurMois, photoRequise } = require('../../utils/cav-photo');
 const { arretsPourMobile, avancerRetourCentre, preparerProgrammeAuDemarrage, centreDeTri, SUITE_MOTIF } = require('./arrets');
+// Sacs collectés chez une association : validation du compteur et dérivation du
+// niveau 0-4. Règle unique, partagée avec la clôture et le compte rendu.
+const { nbSacsValide, niveauDepuisSacs, lireBornesSacs } = require('./sacs');
 
 // Sub-routers
 const crudRouter = require('./crud');
@@ -789,6 +792,34 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
       // `heureArriveeAcceptable`) plutôt que d'inscrire une durée d'arrêt fausse.
       const arriveeClient = heureArriveeAcceptable(req.body.arrivee_at);
 
+      // NOMBRE DE SACS chargés (demande client 08/2026). C'est la seule chose
+      // qu'un équipage puisse réellement compter chez une association : il n'y
+      // a rien à regarder « dedans », et le camion n'est pesé qu'au centre.
+      //
+      // Une valeur illisible est IGNORÉE, jamais refusée en 4xx : la file
+      // hors ligne du mobile purge sur 4xx (`isClientError`), un refus ferait
+      // donc disparaître la collecte entière pour un compteur mal formé. On
+      // garde le passage, on écarte le compteur, et on le journalise.
+      const nbSacs = nbSacsValide(req.body.nb_sacs);
+      if (req.body.nb_sacs !== undefined && req.body.nb_sacs !== null
+          && req.body.nb_sacs !== '' && nbSacs === null) {
+        console.warn(
+          `[TOURS] Nombre de sacs ignoré (tournée ${req.params.id}, point ${req.params.cavId}) : ` +
+          `valeur non exploitable ${JSON.stringify(req.body.nb_sacs)}`
+        );
+      }
+
+      // Le niveau 0-4 n'est plus DEVINÉ par le chauffeur : il est DÉRIVÉ des
+      // sacs, côté serveur, selon des bornes paramétrables. `fill_level` reste
+      // la monnaie de l'apprentissage association (`predictAssociationFillRate`
+      // relit `association_learning_feedback`) — la dériver plutôt que
+      // l'abandonner garde l'historique existant comparable au nouveau.
+      // Sans sacs déclarés, on conserve exactement ce que le client a envoyé :
+      // une application mobile antérieure continue de fonctionner à l'identique.
+      const bornesSacs = await lireBornesSacs();
+      const niveauDerive = niveauDepuisSacs(nbSacs, bornesSacs);
+      const fillLevelEffectif = niveauDerive !== null ? niveauDerive : (fill_level ?? null);
+
       const result = await pool.query(
         `UPDATE tour_association_point SET status = $1::varchar,
          fill_level = $2,
@@ -796,14 +827,20 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
          remballe = $4,
          photo_path = COALESCE($5, photo_path),
          arrived_at = COALESCE(arrived_at, $8::timestamp),
+         nb_sacs = CASE WHEN $1::varchar = 'skipped' THEN NULL ELSE COALESCE($9::int, nb_sacs) END,
          collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $6 AND association_point_id = $7 RETURNING *`,
         [status,
-         status === 'skipped' ? null : fill_level,
+         status === 'skipped' ? null : fillLevelEffectif,
          status === 'skipped' ? (notes || (skip_reason ? `Non collecté : ${skip_reason}` : 'Non collecté')) : (notes || null),
          remballe, photo_path,
          req.params.id, req.params.cavId,
-         arriveeClient]
+         arriveeClient,
+         // COALESCE : un renvoi sans compteur (correction d'une note, rejeu
+         // partiel) n'efface JAMAIS un nombre de sacs déjà déclaré — même
+         // doctrine que `photo_path`. Le zéro, lui, est une déclaration : il
+         // traverse le COALESCE et écrase bien la valeur précédente.
+         nbSacs]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Point association non trouvé dans la tournée' });
       // Durée RÉELLE de l'arrêt, quand les deux bouts sont connus. `null` sans
@@ -817,6 +854,13 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
         ...pt,
         duree_reelle_min: dureeReelleMin,
         duree_prevue_min: pt.duree_prevue_min ?? null,
+        // Provenance du niveau : « sacs » quand il a été calculé du compteur,
+        // « declare » quand il vient encore de l'écran (client antérieur, ou
+        // saisie back-office). L'écran peut ainsi dire d'où sort le chiffre au
+        // lieu de le présenter comme une observation directe.
+        fill_level_source: niveauDerive !== null
+          ? 'sacs'
+          : (pt.fill_level !== null && pt.fill_level !== undefined ? 'declare' : null),
       });
     } else {
       // $1::varchar : même défaut 42P08 que la branche association ci-dessus.

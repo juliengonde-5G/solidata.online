@@ -254,6 +254,10 @@ body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 8.5px; color: #0F1
 h2 { font-size: 8px; text-transform: uppercase; letter-spacing: .6px; color: ${VERT}; font-weight: 800;
      border-bottom: 1px solid #D1DBD4; padding-bottom: 2px; margin: 7px 0 3px; }
 h2:first-child { margin-top: 0; }
+/* Légende logée DANS le titre de section : elle ne coûte aucune hauteur, et la
+   promesse « un rapport, une page » ne se paie pas d'une ligne de plus. */
+h2 .leg { float: right; font-size: 5.8px; font-weight: 600; letter-spacing: 0;
+          text-transform: none; color: #94A3B8; }
 table { width: 100%; border-collapse: collapse; }
 th { font-size: 6.5px; text-transform: uppercase; letter-spacing: .3px; color: #64748B; text-align: left;
      padding: 2px 3px; border-bottom: 1px solid #CBD5E1; font-weight: 700; }
@@ -330,19 +334,59 @@ const SEUIL_DEUX_COLONNES = 22;
 function tableauPoints(points) {
   if (!points || points.length === 0) return '<p class="gris">Aucun point au programme.</p>';
   if (points.length > SEUIL_DEUX_COLONNES) {
-    const milieu = Math.ceil(points.length / 2);
     // Les rangs sont calculés sur la liste ENTIÈRE avant la coupe : la seconde
     // colonne continue la numérotation, elle ne recommence pas à 1.
+    const milieu = Math.ceil(points.length / 2);
     return `<div class="deux-col">${unTableau(points.slice(0, milieu), true)}`
       + `${unTableau(points.slice(milieu), true)}</div>`;
   }
   return unTableau(points, false);
 }
 
+/**
+ * Légende des marques du tableau, destinée au TITRE de la section — et non à
+ * une ligne sous le tableau. Le titre existe déjà : la légende s'y loge sans
+ * coûter un pixel de hauteur, et la page reste une page.
+ *
+ * Vide quand aucune marque n'est imprimée : expliquer un symbole absent
+ * occuperait la place d'une information sans en être une.
+ */
+function legendeMarques(points) {
+  const cles = new Set((points || []).flatMap((p) => marquesPoint(p))
+    .map((m) => (/sacs/.test(m) ? 'sacs' : 'x')));
+  const parts = [
+    cles.has('x') ? '×N = conteneurs' : null,
+    cles.has('sacs') ? 'sacs = remballe déposée' : null,
+  ].filter(Boolean);
+  return parts.length ? `<span class="leg">${esc(parts.join(' · '))}</span>` : '';
+}
+
 /** Libellés d'arrêt GPS destinés au lecteur du rapport, pas au développeur. */
 const TYPE_ARRET_LABELS = {
   cav: 'Conteneur', association: 'Association', centre: 'Centre de tri', inconnu: 'Non identifié',
 };
+
+/**
+ * Marques compactes portées PAR LA CELLULE du point : le nombre de conteneurs
+ * quand il y en a plusieurs, et le dépôt de sacs de remballe.
+ *
+ * Elles ne prennent PAS de colonne supplémentaire — le rapport tient sur une
+ * page, et une colonne de plus se paie sur toutes les lignes, y compris les
+ * quatre-vingts qui n'ont rien à y mettre. Le nom du point est raccourci
+ * d'autant de caractères, si bien que la largeur de la ligne ne bouge pas.
+ *
+ * « ×1 » n'est jamais imprimé : c'est le cas ordinaire, et l'écrire noierait
+ * les points à deux ou trois conteneurs, seuls intéressants ici.
+ */
+function marquesPoint(p) {
+  const m = [];
+  if (Number(p.nb_conteneurs) > 1) m.push(`×${Number(p.nb_conteneurs)}`);
+  // Le nombre de sacs quand il a été compté ; « sacs » tout court quand la
+  // remballe est déclarée sans décompte — dire « 0 sac » serait faux.
+  if (Number.isFinite(Number(p.nb_sacs)) && p.nb_sacs != null) m.push(`${Number(p.nb_sacs)} sacs`);
+  else if (p.remballe) m.push('sacs');
+  return m;
+}
 
 function unTableau(points, dense) {
   const lignes = points.map((p, i) => {
@@ -351,9 +395,13 @@ function unTableau(points, dense) {
     const e = ecartTxt(p.ecart_min);
     const etatCle = p.est_arret ? 'arret' : (p.statut || 'pending');
     const etat = p.est_arret ? (p.motif_libelle || 'Arrêt') : (ETAT_LABELS[p.statut] || p.statut || '—');
+    const marques = marquesPoint(p);
+    const suffixe = marques.join(' ');
+    const budget = Math.max(8, (dense ? 24 : 60) - (suffixe ? suffixe.length + 1 : 0));
     return `<tr>
       <td class="rang">${p.rang ?? i + 1}</td>
-      <td>${esc(court(sansCommune(p.nom, p.commune) || p.nom || '—', dense ? 24 : 60))}${p.commune && !dense ? `<br><span class="gris" style="font-size:6.5px">${esc(p.commune)}</span>` : ''}
+      <td>${esc(court(sansCommune(p.nom, p.commune) || p.nom || '—', budget))}${
+        suffixe ? ` <span class="gris">${esc(suffixe)}</span>` : ''}${p.commune && !dense ? `<br><span class="gris" style="font-size:6.5px">${esc(p.commune)}</span>` : ''}
           ${p.motif_non_collecte ? `<br><span class="moyen" style="font-size:6.5px">${esc(p.motif_non_collecte)}</span>` : ''}</td>
       <td class="num">${prevu ? esc(prevu) : '<span class="gris">—</span>'}</td>
       <td class="num">${reel ? esc(reel) : '<span class="gris">—</span>'}</td>
@@ -433,6 +481,16 @@ export function depuisApi(rep) {
       // Le remplissage est servi en POURCENTAGE (l'échelle 0-5 du chauffeur y a
       // déjà été convertie, `fill_source` disant laquelle des deux a servi).
       remplissage_pct: p.fill_effective_percent ?? null,
+      // Nombre de conteneurs sur le point : deux bornes au même endroit, c'est
+      // deux fois le volume. `null` sur un point association, qui n'en a pas.
+      nb_conteneurs: p.nb_containers ?? null,
+      // Sacs de remballe déposés. Seul le `true` est imprimé : « non » et
+      // « question non posée » ne méritent pas d'encre, et une marque grise
+      // sur les deux se lirait comme une donnée manquante. `nb_sacs` n'existe
+      // que sur les points association, et seulement s'il a été compté —
+      // `null` veut dire « non compté », jamais « zéro sac ».
+      remballe: p.remballe === true,
+      nb_sacs: p.nb_sacs ?? null,
       motif_non_collecte: p.skip_reason_label ?? null,
       motif_libelle: p.motif_label ?? null,
       // Temps réellement passé sur place, mesuré sur la trace GPS. `null` quand
@@ -710,7 +768,7 @@ export function construireRapportHtml(r) {
     <div class="kpis">${kpis}</div>
     <div class="cols${points.length > SEUIL_DEUX_COLONNES ? ' cols-dense' : ''}">
       <div class="col-g">
-        <h2>Détail de la collecte</h2>
+        <h2>Détail de la collecte${legendeMarques(points)}</h2>
         ${tableauPoints(points)}
       </div>
       <div class="col-d">

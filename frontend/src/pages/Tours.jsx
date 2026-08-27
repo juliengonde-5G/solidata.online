@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight, AlertTriangle, Clock } from 'lucide-react';
+import {
+  Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight, AlertTriangle,
+  Clock, ShoppingBag, Boxes, ClipboardCheck,
+} from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, Section, EmptyState, ErrorState } from '../components';
 import CavPicker from '../components/tours/CavPicker';
@@ -8,9 +11,8 @@ import EstimationPanel from '../components/tours/EstimationPanel';
 import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 import { libelleTypeIncident, libelleStatutIncident } from '../utils/incidents';
+import { lienCarteGps } from '../utils/tours';
 import { printRapportTournee } from '../components/tours/pdf-tournee';
-
-const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
 
 // Types d'arrêt GPS. Les valeurs stockées sont techniques (`cav`, `centre`) :
 // elles ne doivent jamais atteindre l'écran telles quelles.
@@ -25,7 +27,21 @@ const ARRET_TYPE_STYLE = {
   centre: 'bg-indigo-100 text-indigo-800',
   inconnu: 'bg-amber-100 text-amber-900',
 };
-const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée' };
+// Motifs de non-collecte, traduits. Le vocabulaire stocké est technique
+// (CHECK de `tour_cav.skip_reason`) et s'affichait tel quel — « cav fermee »,
+// et « skipped » quand aucun motif n'avait été saisi. Même table que
+// `backend/src/routes/tours/rapport.js`, qui imprime les mêmes motifs.
+const MOTIFS_NON_COLLECTE = {
+  cav_fermee: 'Conteneur fermé',
+  bouchee: 'Conteneur bouché',
+  acces_impossible: 'Accès impossible',
+  proprietaire_absent: 'Propriétaire absent',
+  vide: 'Conteneur vide',
+  autre: 'Autre motif',
+};
+// Repli sur la valeur brute plutôt que sur un tiret : un motif inconnu qui
+// s'affiche en clair signale un libellé manquant ici.
+const libelleMotifNonCollecte = (v) => (v ? (MOTIFS_NON_COLLECTE[v] || String(v).replace(/_/g, ' ')) : null);
 
 // Codes de refus 409 forçables à la création (gestionnaire ADMIN/MANAGER,
 // forçage tracé côté serveur dans ai_explanation) — même mécanique que le
@@ -1217,6 +1233,55 @@ function TourDetailPanel({ tour, onClose }) {
   const [pdfEnCours, setPdfEnCours] = useState(false);
   const [pdfErreur, setPdfErreur] = useState(null);
 
+  // ── Questionnaires de collecte (ouverture du matin / fermeture du soir).
+  // La MÊME réponse sert au PDF et à l'écran : elle est donc chargée une fois
+  // et mémorisée. À LA DEMANDE, et jamais à l'ouverture du panneau : ce point
+  // d'accès journalise la consultation (il réunit conducteur nommé et arrêts
+  // géolocalisés) et rassemble une dizaine de tables — payer une trace RGPD et
+  // une seconde de chargement pour une section que personne n'a demandée
+  // serait le prix de rien.
+  const [rapport, setRapport] = useState(null);
+  const [rapportErreur, setRapportErreur] = useState(null);
+  const [rapportChargement, setRapportChargement] = useState(false);
+  const [questionnairesOuverts, setQuestionnairesOuverts] = useState(false);
+  const rapportCache = useRef(null);
+
+  // Le panneau n'est pas démonté d'une tournée à l'autre : sans cette remise à
+  // zéro, la fiche de la tournée suivante afficherait le rapport de la
+  // précédente.
+  useEffect(() => {
+    rapportCache.current = null;
+    setRapport(null);
+    setRapportErreur(null);
+    setQuestionnairesOuverts(false);
+  }, [tour.id]);
+
+  const chargerRapport = useCallback(async () => {
+    if (rapportCache.current) return rapportCache.current;
+    setRapportChargement(true);
+    try {
+      const { data } = await api.get(`/tours/${tour.id}/rapport`);
+      rapportCache.current = data;
+      setRapport(data);
+      return data;
+    } finally {
+      setRapportChargement(false);
+    }
+  }, [tour.id]);
+
+  const basculerQuestionnaires = async () => {
+    const ouvrir = !questionnairesOuverts;
+    setQuestionnairesOuverts(ouvrir);
+    if (!ouvrir || rapportCache.current) return;
+    setRapportErreur(null);
+    try {
+      await chargerRapport();
+    } catch (e) {
+      setRapportErreur(e.response?.data?.error
+        || "Les questionnaires n'ont pas pu être chargés. Réessayez dans un instant.");
+    }
+  };
+
   // ── Arrêts détectés sur la trace GPS.
   // Le programme dit ce qui était prévu, `collected_at` dit à quelle minute le
   // chauffeur a validé. Ni l'un ni l'autre ne dit COMBIEN DE TEMPS le camion est
@@ -1274,8 +1339,7 @@ function TourDetailPanel({ tour, onClose }) {
   const exporterPdf = async () => {
     setPdfEnCours(true); setPdfErreur(null);
     try {
-      const { data } = await api.get(`/tours/${tour.id}/rapport`);
-      printRapportTournee(data);
+      printRapportTournee(await chargerRapport());
     } catch (e) {
       setPdfErreur(e.response?.data?.error || 'Le rapport n’a pas pu être préparé. Réessayez dans un instant.');
     } finally {
@@ -1314,10 +1378,19 @@ function TourDetailPanel({ tour, onClose }) {
         </div>
       )}
 
-      {/* Résumé en 3 colonnes */}
+      {/* Résumé en 3 colonnes.
+          Le statut affichait la valeur BRUTE de la base — « completed »,
+          « in_progress » —, en anglais et sans couleur : le gestionnaire ne
+          savait pas d'un coup d'œil si la tournée était allée à son terme ou
+          avait été annulée. Il passe par le badge partagé (libellés et code
+          couleur de utils/tours.js), le même que dans la liste. */}
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <SummaryTile label="Statut" value={tour.status} />
-        <SummaryTile label="Mode" value={tour.mode} />
+        <SummaryTile label="Statut">
+          <StatusBadge status={tour.status} type="tournee" size="sm" />
+        </SummaryTile>
+        <SummaryTile label="Mode">
+          <StatusBadge status={tour.mode} size="sm" />
+        </SummaryTile>
         <SummaryTile label="Type" value={tour.collection_type === 'association' ? 'Asso' : 'CAV'} />
       </div>
 
@@ -1372,6 +1445,10 @@ function TourDetailPanel({ tour, onClose }) {
                 <tr>
                   <th className="text-left py-1.5 px-2 w-8">#</th>
                   <th className="text-left py-1.5 px-2">Point</th>
+                  {/* Nombre de conteneurs présents sur le point : deux bornes
+                      au même endroit, c'est deux fois le temps de vidage et
+                      deux fois le volume — l'écran le taisait. */}
+                  <th className="text-center py-1.5 px-2" title="Nombre de conteneurs installés sur ce point">Conteneurs</th>
                   <th className="text-right py-1.5 px-2">Prévu</th>
                   <th className="text-right py-1.5 px-2">Réel</th>
                   <th className="text-right py-1.5 px-2">Remplissage</th>
@@ -1388,8 +1465,51 @@ function TourDetailPanel({ tour, onClose }) {
                         liste affichait « 1, 2, 3, 4, 6, 7 » pour six points. */}
                     <td className="py-1.5 px-2 font-mono text-slate-400">{i + 1}</td>
                     <td className="py-1.5 px-2">
-                      <p className="font-medium text-slate-700">{p.cav_name || p.name || p.nom}</p>
-                      {p.commune && <p className="text-[10px] text-slate-400">{p.commune}</p>}
+                      <p className="font-medium text-slate-700 flex items-center gap-1.5">
+                        <span>{p.cav_name || p.name || p.nom}</span>
+                        {/* Remballe : signalée SEULEMENT quand elle est
+                            déclarée. Une icône grisée sur les points sans
+                            remballe se lirait comme une donnée manquante,
+                            alors que la réponse « non » est une réponse. */}
+                        {p.remballe === true && (
+                          <span
+                            title={`Sacs de remballe déposés${p.nb_sacs != null ? ` — ${p.nb_sacs} sac(s)` : ''}`}
+                            aria-label={`Sacs de remballe déposés${p.nb_sacs != null ? ` — ${p.nb_sacs} sac(s)` : ''}`}
+                            className="inline-flex items-center gap-0.5 flex-shrink-0 text-teal-700 bg-teal-50 border border-teal-200 rounded px-1 py-0.5"
+                          >
+                            <ShoppingBag className="w-3 h-3" aria-hidden="true" />
+                            {/* Le nombre de sacs n'existe que sur les points
+                                association, et seulement s'il a été saisi. */}
+                            {p.nb_sacs != null && <span className="text-[9px] font-bold tabular-nums">{p.nb_sacs}</span>}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                        {p.commune && <span>{p.commune}</span>}
+                        {/* Accès au point sur la carte, comme pour les arrêts
+                            GPS : Google Maps, et rien du tout sans coordonnées. */}
+                        {lienCarteGps(p.latitude, p.longitude) && (
+                          <a
+                            href={lienCarteGps(p.latitude, p.longitude)}
+                            target="_blank" rel="noopener noreferrer"
+                            className="text-teal-600 hover:text-teal-700 hover:underline"
+                            title="Ouvrir ce point dans Google Maps"
+                          >
+                            Carte
+                          </a>
+                        )}
+                      </p>
+                    </td>
+                    {/* « — » et jamais 1 : un point association n'a pas de
+                        conteneur, et une valeur inventée fausserait la lecture
+                        du volume collecté. */}
+                    <td className="py-1.5 px-2 text-center tabular-nums">
+                      {p.nb_containers != null ? (
+                        <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+                          <Boxes className="w-3 h-3 text-slate-400" aria-hidden="true" />
+                          {p.nb_containers}
+                        </span>
+                      ) : <span className="text-slate-400">—</span>}
                     </td>
                     {/* « ≈ » quand l'heure vient de la répartition linéaire et
                         non du calcul d'itinéraire : les deux méthodes cohabitent
@@ -1402,9 +1522,11 @@ function TourDetailPanel({ tour, onClose }) {
                     <td className="py-1.5 px-2 text-right text-slate-700">{fmtTime(p.collected_at)}</td>
                     <td className="py-1.5 px-2 text-right">
                       {p.status === 'skipped' ? (
-                        <span className="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase"
-                          title={p.skip_reason ? `Motif : ${p.skip_reason.replace(/_/g, ' ')}` : 'Aucun motif renseigné'}>
-                          {p.skip_reason ? p.skip_reason.replace(/_/g, ' ') : 'skipped'}
+                        /* Le motif s'affichait en valeur brute, et « skipped »
+                           en anglais quand il n'y en avait pas. */
+                        <span className="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold"
+                          title={p.skip_reason ? `Motif : ${libelleMotifNonCollecte(p.skip_reason)}` : 'Aucun motif renseigné'}>
+                          {libelleMotifNonCollecte(p.skip_reason) || 'Non collecté'}
                         </span>
                       ) : p.fill_level != null ? (
                         <span className="font-semibold">{p.fill_level}/5</span>
@@ -1461,6 +1583,50 @@ function TourDetailPanel({ tour, onClose }) {
           </div>
         </div>
       )}
+
+      {/* Questionnaires de collecte — ce que l'équipage a déclaré en ouvrant
+          et en fermant sa journée. Les deux existaient en base sans qu'aucun
+          écran de gestion ne les montre : un camion parti avec un feu cassé
+          produisait la même fiche qu'un camion irréprochable. */}
+      <div className="mb-4 rounded-lg border border-slate-200">
+        <button
+          type="button"
+          onClick={basculerQuestionnaires}
+          className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <ClipboardCheck className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Questionnaires de collecte
+            </span>
+            <span className="text-[10px] text-slate-400 normal-case hidden sm:inline truncate">
+              — ouverture et fermeture de la journée
+            </span>
+          </span>
+          <span className="text-[11px] font-semibold text-teal-700 flex-shrink-0">
+            {questionnairesOuverts ? 'Masquer' : 'Afficher'}
+          </span>
+        </button>
+
+        {questionnairesOuverts && (
+          <div className="px-3 pb-3 space-y-3">
+            {rapportErreur && (
+              <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {rapportErreur}
+              </div>
+            )}
+            {rapportChargement && !rapport && (
+              <p className="text-xs text-slate-400 italic">Chargement des questionnaires…</p>
+            )}
+            {rapport && (
+              <>
+                <QuestionnaireOuverture checklist={rapport.checklist} />
+                <QuestionnaireFermeture fin={rapport.end_of_day} />
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Arrêts détectés sur la trace GPS */}
       <div className="mb-4">
@@ -1523,12 +1689,20 @@ function TourDetailPanel({ tour, onClose }) {
                         </span>
                         <span className="text-slate-700">{a.cav_nom || a.association_nom || ''}</span>
                       </td>
+                      {/* Google Maps (demande client 27/08/2026) : c'est
+                          l'outil que les chauffeurs utilisent déjà pour
+                          naviguer, et le gestionnaire y retrouve la vue
+                          satellite. Le lien est `null` — donc « — » — quand
+                          les coordonnées manquent : au point 0,0 il n'y a
+                          rien à voir. Les FONDS de carte de l'application ne
+                          changent pas. */}
                       <td className="py-1.5 px-2">
-                        {a.latitude != null && a.longitude != null ? (
+                        {lienCarteGps(a.latitude, a.longitude) ? (
                           <a
-                            href={`https://www.openstreetmap.org/?mlat=${a.latitude}&mlon=${a.longitude}#map=18/${a.latitude}/${a.longitude}`}
+                            href={lienCarteGps(a.latitude, a.longitude)}
                             target="_blank" rel="noopener noreferrer"
                             className="text-teal-600 hover:text-teal-700 hover:underline"
+                            title="Ouvrir ce point dans Google Maps"
                           >
                             Voir
                           </a>
@@ -1577,11 +1751,165 @@ function TourDetailPanel({ tour, onClose }) {
   );
 }
 
-function SummaryTile({ label, value }) {
+// ── Questionnaires de collecte ─────────────────────────────────────────────
+//
+// Deux questionnaires encadrent la journée : la vérification du camion au
+// départ, et la déclaration de fin de journée au retour. Chaque bloc DÉGRADE
+// SEUL en nommant son absence : « aucune checklist enregistrée » n'est pas
+// « rien à signaler », et présenter un bloc vide reviendrait à dire le second
+// en montrant le premier.
+
+/** Cadre commun aux deux questionnaires. */
+function BlocQuestionnaire({ titre, heure, auteur, children }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <h4 className="text-[11px] font-bold text-slate-700">{titre}</h4>
+        {heure && (
+          <span className="text-[10px] text-slate-400 flex-shrink-0">
+            {heure}{auteur ? ` · ${auteur}` : ''}
+          </span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Vérification du camion, au matin (`vehicle_checklists`). */
+function QuestionnaireOuverture({ checklist }) {
+  if (!checklist) {
+    return (
+      <BlocQuestionnaire titre="Ouverture — vérification du camion">
+        <p className="text-xs text-slate-500 italic">
+          Aucune checklist du matin enregistrée pour cette tournée.
+        </p>
+      </BlocQuestionnaire>
+    );
+  }
+  const nonValides = checklist.points_non_valides || [];
+  const degats = checklist.degats || [];
+  return (
+    <BlocQuestionnaire
+      titre="Ouverture — vérification du camion"
+      heure={`Terminée à ${fmtTime(checklist.terminee_a || checklist.created_at)}`}
+      auteur={checklist.employee_name}
+    >
+      <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+        <div>
+          <span className="text-slate-500 text-[10px] uppercase">Carburant</span>
+          <p className="font-semibold text-slate-700">{checklist.fuel_level || '—'}</p>
+        </div>
+        <div>
+          <span className="text-slate-500 text-[10px] uppercase">Km au départ</span>
+          <p className="font-semibold text-slate-700">
+            {checklist.km_start != null ? `${Number(checklist.km_start).toLocaleString('fr-FR')} km` : '—'}
+          </p>
+        </div>
+      </div>
+
+      {/* Une checklist d'avant août 2026 ne conserve que son booléen global :
+          dire « aucun défaut » serait affirmer ce qu'on ignore. */}
+      {checklist.detail_disponible !== true ? (
+        <p className="text-xs text-slate-500 italic">
+          Détail du questionnaire non conservé par la version de l'application utilisée ce jour-là —
+          ce n'est pas « rien à signaler ».
+        </p>
+      ) : nonValides.length === 0 ? (
+        <p className="text-xs text-emerald-700">
+          {checklist.points_verifies} point{checklist.points_verifies > 1 ? 's' : ''} vérifié
+          {checklist.points_verifies > 1 ? 's' : ''}, aucun défaut signalé.
+        </p>
+      ) : (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2">
+          <p className="text-xs font-semibold text-amber-800 mb-1">
+            {nonValides.length} point{nonValides.length > 1 ? 's' : ''} NON validé
+            {nonValides.length > 1 ? 's' : ''} sur {checklist.points_verifies}
+          </p>
+          <ul className="text-xs text-amber-800 list-disc list-inside space-y-0.5">
+            {nonValides.map((p, i) => <li key={p.id || i}>{p.libelle || p.id}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {degats.length > 0 && (
+        <p className="text-xs text-red-700 mt-2">
+          <span className="font-semibold">{degats.length} dégât{degats.length > 1 ? 's' : ''} relevé
+          {degats.length > 1 ? 's' : ''}</span>
+          {' : '}
+          {degats.map((d) => `${d.type || 'autre'} (${d.vue || 'vue non précisée'})`).join(', ')}
+        </p>
+      )}
+      {checklist.notes && (
+        <p className="text-xs text-slate-600 mt-2">
+          <span className="text-slate-500">Remarque : </span>{checklist.notes}
+        </p>
+      )}
+    </BlocQuestionnaire>
+  );
+}
+
+// Les six déclarations de fin de journée, dans l'ordre et avec les mots de
+// l'écran chauffeur (mobile/src/pages/EndOfDayChecklist.jsx) : le gestionnaire
+// doit relire ce que l'équipage a réellement coché, pas une reformulation.
+const DECLARATIONS_FIN = [
+  ['chauffeur_non_fume', 'Chauffeur — n’a pas fumé dans le véhicule'],
+  ['chauffeur_pas_objet_personnel', 'Chauffeur — n’a laissé aucun objet personnel'],
+  ['suiveur_non_fume', 'Suiveur — n’a pas fumé dans le véhicule'],
+  ['suiveur_pas_objet_personnel', 'Suiveur — n’a laissé aucun objet personnel'],
+  ['binome_vehicule_vide', 'Binôme — le véhicule est vide'],
+  ['binome_vehicule_ok', 'Binôme — véhicule en bon état, ou défauts déclarés'],
+];
+
+/** Déclaration de fin de journée (`tour_end_of_day_declarations`). */
+function QuestionnaireFermeture({ fin }) {
+  if (!fin) {
+    return (
+      <BlocQuestionnaire titre="Fermeture — déclaration de fin de journée">
+        <p className="text-xs text-slate-500 italic">
+          Aucune déclaration de fin de journée enregistrée pour cette tournée.
+        </p>
+      </BlocQuestionnaire>
+    );
+  }
+  return (
+    <BlocQuestionnaire
+      titre="Fermeture — déclaration de fin de journée"
+      heure={`Déclarée à ${fmtTime(fin.created_at)}`}
+      auteur={fin.employee_name}
+    >
+      <ul className="text-xs space-y-0.5">
+        {DECLARATIONS_FIN.map(([cle, libelle]) => {
+          const coche = fin[cle] === true;
+          return (
+            <li key={cle} className="flex items-start gap-1.5">
+              <span className={coche ? 'text-emerald-600' : 'text-amber-600'} aria-hidden="true">
+                {coche ? '✓' : '✗'}
+              </span>
+              <span className={coche ? 'text-slate-600' : 'text-amber-700 font-medium'}>
+                {libelle}{coche ? '' : ' — non coché'}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {fin.remarques && (
+        <p className="text-xs text-slate-600 mt-2">
+          <span className="text-slate-500">Remarque : </span>{fin.remarques}
+        </p>
+      )}
+    </BlocQuestionnaire>
+  );
+}
+
+/** `children` l'emporte sur `value` : les statuts y logent un badge coloré. */
+function SummaryTile({ label, value, children }) {
   return (
     <div className="bg-slate-50 rounded-lg p-2 text-center">
       <p className="text-[10px] text-slate-500 uppercase">{label}</p>
-      <p className="text-sm font-semibold text-slate-700 mt-0.5">{value || '—'}</p>
+      {children
+        ? <div className="mt-1 flex justify-center">{children}</div>
+        : <p className="text-sm font-semibold text-slate-700 mt-0.5">{value || '—'}</p>}
     </div>
   );
 }

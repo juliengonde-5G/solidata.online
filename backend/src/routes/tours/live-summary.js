@@ -13,6 +13,22 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/**
+ * Exécute la requête riche, et retombe sur une requête minimale quand une
+ * colonne manque (base non encore migrée). Même doctrine que
+ * `routes/tours/rapport.js` (`softAvecRepli`) : un champ ajouté récemment ne
+ * doit jamais emporter tout l'écran de suivi. Si le repli échoue à son tour,
+ * l'erreur remonte — la liste des points, elle, est essentielle.
+ */
+async function requeteAvecRepli(riche, repli, params, bloc) {
+  try {
+    return await pool.query(riche, params);
+  } catch (e) {
+    console.warn(`[TOURS] live-summary — bloc « ${bloc} » en repli minimal (${e.code || '?'}) : ${e.message}`);
+    return pool.query(repli, params);
+  }
+}
+
 // Estime l'horaire prévisionnel de passage à un CAV en répartissant
 // linéairement estimated_duration_min sur le nombre de points.
 function plannedPassageAt(startedAt, estimatedDurationMin, position, nbPoints) {
@@ -54,20 +70,40 @@ router.get('/:id/live-summary', async (req, res) => {
     // tournée (OSRM), sinon on tombera sur une estimation linéaire en aval.
     let points = [];
     if (tour.collection_type === 'association') {
-      const r = await pool.query(`
-        SELECT tap.id, tap.tour_id, tap.association_point_id AS cav_id,
+      // `remballe` (case « J'ai fait de la remballe » du mobile) et `nb_sacs`
+      // ont été ajoutées après coup : on les demande, et on retombe sur la
+      // forme historique plutôt que de priver l'écran de tous ses points sur
+      // une base ancienne.
+      const r = await requeteAvecRepli(
+        `SELECT tap.id, tap.tour_id, tap.association_point_id AS cav_id,
                tap.position, tap.status, tap.fill_level, tap.collected_at,
-               tap.arrived_at, tap.duree_prevue_min,
+               tap.arrived_at, tap.duree_prevue_min, tap.remballe, tap.nb_sacs,
                tap.notes, tap.planned_passage_time,
                ap.name AS cav_name, ap.address, ap.ville AS commune,
                ap.latitude, ap.longitude, NULL::int AS nb_containers
         FROM tour_association_point tap
         JOIN association_points ap ON ap.id = tap.association_point_id
         WHERE tap.tour_id = $1
-        ORDER BY tap.position
-      `, [tourId]);
+        ORDER BY tap.position`,
+        `SELECT tap.id, tap.tour_id, tap.association_point_id AS cav_id,
+               tap.position, tap.status, tap.fill_level, tap.collected_at,
+               tap.arrived_at, tap.duree_prevue_min,
+               NULL::boolean AS remballe, NULL::int AS nb_sacs,
+               tap.notes, tap.planned_passage_time,
+               ap.name AS cav_name, ap.address, ap.ville AS commune,
+               ap.latitude, ap.longitude, NULL::int AS nb_containers
+        FROM tour_association_point tap
+        JOIN association_points ap ON ap.id = tap.association_point_id
+        WHERE tap.tour_id = $1
+        ORDER BY tap.position`,
+        [tourId],
+        'points_association'
+      );
       points = r.rows;
     } else {
+      // `tc.*` porte déjà `remballe` et `skip_reason` quand la base les a :
+      // sur une base ancienne les champs sont simplement absents de la ligne,
+      // et l'objet exposé plus bas les rendra `null` — jamais `false`.
       const r = await pool.query(`
         SELECT tc.*, c.name AS cav_name, c.address, c.commune,
                c.latitude, c.longitude, c.nb_containers
@@ -171,7 +207,21 @@ router.get('/:id/live-summary', async (req, res) => {
         commune: p.commune,
         latitude: p.latitude,
         longitude: p.longitude,
-        nb_containers: p.nb_containers,
+        // Nombre de conteneurs présents SUR CE POINT (référentiel CAV). Un
+        // point association n'en a pas : `null` — et surtout jamais 1, qui
+        // ferait passer une inconnue pour une mesure.
+        nb_containers: p.nb_containers ?? null,
+        // Sacs de remballe déposés sur place par l'équipage. Trois états
+        // distincts : `true` (déclaré), `false` (l'équipage a dit non),
+        // `null` (la question n'a pas été posée — base non migrée). L'écran
+        // ne signale QUE le `true` : une pastille grise sur les deux autres
+        // se lirait comme une donnée manquante.
+        remballe: p.remballe ?? null,
+        // Nombre de sacs déposés, quand l'équipage l'a compté (points
+        // association seulement). `null` = non compté — et non « zéro sac ».
+        nb_sacs: p.nb_sacs ?? null,
+        // Motif de non-collecte, sans quoi l'écran affichait « skipped » brut.
+        skip_reason: p.skip_reason ?? null,
         planned_passage_at: planned,
         planned_source: calcule ? 'calcule' : 'estime',
         delay_minutes: delayMinutes,

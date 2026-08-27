@@ -305,6 +305,12 @@ export async function sendCollect(collect) {
         // l'utilise en priorité pour l'apprentissage. Absent des collectes déjà
         // en file avant cette version → le serveur retombe sur fill_level.
         fill_percent: collect.fillPercent ?? null,
+        // Points ASSOCIATION : nombre de sacs chargés, compté au déchargement.
+        // C'est LUI qui donne au serveur sa clé de répartition du poids pesé —
+        // et dont il dérive le niveau 0-5, que le chauffeur devait auparavant
+        // deviner. `??` : zéro sac est une déclaration, pas une absence.
+        // Absent sur une borne de rue — le serveur l'ignore.
+        nb_sacs: collect.nbSacs ?? null,
         qr_scanned: !!collect.qrScanned,
         remballe: !!collect.remballe,
         notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
@@ -364,6 +370,11 @@ export async function sendCollectWithPhoto(collect, photoFile) {
   fd.append('status', 'collected');
   fd.append('fill_level', String(collect.fillLevel));
   if (collect.fillPercent != null) fd.append('fill_percent', String(collect.fillPercent));
+  // Même champ que la voie JSON (voir sendCollect). Posé seulement s'il est
+  // déclaré : en multipart tout devient chaîne, et un `null` sérialisé
+  // arriverait au serveur comme la chaîne « null », donc comme une saisie
+  // illisible qu'il écarterait en la journalisant pour rien.
+  if (collect.nbSacs != null) fd.append('nb_sacs', String(collect.nbSacs));
   fd.append('qr_scanned', String(!!collect.qrScanned));
   fd.append('remballe', String(!!collect.remballe));
   fd.append('notes', collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''));

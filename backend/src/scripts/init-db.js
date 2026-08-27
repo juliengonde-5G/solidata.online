@@ -5059,6 +5059,48 @@ async function initDatabase() {
       ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS photo_path VARCHAR(500);
     `);
 
+    // Nombre de SACS chargés chez l'association (demande client, 08/2026).
+    //
+    // Le camion est pesé au centre de tri, jamais point par point : la clôture
+    // répartissait donc le poids de la tournée à PARTS ÉGALES entre les points
+    // collectés, faute de mieux. Sur une tournée qui ramasse deux sacs chez
+    // l'une et quarante chez l'autre, cette moyenne écrivait dans
+    // `tonnage_history_association` deux chiffres également faux — et c'est cet
+    // historique que relisent la carte des associations et la prédiction de
+    // remplissage. Le nombre de sacs, lui, se compte en déchargeant : il donne
+    // une clé de répartition observée (poids d'un sac = poids pesé ÷ total des
+    // sacs de la journée) et sert à DÉRIVER le niveau 0-4 que le chauffeur
+    // devait jusqu'ici deviner.
+    //
+    // NULLABLE PAR CONCEPTION : `NULL` = « non déclaré » (tournée antérieure,
+    // application mobile pas à jour, point coché depuis le back-office) et `0`
+    // = « déclaré, rien chargé ». Les deux ne se confondent JAMAIS — un défaut
+    // à 0 ferait entrer dans le prorata des points dont on ne sait rien, et
+    // leur attribuerait zéro kilo alors qu'ils ont bien été collectés.
+    await client.query(`
+      ALTER TABLE tour_association_point ADD COLUMN IF NOT EXISTS nb_sacs INTEGER;
+    `);
+    // Contrainte RECONSTRUITE à chaque passage (pattern des motifs d'arrêt
+    // technique) : élargir le plafond doit se faire ici, sans intervention
+    // manuelle en base. Le plafond ne rejette qu'une saisie manifestement
+    // erronée — un chargement réel n'atteint jamais ces valeurs.
+    await client.query(`
+      DO $$
+      DECLARE nom text;
+      BEGIN
+        SELECT conname INTO nom FROM pg_constraint
+         WHERE conrelid = 'tour_association_point'::regclass
+           AND contype = 'c'
+           AND pg_get_constraintdef(oid) LIKE '%nb_sacs%';
+        IF nom IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE tour_association_point DROP CONSTRAINT %I', nom);
+        END IF;
+        ALTER TABLE tour_association_point
+          ADD CONSTRAINT tour_association_point_nb_sacs_check
+          CHECK (nb_sacs IS NULL OR (nb_sacs >= 0 AND nb_sacs <= 5000));
+      END $$;
+    `);
+
     // ──────────────────────────────────────────────────────────────
     // Horaires d'accessibilité, durée d'arrêt et demandes de collecte
     // (cahier des charges du 26/08/2026, RG-A / RG-B / RG-C).
@@ -8064,6 +8106,14 @@ async function initDatabase() {
       // ne protège plus rien. La valeur est modifiable à l'écran, mais le job
       // de purge la BORNE à 90 j : on ne peut pas l'allonger par mégarde.
       ['collecte.arrets_retention_jours', '90', 'collecte'],
+      // Bornes de conversion « nombre de sacs collectés → niveau 0-4 » chez une
+      // association (08/2026). Seuils d'ENTRÉE dans chaque niveau : 0 sac = 0,
+      // à partir de 1 sac niveau 1, de 6 niveau 2, de 16 niveau 3, de 31
+      // niveau 4. Le volume d'un sac varie d'une structure à l'autre : ces
+      // valeurs sont un point de départ que l'exploitation ajuste ici, sans
+      // toucher au code (`routes/tours/sacs.js` en est le seul lecteur, et
+      // conserve ces mêmes défauts en repli si le réglage devient illisible).
+      ['collecte.assoc_sacs_niveaux', '[1,6,16,31]', 'collecte'],
       ['exutoires.recurrence_horizon_jours', '30', 'exutoires'], // horizon de génération des occurrences
     ];
     let reglagesCrees0826 = 0;

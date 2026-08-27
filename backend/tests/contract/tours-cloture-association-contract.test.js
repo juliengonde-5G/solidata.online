@@ -35,8 +35,16 @@ const indexDe = (motif) => trace().findIndex((q) => motif.test(q.sql));
 function base({ collectes = [1, 2, 3], niveaux = [] } = {}) {
   mockQuery.mockImplementation((sql) => {
     const s = String(sql).replace(/\s+/g, ' ');
-    if (/SELECT association_point_id AS point_id FROM tour_association_point/.test(s)) {
-      return Promise.resolve({ rows: collectes.map((id) => ({ point_id: id })) });
+    // La liste de colonnes s'est enrichie (`nb_sacs`, 08/2026) : on reconnaît la
+    // requête à ce qu'elle FAIT — remonter les points collectés — et non à sa
+    // rédaction exacte, qui n'est pas ce que ce fichier teste.
+    if (/association_point_id AS point_id.*FROM tour_association_point/.test(s)) {
+      // `nb_sacs: null` = aucun compteur déclaré. C'est bien le cas couvert ici :
+      // les attentes de ce fichier portent sur la répartition à PARTS ÉGALES,
+      // qui reste le comportement quand l'équipage n'a rien compté (tournées
+      // antérieures, application mobile pas à jour). Le prorata des sacs a ses
+      // propres tests (tests/unit/tours-tonnage-sacs.test.js).
+      return Promise.resolve({ rows: collectes.map((id) => ({ point_id: id, nb_sacs: null })) });
     }
     if (/FROM tour_cav WHERE tour_id = \$1 AND status = 'collected'/.test(s)) {
       return Promise.resolve({ rows: [{ cav_id: 11 }, { cav_id: 12 }] });

@@ -8,6 +8,11 @@ import {
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, Section, DateRangePicker } from '../components';
 import api from '../services/api';
+// Libellés et code couleur des états de tournée : SOURCE UNIQUE partagée avec
+// l'historique et la collecte en direct. Cette page en tenait une copie locale
+// — c'est exactement ainsi que « Terminée » ici et « Completed » là finissent
+// par cohabiter dans la même application.
+import { TOUR_STATUS_META, libelleStatutTournee, classeStatutTournee } from '../utils/tours';
 
 function shiftDays(iso, n) {
   const d = new Date(iso + 'T00:00:00');
@@ -25,14 +30,9 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
-const STATUS_META = {
-  planned: { label: 'Planifiée', color: '#94a3b8', bg: 'bg-slate-100', text: 'text-slate-700' },
-  in_progress: { label: 'En cours', color: '#f59e0b', bg: 'bg-amber-100', text: 'text-amber-700' },
-  paused: { label: 'En pause', color: '#fb923c', bg: 'bg-orange-100', text: 'text-orange-700' },
-  returning: { label: 'Retour', color: '#3b82f6', bg: 'bg-blue-100', text: 'text-blue-700' },
-  completed: { label: 'Terminée', color: '#10b981', bg: 'bg-emerald-100', text: 'text-emerald-700' },
-  cancelled: { label: 'Annulée', color: '#ef4444', bg: 'bg-red-100', text: 'text-red-700' },
-};
+// Couleur de la pastille du donut. Repli gris neutre : un statut inconnu doit
+// rester visible dans la répartition, pas disparaître du graphique.
+const couleurStatut = (statut) => TOUR_STATUS_META[statut]?.puce || '#94A3B8';
 
 function KPI({ label, value, unit, icon: Icon, accent = 'slate' }) {
   const styles = {
@@ -85,12 +85,11 @@ function StatusDonut({ breakdown }) {
           {entries.map(([status, count]) => {
             const fraction = count / total;
             const length = fraction * circumference;
-            const meta = STATUS_META[status] || STATUS_META.planned;
             const circle = (
               <circle
                 key={status}
                 cx="70" cy="70" r={radius} fill="none"
-                stroke={meta.color} strokeWidth="18"
+                stroke={couleurStatut(status)} strokeWidth="18"
                 strokeDasharray={`${length} ${circumference - length}`}
                 strokeDashoffset={-offset}
                 transform="rotate(-90 70 70)"
@@ -104,16 +103,13 @@ function StatusDonut({ breakdown }) {
           </text>
         </svg>
         <div className="flex-1 space-y-1.5 min-w-0">
-          {entries.map(([status, count]) => {
-            const meta = STATUS_META[status] || STATUS_META.planned;
-            return (
-              <div key={status} className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-sm" style={{ background: meta.color }} />
-                <span className="text-xs text-slate-600 flex-1">{meta.label}</span>
-                <span className="text-xs font-semibold text-slate-800 tabular-nums">{count}</span>
-              </div>
-            );
-          })}
+          {entries.map(([status, count]) => (
+            <div key={status} className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: couleurStatut(status) }} />
+              <span className="text-xs text-slate-600 flex-1">{libelleStatutTournee(status)}</span>
+              <span className="text-xs font-semibold text-slate-800 tabular-nums">{count}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -121,10 +117,9 @@ function StatusDonut({ breakdown }) {
 }
 
 function StatusBadge({ status }) {
-  const meta = STATUS_META[status] || STATUS_META.planned;
   return (
-    <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${meta.bg} ${meta.text}`}>
-      {meta.label}
+    <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${classeStatutTournee(status)}`}>
+      {libelleStatutTournee(status)}
     </span>
   );
 }

@@ -31,16 +31,24 @@ import {
  * avec le départ, dans le même envoi rejouable.
  */
 
-// Volumes chargés. Même colonne 0-4 que les bornes (l'apprentissage continue
-// d'être alimenté) — seuls les mots changent, pour dire quelque chose de vrai
-// à quelqu'un qui charge un camion.
-const VOLUMES = [
-  { value: 0, titre: 'Rien',            detail: 'aucune collecte',    store: 0, pct: 0 },
-  { value: 1, titre: 'Quelques sacs',   detail: 'un fond de camion',  store: 1, pct: 25 },
-  { value: 2, titre: 'Un quart',        detail: 'du camion',          store: 2, pct: 50 },
-  { value: 3, titre: 'La moitié',       detail: 'du camion',          store: 3, pct: 75 },
-  { value: 4, titre: 'Beaucoup',        detail: 'camion bien rempli', store: 4, pct: 100 },
-];
+// COMBIEN DE SACS ? (demande client, 08/2026)
+//
+// L'écran demandait auparavant un volume approximatif (« un quart », « la
+// moitié » du camion). Deux problèmes : c'était une estimation à l'œil, et
+// surtout elle ne servait qu'à ranger le passage dans une case 0-4. Le poids
+// de la journée, lui, était ensuite réparti à parts égales entre les
+// associations visitées — deux sacs chez l'une et quarante chez l'autre
+// produisaient la même ligne d'historique.
+//
+// Les sacs, eux, se COMPTENT en déchargeant. Le serveur en tire à la fois la
+// clé de répartition du poids pesé et le niveau 0-4 de l'apprentissage : le
+// chauffeur ne devine plus rien, il rapporte ce qu'il a fait.
+//
+// Raccourcis : ils POSENT la valeur (ils ne s'ajoutent pas). Quatorze sacs se
+// saisissent en « 10 » puis quatre « + » — cinq gestes au lieu de quatorze, ce
+// qui compte avec des gants et un camion à refermer.
+const RACCOURCIS_SACS = [5, 10, 20];
+const MAX_SACS = 5000;
 
 export default function AssociationStop() {
   const navigate = useNavigate();
@@ -50,7 +58,9 @@ export default function AssociationStop() {
   const [point, setPoint] = useState(null);
   const [arrivee, setArrivee] = useState(() => lireArrivee(tourId, pointId));
   const [maintenant, setMaintenant] = useState(() => new Date());
-  const [volume, setVolume] = useState(null);
+  // `null` = pas encore déclaré (le départ est refusé), `0` = déclaré « rien
+  // chargé ». Les deux ne se confondent jamais, jusque dans la base.
+  const [nbSacs, setNbSacs] = useState(null);
   const [notes, setNotes] = useState('');
   const [notesOuvert, setNotesOuvert] = useState(false);
   const [chargement, setChargement] = useState(false);
@@ -113,21 +123,30 @@ export default function AssociationStop() {
     } catch { /* hors ligne — l'arrivée voyagera avec le départ */ }
   };
 
+  /** Pose le compteur en le bornant, et efface l'erreur « à renseigner ». */
+  const poserSacs = (valeur) => {
+    vibrateTap();
+    setNbSacs(Math.max(0, Math.min(MAX_SACS, valeur)));
+    setErreur('');
+  };
+
   const declarerDepart = async () => {
-    if (volume === null) {
-      setErreur('Indiquez ce que vous avez chargé avant de partir.');
+    if (nbSacs === null) {
+      setErreur('Indiquez le nombre de sacs chargés avant de partir (0 si vous n’avez rien chargé).');
       vibrateError();
       return;
     }
     setChargement(true);
     setErreur('');
-    const choisi = VOLUMES.find((v) => v.value === volume);
     const payload = {
       clientId: newClientId(),
       tourId,
       cavId: pointId,
-      fillLevel: choisi.store,
-      fillPercent: choisi.pct,
+      // Le NIVEAU de remplissage n'est plus envoyé d'ici : le serveur le dérive
+      // du nombre de sacs, selon des bornes que le métier peut ajuster. Une
+      // valeur devinée par le chauffeur et une valeur calculée n'auraient pas
+      // la même signification dans l'historique d'apprentissage.
+      nbSacs,
       notes,
       // Pas de QR code chez une association : le dire franchement plutôt que
       // de faire passer le passage pour scanné.
@@ -177,8 +196,12 @@ export default function AssociationStop() {
 
   if (confirme) {
     const lignes = [];
-    const choisi = VOLUMES.find((v) => v.value === volume);
-    if (choisi) lignes.push({ label: 'Chargé', value: `${choisi.titre} — ${choisi.detail}` });
+    if (nbSacs !== null) {
+      lignes.push({
+        label: 'Chargé',
+        value: nbSacs === 0 ? 'Rien collecté' : `${nbSacs} sac${nbSacs > 1 ? 's' : ''}`,
+      });
+    }
     if (surPlace != null) lignes.push({ label: 'Temps sur place', value: formatDuree(surPlace) });
     if (notes) lignes.push({ label: 'Note', value: notes });
     return (
@@ -290,29 +313,101 @@ export default function AssociationStop() {
 
       {arrivee && (
         <>
-          <h2 className="font-bold text-lg mb-2">Qu’avez-vous chargé ?</h2>
-          <div className="grid gap-2 mb-4">
-            {VOLUMES.map((v) => (
+          <h2 className="font-bold text-lg mb-1">Combien de sacs avez-vous chargés ?</h2>
+          <p className="text-sm text-[var(--color-text-secondary)] mb-3">
+            Comptez les sacs en les chargeant. C’est ce nombre qui permet de
+            savoir combien cette association a réellement apporté.
+          </p>
+
+          {/* Compteur : deux grandes cibles et un chiffre lisible à bout de
+              bras. Aucun clavier n'est imposé — on saisit avec des gants, dans
+              un local mal éclairé, souvent une main occupée. */}
+          <div
+            className="mb-3 rounded-2xl px-3 py-3"
+            style={{ background: 'var(--color-surface)', border: '2px solid #E2E8F0' }}
+          >
+            <div className="flex items-center justify-between gap-3">
               <button
-                key={v.value}
                 type="button"
-                onClick={() => { vibrateTap(); setVolume(v.value); setErreur(''); }}
-                aria-pressed={volume === v.value}
-                className="w-full text-left px-4 py-3 rounded-2xl transition-transform active:scale-[0.99]"
+                onClick={() => poserSacs((nbSacs ?? 0) - 1)}
+                disabled={nbSacs === null || nbSacs === 0}
+                aria-label="Un sac de moins"
+                className="font-extrabold active:scale-[0.95] transition-transform disabled:opacity-30"
                 style={{
-                  background: volume === v.value ? 'var(--color-primary)' : 'var(--color-surface)',
-                  color: volume === v.value ? '#fff' : 'var(--color-text)',
-                  border: `2px solid ${volume === v.value ? 'var(--color-primary)' : '#E2E8F0'}`,
-                  minHeight: 64,
+                  minWidth: 88, minHeight: 88, borderRadius: 20, fontSize: 40,
+                  background: '#F1F5F9', border: '2px solid #CBD5E1', color: 'var(--color-text)',
                 }}
               >
-                <span className="font-extrabold text-lg">{v.titre}</span>
-                <span className={volume === v.value ? 'text-white/80 ml-2' : 'text-[var(--color-text-secondary)] ml-2'}>
-                  {v.detail}
-                </span>
+                −
+              </button>
+
+              <div className="text-center flex-1" aria-live="polite">
+                <div
+                  className="font-extrabold leading-none"
+                  style={{ fontSize: 56, color: nbSacs === null ? '#94A3B8' : 'var(--color-primary)' }}
+                >
+                  {nbSacs === null ? '—' : nbSacs}
+                </div>
+                <div className="text-base font-bold text-[var(--color-text-secondary)] mt-1">
+                  {nbSacs === null
+                    ? 'à renseigner'
+                    : (nbSacs > 1 ? 'sacs' : 'sac')}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => poserSacs((nbSacs ?? 0) + 1)}
+                aria-label="Un sac de plus"
+                className="font-extrabold text-white active:scale-[0.95] transition-transform"
+                style={{
+                  minWidth: 88, minHeight: 88, borderRadius: 20, fontSize: 40,
+                  background: 'var(--color-primary)', border: '2px solid var(--color-primary)',
+                }}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {/* Raccourcis : ils POSENT la valeur, on ajuste ensuite au « + ». */}
+          <div className="grid grid-cols-3 gap-2 mb-2">
+            {RACCOURCIS_SACS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => poserSacs(n)}
+                aria-pressed={nbSacs === n}
+                className="font-extrabold text-lg active:scale-[0.97] transition-transform"
+                style={{
+                  minHeight: 60, borderRadius: 16,
+                  background: nbSacs === n ? 'var(--color-primary)' : 'var(--color-surface)',
+                  color: nbSacs === n ? '#fff' : 'var(--color-text)',
+                  border: `2px solid ${nbSacs === n ? 'var(--color-primary)' : '#E2E8F0'}`,
+                }}
+              >
+                {n} sacs
               </button>
             ))}
           </div>
+
+          {/* « Rien » doit rester atteignable d'un seul geste : une association
+              qui n'avait rien à donner est une information, pas une absence de
+              réponse — et elle ne se confond jamais avec « non déclaré ». */}
+          <button
+            type="button"
+            onClick={() => poserSacs(0)}
+            aria-pressed={nbSacs === 0}
+            className="w-full font-extrabold text-lg mb-4 active:scale-[0.99] transition-transform"
+            style={{
+              minHeight: 60, borderRadius: 16,
+              background: nbSacs === 0 ? '#B45309' : 'var(--color-surface)',
+              color: nbSacs === 0 ? '#fff' : 'var(--color-text)',
+              border: `2px solid ${nbSacs === 0 ? '#B45309' : '#E2E8F0'}`,
+            }}
+          >
+            Rien collecté (0 sac)
+          </button>
 
           <button
             type="button"

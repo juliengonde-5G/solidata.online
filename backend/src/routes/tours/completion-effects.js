@@ -27,6 +27,9 @@
 // exécutés que sur la ligne réellement basculée.
 const pool = require('../../config/database');
 const { isDemoTour } = require('../../services/demo-mode');
+// Règle de répartition du poids — source UNIQUE, partagée avec le compte rendu
+// de tournée. Le rapport doit dire exactement ce que la base a enregistré.
+const { repartirPoids } = require('./sacs');
 
 /** Une tournée d'associations collecte des points de dépôt, pas des bornes. */
 const estAssociation = (tour) => !!tour && tour.collection_type === 'association';
@@ -45,11 +48,26 @@ function libelleCollectes(tour, nb) {
  */
 async function pointsCollectes(tour, tourId, db = pool) {
   if (estAssociation(tour)) {
-    const r = await db.query(
-      "SELECT association_point_id AS point_id FROM tour_association_point WHERE tour_id = $1 AND status = 'collected'",
-      [tourId]
-    );
-    return r.rows.filter((p) => p.point_id != null);
+    // `nb_sacs` remonte AVEC le point : c'est la clé de répartition du poids.
+    // Repli sur une base non migrée (colonne absente) : on relit sans elle
+    // plutôt que d'échouer la clôture, qui porte le tonnage, le stock et
+    // l'apprentissage. Les points reviennent alors sans déclaration, et la
+    // répartition retombe d'elle-même à parts égales, en le disant.
+    try {
+      const r = await db.query(
+        "SELECT association_point_id AS point_id, nb_sacs FROM tour_association_point WHERE tour_id = $1 AND status = 'collected'",
+        [tourId]
+      );
+      return r.rows.filter((p) => p.point_id != null);
+    } catch (err) {
+      if (err.code !== '42703') throw err;   // colonne inexistante — tout autre échec doit remonter
+      console.warn(`[TOURS] Colonne nb_sacs absente (tournée ${tourId}) : répartition à parts égales.`);
+      const r = await db.query(
+        "SELECT association_point_id AS point_id FROM tour_association_point WHERE tour_id = $1 AND status = 'collected'",
+        [tourId]
+      );
+      return r.rows.filter((p) => p.point_id != null);
+    }
   }
   const r = await db.query(
     "SELECT cav_id FROM tour_cav WHERE tour_id = $1 AND status = 'collected'",
@@ -60,30 +78,58 @@ async function pointsCollectes(tour, tourId, db = pool) {
 
 /**
  * Répartit le poids total pesé entre les points effectivement collectés.
- * Même règle pour les deux familles : le camion est pesé au centre, jamais
- * point par point — la répartition à parts égales est la seule information
- * dont on dispose, et elle est assumée comme telle.
+ *
+ * Le camion est pesé au centre de tri, jamais point par point. La répartition à
+ * PARTS ÉGALES a longtemps été la seule information disponible, et elle était
+ * assumée comme telle — sur une tournée qui ramasse deux sacs chez l'une et
+ * quarante chez l'autre, elle inscrivait pourtant dans l'historique deux
+ * chiffres également faux, que relisent ensuite la carte des associations et la
+ * prédiction de remplissage.
+ *
+ * Depuis que l'équipage déclare son NOMBRE DE SACS au départ de chaque
+ * association (08/2026), une clé observée existe : le poids d'un sac est le
+ * poids pesé divisé par le total des sacs de la journée. La règle vit dans
+ * `sacs.repartirPoids` — une seule fois, partagée avec le compte rendu — et
+ * retombe d'elle-même à parts égales quand la déclaration manque ou est
+ * incomplète. Ce repli est JOURNALISÉ : une moyenne présentée comme une mesure
+ * serait précisément le défaut qu'on corrige.
+ *
+ * Les tournées de BORNES ne déclarent aucun sac : elles conservent donc
+ * exactement le comportement historique, sans exception à écrire ici.
  *
  * @returns {Promise<number>} nombre de lignes d'historique écrites.
  */
 async function ecrireTonnage(tour, tourId, points, db = pool) {
   if (points.length === 0) return 0;
-  const poidsParPoint = tour.total_weight_kg / points.length;
-  for (const p of points) {
+  const repartition = repartirPoids(points, tour.total_weight_kg);
+
+  if (repartition.mode === 'prorata_sacs') {
+    console.log(
+      `[TOURS] Clôture #${tourId} : poids réparti au prorata des sacs ` +
+      `(${repartition.total_sacs} sac(s), ${Math.round(repartition.poids_par_sac_kg * 10) / 10} kg par sac).`
+    );
+  } else if (repartition.mode === 'parts_egales') {
+    // Jamais silencieux : le motif dit POURQUOI la clé observée n'a pas servi.
+    console.warn(`[TOURS] Clôture #${tourId} : ${repartition.motif}.`);
+  }
+
+  // `mode: 'aucun'` (rien à répartir) laisse `parts` vide : aucune ligne n'est
+  // écrite, plutôt qu'une rangée de zéros dans l'historique d'apprentissage.
+  for (const part of repartition.parts) {
     if (estAssociation(tour)) {
       await db.query(
         `INSERT INTO tonnage_history_association (association_point_id, date, weight_kg, tour_id, source)
          VALUES ($1, $2, $3, $4, 'mobile')`,
-        [p.point_id, tour.date, poidsParPoint, tourId]
+        [part.point_id, tour.date, part.poids_kg, tourId]
       );
     } else {
       await db.query(
         "INSERT INTO tonnage_history (date, cav_id, weight_kg, source) VALUES ($1, $2, $3, 'mobile')",
-        [tour.date, p.point_id, poidsParPoint]
+        [tour.date, part.point_id, part.poids_kg]
       );
     }
   }
-  return points.length;
+  return repartition.parts.length;
 }
 
 /**
