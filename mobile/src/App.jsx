@@ -12,6 +12,7 @@ import DriverMessageBanner from './components/DriverMessageBanner';
 import DemoModeBanner from './components/DemoModeBanner';
 import MessagesButton from './components/MessagesButton';
 import NouveauMessageBanner from './components/messagerie/NouveauMessageBanner';
+import ErreurApplication from './components/ErreurApplication';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
@@ -39,6 +40,11 @@ function App() {
           <DriverMessageBanner />
           <DemoModeBanner />
           <NouveauMessageBanner />
+          {/* Dernier rempart : un écran qui plante au rendu ne doit JAMAIS
+              laisser un chauffeur devant une page blanche (cf. tournées
+              association, 27/08/2026). Les bandeaux restent hors du rempart :
+              « Hors ligne — rien n'est perdu » doit survivre au plantage. */}
+          <ErreurApplication>
           <Routes>
             {/* Auth chauffeur — point d'entrée principal (raccourci écran d'accueil).
                 « 1 URL = 1 véhicule » : voir mobile/src/pages/VehicleLogin.jsx. */}
@@ -65,6 +71,7 @@ function App() {
             <Route path="/messages" element={<Messages />} />
             <Route path="*" element={<Navigate to="/start" />} />
           </Routes>
+          </ErreurApplication>
           <BatteryAlert />
           <MessagesButton />
           <SolidataBot />

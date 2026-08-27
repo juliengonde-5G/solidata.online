@@ -439,6 +439,27 @@ function sanitizeReponses(brut) {
   })).filter((r) => r.id);
 }
 
+/**
+ * Niveau de carburant déclaré au départ, ramené aux SEULES valeurs que la base
+ * accepte (`vehicle_checklists_fuel_level_check` : '1/4', '1/2', '3/4', 'full').
+ *
+ * Le sélecteur mobile envoie « plein » là où la colonne attend « full » : un
+ * chauffeur partant le réservoir PLEIN recevait un 500, sa checklist n'était
+ * jamais enregistrée, et la file hors ligne — qui ne se purge que sur 4xx — la
+ * rejouait indéfiniment. Fonction PURE (exportée pour les tests).
+ *
+ * Une valeur inconnue retombe sur le repli historique '1/2' plutôt que de faire
+ * échouer le départ : le camion part, quitte à ce que le niveau soit imprécis.
+ */
+const NIVEAUX_CARBURANT = ['1/4', '1/2', '3/4', 'full'];
+
+function normaliserNiveauCarburant(brut) {
+  const v = String(brut ?? '').trim().toLowerCase();
+  if (!v) return '1/2';
+  if (v === 'plein' || v === 'full' || v === '4/4' || v === '1') return 'full';
+  return NIVEAUX_CARBURANT.includes(v) ? v : '1/2';
+}
+
 function sanitizeDegats(input) {
   if (!Array.isArray(input)) return null;
   const clean = input.slice(0, 40).map((d) => {
@@ -567,7 +588,7 @@ router.post('/:id/checklist-public', async (req, res) => {
        // Le niveau de carburant vient du chauffeur. Le repli '1/2' n'est
        // conservé que pour les versions de l'application qui ne le demandent
        // pas encore — il ne doit pas devenir la valeur normale.
-       (fuel_level && String(fuel_level).trim()) || '1/2', km_start || 0,
+       normaliserNiveauCarburant(fuel_level), km_start || 0,
        remarque,
        JSON.stringify(degatsPropres),
        JSON.stringify(reponsesPropres)]
@@ -1874,3 +1895,6 @@ module.exports = router;
 // Exporté pour les tests : décider ce qui constitue une anomalie est une RÈGLE,
 // pas un détail d'implémentation — elle doit pouvoir être vérifiée sans base.
 module.exports.resumeAnomaliesChecklist = resumeAnomaliesChecklist;
+// Idem : les valeurs de niveau de carburant acceptées par la base sont une
+// règle, vérifiable sans base.
+module.exports.normaliserNiveauCarburant = normaliserNiveauCarburant;

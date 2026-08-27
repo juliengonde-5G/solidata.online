@@ -13,6 +13,10 @@ import { addGpsPosition } from '../services/db';
 import { libellePoint } from '../services/pointLabel';
 import InfosPointAssociation from '../components/InfosPointAssociation';
 import { infoHorairesJour, texteRdv } from '../services/pointHoraires';
+// `lireArrivee` sert au libellé du bouton chez une association (arrivée déjà
+// déclarée ou non). L'import manquait : sur une tournée ASSOCIATION, le rendu
+// levait « lireArrivee is not defined » et l'écran chauffeur restait BLANC.
+import { lireArrivee } from '../services/arriveeAssociation';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({

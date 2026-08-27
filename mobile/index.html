@@ -8,6 +8,43 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Filet anti-page-blanche AVANT React (27/08/2026). L'ErrorBoundary de
+      // l'application (ErreurApplication.jsx) attrape les plantages d'écran,
+      // mais il n'existe pas encore quand le BUNDLE lui-même ne se charge pas
+      // (cache PWA en transition après un déploiement, réseau coupé au premier
+      // chargement) : le chauffeur restait alors devant une page vide, sans un
+      // mot. Ce script autonome — volontairement sans module, pour survivre à
+      // l'échec du bundle — affiche un message et un bouton « Recharger » si
+      // rien ne s'est affiché au bout de 12 secondes. Il ne fait RIEN quand
+      // l'application démarre normalement (montage < 3 s).
+      (function () {
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.childElementCount > 0) return;
+          root.innerHTML =
+            '<div role="alert" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:24px;background:#fff;color:#0F172A;text-align:center;font-family:system-ui,-apple-system,sans-serif">' +
+            '<span aria-hidden="true" style="font-size:64px;line-height:1">&#9888;&#65039;</span>' +
+            '<p style="font-size:26px;font-weight:800;line-height:1.25;margin:0">L&rsquo;application n&rsquo;a pas r&eacute;ussi &agrave; d&eacute;marrer</p>' +
+            '<p style="font-size:18px;line-height:1.45;margin:0;color:#334155">Appuyez sur le bouton pour recharger.<br>Rien de ce que vous avez enregistr&eacute; n&rsquo;est perdu.</p>' +
+            '<button type="button" id="solidata-recharger" style="width:100%;max-width:420px;min-height:72px;font-size:22px;font-weight:800;color:#fff;background:#0D9488;border:none;border-radius:18px;padding:18px 24px;cursor:pointer">Recharger l&rsquo;application</button>' +
+            '<p style="font-size:15px;line-height:1.4;margin:0;color:#64748B">Si l&rsquo;&eacute;cran revient, pr&eacute;venez le bureau.</p>' +
+            '</div>';
+          document.getElementById('solidata-recharger').addEventListener('click', function () {
+            // Pousser le service worker à vérifier la nouvelle version avant de
+            // recharger — best effort, le rechargement part dans tous les cas.
+            try {
+              if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+                navigator.serviceWorker.getRegistrations().then(function (regs) {
+                  regs.forEach(function (r) { r.update(); });
+                });
+              }
+            } catch (e) { /* sans effet */ }
+            window.location.reload();
+          });
+        }, 12000);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

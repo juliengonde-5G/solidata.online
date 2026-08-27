@@ -263,3 +263,44 @@ describe('resumeAnomaliesChecklist — ce qui mérite de déranger un gestionnai
     expect(a.resume).toContain('…');
   });
 });
+
+describe('normaliserNiveauCarburant — ce que la base accepte réellement', () => {
+  // Même raison qu'au-dessus : tours/index.js monte un routeur.
+  const { normaliserNiveauCarburant } = require('../../src/routes/tours');
+
+  // La colonne `vehicle_checklists.fuel_level` n'accepte QUE ces quatre valeurs
+  // (CHECK `vehicle_checklists_fuel_level_check`).
+  const ACCEPTES = ['1/4', '1/2', '3/4', 'full'];
+
+  test('« plein » (valeur envoyée par le mobile) devient « full »', () => {
+    // Défaut réel : le sélecteur mobile envoie « plein », la base attend
+    // « full ». Un chauffeur partant réservoir PLEIN recevait un 500 et sa
+    // checklist n'était jamais enregistrée.
+    expect(normaliserNiveauCarburant('plein')).toBe('full');
+    expect(normaliserNiveauCarburant('Plein')).toBe('full');
+    expect(normaliserNiveauCarburant(' PLEIN ')).toBe('full');
+  });
+
+  test('les quarts sont conservés tels quels', () => {
+    expect(normaliserNiveauCarburant('1/4')).toBe('1/4');
+    expect(normaliserNiveauCarburant('1/2')).toBe('1/2');
+    expect(normaliserNiveauCarburant('3/4')).toBe('3/4');
+    expect(normaliserNiveauCarburant('full')).toBe('full');
+  });
+
+  test('valeur absente ou inconnue → repli « 1/2 », jamais un échec du départ', () => {
+    expect(normaliserNiveauCarburant(null)).toBe('1/2');
+    expect(normaliserNiveauCarburant(undefined)).toBe('1/2');
+    expect(normaliserNiveauCarburant('')).toBe('1/2');
+    expect(normaliserNiveauCarburant('   ')).toBe('1/2');
+    expect(normaliserNiveauCarburant('réservoir à moitié')).toBe('1/2');
+  });
+
+  test('AUCUNE entrée ne peut produire une valeur refusée par la base', () => {
+    const entrees = ['plein', 'full', '4/4', '1', '1/4', '1/2', '3/4', '', null,
+      undefined, 0, 42, 'xyz', '  Plein  ', {}, []];
+    for (const e of entrees) {
+      expect(ACCEPTES).toContain(normaliserNiveauCarburant(e));
+    }
+  });
+});
