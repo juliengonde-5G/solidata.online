@@ -1,3 +1,5 @@
+import { TOUR_STATUS_META } from '../utils/tours';
+
 const statusMappings = {
   // Candidats (recrutement)
   received: { label: 'Reçu', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
@@ -16,10 +18,16 @@ const statusMappings = {
   closed: { label: 'Clôturée', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
   cancelled: { label: 'Annulée', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 
-  // Tournees
+  // Tournees — les 6 valeurs du CHECK `tours.status`. `paused` et `returning`
+  // manquaient : elles s'affichaient en anglais brut dans un badge gris, alors
+  // que « retour au centre » est justement l'information la plus utile d'une
+  // fin de journée. Libellés et couleurs alignés sur utils/tours.js (source
+  // unique) via typeOverrides.tournee ci-dessous.
   planned: { label: 'Planifiée', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   in_progress: { label: 'En cours', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
   completed: { label: 'Terminée', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  paused: { label: 'En pause', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  returning: { label: 'Retour au centre', color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
 
   // Facturation
   sent: { label: 'Envoyée', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
@@ -96,11 +104,12 @@ const typeOverrides = {
     pending: { label: 'En attente' },
     confirmed: { label: 'Confirmée' },
   },
-  tournee: {
-    planned: { label: 'Planifiée' },
-    in_progress: { label: 'En cours' },
-    completed: { label: 'Terminée' },
-  },
+  // Les libellés des états de tournée viennent de utils/tours.js — SOURCE
+  // UNIQUE partagée avec l'historique, la collecte en direct et le tableau de
+  // bord (« Complétée » à la demande du client, l'écran affichait « Completed »).
+  tournee: Object.fromEntries(
+    Object.entries(TOUR_STATUS_META).map(([cle, meta]) => [cle, { label: meta.label }])
+  ),
 };
 
 const sizeClasses = {

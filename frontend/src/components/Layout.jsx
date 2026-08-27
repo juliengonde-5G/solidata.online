@@ -55,11 +55,21 @@ const NAV_TREE = [
           { label: 'Incidents', path: '/incidents', icon: AlertTriangle, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
           { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN', 'MANAGER'] },
           {
+            // Réglages de la collecte — remontés d'« Administration > Collecte »
+            // (demande client 27/08/2026) : ces écrans servent au quotidien du
+            // responsable de collecte, pas à l'administration du logiciel. Ils
+            // sont ouverts au MANAGER, qui pilote la collecte.
             label: 'Réglages',
             icon: Settings,
             children: [
+              { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Capteurs CAV', path: '/admin-sensors', icon: Radio, roles: ['ADMIN', 'MANAGER'] },
               { label: 'Associations', path: '/admin-associations', icon: Handshake, roles: ['ADMIN', 'MANAGER'] },
               { label: "Lieux d'arrêt", path: '/admin-lieux-techniques', icon: MapPinned, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Véhicules', path: '/vehicles', icon: Car, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+              { label: 'Maintenance', path: '/vehicle-maintenance', icon: Wrench, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
+              { label: 'Moteur prédictif', path: '/admin-predictive', icon: Brain, roles: ['ADMIN', 'MANAGER'] },
+              { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
             ],
           },
           { label: 'Historique des tournées', path: '/tours', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
@@ -299,18 +309,10 @@ const NAV_TREE = [
     label: 'Administration',
     icon: ShieldCheck,
     children: [
-      {
-        label: 'Collecte',
-        icon: Truck,
-        children: [
-          { label: 'Véhicules', path: '/vehicles', icon: Car, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
-          { label: 'Maintenance', path: '/vehicle-maintenance', icon: Wrench, roles: ['ADMIN', 'MANAGER', 'QHSE'] },
-          { label: 'Moteur prédictif', path: '/admin-predictive', icon: Brain, roles: ['ADMIN'] },
-          { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Capteurs CAV', path: '/admin-sensors', icon: Radio, roles: ['ADMIN', 'MANAGER'] },
-          { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN', 'MANAGER'] },
-        ],
-      },
+      // La sous-section « Collecte » a été remontée dans Opérations > Collecte >
+      // Réglages (demande client 27/08/2026) : ces écrans sont des outils de
+      // conduite d'activité, leur place n'était pas dans l'administration du
+      // logiciel. Aucune page n'a été retirée ni renommée.
       {
         label: 'Reporting',
         icon: PieChart,

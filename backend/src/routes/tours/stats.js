@@ -465,7 +465,7 @@ router.get('/predictive/cav-correlations', authorize('ADMIN'), async (req, res) 
 // ══════════════════════════════════════════════════════════════
 
 // GET /api/tours/predictive/ia/synthese — Synthèse hebdomadaire IA
-router.get('/predictive/ia/synthese', authorize('ADMIN'), async (req, res) => {
+router.get('/predictive/ia/synthese', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { analyseHebdomadaire } = require('../../services/predictive-ai');
     const result = await analyseHebdomadaire();
@@ -480,7 +480,7 @@ router.get('/predictive/ia/synthese', authorize('ADMIN'), async (req, res) => {
 });
 
 // GET /api/tours/predictive/ia/ajustements — Recommandations d'ajustement des facteurs
-router.get('/predictive/ia/ajustements', authorize('ADMIN'), async (req, res) => {
+router.get('/predictive/ia/ajustements', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { recommanderAjustements } = require('../../services/predictive-ai');
     const result = await recommanderAjustements();

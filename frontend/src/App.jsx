@@ -299,7 +299,7 @@ function App() {
               <Route path="/admin/permissions" element={<ProtectedRoute roles={['ADMIN']}><AdminPermissions /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
               <Route path="/referentiels" element={<Navigate to="/admin/catalogue" replace />} />
-              <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
+              <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminPredictive /></ProtectedRoute>} />
               <Route path="/admin-alert-thresholds" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAlertThresholds /></ProtectedRoute>} />
               <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN', 'DPO']}><RGPD /></ProtectedRoute>} />
               <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />

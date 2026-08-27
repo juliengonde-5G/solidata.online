@@ -14,6 +14,7 @@ import {
   MessageSquare, Send,
 } from 'lucide-react';
 import TourProgrammePanel from '../components/tours/TourProgrammePanel';
+import { libelleStatutTournee, classeStatutTournee, lienCarteGps } from '../utils/tours';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -57,14 +58,10 @@ const SOURCES_REOPT = {
   estimation: 'estimation — routeur indisponible',
 };
 
-const TOUR_STATUS_META = {
-  planned: { label: 'Planifiée', classe: 'bg-slate-100 text-slate-600' },
-  in_progress: { label: 'En cours', classe: 'bg-emerald-100 text-emerald-700' },
-  paused: { label: 'En pause', classe: 'bg-amber-100 text-amber-700' },
-  returning: { label: '🔄 Retour au centre', classe: 'bg-blue-100 text-blue-700 font-semibold' },
-  completed: { label: 'Terminée', classe: 'bg-slate-100 text-slate-500' },
-  cancelled: { label: 'Annulée', classe: 'bg-red-100 text-red-700' },
-};
+// Les libellés et le code couleur des états de tournée vivent désormais dans
+// utils/tours.js : cette table était locale à cet écran pendant que
+// l'historique affichait « completed » en anglais (même divergence que les
+// incidents avant la 2.39.0).
 
 // Types d'arrêt GPS. Les valeurs stockées sont techniques : elles ne doivent
 // jamais atteindre l'écran telles quelles.
@@ -79,7 +76,7 @@ const ARRET_TYPE_STYLE = {
 };
 
 function statutTournee(status) {
-  return TOUR_STATUS_META[status] || { label: status || '—', classe: 'bg-slate-100 text-slate-600' };
+  return { label: libelleStatutTournee(status), classe: classeStatutTournee(status) };
 }
 
 /**
@@ -1141,9 +1138,9 @@ function ArretsGpsPanel({ bloc }) {
                       <span className="text-slate-700">{a.cav_nom || a.association_nom || ''}</span>
                     </td>
                     <td className="py-1.5 px-2">
-                      {a.latitude != null && a.longitude != null ? (
+                      {lienCarteGps(a.latitude, a.longitude) ? (
                         <a
-                          href={`https://www.openstreetmap.org/?mlat=${a.latitude}&mlon=${a.longitude}#map=18/${a.latitude}/${a.longitude}`}
+                          href={lienCarteGps(a.latitude, a.longitude)}
                           target="_blank" rel="noopener noreferrer"
                           className="text-teal-600 hover:text-teal-700 hover:underline"
                           title={fmtGps(a.latitude, a.longitude) || undefined}

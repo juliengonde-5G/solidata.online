@@ -421,7 +421,7 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // Renvoie les facteurs EFFECTIFS (appris > manuel > défaut) + la source de
 // chacun (item 49). Les tableaux `seasonalFactors`/`dayOfWeekFactors` reflètent
 // donc ce que le moteur applique réellement ; `*Sources` documente l'origine.
-router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
+router.get('/predictive-config', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     await ensureConfigLoaded();
     const resolved = await fillFactors.getResolvedFactors();
@@ -453,7 +453,13 @@ router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
 // Persiste la config dans `settings` (via fill-factors) ET met à jour la copie
 // en mémoire (getters historiques). Les facteurs saisis alimentent la couche
 // MANUELLE ; ils restent supplantés par les facteurs APPRIS là où ils existent.
-router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
+// Ouvert au MANAGER (demande client 27/08/2026) : ces réglages sont des règles
+// MÉTIER de collecte (facteurs saisonniers, jours fériés, vacances, pondération
+// du scoring) — aucun secret, aucune donnée personnelle. Ils vivent dans
+// `settings` via fill-factors, mais cet endpoint n'expose QUE ces clés-là : le
+// routeur /api/settings, lui, reste ADMIN (il porte les clés chiffrées SumUp,
+// Pennylane et badgeuse).
+router.put('/predictive-config', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { seasonalFactors, dayOfWeekFactors, holidays, schoolVacations, scoring } = req.body;
 

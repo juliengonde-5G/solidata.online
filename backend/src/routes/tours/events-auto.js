@@ -440,7 +440,7 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 // ══════════════════════════════════════════
 
 // POST /api/tours/events-auto/discover — Lancer la découverte automatique multi-sources
-router.post('/events-auto/discover', authorize('ADMIN'), async (req, res) => {
+router.post('/events-auto/discover', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { months_ahead, sources } = req.body;
     const lookAheadMonths = months_ahead || 3;

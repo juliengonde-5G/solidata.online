@@ -23,7 +23,10 @@ router.get('/events', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // POST /api/tours/events — Créer un événement local
-router.post('/events', authorize('ADMIN'), [
+// Événements locaux (brocantes, marchés…) : le responsable de collecte les
+// connaît mieux que l'administrateur — ouvert au MANAGER avec la lecture
+// (demande client 27/08/2026).
+router.post('/events', authorize('ADMIN', 'MANAGER'), [
   body('nom').notEmpty().withMessage('Nom requis'),
   body('date_debut').notEmpty().withMessage('Date de début requise'),
   body('date_fin').notEmpty().withMessage('Date de fin requise'),
@@ -43,7 +46,7 @@ router.post('/events', authorize('ADMIN'), [
 });
 
 // PUT /api/tours/events/:id — Modifier un événement
-router.put('/events/:id', authorize('ADMIN'), async (req, res) => {
+router.put('/events/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes, is_active } = req.body;
     const result = await pool.query(
