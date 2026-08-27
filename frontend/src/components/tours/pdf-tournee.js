@@ -1,5 +1,5 @@
 /**
- * Rapport de tournée — PDF d'UNE page A4.
+ * Rapport de tournée — PDF d'UNE à DEUX pages A4.
  *
  * Même mécanisme que les autres exports du projet (window.open + print, aucune
  * librairie ajoutée) : le navigateur fait le PDF, on ne fait que lui donner une
@@ -301,6 +301,22 @@ table.mini td { padding: 0.8px 2px; }
    page — deux lignes au maximum, elle ne doit jamais pousser sur une 2e page. */
 .confid { margin-top: 5px; padding: 3px 5px; border-left: 2px solid #B45309; background: #FFFBEB;
           font-size: 5.9px; line-height: 1.25; color: #78350F; }
+/* ── Pagination : le rapport dispose de DEUX pages A4 (27/08/2026) ─────────
+   Tenir sur une seule page obligeait à resserrer le tableau dès 22 points, à
+   retirer les colonnes « Remplissage » et « Sur place », et à couper les noms
+   de points à 24 caractères. Deux pages rendent cette information au lecteur.
+   Le contenu S'ÉCOULE : une petite tournée tient toujours sur UNE page, on
+   n'en fabrique pas une seconde pour rien.
+   Ces règles évitent les coupures qui rendraient la seconde page illisible :
+   une ligne de tableau n'est jamais coupée en deux, l'en-tête du tableau se
+   répète en haut de la page suivante, et un titre n'est jamais séparé de ce
+   qu'il annonce. */
+thead { display: table-header-group; }
+tr { break-inside: avoid; page-break-inside: avoid; }
+.bloc, .kpi, .identite, .kpis { break-inside: avoid; page-break-inside: avoid; }
+h2 { break-after: avoid; page-break-after: avoid; }
+.bas > div { break-inside: avoid; page-break-inside: avoid; }
+.pied, .confid { break-inside: avoid; page-break-inside: avoid; }
 @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 `;
 
@@ -324,12 +340,22 @@ function ligneKpi(label, valeur, note = null, alerte = false) {
  * extrait —, on la coupe en deux colonnes côte à côte et on resserre les lignes.
  * Le seuil est mesuré, pas deviné : au-delà, le rendu A4 déborde.
  *
- * Il a été RABAISSÉ de 26 à 22 le 26/08/2026, à la mesure : la page porte
+ * Il a été RABAISSÉ de 26 à 22 le 26/08/2026, à la mesure : la page portait
  * désormais une bande de plus (vérification du camion, fin de tournée, arrêts
- * GPS) et une colonne de plus au tableau. Le budget d'une page A4 n'a pas
- * changé, lui — c'est donc le seuil qui devait bouger.
+ * GPS) et une colonne de plus au tableau.
+ *
+ * RELEVÉ À 55 le 27/08/2026, à la mesure lui aussi, quand le rapport a reçu sa
+ * SECONDE page : jusque-là, une tournée de 23 points basculait en colonnes
+ * resserrées et y perdait « Remplissage » et « Sur place ». Le point de
+ * bascule vers une TROISIÈME page a été mesuré à 64 points (charge annexe
+ * maximale : 9 événements, 9 messages, 16 arrêts) ; 55 laisse la marge qui
+ * absorbe des noms plus longs et des motifs de non-collecte.
+ *
+ * Au-delà, les deux colonnes restent le bon choix : une tournée de 74 bornes
+ * remplit deux pages à elle seule, et c'est le DÉTAIL DE LA COLLECTE qui prime
+ * — il ne se tronque jamais.
  */
-const SEUIL_DEUX_COLONNES = 22;
+const SEUIL_DEUX_COLONNES = 55;
 
 function tableauPoints(points) {
   if (!points || points.length === 0) return '<p class="gris">Aucun point au programme.</p>';
@@ -397,7 +423,9 @@ function unTableau(points, dense) {
     const etat = p.est_arret ? (p.motif_libelle || 'Arrêt') : (ETAT_LABELS[p.statut] || p.statut || '—');
     const marques = marquesPoint(p);
     const suffixe = marques.join(' ');
-    const budget = Math.max(8, (dense ? 24 : 60) - (suffixe ? suffixe.length + 1 : 0));
+    // Budgets relevés (24→36 en dense, 60→78) : sur une page unique, le nom
+    // d'un point était coupé alors que c'est lui qui identifie l'adresse.
+    const budget = Math.max(8, (dense ? 36 : 78) - (suffixe ? suffixe.length + 1 : 0));
     return `<tr>
       <td class="rang">${p.rang ?? i + 1}</td>
       <td>${esc(court(sansCommune(p.nom, p.commune) || p.nom || '—', budget))}${
@@ -644,10 +672,11 @@ export function construireRapportHtml(r) {
   // reste entière (c'est le détail de la collecte qui est demandé) ; ici, on
   // borne et on DIT combien manquent, plutôt que de couper en silence.
   //
-  // Deux au lieu de trois quand le tableau des points passe en deux colonnes :
-  // une tournée de soixante-dix bornes remplit déjà la page à elle seule, et
-  // c'est le DÉTAIL DE LA COLLECTE qui prime — il ne se tronque jamais.
-  const MAX_BLOCS = points.length > SEUIL_DEUX_COLONNES ? 2 : 3;
+  // Relevé à 6 (4 sur les très grosses tournées, où le tableau des points
+  // occupe déjà les deux colonnes) : la seconde page a rendu la hauteur qui
+  // manquait. Le principe ne change pas — on borne, et on DIT combien
+  // manquent, plutôt que de couper en silence.
+  const MAX_BLOCS = points.length > SEUIL_DEUX_COLONNES ? 4 : 6;
   const reste = (n, sing, plur) => (n <= 0 ? ''
     : `<p class="note">+ ${n} ${n > 1 ? plur : sing} — voir la fiche de la tournée.</p>`);
 
@@ -655,8 +684,8 @@ export function construireRapportHtml(r) {
     : incidents.slice(0, MAX_BLOCS).map((i) => `<div class="bloc rouge">
         <span class="h">${cell(frHeure(i.heure))}</span>
         <span class="t">${esc(i.type_libelle || i.type || 'Événement')}</span>
-        ${i.description ? `<div>${esc(court(i.description, 150))}</div>` : ''}
-        <div class="gris">Statut : ${esc(i.statut_libelle || i.statut || '—')}${i.resolution ? ` · ${esc(court(i.resolution, 90))}` : ''}</div>
+        ${i.description ? `<div>${esc(court(i.description, 260))}</div>` : ''}
+        <div class="gris">Statut : ${esc(i.statut_libelle || i.statut || '—')}${i.resolution ? ` · ${esc(court(i.resolution, 160))}` : ''}</div>
       </div>`).join('')
       + reste(incidents.length - MAX_BLOCS, 'autre événement déclaré', 'autres événements déclarés');
 
@@ -664,7 +693,7 @@ export function construireRapportHtml(r) {
     : messages.slice(0, MAX_BLOCS).map((m) => `<div class="bloc">
         <span class="h">${cell(frHeure(m.heure))}</span>
         <span class="t">${m.sens === 'chauffeur' ? 'Chauffeur' : 'Gestionnaire'}</span>
-        <div>${esc(court(m.texte || '—', 150))}</div>
+        <div>${esc(court(m.texte || '—', 260))}</div>
         ${m.lu_le ? `<div class="gris">Lu à ${esc(frHeure(m.lu_le) || '—')}</div>` : ''}
       </div>`).join('')
       + reste(messages.length - MAX_BLOCS, 'autre message échangé', 'autres messages échangés');
@@ -734,7 +763,9 @@ export function construireRapportHtml(r) {
   const horsPoints = arrets.filter((a) => a.type === 'centre' || a.type === 'inconnu');
   const surPoints = arrets.length - horsPoints.length;
   const totalMin = arrets.reduce((s, a) => s + (Number(a.duree_min) || 0), 0);
-  const MAX_ARRETS = 6;
+  // Relevé de 6 à 12 : la seconde page laisse la place de détailler les arrêts
+  // hors programme, qui sont justement ceux qu'un gestionnaire vient chercher.
+  const MAX_ARRETS = 12;
 
   let blocArrets;
   if (ag.source === 'indisponible' || arrets.length === 0) {
