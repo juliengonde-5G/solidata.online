@@ -595,10 +595,85 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       nb_incidents_open: incidents.filter((i) => i.status === 'open' || i.status === 'in_progress').length,
     };
 
+    // ── 7bis. Arrêts GPS. Bloc à part entière et donc DÉGRADABLE seul : le
+    // module d'analyse lit une table qui peut manquer sur une base non migrée,
+    // et un compte rendu sans arrêts reste un compte rendu. Le motif remonte
+    // dans la réponse : « aucun relevé GPS » et « analyse indisponible » ne se
+    // lisent pas de la même façon.
+    let arretsGps = { arrets: [], source: 'indisponible', motif: null };
+    try {
+      const { arretsPourAffichage } = require('./analyse-gps');
+      arretsGps = await arretsPourAffichage(tourId, t.status, pool);
+    } catch (e) {
+      console.error(`[TOURS] rapport — bloc « arrets_gps » ignoré (${e.code || '?'}) : ${e.message}`);
+      if (!degraded.includes('arrets_gps')) degraded.push('arrets_gps');
+      arretsGps = { arrets: [], source: 'indisponible', motif: "Analyse des arrêts GPS indisponible" };
+    }
+
+    // Temps mesuré PAR POINT du programme : la durée de l'arrêt rattaché à ce
+    // point. C'est le « temps de vidage » réel, à mettre en regard du niveau de
+    // remplissage relevé. Un point sans arrêt rattaché n'en reçoit AUCUNE — pas
+    // un zéro : le camion s'y est peut-être arrêté moins longtemps que le seuil
+    // de détection, ou n'a pas émis.
+    const dureeParCav = new Map();
+    const dureeParAsso = new Map();
+    for (const a of arretsGps.arrets || []) {
+      const d = num(a.duree_min);
+      if (d === null) continue;
+      if (a.cav_id != null) dureeParCav.set(a.cav_id, (dureeParCav.get(a.cav_id) || 0) + d);
+      if (a.association_point_id != null) {
+        dureeParAsso.set(a.association_point_id, (dureeParAsso.get(a.association_point_id) || 0) + d);
+      }
+    }
+    for (const p of points) {
+      if (p.kind === 'cav') p.stop_duration_min = arrondi(dureeParCav.get(p.ref_id) ?? null);
+      else if (p.kind === 'association') p.stop_duration_min = arrondi(dureeParAsso.get(p.ref_id) ?? null);
+      else p.stop_duration_min = null;
+    }
+
     const suiveurs = [
       { id: t.suiveur1_employee_id ?? null, name: t.suiveur1_name ?? null },
       { id: t.suiveur2_employee_id ?? null, name: t.suiveur2_name ?? null },
     ].filter((s) => s.id != null || s.name != null);
+
+    /**
+     * La vérification du camion, telle qu'elle doit être IMPRIMÉE : l'heure à
+     * laquelle elle s'est terminée, ce qui n'a PAS été validé, les dégâts
+     * relevés, le carburant et le kilométrage.
+     *
+     * `terminee_a` vaut `created_at` : la ligne est écrite au moment où le
+     * chauffeur valide l'écran, il n'existe pas d'autre horodatage. Le champ
+     * est nommé pour ce qu'il dit, et cette équivalence est assumée ici plutôt
+     * que devinée par chaque écran.
+     */
+    function checklist() {
+      const c = checklistRes.rows[0];
+      if (!c) return null;
+      const reponses = Array.isArray(c.reponses) ? c.reponses : [];
+      const degats = Array.isArray(c.degats) ? c.degats : [];
+      return {
+        id: c.id,
+        created_at: c.created_at ?? null,
+        terminee_a: c.created_at ?? null,
+        employee_name: c.employee_name ?? null,
+        exterior_ok: c.exterior_ok ?? null,
+        fuel_level: c.fuel_level ?? null,
+        km_start: num(c.km_start),
+        km_end: num(c.km_end),
+        notes: c.notes ?? null,
+        degats,
+        nb_degats: degats.length,
+        reponses,
+        points_verifies: reponses.length,
+        // Ce qui doit déclencher une action, isolé : le lecteur du rapport n'a
+        // pas à relire onze lignes conformes pour trouver la douzième.
+        points_non_valides: reponses.filter((x) => x && x.ok !== true),
+        // Une checklist enregistrée avant août 2026 ne conserve que son
+        // booléen global : le détail est ABSENT, ce qui n'est pas la même
+        // chose que « rien à signaler ». On le dit.
+        detail_disponible: reponses.length > 0,
+      };
+    }
 
     // Avertissements destinés au lecteur du rapport, pas au développeur : ils
     // disent pourquoi un chiffre pourrait surprendre.
@@ -656,26 +731,19 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       messages,
       gps_track: gpsTrack,
       planned_route: plannedRoute,
-      checklist: checklistRes.rows[0]
-        ? {
-          id: checklistRes.rows[0].id,
-          created_at: checklistRes.rows[0].created_at ?? null,
-          employee_name: checklistRes.rows[0].employee_name ?? null,
-          exterior_ok: checklistRes.rows[0].exterior_ok ?? null,
-          fuel_level: checklistRes.rows[0].fuel_level ?? null,
-          km_start: num(checklistRes.rows[0].km_start),
-          km_end: num(checklistRes.rows[0].km_end),
-          notes: checklistRes.rows[0].notes ?? null,
-          degats: Array.isArray(checklistRes.rows[0].degats) ? checklistRes.rows[0].degats : [],
-          reponses: Array.isArray(checklistRes.rows[0].reponses) ? checklistRes.rows[0].reponses : [],
-          // Une checklist enregistrée avant août 2026 ne conserve que son
-          // booléen global : le détail est ABSENT, ce qui n'est pas la même
-          // chose que « rien à signaler ». On le dit.
-          detail_disponible: Array.isArray(checklistRes.rows[0].reponses)
-            && checklistRes.rows[0].reponses.length > 0,
-        }
-        : null,
+      checklist: checklist(),
       end_of_day: eodRes.rows[0] || null,
+      // Arrêts détectés sur la trace GPS. `source` dit d'où vient la liste :
+      // « table » = figée à la clôture, « live » = recalculée à l'instant (donc
+      // susceptible de bouger), « indisponible » = rien de fiable à montrer.
+      arrets_gps: {
+        arrets: arretsGps.arrets || [],
+        source: arretsGps.source || 'indisponible',
+        motif: arretsGps.motif ?? null,
+        seuil_min: arretsGps.seuil_min ?? null,
+        rayon_m: arretsGps.rayon_m ?? null,
+        nb_inconnus: (arretsGps.arrets || []).filter((a) => a.type === 'inconnu').length,
+      },
       // Blocs dont la lecture a échoué (base non migrée, table absente) : le
       // rapport reste servi, amputé, mais il le DIT.
       degraded,

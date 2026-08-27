@@ -281,8 +281,14 @@ router.get('/:id/etat-declare', authorize('ADMIN', 'MANAGER', 'QHSE'), async (re
       notes: c.notes,
       degats,
       nb_degats: degats.length,
+      // La liste COMPLÈTE des points, et pas seulement ceux qui posent
+      // problème : sans elle, l'écran ne peut pas montrer ce qui A ÉTÉ vérifié.
+      // Onze points conformes est une information — c'est même la seule preuve
+      // que la ronde a bien eu lieu.
+      reponses,
       points_verifies: reponses.length,
       points_non_valides: nonValides,
+      nb_points_non_valides: nonValides.length,
       // `reponses` vide = checklist enregistrée par une version de
       // l'application qui ne transmettait pas encore le détail. On le DIT,
       // plutôt que de laisser croire que rien n'a été vérifié.

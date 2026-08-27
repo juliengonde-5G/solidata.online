@@ -30,9 +30,13 @@ const FACTEURS_CO2 = {
 };
 
 // Helper: generate order reference
-async function generateReference() {
+// `executor` permet d'appeler le générateur DANS une transaction (client pg) :
+// sans cela, deux commandes créées dans la même transaction — cas de la
+// génération des occurrences récurrentes — liraient toutes deux le MAX
+// d'AVANT la transaction et produiraient la même référence (violation UNIQUE).
+async function generateReference(executor = pool) {
   const year = new Date().getFullYear();
-  const result = await pool.query(
+  const result = await executor.query(
     "SELECT MAX(reference) as last FROM commandes_exutoires WHERE reference LIKE $1",
     [`CMD-${year}-%`]
   );

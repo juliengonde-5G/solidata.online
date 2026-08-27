@@ -11,6 +11,20 @@ import { libelleTypeIncident, libelleStatutIncident } from '../utils/incidents';
 import { printRapportTournee } from '../components/tours/pdf-tournee';
 
 const MODE_LABELS = { intelligent: 'IA', standard: 'Standard', manual: 'Manuel' };
+
+// Types d'arrêt GPS. Les valeurs stockées sont techniques (`cav`, `centre`) :
+// elles ne doivent jamais atteindre l'écran telles quelles.
+const ARRET_TYPE_LABELS = {
+  cav: 'Conteneur', association: 'Association', centre: 'Centre de tri', inconnu: 'Non identifié',
+};
+// L'arrêt « non identifié » est mis en évidence : c'est précisément celui qu'on
+// ne s'explique pas, donc celui qui mérite d'être regardé.
+const ARRET_TYPE_STYLE = {
+  cav: 'bg-teal-100 text-teal-800',
+  association: 'bg-orange-100 text-orange-800',
+  centre: 'bg-indigo-100 text-indigo-800',
+  inconnu: 'bg-amber-100 text-amber-900',
+};
 const STATUS_LABELS = { planned: 'Planifiée', in_progress: 'En cours', completed: 'Terminée' };
 
 // Codes de refus 409 forçables à la création (gestionnaire ADMIN/MANAGER,
@@ -1046,6 +1060,61 @@ function TourDetailPanel({ tour, onClose }) {
   // de départ. On ne recompose donc rien ici, on imprime ce qu'il renvoie.
   const [pdfEnCours, setPdfEnCours] = useState(false);
   const [pdfErreur, setPdfErreur] = useState(null);
+
+  // ── Arrêts détectés sur la trace GPS.
+  // Le programme dit ce qui était prévu, `collected_at` dit à quelle minute le
+  // chauffeur a validé. Ni l'un ni l'autre ne dit COMBIEN DE TEMPS le camion est
+  // resté sur place — la seule mesure qui permette d'ajuster le temps de vidage
+  // au lieu de le deviner.
+  const [arretsGps, setArretsGps] = useState(null);
+  const [arretsErreur, setArretsErreur] = useState(null);
+  const [recalculEnCours, setRecalculEnCours] = useState(false);
+
+  const chargerArrets = useCallback(async () => {
+    setArretsErreur(null);
+    try {
+      const { data } = await api.get(`/tours/${tour.id}/arrets-gps`);
+      setArretsGps(data);
+    } catch (e) {
+      setArretsGps(null);
+      setArretsErreur(e.response?.data?.error || "Les arrêts GPS n'ont pas pu être chargés.");
+    }
+  }, [tour.id]);
+
+  useEffect(() => { chargerArrets(); }, [chargerArrets]);
+
+  const recalculerArrets = async () => {
+    setRecalculEnCours(true); setArretsErreur(null);
+    try {
+      await api.post(`/tours/${tour.id}/arrets-gps/recalcul`);
+      await chargerArrets();
+    } catch (e) {
+      setArretsErreur(e.response?.data?.error || "Le recalcul des arrêts n'a pas abouti.");
+    } finally {
+      setRecalculEnCours(false);
+    }
+  };
+
+  // Durée mesurée PAR POINT, pour l'afficher à côté du niveau de remplissage :
+  // c'est le croisement qui rend le « temps de vidage selon le remplissage »
+  // lisible sans quitter la fiche. Un point sans arrêt rattaché reste absent de
+  // la table — il n'a pas une durée de zéro, il n'a pas de durée du tout.
+  const dureeParPoint = useMemo(() => {
+    const m = new Map();
+    for (const a of (arretsGps?.arrets || [])) {
+      const cle = a.cav_id != null ? `c${a.cav_id}` : (a.association_point_id != null ? `a${a.association_point_id}` : null);
+      if (!cle || a.duree_min == null) continue;
+      m.set(cle, (m.get(cle) || 0) + Number(a.duree_min));
+    }
+    return m;
+  }, [arretsGps]);
+
+  const dureeDuPoint = (p) => {
+    const id = p.cav_id ?? p.association_point_id ?? p.ref_id ?? null;
+    if (id == null) return null;
+    return dureeParPoint.get(`c${id}`) ?? dureeParPoint.get(`a${id}`) ?? null;
+  };
+
   const exporterPdf = async () => {
     setPdfEnCours(true); setPdfErreur(null);
     try {
@@ -1150,6 +1219,7 @@ function TourDetailPanel({ tour, onClose }) {
                   <th className="text-right py-1.5 px-2">Prévu</th>
                   <th className="text-right py-1.5 px-2">Réel</th>
                   <th className="text-right py-1.5 px-2">Remplissage</th>
+                  <th className="text-right py-1.5 px-2" title="Temps d'immobilisation mesuré sur la trace GPS">Sur place</th>
                   {colonnePoids && <th className="text-right py-1.5 px-2">Poids</th>}
                   <th className="text-center py-1.5 px-2">⚠</th>
                 </tr>
@@ -1183,6 +1253,15 @@ function TourDetailPanel({ tour, onClose }) {
                       ) : p.fill_level != null ? (
                         <span className="font-semibold">{p.fill_level}/5</span>
                       ) : <span className="text-slate-400">—</span>}
+                    </td>
+                    {/* Durée d'immobilisation mesurée. « — » quand aucun arrêt
+                        n'a été rattaché : le camion s'y est peut-être arrêté
+                        moins longtemps que le seuil de détection, ou n'a pas
+                        émis. Ce n'est pas zéro minute. */}
+                    <td className="py-1.5 px-2 text-right tabular-nums">
+                      {dureeDuPoint(p) != null
+                        ? <span className="font-semibold text-slate-700">{fmtDur(dureeDuPoint(p))}</span>
+                        : <span className="text-slate-400">—</span>}
                     </td>
                     {colonnePoids && (
                       <td className="py-1.5 px-2 text-right tabular-nums">
@@ -1226,6 +1305,97 @@ function TourDetailPanel({ tour, onClose }) {
           </div>
         </div>
       )}
+
+      {/* Arrêts détectés sur la trace GPS */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2 gap-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+            <Navigation className="w-3.5 h-3.5" />
+            Arrêts détectés (GPS)
+            {arretsGps?.seuil_min != null && (
+              <span className="normal-case font-normal text-slate-400">
+                — immobilisations de {arretsGps.seuil_min} min ou plus
+              </span>
+            )}
+          </h3>
+          {tour.status === 'completed' && (
+            <button
+              onClick={recalculerArrets}
+              disabled={recalculEnCours}
+              className="text-[11px] font-semibold px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-wait"
+            >
+              {recalculEnCours ? 'Recalcul…' : 'Recalculer'}
+            </button>
+          )}
+        </div>
+
+        {arretsErreur && (
+          <div className="mb-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+            {arretsErreur}
+          </div>
+        )}
+
+        {!arretsGps ? (
+          !arretsErreur && <p className="text-xs text-slate-400 italic">Chargement des arrêts…</p>
+        ) : arretsGps.arrets.length === 0 ? (
+          /* Motif explicite plutôt qu'une liste vide : « aucun arrêt » et
+             « aucun relevé GPS » ne veulent pas dire la même chose. */
+          <p className="text-xs text-slate-400 italic">
+            {arretsGps.motif || 'Aucun arrêt de cette durée détecté sur la trace GPS.'}
+          </p>
+        ) : (
+          <>
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-xs">
+                <thead className="text-[10px] uppercase text-slate-500 bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left py-1.5 px-2">Début</th>
+                    <th className="text-right py-1.5 px-2">Durée</th>
+                    <th className="text-left py-1.5 px-2">Lieu</th>
+                    <th className="text-left py-1.5 px-2">Carte</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arretsGps.arrets.map((a, i) => (
+                    <tr key={`${a.debut}-${i}`} className="border-b border-slate-100">
+                      <td className="py-1.5 px-2 text-slate-600 whitespace-nowrap">{fmtTime(a.debut)}</td>
+                      <td className="py-1.5 px-2 text-right font-semibold tabular-nums">{fmtDur(a.duree_min)}</td>
+                      <td className="py-1.5 px-2">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase mr-1.5 ${
+                          ARRET_TYPE_STYLE[a.type] || ARRET_TYPE_STYLE.inconnu}`}>
+                          {ARRET_TYPE_LABELS[a.type] || a.type}
+                        </span>
+                        <span className="text-slate-700">{a.cav_nom || a.association_nom || ''}</span>
+                      </td>
+                      <td className="py-1.5 px-2">
+                        {a.latitude != null && a.longitude != null ? (
+                          <a
+                            href={`https://www.openstreetmap.org/?mlat=${a.latitude}&mlon=${a.longitude}#map=18/${a.latitude}/${a.longitude}`}
+                            target="_blank" rel="noopener noreferrer"
+                            className="text-teal-600 hover:text-teal-700 hover:underline"
+                          >
+                            Voir
+                          </a>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              {/* La provenance change ce que le chiffre vaut : une tournée en
+                  cours voit ses arrêts recalculés à chaque ouverture, et le
+                  dernier n'a pas encore de fin. */}
+              {arretsGps.source === 'live'
+                ? 'Tournée non clôturée : arrêts recalculés à l’instant, non figés en base.'
+                : 'Arrêts figés à la clôture de la tournée.'}
+              {arretsGps.arrets.some((a) => a.type === 'inconnu')
+                && ' Les arrêts « non identifiés » ne correspondent à aucun point du programme.'}
+            </p>
+          </>
+        )}
+      </div>
 
       {/* Incidents */}
       {incidents.length > 0 && (

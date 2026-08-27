@@ -150,6 +150,35 @@ async function ecrireFeedbackAssociation(tourId, tour, db = pool) {
 }
 
 /**
+ * Détection et enregistrement des ARRÊTS GPS de la tournée.
+ *
+ * Le module d'analyse est requis PARESSEUSEMENT, ici et non en tête de fichier :
+ * il tire `services/TourService` et le référentiel des lieux, dont la clôture
+ * d'une tournée n'a aucun besoin par ailleurs. Une base non migrée (table
+ * `tour_gps_stops` absente) dégrade donc sur un avertissement, sans jamais
+ * remonter jusqu'à l'appelant.
+ *
+ * @returns {Promise<number>} nombre d'arrêts enregistrés (0 si dégradé).
+ */
+async function enregistrerArretsGps(tourId) {
+  try {
+    const { analyserArretsGps } = require('./analyse-gps');
+    const r = await analyserArretsGps(tourId, { persist: true, source: 'cloture' });
+    if (!r.ok) {
+      console.warn(`[TOURS] Arrêts GPS non enregistrés (tournée ${tourId}) : ${r.motif}`);
+      return 0;
+    }
+    if (r.persistes > 0) {
+      console.log(`[TOURS] Clôture #${tourId} : ${r.persistes} arrêt(s) GPS enregistré(s).`);
+    }
+    return r.persistes;
+  } catch (err) {
+    console.warn(`[TOURS] Analyse des arrêts GPS indisponible (tournée ${tourId}) :`, err.message);
+    return 0;
+  }
+}
+
+/**
  * @param {object} tour  Ligne `tours` APRÈS la bascule en completed
  *                       (date, total_weight_kg, vehicle_id, collection_type).
  * @param {number} tourId
@@ -244,6 +273,16 @@ async function applyCompletionSideEffects(tour, tourId, userId) {
     );
   }
 
+  // 3bis. Arrêts GPS de la journée : détectés et figés MAINTENANT, une fois
+  //    que la trace est complète. C'est le seul moment où elle l'est — un arrêt
+  //    calculé en cours de route n'a pas encore de fin.
+  //
+  //    BEST EFFORT ASSUMÉ : l'analyse lit des relevés GPS et écrit dans une
+  //    table de confort. Un échec ne doit JAMAIS empêcher une clôture, dont
+  //    dépendent le tonnage, le stock et l'apprentissage. Il est journalisé —
+  //    jamais avalé en silence.
+  await enregistrerArretsGps(tourId);
+
   // 4. Apprentissage continu des BORNES : prédit vs observé (fill_level 0-5
   //    saisi chauffeur). Celui des associations a été relevé à l'étape 0.
   if (estAssociation(tour)) return;
@@ -266,6 +305,7 @@ async function applyCompletionSideEffects(tour, tourId, userId) {
 module.exports = {
   applyCompletionSideEffects,
   poidsTotalPese,
+  enregistrerArretsGps,
   // Exportés pour le script de rattrapage et les tests : la règle de
   // répartition doit rester UNE seule, jamais réécrite ailleurs.
   estAssociation,

@@ -458,6 +458,61 @@ function sanitizeDegats(input) {
 }
 
 /**
+ * Notification des gestionnaires par la MESSAGERIE INTERNE, en plus du push.
+ *
+ * `require` PARESSEUX et sous try/catch, délibérément : le service de
+ * messagerie est livré en parallèle par un autre lot. S'il n'est pas encore
+ * déployé, un `require` en tête de fichier ferait échouer TOUT le module des
+ * tournées — donc le parcours chauffeur — pour un canal de confort. Ici, son
+ * absence dégrade sur un avertissement et rien d'autre.
+ *
+ * Jamais bloquant : cette fonction n'attend pas et ne rejette jamais.
+ */
+function notifierGestionnaires({ texte, source, lien = null }) {
+  try {
+    const { envoyerMessageSystemeRoles } = require('../../services/messagerie');
+    if (typeof envoyerMessageSystemeRoles !== 'function') return;
+    Promise.resolve(envoyerMessageSystemeRoles(['ADMIN', 'MANAGER'], { texte, source, lien }))
+      .catch((err) => console.warn('[TOURS] Messagerie interne indisponible :', err.message));
+  } catch (err) {
+    console.warn('[TOURS] Service de messagerie absent, notification non doublée :', err.message);
+  }
+}
+
+/**
+ * Ce que la vérification du camion a relevé d'ANORMAL, sous une forme que le
+ * gestionnaire peut lire d'un coup d'œil. Fonction PURE (exportée pour les
+ * tests) : elle ne décide pas d'alerter, elle dit ce qu'il y a à dire.
+ *
+ * `null` quand tout est conforme — et c'est le seul cas où personne n'est
+ * dérangé. Une checklist sans détail transmis (ancienne version du mobile) n'a
+ * rien à signaler non plus : l'ABSENCE d'information n'est pas une anomalie, et
+ * la présenter comme telle réveillerait un manager pour rien.
+ */
+function resumeAnomaliesChecklist({ reponses, degats, notes }) {
+  const nonValides = (Array.isArray(reponses) ? reponses : []).filter((r) => r && r.ok !== true);
+  const casses = Array.isArray(degats) ? degats : [];
+  const remarque = typeof notes === 'string' && notes.trim() ? notes.trim() : null;
+  if (nonValides.length === 0 && casses.length === 0) return null;
+
+  const morceaux = [];
+  if (nonValides.length > 0) {
+    const libelles = nonValides.map((r) => r.libelle || r.id).filter(Boolean);
+    morceaux.push(`${nonValides.length} point(s) non validé(s)`
+      + (libelles.length > 0 ? ` : ${libelles.slice(0, 4).join(', ')}${libelles.length > 4 ? '…' : ''}` : ''));
+  }
+  if (casses.length > 0) {
+    morceaux.push(`${casses.length} dégât(s) signalé(s)`);
+  }
+  return {
+    nb_points_non_valides: nonValides.length,
+    nb_degats: casses.length,
+    resume: morceaux.join(' · '),
+    remarque,
+  };
+}
+
+/**
  * Message de prévention routière du jour (rotation déterministe sur le
  * quantième de l'année) : tous les chauffeurs voient le même message le même
  * jour, et il change chaque jour sans rien tirer au hasard. `null` si aucun
@@ -515,6 +570,10 @@ router.post('/:id/checklist-public', async (req, res) => {
       }
     }
 
+    const degatsPropres = sanitizeDegats(degats);
+    const reponsesPropres = sanitizeReponses(reponses);
+    const remarque = (notes && String(notes).trim()) ? String(notes).trim() : null;
+
     await pool.query(
       `INSERT INTO vehicle_checklists (tour_id, vehicle_id, employee_id, exterior_ok, fuel_level,
                                        km_start, notes, degats, reponses)
@@ -525,10 +584,52 @@ router.post('/:id/checklist-public', async (req, res) => {
        // conservé que pour les versions de l'application qui ne le demandent
        // pas encore — il ne doit pas devenir la valeur normale.
        (fuel_level && String(fuel_level).trim()) || '1/2', km_start || 0,
-       (notes && String(notes).trim()) ? String(notes).trim() : null,
-       JSON.stringify(sanitizeDegats(degats)),
-       JSON.stringify(sanitizeReponses(reponses))]
+       remarque,
+       JSON.stringify(degatsPropres),
+       JSON.stringify(reponsesPropres)]
     );
+
+    // ── Anomalies du matin : elles remontent au gestionnaire comme un incident.
+    //
+    // Défaut corrigé le 26/08/2026 : un chauffeur pouvait signaler un feu cassé
+    // et trois points non validés sans que personne au bureau n'en soit averti.
+    // L'information était bien EN BASE — il fallait ouvrir la fiche du véhicule
+    // pour la trouver, c'est-à-dire savoir qu'il fallait la chercher. Un camion
+    // qui part avec un défaut de sécurité ne peut pas dépendre de ça.
+    //
+    // Deux canaux, comme pour un incident : la notification push (déjà en place
+    // pour `incident-public`) et la messagerie interne. Aucun des deux ne peut
+    // faire échouer le départ du chauffeur : les deux sont lancés SANS être
+    // attendus, et leurs échecs sont journalisés.
+    const anomalies = resumeAnomaliesChecklist({
+      reponses: reponsesPropres, degats: degatsPropres, notes: remarque,
+    });
+    // JAMAIS en mode démo : un exercice de formation ne réveille personne.
+    const demoChecklist = await isDemoTourId(req.params.id).catch(() => false);
+    if (anomalies && !demoChecklist) {
+      const veh = vehId
+        ? await pool.query('SELECT registration, name FROM vehicles WHERE id = $1', [vehId]).catch(() => null)
+        : null;
+      const nomVehicule = veh && veh.rows[0]
+        ? [veh.rows[0].registration, veh.rows[0].name].filter(Boolean).join(' — ')
+        : `véhicule #${vehId ?? '?'}`;
+      const corps = `${nomVehicule} — ${anomalies.resume}`
+        + (anomalies.remarque ? ` · « ${anomalies.remarque.slice(0, 120)} »` : '');
+
+      sendPushToRoles(['ADMIN', 'MANAGER'], {
+        title: 'Vérification du camion : anomalie signalée',
+        body: corps.slice(0, 160),
+        tag: `checklist-${vehId ?? req.params.id}`,
+        data: { url: '/vehicles', vehicleId: vehId ?? null, tourId: parseInt(req.params.id, 10) || null },
+      }).catch(() => {});
+
+      notifierGestionnaires({
+        texte: `Vérification du camion — ${corps}`,
+        source: 'checklist',
+        lien: '/vehicles',
+      });
+    }
+
     res.json({ ok: true, message_prevention: await messagePreventionDuJour() });
   } catch (err) {
     console.error('[TOURS] Erreur checklist-public:', err);
@@ -1167,6 +1268,20 @@ router.post('/:id/weigh-public', async (req, res) => {
 const INCIDENT_TYPE_MAP = { cav_overflow: 'environment', security: 'other' };
 const INCIDENT_TYPE_ORIG_LABELS = { cav_overflow: 'Débordement', security: 'Sécurité' };
 const VALID_INCIDENT_TYPES = ['cav_problem', 'environment', 'vehicle_breakdown', 'accident', 'other'];
+/**
+ * Libellés destinés à un HUMAIN qui reçoit la notification. Miroir de
+ * `frontend/src/utils/incidents.js` — les deux doivent dire le même mot du même
+ * type ; le repli sur la valeur brute est délibéré (un type sans libellé se
+ * voit, au lieu de disparaître derrière un tiret).
+ */
+const INCIDENT_LIBELLES = {
+  cav_problem: 'CAV dégradée',
+  environment: 'CAV inaccessible / environnement',
+  vehicle_breakdown: 'Panne véhicule',
+  accident: 'Accident',
+  other: 'Autre',
+};
+const libelleTypeIncident = (type) => INCIDENT_LIBELLES[type] || type || 'Incident';
 router.post('/:id/incident-public', upload.single('photo'), async (req, res) => {
   try {
     const { type, description, cav_id, vehicle_id, current_lat, current_lng } = req.body;
@@ -1216,12 +1331,24 @@ router.post('/:id/incident-public', upload.single('photo'), async (req, res) => 
     // vers la page Incidents (cycle de vie / clôture), pas seulement la carte.
     // JAMAIS en mode démo : un exercice de formation ne réveille personne.
     if (!demo) {
+      const libelle = libelleTypeIncident(dbType);
       sendPushToRoles(['ADMIN', 'MANAGER'], {
         title: 'Incident signalé',
         body: `Tournée #${req.params.id} — ${dbType}${finalDescription ? ` : ${finalDescription.slice(0, 80)}` : ''}`,
         tag: `incident-${req.params.id}`,
         data: { url: `/incidents?tourId=${parseInt(req.params.id, 10)}`, tourId: parseInt(req.params.id, 10) },
       }).catch(() => {});
+
+      // Même événement, second canal : la messagerie interne. Le push se perd
+      // quand le téléphone du manager est fermé ; le message, lui, attend. Le
+      // libellé est celui des ÉCRANS (`utils/incidents`), pas la valeur brute
+      // du CHECK SQL : « vehicle_breakdown » n'est pas du français.
+      notifierGestionnaires({
+        texte: `Incident sur la tournée n° ${parseInt(req.params.id, 10)} — ${libelle}`
+          + (finalDescription ? ` : ${finalDescription.slice(0, 200)}` : ''),
+        source: 'incident',
+        lien: `/incidents?tourId=${parseInt(req.params.id, 10)}`,
+      });
     }
 
     res.status(201).json(result.rows[0]);
@@ -1726,6 +1853,11 @@ router.use('/', activeSummaryRouter);
 // Monté AVANT crudRouter, dont « /:id » capterait la route.
 router.use('/', rapportRouter);
 
+// Mount analyse des arrêts GPS (arrêts > seuil, temps de vidage par borne).
+// Monté AVANT crudRouter pour la même raison : « /analyse-gps/cav-durees »
+// serait sinon lu comme la tournée n° « analyse-gps ».
+router.use('/', require('./analyse-gps'));
+
 // Mount reoptimize routes (manager trigger / accept / reject)
 router.use('/', reoptimizeRouter);
 
@@ -1755,3 +1887,6 @@ router.use('/', proposalsRouter);
 router.use('/', crudRouter);
 
 module.exports = router;
+// Exporté pour les tests : décider ce qui constitue une anomalie est une RÈGLE,
+// pas un détail d'implémentation — elle doit pouvoir être vérifiée sans base.
+module.exports.resumeAnomaliesChecklist = resumeAnomaliesChecklist;

@@ -66,8 +66,31 @@ const TOUR_STATUS_META = {
   cancelled: { label: 'Annulée', classe: 'bg-red-100 text-red-700' },
 };
 
+// Types d'arrêt GPS. Les valeurs stockées sont techniques : elles ne doivent
+// jamais atteindre l'écran telles quelles.
+const ARRET_TYPE_LABELS = {
+  cav: 'Conteneur', association: 'Association', centre: 'Centre de tri', inconnu: 'Non identifié',
+};
+const ARRET_TYPE_STYLE = {
+  cav: 'bg-teal-100 text-teal-800',
+  association: 'bg-orange-100 text-orange-800',
+  centre: 'bg-indigo-100 text-indigo-800',
+  inconnu: 'bg-amber-100 text-amber-900',
+};
+
 function statutTournee(status) {
   return TOUR_STATUS_META[status] || { label: status || '—', classe: 'bg-slate-100 text-slate-600' };
+}
+
+/**
+ * Nombre d'arrêts détectés qui ne correspondent à AUCUN point du programme.
+ * `0` quand rien n'a été chargé : on n'annonce pas une alerte qu'on n'a pas
+ * mesurée — l'absence de donnée n'est pas une absence d'arrêt, et le panneau
+ * déplié le dit explicitement.
+ */
+function nbArretsInconnus(bloc) {
+  if (!bloc || !Array.isArray(bloc.arrets)) return 0;
+  return bloc.arrets.filter((a) => a.type === 'inconnu').length;
 }
 
 /** Coordonnées GPS lisibles et copiables (5 décimales ≈ 1 m). */
@@ -240,7 +263,13 @@ export default function CollectionsLive() {
   // Demandes de collecte du jour (rendez-vous associations) — pour le badge
   // « RDV » sur les points association d'une tournée en cours (RG-B6).
   const [demandes, setDemandes] = useState([]);
+  // { [tour_id]: { arrets, source, seuil_min, ... } } — arrêts GPS par tournée.
+  const [arretsParTournee, setArretsParTournee] = useState({});
   const socketRef = useRef(null);
+
+  // `loadActive` est déclaré avant `loadArrets` : la référence évite de les
+  // faire dépendre l'un de l'autre (et de recréer le minuteur à chaque rendu).
+  const loadArretsRef = useRef(null);
 
   const loadActive = useCallback(async () => {
     try {
@@ -259,6 +288,8 @@ export default function CollectionsLive() {
         }
       });
       setLivePositions(initialPositions);
+      // Arrêts GPS : chargés dans la foulée, au même rythme que le reste.
+      loadArretsRef.current?.(res.data.tours || []);
       // Best-effort : une erreur ici (endpoint absent ou en échec) ne doit
       // jamais bloquer l'écran principal de collecte en direct.
       if (res.data.date) {
@@ -283,6 +314,31 @@ export default function CollectionsLive() {
       console.error('[CollectionsLive] reoptimizations:', err);
     }
   }, []);
+
+  // ── Arrêts détectés sur la trace GPS, tournée par tournée.
+  //
+  // Ce que ça donne au superviseur : un camion immobilisé une demi-heure quelque
+  // part où AUCUN point n'est prévu. Rien d'autre sur cet écran ne le montre —
+  // la carte affiche une position, pas une durée, et un camion à l'arrêt y
+  // ressemble à un camion qui roule.
+  //
+  // Un appel PAR TOURNÉE EN COURS (le calcul est fait à la volée côté serveur,
+  // il n'y a pas d'endpoint groupé) : best-effort, chaque échec est isolé pour
+  // qu'une tournée illisible n'efface pas les arrêts des autres.
+  const loadArrets = useCallback(async (tours) => {
+    const actifs = (tours || []).filter((t) => t && t.id != null);
+    if (actifs.length === 0) { setArretsParTournee({}); return; }
+    const resultats = await Promise.all(actifs.map(async (t) => {
+      try {
+        const res = await api.get(`/tours/${t.id}/arrets-gps`);
+        return [t.id, res.data];
+      } catch (err) {
+        return [t.id, null];
+      }
+    }));
+    setArretsParTournee(Object.fromEntries(resultats.filter(([, v]) => v)));
+  }, []);
+  loadArretsRef.current = loadArrets;
 
   const deciderReopt = useCallback(async (reopt, action) => {
     setReoptEnCours(reopt.id);
@@ -794,7 +850,7 @@ export default function CollectionsLive() {
                                 explicitement au lieu de laisser une case vide
                                 qu'on prend pour un oubli d'affichage. */}
                             <td className="py-2 px-3">
-                              {!tour.alert_overrun && !(tour.nb_incidents > 0) ? (
+                              {!tour.alert_overrun && !(tour.nb_incidents > 0) && nbArretsInconnus(arretsParTournee[tour.id]) === 0 ? (
                                 <span className="text-[11px] text-slate-400">Aucune</span>
                               ) : (
                                 <div className="flex flex-col gap-1 items-start">
@@ -814,6 +870,19 @@ export default function CollectionsLive() {
                                     >
                                       <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
                                       {tour.nb_incidents} incident{tour.nb_incidents > 1 ? 's' : ''}
+                                    </span>
+                                  )}
+                                  {/* Camion immobilisé là où AUCUN point n'est
+                                      prévu : rien d'autre sur cet écran ne le
+                                      montre — la carte affiche une position,
+                                      pas une durée. */}
+                                  {nbArretsInconnus(arretsParTournee[tour.id]) > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded-full bg-orange-50 border border-orange-200 px-2 py-0.5 text-[11px] font-medium text-orange-800 whitespace-nowrap"
+                                      title="Arrêts détectés sur la trace GPS hors de tout point du programme"
+                                    >
+                                      <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                                      {nbArretsInconnus(arretsParTournee[tour.id])} arrêt{nbArretsInconnus(arretsParTournee[tour.id]) > 1 ? 's' : ''} non identifié{nbArretsInconnus(arretsParTournee[tour.id]) > 1 ? 's' : ''}
                                     </span>
                                   )}
                                 </div>
@@ -842,7 +911,7 @@ export default function CollectionsLive() {
                           {isExpanded && (
                             <tr>
                               <td colSpan={10} className="bg-slate-50 px-4 py-3 border-b border-slate-200">
-                                <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} demandeParPoint={demandeParPoint} />
+                                <ExpandedDetail tour={tour} color={color} onRefresh={loadActive} demandeParPoint={demandeParPoint} arretsGps={arretsParTournee[tour.id]} />
                               </td>
                             </tr>
                           )}
@@ -894,7 +963,7 @@ function ProgressBar({ pct, color = '#0D9488' }) {
   );
 }
 
-function ExpandedDetail({ tour, color, onRefresh, demandeParPoint }) {
+function ExpandedDetail({ tour, color, onRefresh, demandeParPoint, arretsGps }) {
   const isAssociation = tour.collection_type === 'association';
   return (
     <div>
@@ -971,6 +1040,9 @@ function ExpandedDetail({ tour, color, onRefresh, demandeParPoint }) {
           vérité propre (GET /tours/:id/programme), sans toucher au tableau
           ci-dessus ni au reste de la page. */}
       <TourProgrammePanel tourId={tour.id} onChanged={onRefresh} />
+
+      {/* Arrêts détectés sur la trace GPS */}
+      <ArretsGpsPanel bloc={arretsGps} />
 
       {/* Canal manager → chauffeur (item 62) */}
       <TourMessagePanel tour={tour} />

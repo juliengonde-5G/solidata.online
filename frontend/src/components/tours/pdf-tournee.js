@@ -187,6 +187,48 @@ function carteSvg({ previsionnel = [], reel = [], centre = null }, L = 330, Hmax
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SILHOUETTE DES DÉGÂTS — quatre vues du camion, les points reportés dessus
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VUES_DEGAT = [
+  ['avant', 'Avant'], ['arriere', 'Arrière'], ['gauche', 'Gauche'], ['droit', 'Droit'],
+];
+const COULEUR_DEGAT = { rayure: '#F59E0B', choc: '#DC2626', bris: '#7C2D12', autre: '#64748B' };
+
+/**
+ * Le chauffeur pointe les dégâts sur un schéma, en coordonnées RELATIVES
+ * (x et y entre 0 et 1, par vue). Les lister en texte — « choc, vue arrière » —
+ * perd exactement ce que le geste apportait : l'ENDROIT. Quatre cadres et des
+ * pastilles le rendent d'un coup d'œil, et tiennent en trente pixels.
+ *
+ * `null` s'il n'y a rien à montrer : une silhouette vierge occuperait la place
+ * d'une information sans en être une.
+ */
+function silhouetteDegatsSvg(degats) {
+  const pts = (degats || []).filter((d) => d && Number.isFinite(Number(d.x)) && Number.isFinite(Number(d.y)));
+  if (pts.length === 0) return null;
+
+  const L = 40; const H = 26; const ecart = 5;
+  const cadres = VUES_DEGAT.map(([cle, libelle], i) => {
+    const x0 = i * (L + ecart);
+    const sur = pts.filter((d) => d.vue === cle);
+    const pastilles = sur.map((d) => {
+      const cx = x0 + Math.max(0, Math.min(1, Number(d.x))) * L;
+      const cy = 8 + Math.max(0, Math.min(1, Number(d.y))) * H;
+      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.6"
+        fill="${COULEUR_DEGAT[d.type] || COULEUR_DEGAT.autre}" stroke="#fff" stroke-width="0.7"/>`;
+    }).join('');
+    return `<rect x="${x0}" y="8" width="${L}" height="${H}" rx="2" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="0.6"/>
+      <text x="${x0 + L / 2}" y="5.5" text-anchor="middle" font-size="4.6" fill="#64748B">${esc(libelle)}</text>
+      ${pastilles}`;
+  }).join('');
+
+  const largeur = VUES_DEGAT.length * (L + ecart) - ecart;
+  return `<svg viewBox="0 0 ${largeur} ${H + 10}" width="100%" height="${H + 10}"
+    xmlns="http://www.w3.org/2000/svg" style="max-width:${largeur * 1.6}px">${cadres}</svg>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STYLES = `
 @page { size: A4 portrait; margin: 9mm 9mm; }
@@ -239,6 +281,16 @@ table.dense td span.gris[style] { display: none; }
 .bloc.rouge { border-color: #FECACA; background: #FEF2F2; }
 .bloc .t { font-weight: 700; color: #334155; }
 .bloc .h { float: right; color: #94A3B8; font-size: 6.5px; }
+.bas { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; }
+.bas > div { flex: 1; min-width: 0; }
+.bas h2 { margin-top: 0; }
+.bas .l { font-size: 7.2px; line-height: 1.4; }
+.bas .l b { color: #334155; }
+.alerte-l { color: #B91C1C; font-size: 7px; }
+.warn-l { color: #B45309; font-size: 7px; }
+table.mini { font-size: 6.6px; }
+table.mini th { font-size: 5.6px; padding: 1px 2px; }
+table.mini td { padding: 0.8px 2px; }
 .pied { margin-top: 7px; padding-top: 4px; border-top: 1px solid #E2E8F0; font-size: 6.5px; color: #94A3B8;
         display: flex; justify-content: space-between; }
 @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
@@ -278,6 +330,11 @@ function tableauPoints(points) {
   return unTableau(points, false);
 }
 
+/** Libellés d'arrêt GPS destinés au lecteur du rapport, pas au développeur. */
+const TYPE_ARRET_LABELS = {
+  cav: 'Conteneur', association: 'Association', centre: 'Centre de tri', inconnu: 'Non identifié',
+};
+
 function unTableau(points, dense) {
   const lignes = points.map((p, i) => {
     const prevu = frHeure(p.heure_prevue);
@@ -294,14 +351,16 @@ function unTableau(points, dense) {
       <td class="num ${ecartClasse(p.ecart_min)}">${e ? esc(e) : '<span class="gris">—</span>'}</td>
       <td><span class="etat e-${etatCle}">${esc(etat)}</span></td>
       ${dense ? '' : `<td class="num">${p.remplissage_pct != null ? `${esc(Math.round(Number(p.remplissage_pct)))} %` : '<span class="gris">—</span>'}</td>`}
+      ${dense ? '' : `<td class="num">${fmtDur(p.sur_place_min) ? esc(fmtDur(p.sur_place_min)) : '<span class="gris">—</span>'}</td>`}
     </tr>`;
   }).join('');
-  // En mode dense, la colonne est deux fois plus étroite : le remplissage et la
-  // commune passent à la trappe plutôt que de replier chaque ligne sur trois.
+  // En mode dense, la colonne est deux fois plus étroite : le remplissage, la
+  // commune et le temps sur place passent à la trappe plutôt que de replier
+  // chaque ligne sur trois. Ils restent lisibles dans la section « Arrêts ».
   return `<table class="${dense ? 'dense' : ''}"><thead><tr>
       <th style="width:12px">#</th><th>Point</th><th style="width:24px">Prévu</th>
       <th style="width:24px">Réel</th><th style="width:32px">Écart</th>
-      <th style="width:40px">État</th>${dense ? '' : '<th style="width:28px">Rempl.</th>'}
+      <th style="width:40px">État</th>${dense ? '' : '<th style="width:28px">Rempl.</th><th style="width:32px">Sur place</th>'}
     </tr></thead><tbody>${lignes}</tbody></table>`;
 }
 
@@ -367,6 +426,10 @@ export function depuisApi(rep) {
       remplissage_pct: p.fill_effective_percent ?? null,
       motif_non_collecte: p.skip_reason_label ?? null,
       motif_libelle: p.motif_label ?? null,
+      // Temps réellement passé sur place, mesuré sur la trace GPS. `null` quand
+      // aucun arrêt n'a été rattaché à ce point : le camion s'y est peut-être
+      // arrêté moins longtemps que le seuil de détection, ou n'a pas émis.
+      sur_place_min: p.stop_duration_min ?? null,
       lat: p.latitude ?? null,
       lng: p.longitude ?? null,
     })),
@@ -392,6 +455,46 @@ export function depuisApi(rep) {
       texte: m.message ?? null,
       lu_le: m.read_at ?? null,
     })),
+    // La vérification du camion, au matin. `null` quand elle n'a pas été
+    // enregistrée — ce qui n'est pas « rien à signaler » et sera dit comme tel.
+    checklist: r.checklist
+      ? {
+        terminee_a: r.checklist.terminee_a ?? r.checklist.created_at ?? null,
+        chauffeur: r.checklist.employee_name ?? null,
+        carburant: r.checklist.fuel_level ?? null,
+        km_depart: r.checklist.km_start ?? null,
+        exterieur_ok: r.checklist.exterior_ok ?? null,
+        remarque: r.checklist.notes ?? null,
+        points_verifies: r.checklist.points_verifies ?? 0,
+        points_non_valides: r.checklist.points_non_valides || [],
+        degats: r.checklist.degats || [],
+        detail_disponible: r.checklist.detail_disponible === true,
+      }
+      : null,
+    fin_journee: r.end_of_day
+      ? {
+        heure: r.end_of_day.created_at ?? null,
+        remarques: r.end_of_day.remarques ?? null,
+        // Le serveur n'accepte la déclaration que si les six cases sont
+        // cochées : leur présence VAUT conformité, on ne réinvente pas le test.
+        complete: [
+          'chauffeur_non_fume', 'chauffeur_pas_objet_personnel',
+          'suiveur_non_fume', 'suiveur_pas_objet_personnel',
+          'binome_vehicule_vide', 'binome_vehicule_ok',
+        ].every((f) => r.end_of_day[f] === true),
+      }
+      : null,
+    arrets_gps: {
+      liste: ((r.arrets_gps && r.arrets_gps.arrets) || []).map((a) => ({
+        debut: a.debut ?? null,
+        duree_min: a.duree_min ?? null,
+        type: a.type ?? 'inconnu',
+        nom: a.cav_nom || a.association_nom || null,
+      })),
+      source: (r.arrets_gps && r.arrets_gps.source) || 'indisponible',
+      motif: (r.arrets_gps && r.arrets_gps.motif) || null,
+      seuil_min: (r.arrets_gps && r.arrets_gps.seuil_min) ?? null,
+    },
     trace_gps: (gps.positions || []).map((g) => ({ lat: g.latitude, lng: g.longitude })),
     nb_positions_gps: gps.total_positions ?? null,
     centre_tri: (r.planned_route && r.planned_route.centre_tri)
@@ -488,6 +591,89 @@ export function construireRapportHtml(r) {
          (r && r.nb_positions_gps) ? ` (${r.nb_positions_gps} positions enregistrées)` : ''}.</p>`
     : '<p class="gris" style="font-size:7.5px">Carte non traçable : ni coordonnées de points ni relevés GPS exploitables.</p>';
 
+  // ── Vérification du camion (« checklist du matin »).
+  // Elle existait en base depuis un an et n'apparaissait NULLE PART sur le
+  // compte rendu : un camion parti avec un feu cassé et trois points non
+  // validés produisait exactement le même rapport qu'un camion irréprochable.
+  const ck = (r && r.checklist) || null;
+  const blocChecklist = !ck
+    ? '<p class="gris" style="font-size:7.5px">Aucune vérification de début de journée enregistrée pour cette tournée.</p>'
+    : (() => {
+      const l = [];
+      l.push(`<div class="l"><b>Terminée à ${esc(frHeure(ck.terminee_a) || '—')}</b>`
+        + `${ck.chauffeur ? ` · ${esc(ck.chauffeur)}` : ''}</div>`);
+      l.push(`<div class="l">Carburant ${cell(ck.carburant)}`
+        + ` · ${ck.km_depart != null ? esc(`${Number(ck.km_depart).toLocaleString('fr-FR')} km`) : '<span class="gris">km non relevé</span>'}</div>`);
+      if (!ck.detail_disponible) {
+        // Une checklist d'avant août 2026 ne conserve que son booléen global :
+        // dire « rien à signaler » serait affirmer ce qu'on ignore.
+        l.push('<div class="l gris">Détail du questionnaire non transmis par cette version de l’application.</div>');
+      } else if (ck.points_non_valides.length === 0) {
+        l.push(`<div class="l ok">${ck.points_verifies} point(s) vérifié(s), aucun défaut signalé.</div>`);
+      } else {
+        const noms = ck.points_non_valides.map((p) => p.libelle || p.id).filter(Boolean);
+        l.push(`<div class="alerte-l"><b>${ck.points_non_valides.length} point(s) NON validé(s)</b>`
+          + ` sur ${ck.points_verifies} : ${esc(court(noms.join(', '), 120))}</div>`);
+      }
+      if (ck.degats.length > 0) {
+        l.push(`<div class="alerte-l"><b>${ck.degats.length} dégât(s) relevé(s)</b> : `
+          + esc(court(ck.degats.map((d) => `${d.type || 'autre'} (${d.vue || '?'})`).join(', '), 90)) + '</div>');
+        const svg = silhouetteDegatsSvg(ck.degats);
+        if (svg) l.push(svg);
+      }
+      if (ck.remarque) l.push(`<div class="warn-l">Remarque : ${esc(court(ck.remarque, 160))}</div>`);
+      return l.join('');
+    })();
+
+  const fj = (r && r.fin_journee) || null;
+  const blocFinJournee = !fj
+    ? '<p class="gris" style="font-size:7.5px">Aucune déclaration de fin de journée enregistrée.</p>'
+    : `<div class="l"><b>Déclarée à ${esc(frHeure(fj.heure) || '—')}</b></div>`
+      + `<div class="l ${fj.complete ? 'ok' : 'moyen'}">${fj.complete
+        ? 'Les six déclarations (chauffeur, suiveur, binôme) sont cochées.'
+        : 'Déclaration incomplète.'}</div>`
+      + (fj.remarques ? `<div class="warn-l">Remarque : ${esc(court(fj.remarques, 160))}</div>` : '');
+
+  // ── Arrêts GPS.
+  // On ne réimprime PAS ici les arrêts déjà lisibles dans le tableau des points
+  // (colonne « Sur place ») : le rapport tient sur une page, et répéter la même
+  // minute à deux endroits la rend moins crédible, pas plus. Ce qui est détaillé
+  // ici, ce sont les arrêts qu'AUCUNE autre section ne montre — les passages au
+  // centre et surtout ceux qu'on ne s'explique pas.
+  const ag = (r && r.arrets_gps) || { liste: [], source: 'indisponible' };
+  const arrets = ag.liste || [];
+  const horsPoints = arrets.filter((a) => a.type === 'centre' || a.type === 'inconnu');
+  const surPoints = arrets.length - horsPoints.length;
+  const totalMin = arrets.reduce((s, a) => s + (Number(a.duree_min) || 0), 0);
+  const MAX_ARRETS = 6;
+
+  let blocArrets;
+  if (ag.source === 'indisponible' || arrets.length === 0) {
+    blocArrets = `<p class="gris" style="font-size:7.5px">${esc(
+      ag.motif || 'Aucun arrêt détecté sur la trace GPS de cette tournée.')}</p>`;
+  } else {
+    const lignes = horsPoints.slice(0, MAX_ARRETS).map((a) => `<tr>
+        <td class="num" style="width:26px">${cell(frHeure(a.debut))}</td>
+        <td>${esc(a.nom || TYPE_ARRET_LABELS[a.type] || a.type)}</td>
+        <td class="num">${cell(fmtDur(a.duree_min))}</td>
+        <td><span class="etat ${a.type === 'inconnu' ? 'e-incident' : 'e-arret'}">${esc(TYPE_ARRET_LABELS[a.type] || a.type)}</span></td>
+      </tr>`).join('');
+    blocArrets = `<div class="l"><b>${arrets.length} arrêt(s)</b> de ${esc(nb(ag.seuil_min, 'min') || '5 min')} ou plus`
+      + ` · ${esc(fmtDur(totalMin) || '—')} à l’arrêt au total</div>`
+      + (horsPoints.length === 0
+        ? `<div class="l gris">Tous rattachés à un point du programme (voir « Sur place »).</div>`
+        : `<table class="mini"><tbody>${lignes}</tbody></table>`
+          + (horsPoints.length > MAX_ARRETS
+            ? `<p class="note">+ ${horsPoints.length - MAX_ARRETS} autre(s) arrêt(s) hors programme non détaillé(s) ici.</p>`
+            : ''))
+      + (surPoints > 0
+        ? `<p class="note">${surPoints} arrêt(s) rattaché(s) à un point : leur durée figure colonne « Sur place ».</p>`
+        : '')
+      + (ag.source === 'live'
+        ? '<p class="note">Tournée non clôturée : arrêts recalculés à l’instant, non figés.</p>'
+        : '');
+  }
+
   const corps = `
     <div class="identite">${identite}</div>
     <div class="kpis">${kpis}</div>
@@ -505,6 +691,20 @@ export function construireRapportHtml(r) {
         ${blocIncidents}
         <h2>Messages avec le gestionnaire</h2>
         ${blocMessages}
+      </div>
+    </div>
+    <div class="bas">
+      <div>
+        <h2>Vérification du camion</h2>
+        ${blocChecklist}
+      </div>
+      <div>
+        <h2>Fin de tournée</h2>
+        ${blocFinJournee}
+      </div>
+      <div>
+        <h2>Arrêts détectés (GPS)</h2>
+        ${blocArrets}
       </div>
     </div>
     <div class="pied">
