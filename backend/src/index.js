@@ -263,6 +263,13 @@ app.use('/api/finance', require('./routes/finance'));
 // SolidataBot : Agent conversationnel IA (Claude API)
 app.use('/api/chat', require('./routes/chat'));
 
+// Messagerie interne (conversations directes, bot, notifications applicatives).
+// Ouverte à TOUS les rôles connectés, jeton chauffeur compris : l'autorisation
+// n'est pas un rôle mais le PÉRIMÈTRE DE PARTICIPATION, vérifié requête par
+// requête dans le routeur. Canal qui S'AJOUTE aux canaux existants (Brevo,
+// push VAPID, driver_messages) sans en retirer aucun.
+app.use('/api/messages', require('./routes/messages'));
+
 // Performance : Dashboard KPI consolide et indicateurs industriels
 app.use('/api/performance', require('./routes/performance'));
 
@@ -310,25 +317,74 @@ if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change-this-in-prod
   process.exit(1);
 }
 
-io.use((socket, next) => {
+// Le socket porte désormais des CONVERSATIONS (messagerie interne), et non plus
+// seulement des positions GPS : sa poignée de main contrôle la révocation de
+// session au même titre que `middleware/auth.authenticate`. Sans ce contrôle, un
+// compte désactivé ou déconnecté de force gardait un socket ouvert et continuait
+// de recevoir les messages poussés jusqu'à l'expiration naturelle du jeton (8 h).
+//
+// Sémantique IDENTIQUE à celle du middleware HTTP, pour ne rien casser des
+// usages existants (gps-update, vak:live, badgeuse:supervision) :
+//   • jeton hérité sans `tv` → aucun contrôle possible, on laisse passer
+//     (il expire de lui-même en ≤ 8 h, et aucune lecture base n'est faite) ;
+//   • base indisponible → on laisse passer (une panne ne doit verrouiller personne).
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.query?.token;
   if (!token) {
     return next(new Error('Authentification requise'));
   }
+  let decoded;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    socket.user = decoded;
-    next();
+    decoded = jwt.verify(token, JWT_SECRET);
   } catch (err) {
     return next(new Error('Token invalide'));
   }
+  socket.user = decoded;
+
+  if (decoded.tv === undefined || decoded.tv === null) return next();
+  const uid = decoded.id != null ? decoded.id : decoded.userId;
+  if (uid == null) return next();
+  try {
+    const r = await pool.query('SELECT token_version FROM users WHERE id = $1', [uid]);
+    if (r && r.rows && r.rows.length > 0) {
+      const dbTv = r.rows[0].token_version == null ? 0 : r.rows[0].token_version;
+      if (dbTv !== decoded.tv) return next(new Error('Session expirée'));
+    }
+  } catch (e) {
+    logger.warn('Socket.IO : contrôle de révocation indisponible', { error: e.message });
+  }
+  return next();
 });
 
 // Exposer io pour les jobs scheduler (sync SumUp VAK qui doit emit en live)
 global.__io = io;
 
+const { driverVehicleIdFromToken } = require('./routes/tours/driver-session');
+
 io.on('connection', (socket) => {
   logger.debug(`Socket client connecté: ${socket.id}`, { userId: socket.user?.id });
+
+  // ── Messagerie interne : salle de destination, décidée par le SERVEUR ──
+  //
+  // Aucun `join` n'est jamais accepté du client : la salle découle du jeton, et
+  // d'elle seule. Sans cela, n'importe quel connecté pourrait rejoindre
+  // `user:<id>` d'un collègue et lire ses conversations en direct.
+  //
+  // Un jeton chauffeur rejoint `vehicule:<id>` ET RIEN D'AUTRE : le compte
+  // `chauffeur` est générique et PARTAGÉ entre tous les camions — le faire
+  // entrer dans `user:<id>` enverrait à chaque téléphone les messages de tous
+  // les autres. `driverVehicleIdFromToken` couvre aussi les jetons hérités
+  // (`username = driver_<id>`, sans claim `vehicle_id`), valides jusqu'à 8 h.
+  try {
+    const vehicleId = driverVehicleIdFromToken(socket.user);
+    if (vehicleId != null) {
+      socket.join(`vehicule:${vehicleId}`);
+    } else if (socket.user?.id != null) {
+      socket.join(`user:${socket.user.id}`);
+    }
+  } catch (err) {
+    logger.warn('Socket.IO : salle de messagerie non attribuée', { error: err.message });
+  }
 
   // Le chauffeur rejoint la room de sa tournée
   socket.on('join-tour', (tourId) => {

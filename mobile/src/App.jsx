@@ -10,6 +10,8 @@ import SolidataBot from './components/SolidataBot';
 import SyncStatusBanner from './components/SyncStatusBanner';
 import DriverMessageBanner from './components/DriverMessageBanner';
 import DemoModeBanner from './components/DemoModeBanner';
+import MessagesButton from './components/MessagesButton';
+import NouveauMessageBanner from './components/messagerie/NouveauMessageBanner';
 import VehicleSelect from './pages/VehicleSelect';
 import Checklist from './pages/Checklist';
 import TourMap from './pages/TourMap';
@@ -22,6 +24,7 @@ import WeighIn from './pages/WeighIn';
 import TourSummary from './pages/TourSummary';
 import TourHistory from './pages/TourHistory';
 import EndOfDayChecklist from './pages/EndOfDayChecklist';
+import Messages from './pages/Messages';
 
 function App() {
   useEffect(() => {
@@ -35,6 +38,7 @@ function App() {
           <SyncStatusBanner />
           <DriverMessageBanner />
           <DemoModeBanner />
+          <NouveauMessageBanner />
           <Routes>
             {/* Auth chauffeur — point d'entrée principal (raccourci écran d'accueil).
                 « 1 URL = 1 véhicule » : voir mobile/src/pages/VehicleLogin.jsx. */}
@@ -57,9 +61,12 @@ function App() {
             <Route path="/tour-summary" element={<TourSummary />} />
             <Route path="/tour-history" element={<TourHistory />} />
             <Route path="/end-of-day" element={<EndOfDayChecklist />} />
+            {/* Messagerie interne — mode conduite (lot L3, 26/08/2026) */}
+            <Route path="/messages" element={<Messages />} />
             <Route path="*" element={<Navigate to="/start" />} />
           </Routes>
           <BatteryAlert />
+          <MessagesButton />
           <SolidataBot />
         </UsageModeProvider>
       </AuthProvider>

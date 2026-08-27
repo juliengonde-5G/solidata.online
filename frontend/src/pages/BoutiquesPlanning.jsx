@@ -29,17 +29,23 @@ export default function BoutiquesPlanning() {
   const [affectations, setAffectations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState(null);
+  const [messageHorsLogiciel, setMessageHorsLogiciel] = useState(null);
 
   useEffect(() => { load(); }, [weekStart]);
 
   async function load() {
     setLoading(true);
     setAccessError(null);
+    setMessageHorsLogiciel(null);
     try {
       const [p, a] = await Promise.all([
         api.get('/planning-hebdo/postes'),
         api.get(`/planning-hebdo?week_start=${fmtDate(weekStart)}`),
       ]);
+      // Depuis le 26/08/2026, le planning hebdo ne gère plus les boutiques :
+      // l'API renvoie un périmètre vide et le motif. On l'affiche tel quel
+      // plutôt que de laisser croire à une semaine sans personne affectée.
+      setMessageHorsLogiciel(p.data?.message || a.data?.message || null);
       // Filtrer uniquement les postes boutique
       const btqPostes = (p.data?.postes || []).filter(po => po.filiere === 'btq');
       setPostes(btqPostes);
@@ -100,8 +106,11 @@ export default function BoutiquesPlanning() {
         />
 
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
-          <UserCheck className="inline w-4 h-4 mr-1" />
-          Vue en lecture seule. Pour affecter ou modifier, utilisez la page <a href="/planning-hebdo" className="underline font-medium">Planning Hebdo</a>.
+          <UserCheck className="inline w-4 h-4 mr-1 align-text-bottom" />
+          <span className="font-semibold">Le planning des boutiques est géré hors logiciel.</span>{' '}
+          Le planning hebdomadaire de SOLIDATA ne couvre plus la filière boutiques : il est consacré au tri,
+          à la collecte et à la logistique. Cette page reste ouverte en lecture pour consulter l'historique
+          des affectations boutique déjà saisies — celles-ci sont conservées en base, rien n'a été supprimé.
         </div>
 
         {accessError && (
@@ -110,9 +119,15 @@ export default function BoutiquesPlanning() {
           </div>
         )}
 
+        {!accessError && messageHorsLogiciel && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 text-sm text-slate-600">
+            {messageHorsLogiciel}
+          </div>
+        )}
+
         {!accessError && Object.keys(postesParBoutique).length === 0 && (
           <div className="bg-white rounded-card shadow-card p-6 text-center text-slate-500 text-sm">
-            Aucun poste boutique planifié cette semaine.
+            Aucun poste boutique à afficher : la planification des boutiques se fait en dehors de l'application.
           </div>
         )}
 

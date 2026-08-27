@@ -5,30 +5,119 @@ const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 
-// Vague 3 — GET /postes et GET / ouverts en LECTURE (filtrée filière boutique)
-// au rôle RESP_BTQ pour alimenter la page « Planning boutiques » (BoutiquesPlanning).
-// Toute écriture (affecter/supprimer/confirmer) et la recherche d'employés
-// disponibles restent réservées ADMIN/MANAGER (autorisation par route ci-dessous).
+// Lot L5 (26/08/2026) — Refonte du planning hebdomadaire :
+//   1. La filière BOUTIQUES est RETIRÉE de cet écran : le planning des boutiques
+//      est géré hors logiciel. Les affectations `schedule` historiques `BTQ_*`
+//      ne sont NI supprimées NI renvoyées — elles restent en base, intactes.
+//   2. Les postes de collecte ne sont plus deux libellés en dur
+//      (« Chauffeur »/« Ripeur ») mais UN POSTE PAR VÉHICULE RÉEL : la liste
+//      suit la table `vehicles`, donc elle évolue sans toucher au code.
+//   3. Les équipages (chauffeur + suiveurs) REMONTENT de la gestion de la
+//      collecte (`tours`) : le planning hebdo les AFFICHE en lecture seule,
+//      il ne les re-saisit pas — l'équipage s'affecte au Planning tournées.
+//
+// Lecture : ADMIN / MANAGER / RH (le RH consulte le planning sans l'écrire).
+// Écriture (affecter/supprimer/confirmer) et recherche d'employés disponibles :
+// ADMIN / MANAGER uniquement. RESP_BTQ conserve un accès en lecture qui renvoie
+// une réponse vide MOTIVÉE (jamais un 500) — la page « Planning boutiques »
+// affiche le message plutôt qu'une erreur.
 router.use(authenticate);
 
-const READ_ROLES = ['ADMIN', 'MANAGER', 'RESP_BTQ'];
+const READ_ROLES = ['ADMIN', 'MANAGER', 'RH', 'RESP_BTQ'];
 const WRITE_ROLES = ['ADMIN', 'MANAGER'];
 const isRespBtq = (req) => resolveBaseRole(req.user && req.user.role) === 'RESP_BTQ';
+
+const MESSAGE_BOUTIQUES = 'Le planning des boutiques est géré hors logiciel.';
+
+const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+
+// ══════════════════════════════════════════
+// DATES — jour civil Europe/Paris
+// ══════════════════════════════════════════
+// Le conteneur tourne en UTC : « aujourd'hui » calculé sur l'heure UTC bascule
+// une heure (deux en été) trop tôt et pouvait désigner la semaine précédente
+// pour une consultation faite en soirée. Les dates de semaine sont donc
+// calculées sur le JOUR CIVIL de Paris, puis manipulées en arithmétique de
+// calendrier pure (UTC) — insensible au fuseau et à l'heure d'été.
+
+/** Jour civil (AAAA-MM-JJ) à Paris pour un instant donné. */
+function parisDateStr(instant = new Date()) {
+  return new Intl.DateTimeFormat('fr-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(instant);
+}
+
+/** Lundi (Date UTC minuit) de la semaine contenant `isoDate` (AAAA-MM-JJ). */
+function lundiDeLaSemaine(isoDate) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const ref = new Date(Date.UTC(y, m - 1, d));
+  const dow = ref.getUTCDay(); // 0 = dimanche
+  ref.setUTCDate(ref.getUTCDate() - ((dow + 6) % 7));
+  return ref;
+}
+
+/** Les 6 jours (lundi → samedi) de la semaine, en AAAA-MM-JJ. */
+function joursDeLaSemaine(lundiUTC) {
+  const out = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(lundiUTC.getTime());
+    d.setUTCDate(lundiUTC.getUTCDate() + i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
+ * Jour civil d'une valeur de colonne DATE PostgreSQL. Le pilote pg construit
+ * un Date à MINUIT LOCAL : passer par toISOString() décalerait la date d'un
+ * jour si le processus ne tournait pas en UTC. On lit donc les composantes
+ * locales, qui sont exactement celles écrites en base.
+ */
+function jourCivil(v) {
+  if (!v) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** « NOM Prénom » (règle de nommage projet). Renvoie null si rien à afficher. */
+function nomComplet(last, first) {
+  const l = String(last == null ? '' : last).trim().toUpperCase();
+  const f = String(first == null ? '' : first).trim();
+  const nom = [l, f].filter(Boolean).join(' ');
+  return nom || null;
+}
 
 // ══════════════════════════════════════════
 // POSTES DE TRAVAIL PAR FILIERE
 // ══════════════════════════════════════════
 
+// Filière `btq` RETIRÉE (planning boutiques géré hors logiciel).
 const FILIERES = [
   { code: 'tri', label: 'Tri', color: '#8BC540' },
   { code: 'collecte', label: 'Collecte', color: '#3B82F6' },
   { code: 'logistique', label: 'Logistique', color: '#F59E0B' },
-  { code: 'btq', label: 'Boutiques', color: '#EC4899' },
 ];
+
+const LIB_STATUT_VEHICULE = {
+  available: 'Disponible',
+  in_use: 'En service',
+  maintenance: 'En maintenance',
+  out_of_service: 'Hors service',
+};
 
 // GET /api/planning-hebdo/postes — Tous les postes groupes par filiere
 router.get('/postes', authorize(...READ_ROLES), async (req, res) => {
   try {
+    // RESP_BTQ : le planning des boutiques est géré hors logiciel. On répond
+    // 200 avec un périmètre VIDE et le motif — jamais un 403 ni un 500, et
+    // surtout pas une liste de postes boutique qui n'existent plus ici.
+    if (isRespBtq(req)) {
+      return res.json({ filieres: [], postes: [], message: MESSAGE_BOUTIQUES });
+    }
+
     const postes = [];
 
     // 1. Postes de tri (depuis postes_operation)
@@ -61,25 +150,45 @@ router.get('/postes', authorize(...READ_ROLES), async (req, res) => {
       }
     } catch (err) { console.warn('[PLANNING] Table may not exist:', err.message); }
 
-    // 2. Postes de collecte
-    postes.push({
-      id: 'collecte_chauffeur',
-      source_id: null, source_table: null, filiere: 'collecte',
-      nom: 'Chauffeur collecte', code: 'COLL_CHAUFF',
-      detail: 'Conduite vehicule de collecte',
-      competences_requises: ['permis_b'],
-      require_permis_b: true, require_caces: false,
-      obligatoire: true, permet_doublure: false,
-    });
-    postes.push({
-      id: 'collecte_ripeur',
-      source_id: null, source_table: null, filiere: 'collecte',
-      nom: 'Ripeur / Equipier', code: 'COLL_RIPEUR',
-      detail: 'Manipulation des conteneurs et collecte',
-      competences_requises: [],
-      require_permis_b: false, require_caces: false,
-      obligatoire: false, permet_doublure: true,
-    });
+    // 2. Postes de collecte — UN POSTE PAR VÉHICULE RÉEL (liste évolutive).
+    //    La collecte s'organise par camion, pas par intitulé générique : la
+    //    ligne du planning est le véhicule, et l'équipage qui la sert remonte
+    //    des tournées (voir GET / → collecte_tournees). Le parc de démonstration
+    //    (formations) et les véhicules hors service en sont exclus.
+    let collecteIndisponible = null;
+    try {
+      const vehiculesResult = await pool.query(`
+        SELECT id, registration, name, status
+          FROM vehicles
+         WHERE COALESCE(is_demo, false) = false
+           AND status <> 'out_of_service'
+         ORDER BY registration
+      `);
+      for (const v of vehiculesResult.rows) {
+        postes.push({
+          id: `collecte_vehicule_${v.id}`,
+          source_id: v.id,
+          source_table: 'vehicles',
+          filiere: 'collecte',
+          nom: v.registration,
+          code: `COLL_VEH_${v.id}`,
+          detail: [v.name, LIB_STATUT_VEHICULE[v.status] || v.status]
+            .filter(Boolean).join(' — ') || 'Véhicule de collecte',
+          vehicle_id: v.id,
+          vehicle_name: v.name || null,
+          vehicle_status: v.status,
+          competences_requises: [],
+          require_permis_b: false, require_caces: false,
+          obligatoire: false, permet_doublure: true,
+        });
+      }
+    } catch (err) {
+      // Jamais de poste inventé : si le parc n'est pas lisible, on le DIT.
+      // Un repli « Chauffeur / Ripeur » afficherait un planning de collecte
+      // sans rapport avec les camions réellement disponibles.
+      collecteIndisponible = `Le parc de véhicules n'a pas pu être lu (${err.message}).`;
+      console.warn('[PLANNING-HEBDO] Véhicules de collecte indisponibles :', err.message);
+    }
 
     // 3. Postes logistique
     postes.push({
@@ -110,37 +219,9 @@ router.get('/postes', authorize(...READ_ROLES), async (req, res) => {
       obligatoire: false, permet_doublure: true,
     });
 
-    // 4. Postes boutique
-    for (const btq of ['btq_st_sever', 'btq_lhopital']) {
-      const label = btq === 'btq_st_sever' ? 'BTQ St-Sever' : "BTQ L'Hopital";
-      postes.push({
-        id: `${btq}_vendeur`,
-        source_id: null, source_table: null, filiere: 'btq',
-        nom: `Vendeur ${label}`, code: `${btq.toUpperCase()}_VEND`,
-        detail: `Vente et accueil en boutique ${label}`,
-        competences_requises: [],
-        require_permis_b: false, require_caces: false,
-        obligatoire: true, permet_doublure: false,
-      });
-      postes.push({
-        id: `${btq}_caisse`,
-        source_id: null, source_table: null, filiere: 'btq',
-        nom: `Caissier ${label}`, code: `${btq.toUpperCase()}_CAISSE`,
-        detail: `Tenue de caisse ${label}`,
-        competences_requises: [],
-        require_permis_b: false, require_caces: false,
-        obligatoire: true, permet_doublure: false,
-      });
-    }
+    // 4. (plus de postes boutique — planning des boutiques hors logiciel)
 
-    // RESP_BTQ (page Planning boutiques) : périmètre restreint à la filière boutique.
-    if (isRespBtq(req)) {
-      return res.json({
-        filieres: FILIERES.filter(f => f.code === 'btq'),
-        postes: postes.filter(p => p.filiere === 'btq'),
-      });
-    }
-    res.json({ filieres: FILIERES, postes });
+    res.json({ filieres: FILIERES, postes, collecte_indisponible: collecteIndisponible });
   } catch (err) {
     console.error('[PLANNING-HEBDO] Erreur postes :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -151,32 +232,43 @@ router.get('/postes', authorize(...READ_ROLES), async (req, res) => {
 router.get('/', authorize(...READ_ROLES), async (req, res) => {
   try {
     const { week_start } = req.query;
-    let monday;
+    let base;
     if (week_start) {
-      monday = new Date(week_start);
+      const iso = String(week_start).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || Number.isNaN(new Date(`${iso}T00:00:00Z`).getTime())) {
+        return res.status(400).json({
+          error: 'Date de début de semaine invalide (format attendu AAAA-MM-JJ)',
+          code: 'WEEK_START_INVALIDE',
+        });
+      }
+      base = iso;
     } else {
-      const now = new Date();
-      const day = now.getDay();
-      monday = new Date(now);
-      monday.setDate(now.getDate() - ((day + 6) % 7));
-    }
-    monday.setHours(0, 0, 0, 0);
-
-    const dates = [];
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      dates.push(d.toISOString().slice(0, 10));
+      base = parisDateStr(); // jour civil de Paris, pas l'heure UTC du conteneur
     }
 
+    const dates = joursDeLaSemaine(lundiDeLaSemaine(base));
     const dateFrom = dates[0];
     const dateTo = dates[dates.length - 1];
 
-    // 1. Affectations existantes (avec periode)
+    // RESP_BTQ : périmètre vide et motivé (planning boutiques hors logiciel).
+    if (isRespBtq(req)) {
+      return res.json({
+        week_start: dateFrom, dates, jours: JOURS,
+        affectations: [], employees: [], absences: {},
+        collecte_tournees: [], message: MESSAGE_BOUTIQUES,
+      });
+    }
+
+    // 1. Affectations existantes (avec periode).
+    //    Les affectations boutique historiques (`BTQ_*`) restent EN BASE — on
+    //    ne les supprime pas — mais elles ne sont plus renvoyées : cet écran
+    //    ne pilote plus les boutiques.
     const scheduleResult = await pool.query(`
       SELECT s.id, s.employee_id, s.date, s.status, s.position_id, s.poste_code,
              s.is_provisional, COALESCE(s.periode, 'journee') as periode,
              e.first_name, e.last_name, e.has_permis_b, e.has_caces, e.skills,
+             e.insertion_status,
+             (e.insertion_status IS DISTINCT FROM 'en_parcours') AS est_permanent,
              t.name as team_name, t.type as team_type,
              p.title as position_title
       FROM schedule s
@@ -184,13 +276,19 @@ router.get('/', authorize(...READ_ROLES), async (req, res) => {
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN positions p ON s.position_id = p.id
       WHERE s.date >= $1 AND s.date <= $2
+        AND (s.poste_code IS NULL OR UPPER(s.poste_code) NOT LIKE 'BTQ!_%' ESCAPE '!')
       ORDER BY s.date, UPPER(e.last_name), UPPER(e.first_name)
     `, [dateFrom, dateTo]);
 
-    // 2. Employes actifs avec dispo
+    // 2. Employes actifs avec dispo.
+    //    `est_permanent` distingue les salariés permanents (encadrants,
+    //    managers, fonctions support) des salariés EN PARCOURS d'insertion.
+    //    Les deux sont affectables ; l'écran les présente séparément.
     const employeesResult = await pool.query(`
       SELECT e.id, e.first_name, e.last_name, e.has_permis_b, e.has_caces,
              e.skills, e.position, e.weekly_hours, e.contract_type,
+             e.insertion_status,
+             (e.insertion_status IS DISTINCT FROM 'en_parcours') AS est_permanent,
              t.name as team_name, t.type as team_type,
              ARRAY_AGG(ea.day_off) FILTER (WHERE ea.day_off IS NOT NULL) as jours_off
       FROM employees e
@@ -198,7 +296,7 @@ router.get('/', authorize(...READ_ROLES), async (req, res) => {
       LEFT JOIN employee_availability ea ON ea.employee_id = e.id
       WHERE e.is_active = true
       GROUP BY e.id, t.name, t.type
-      ORDER BY t.type, UPPER(e.last_name), UPPER(e.first_name)
+      ORDER BY UPPER(e.last_name), UPPER(e.first_name)
     `);
 
     // 3. Absences
@@ -211,32 +309,93 @@ router.get('/', authorize(...READ_ROLES), async (req, res) => {
 
     const absencesByEmpDate = {};
     for (const a of absencesResult.rows) {
-      const key = `${a.employee_id}_${new Date(a.date).toISOString().slice(0, 10)}`;
-      absencesByEmpDate[key] = a.type;
+      absencesByEmpDate[`${a.employee_id}_${jourCivil(a.date)}`] = a.type;
     }
 
-    const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-    let affectations = scheduleResult.rows.map(s => ({
-      ...s,
-      date: new Date(s.date).toISOString().slice(0, 10),
-    }));
-    let employees = employeesResult.rows.map(e => ({
-      ...e,
-      jours_off: e.jours_off || [],
-    }));
-    let absences = absencesByEmpDate;
+    // 4. Équipages de collecte de la semaine — LECTURE SEULE.
+    //    Source : la gestion de la collecte (`tours`). Le planning hebdo montre
+    //    qui roule sur quel camion ; l'affectation de l'équipage, elle, se fait
+    //    au Planning tournées. Les tournées de DÉMONSTRATION (formations) sont
+    //    exclues : ce ne sont pas des tournées d'exploitation.
+    let collecteTournees = [];
+    let collecteIndisponible = null;
+    try {
+      const tourneesResult = await pool.query(`
+        SELECT t.id AS tour_id, t.date, t.status, t.vehicle_id,
+               v.registration, v.name AS vehicle_name,
+               t.driver_employee_id,
+               d.first_name  AS driver_first_name,  d.last_name  AS driver_last_name,
+               t.suiveur1_employee_id,
+               s1.first_name AS suiveur1_first_name, s1.last_name AS suiveur1_last_name,
+               t.suiveur2_employee_id,
+               s2.first_name AS suiveur2_first_name, s2.last_name AS suiveur2_last_name
+          FROM tours t
+          JOIN vehicles v ON v.id = t.vehicle_id
+          LEFT JOIN employees d  ON d.id  = t.driver_employee_id
+          LEFT JOIN employees s1 ON s1.id = t.suiveur1_employee_id
+          LEFT JOIN employees s2 ON s2.id = t.suiveur2_employee_id
+         WHERE t.date >= $1 AND t.date <= $2
+           AND COALESCE(t.is_demo, false) = false
+         ORDER BY t.date, v.registration, t.id
+      `, [dateFrom, dateTo]);
 
-    // RESP_BTQ : périmètre restreint à la filière boutique. On ne renvoie que
-    // les affectations boutique (poste_code BTQ_*) et on masque le reste du
-    // personnel (roster complet + absences) — inutile à la vue boutique et hors
-    // périmètre d'un responsable de boutique (cf. cloisonnement RESP_BTQ vague 2).
-    if (isRespBtq(req)) {
-      affectations = affectations.filter(a => String(a.poste_code || '').toUpperCase().startsWith('BTQ_'));
-      employees = [];
-      absences = {};
+      collecteTournees = tourneesResult.rows.map(t => {
+        const suiveurs = [];
+        if (t.suiveur1_employee_id) {
+          suiveurs.push({
+            employee_id: t.suiveur1_employee_id,
+            nom: nomComplet(t.suiveur1_last_name, t.suiveur1_first_name),
+            first_name: t.suiveur1_first_name || null,
+            last_name: t.suiveur1_last_name || null,
+          });
+        }
+        if (t.suiveur2_employee_id) {
+          suiveurs.push({
+            employee_id: t.suiveur2_employee_id,
+            nom: nomComplet(t.suiveur2_last_name, t.suiveur2_first_name),
+            first_name: t.suiveur2_first_name || null,
+            last_name: t.suiveur2_last_name || null,
+          });
+        }
+        return {
+          date: jourCivil(t.date),
+          tour_id: t.tour_id,
+          vehicle_id: t.vehicle_id,
+          registration: t.registration,
+          vehicle_name: t.vehicle_name || null,
+          statut: t.status,
+          // Chauffeur non identifié = null assumé (« 1 URL = 1 véhicule » :
+          // une tournée peut rouler sans fiche employé rattachée).
+          chauffeur: t.driver_employee_id ? {
+            employee_id: t.driver_employee_id,
+            nom: nomComplet(t.driver_last_name, t.driver_first_name),
+            first_name: t.driver_first_name || null,
+            last_name: t.driver_last_name || null,
+          } : null,
+          suiveurs,
+        };
+      });
+    } catch (err) {
+      // Une liste vide se lirait « aucune tournée planifiée » — un contresens
+      // quand la lecture a échoué. On renvoie null + le motif.
+      collecteTournees = null;
+      collecteIndisponible = `Les tournées de la semaine n'ont pas pu être lues (${err.message}).`;
+      console.warn('[PLANNING-HEBDO] Tournées de collecte indisponibles :', err.message);
     }
 
-    res.json({ week_start: dateFrom, dates, jours, affectations, employees, absences });
+    const affectations = scheduleResult.rows.map(s => ({ ...s, date: jourCivil(s.date) }));
+    const employees = employeesResult.rows.map(e => ({ ...e, jours_off: e.jours_off || [] }));
+
+    res.json({
+      week_start: dateFrom,
+      dates,
+      jours: JOURS,
+      affectations,
+      employees,
+      absences: absencesByEmpDate,
+      collecte_tournees: collecteTournees,
+      collecte_indisponible: collecteIndisponible,
+    });
   } catch (err) {
     console.error('[PLANNING-HEBDO] Erreur planning :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -412,7 +571,9 @@ router.get('/employes-disponibles', authorize(...WRITE_ROLES), async (req, res) 
 
     let query = `
       SELECT e.id, e.first_name, e.last_name, e.has_permis_b, e.has_caces,
-             e.skills, e.position, t.name as team_name, t.type as team_type
+             e.skills, e.position, e.insertion_status,
+             (e.insertion_status IS DISTINCT FROM 'en_parcours') AS est_permanent,
+             t.name as team_name, t.type as team_type
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN employee_availability ea ON ea.employee_id = e.id AND ea.day_off = $2

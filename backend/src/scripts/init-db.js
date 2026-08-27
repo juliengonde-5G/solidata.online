@@ -7764,6 +7764,333 @@ async function initDatabase() {
 
     console.log('[INIT-DB] Module Effectifs conventionnés (ETP) — etp_asp_mensuel + import ASP (etp_asp_salaries, etp_asp_liaisons) ✓');
 
+    // ══════════════════════════════════════════
+    // CHANTIER DU 26/08/2026 — DDL DU CONTRAT COMMUN
+    // (rapports/evolutions-2026-08-26/CONTRATS.md §1, ORDRE IMPOSÉ)
+    //
+    //   §1.1  Messagerie interne .......................... lots L1 / L2 / L3
+    //   §1.2  Configurateur 2D de la chaîne de tri ........ lot  L4
+    //   §1.3  Arrêts GPS des tournées ..................... lot  L6
+    //   §1.4  Récurrence commandes exutoires + Pennylane .. lot  L7 (additif)
+    //   §1.5  Réglages par défaut (settings)
+    //   §1.6  Registre RGPD — messagerie interne
+    //
+    // Placement : TOUTES les tables parentes référencées par ces FK
+    // (users, vehicles, tours, cav, association_points, postes_operation,
+    // settings, rgpd_registre) sont créées plus haut dans ce fichier. Le bloc
+    // vient donc en fin de séquence, juste AVANT le resync des séquences
+    // SERIAL — auquel les nouvelles tables sont ajoutées (`tablesAResyncer`).
+    // ══════════════════════════════════════════
+
+    // ── §1.1 — Messagerie interne (conversations, messages, mentions) ──────
+    // Canal qui S'AJOUTE aux canaux existants (driver_messages, Brevo, push
+    // VAPID) sans en retirer aucun (arbitrage §12.3 du contrat).
+    //
+    // Identité d'un chauffeur = le VÉHICULE, jamais son compte : le compte
+    // `chauffeur` est générique et PARTAGÉ entre tous les camions (« 1 URL =
+    // 1 véhicule »), router par users.id enverrait les consignes de tous les
+    // camions à tous les téléphones. D'où la double clé user_id / vehicle_id
+    // sur les participants ET les mentions, avec un CHECK qui interdit la
+    // ligne sans aucune des deux.
+    //
+    // `cle_unique` (calculée SERVEUR, jamais saisie) déduplique la
+    // conversation : segments `u<user_id>` / `v<vehicle_id>` des participants
+    // triés lexicographiquement, préfixés du type — `directe:u3:u7`,
+    // `directe:u3:v1`, `bot:u3`, `systeme:v1`.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messagerie_conversations (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(20) NOT NULL DEFAULT 'directe' CHECK (type IN ('directe', 'bot', 'systeme')),
+        titre VARCHAR(200),
+        cle_unique VARCHAR(120) UNIQUE,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        dernier_message_at TIMESTAMP
+      );
+    `);
+
+    // `dernier_lu_message_id` volontairement SANS clé étrangère : l'accusé de
+    // lecture doit survivre à la purge RGPD du message qu'il désigne (la purge
+    // recale les pointeurs orphelins, cf. purgeMessagerieRetention).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messagerie_participants (
+        id SERIAL PRIMARY KEY,
+        conversation_id INTEGER NOT NULL REFERENCES messagerie_conversations(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE CASCADE,
+        dernier_lu_message_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CHECK (user_id IS NOT NULL OR vehicle_id IS NOT NULL)
+      );
+    `);
+    // UNIQUE composite avec NULL ne déduplique PAS en PostgreSQL (deux lignes
+    // (12, NULL) sont distinctes) : les index partiels ci-dessous sont la SEULE
+    // garantie qu'un participant n'est pas inscrit deux fois.
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_msgp_conv_user
+      ON messagerie_participants(conversation_id, user_id) WHERE user_id IS NOT NULL;`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_msgp_conv_vehicule
+      ON messagerie_participants(conversation_id, vehicle_id) WHERE vehicle_id IS NOT NULL;`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_msgp_user ON messagerie_participants(user_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_msgp_vehicule ON messagerie_participants(vehicle_id);');
+
+    // Pas de pièce jointe en v1 (texte seul). `auteur_*` en ON DELETE SET NULL :
+    // supprimer un compte ne doit pas effacer l'historique de la conversation
+    // des autres participants (le message reste, son auteur devient inconnu).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messagerie_messages (
+        id SERIAL PRIMARY KEY,
+        conversation_id INTEGER NOT NULL REFERENCES messagerie_conversations(id) ON DELETE CASCADE,
+        auteur_type VARCHAR(20) NOT NULL DEFAULT 'utilisateur'
+          CHECK (auteur_type IN ('utilisateur', 'chauffeur', 'bot', 'systeme')),
+        auteur_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        auteur_vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE SET NULL,
+        texte TEXT NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'texte' CHECK (type IN ('texte', 'notification')),
+        source VARCHAR(50),
+        lien VARCHAR(300),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // (conversation_id, id) : pagination descendante du fil (`avant_id`).
+    await client.query('CREATE INDEX IF NOT EXISTS idx_msgm_conv ON messagerie_messages(conversation_id, id);');
+    // created_at : balayage de la purge de rétention.
+    await client.query('CREATE INDEX IF NOT EXISTS idx_msgm_created ON messagerie_messages(created_at);');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messagerie_mentions (
+        id SERIAL PRIMARY KEY,
+        message_id INTEGER NOT NULL REFERENCES messagerie_messages(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE CASCADE,
+        CHECK (user_id IS NOT NULL OR vehicle_id IS NOT NULL)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_msgmention_msg ON messagerie_mentions(message_id);');
+    console.log('[INIT-DB] Messagerie interne — 4 tables + index de périmètre ✓');
+
+    // ── §1.2 — Configurateur 2D de la chaîne de tri ────────────────────────
+    // Le layout est une DONNÉE D'EXPLOITATION modifiable à l'écran, pas une
+    // constante de code : le plan V7 seedé (15 personnes) est un point de
+    // départ que l'atelier réorganise. `x`/`y`/`largeur`/`hauteur` sont des
+    // POURCENTAGES 0-100 du canevas (origine haut-gauche) : le plan est un
+    // schéma logique, pas une carte à l'échelle — le % survit à tout écran et
+    // s'imprime tel quel (arbitrage §12.2).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chaine_layouts (
+        id SERIAL PRIMARY KEY,
+        nom VARCHAR(120) NOT NULL,
+        description TEXT,
+        effectif_max INTEGER,
+        source VARCHAR(20) NOT NULL DEFAULT 'manuel' CHECK (source IN ('seed_v7', 'manuel', 'duplication')),
+        is_actif BOOLEAN NOT NULL DEFAULT false,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Un SEUL layout actif à la fois — garanti par la base et non par le code
+    // (activation transactionnelle : tous à false, puis un à true).
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_chaine_layouts_actif
+      ON chaine_layouts(is_actif) WHERE is_actif = true;`);
+
+    // `categorie` : 'poste' = poste de travail avec opérateurs (obligatoire ou
+    // facultatif) · 'zone_depose' = contenant/sortie (effectifs 0) · 'entree' =
+    // « Original entrant pour tri ». `poste_operation_id` relie facultativement
+    // un bloc au référentiel de production existant (ON DELETE SET NULL : le
+    // plan survit à une refonte du référentiel). `proprietes` JSONB libre
+    // (couleur, notes, flux) — JAMAIS requis.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chaine_layout_postes (
+        id SERIAL PRIMARY KEY,
+        layout_id INTEGER NOT NULL REFERENCES chaine_layouts(id) ON DELETE CASCADE,
+        code VARCHAR(40) NOT NULL,
+        libelle VARCHAR(120) NOT NULL,
+        categorie VARCHAR(20) NOT NULL DEFAULT 'poste'
+          CHECK (categorie IN ('poste', 'zone_depose', 'entree')),
+        x NUMERIC(6,2) NOT NULL DEFAULT 0,
+        y NUMERIC(6,2) NOT NULL DEFAULT 0,
+        largeur NUMERIC(6,2),
+        hauteur NUMERIC(6,2),
+        obligatoire BOOLEAN NOT NULL DEFAULT false,
+        actif BOOLEAN NOT NULL DEFAULT true,
+        effectif_min INTEGER NOT NULL DEFAULT 0,
+        effectif_max INTEGER NOT NULL DEFAULT 1,
+        poste_operation_id INTEGER REFERENCES postes_operation(id) ON DELETE SET NULL,
+        proprietes JSONB,
+        UNIQUE (layout_id, code)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_chaine_layout_postes_layout ON chaine_layout_postes(layout_id);');
+    console.log('[INIT-DB] Configurateur 2D chaîne de tri — chaine_layouts + chaine_layout_postes ✓');
+
+    // ── §1.3 — Arrêts GPS des tournées ─────────────────────────────────────
+    // Détection en POST-TRAITEMENT de `gps_positions` (à la clôture, ou à la
+    // volée sans écriture pour une tournée en cours) et non dans le handler
+    // Socket.IO : les données sont déjà en base, le recalcul est idempotent
+    // donc PROUVABLE (arbitrage §12.9). `UNIQUE (tour_id, debut)` : un même
+    // arrêt ne peut jamais être compté deux fois, même si le recalcul est
+    // relancé. `type` reste 'inconnu' quand aucun point de collecte n'explique
+    // l'arrêt — c'est précisément ce que le gestionnaire doit voir, jamais un
+    // rattachement inventé.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_gps_stops (
+        id SERIAL PRIMARY KEY,
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+        debut TIMESTAMP NOT NULL,
+        fin TIMESTAMP,
+        duree_min NUMERIC(6,1),
+        latitude DOUBLE PRECISION NOT NULL,
+        longitude DOUBLE PRECISION NOT NULL,
+        type VARCHAR(20) NOT NULL DEFAULT 'inconnu'
+          CHECK (type IN ('cav', 'centre', 'association', 'inconnu')),
+        cav_id INTEGER REFERENCES cav(id) ON DELETE SET NULL,
+        association_point_id INTEGER REFERENCES association_points(id) ON DELETE SET NULL,
+        source VARCHAR(20) NOT NULL DEFAULT 'cloture' CHECK (source IN ('cloture', 'recalcul')),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tour_id, debut)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_gps_stops_tour ON tour_gps_stops(tour_id);');
+    // Index partiel : le croisement « temps de vidage par CAV » ne lit que les
+    // arrêts rattachés à un conteneur.
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tour_gps_stops_cav ON tour_gps_stops(cav_id) WHERE cav_id IS NOT NULL;');
+    console.log('[INIT-DB] Arrêts GPS de tournée — tour_gps_stops ✓');
+
+    // ── §1.4 — Récurrence commandes exutoires + Pennylane (colonnes) ───────
+    // Ces trois tables ne sont PAS créées par ce fichier :
+    //   `commandes_exutoires` / `clients_exutoires` → scripts/migrate-exutoires.js
+    //   `pennylane_config`                          → routes/pennylane.js (IIFE au montage)
+    // Sur une base NEUVE, init-db.js peut donc s'exécuter AVANT leur création.
+    // On teste leur présence et on DIT explicitement quand la migration est
+    // reportée au prochain passage : jamais un échec silencieux, et jamais une
+    // table recréée ici (elle divergerait de sa définition d'origine).
+    // Même pattern que les colonnes Pennylane de `factures_exutoires` ci-dessus.
+    const tableExiste = async (nom) => {
+      const r = await client.query(
+        `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1`,
+        [nom]
+      );
+      return r.rows.length > 0;
+    };
+
+    try {
+      if (await tableExiste('commandes_exutoires')) {
+        // Le modèle récurrent EST la commande d'origine — définition DÉRIVÉE
+        // (`frequence <> 'unique' AND commande_parent_id IS NULL`), aucune
+        // colonne « est_modele » : un statut dérivé ne peut pas mentir
+        // (arbitrage §12.7). Le CHECK `frequence` existant reste INCHANGÉ.
+        await client.query(`
+          ALTER TABLE commandes_exutoires
+            ADD COLUMN IF NOT EXISTS prochaine_echeance DATE,
+            ADD COLUMN IF NOT EXISTS recurrence_suspendue BOOLEAN NOT NULL DEFAULT false;
+        `);
+        // Anti-doublon de génération : une seule commande fille par modèle et
+        // par date d'échéance. C'est la base — et non la boucle du service —
+        // qui garantit qu'un second passage ne double jamais les occurrences.
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cmd_exu_fille_unique
+          ON commandes_exutoires(commande_parent_id, date_commande) WHERE commande_parent_id IS NOT NULL;`);
+        console.log('[INIT-DB] Récurrence commandes exutoires — prochaine_echeance, recurrence_suspendue + index anti-doublon ✓');
+      } else {
+        console.warn('[INIT-DB] Récurrence commandes exutoires : table `commandes_exutoires` absente (migrate-exutoires.js non encore joué) — colonnes reportées au prochain init-db');
+      }
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration récurrence commandes_exutoires :', e.message);
+    }
+
+    try {
+      if (await tableExiste('pennylane_config')) {
+        // Curseur DÉDIÉ à la synchronisation des factures clients : `last_sync_at`
+        // est PARTAGÉ (test de connexion, Grand Livre, transactions) et le job GL
+        // quotidien l'avance — le bouton « factures » ne cherchait donc plus que
+        // depuis la veille. Colonne séparée = correctif minimal, zéro régression
+        // GL (arbitrage §12.8). NULL = jamais synchronisé (repli 90 j côté code,
+        // jamais une date inventée en base).
+        await client.query(`ALTER TABLE pennylane_config ADD COLUMN IF NOT EXISTS last_invoice_sync_at TIMESTAMP;`);
+        console.log('[INIT-DB] Pennylane — curseur dédié last_invoice_sync_at ✓');
+      } else {
+        console.warn('[INIT-DB] Pennylane : table `pennylane_config` absente (créée au montage de routes/pennylane.js) — colonne last_invoice_sync_at reportée au prochain init-db');
+      }
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration pennylane_config.last_invoice_sync_at :', e.message);
+    }
+
+    try {
+      if (await tableExiste('clients_exutoires')) {
+        await client.query(`
+          ALTER TABLE clients_exutoires
+            ADD COLUMN IF NOT EXISTS pennylane_customer_id VARCHAR(60),
+            ADD COLUMN IF NOT EXISTS pennylane_customer_name VARCHAR(255);
+        `);
+        // Un client Pennylane ne peut être lié qu'à UN client exutoire : l'import
+        // rapproche, il ne duplique pas. Index PARTIEL — les clients non liés
+        // (colonne NULL) restent libres et ne se heurtent pas entre eux.
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_exu_pennylane
+          ON clients_exutoires(pennylane_customer_id) WHERE pennylane_customer_id IS NOT NULL;`);
+        console.log('[INIT-DB] Clients exutoires — liaison Pennylane (pennylane_customer_id/_name) ✓');
+      } else {
+        console.warn('[INIT-DB] Clients exutoires : table `clients_exutoires` absente (migrate-exutoires.js non encore joué) — colonnes Pennylane reportées au prochain init-db');
+      }
+    } catch (e) {
+      console.error('[INIT-DB] Erreur migration clients_exutoires (liaison Pennylane) :', e.message);
+    }
+
+    // ── §1.5 — Réglages par défaut ─────────────────────────────────────────
+    // Ces valeurs sont des DÉFAUTS visibles et modifiables à l'écran, pas des
+    // constantes : le code qui les consomme conserve son propre repli (règle
+    // « jamais de valeur en dur »). Idempotent par WHERE NOT EXISTS : une
+    // valeur ajustée par l'exploitation n'est JAMAIS réécrite au redémarrage.
+    //
+    // NB : `tri.chaine_layout_v7_seed` n'est délibérément PAS seedé ici — c'est
+    // le VERROU posé par seedChaineV7 APRÈS une création réussie (pattern
+    // 2.26.4). Le poser d'avance empêcherait le plan V7 d'être seedé une seule
+    // fois, sans que rien ne le signale.
+    const reglagesChantier0826 = [
+      ['messagerie.retention_jours', '365', 'messagerie'],   // purge planifiée des messages
+      ['collecte.arret_seuil_min', '5', 'collecte'],         // durée minimale d'un arrêt GPS retenu
+      ['collecte.arret_rayon_m', '40', 'collecte'],          // rayon de stationnarité du cluster GPS
+      ['collecte.arret_rattachement_m', '80', 'collecte'],   // rayon de rattachement CAV/association
+      ['exutoires.recurrence_horizon_jours', '30', 'exutoires'], // horizon de génération des occurrences
+    ];
+    let reglagesCrees0826 = 0;
+    for (const [cle, valeur, categorie] of reglagesChantier0826) {
+      // Casts EXPLICITES obligatoires : dans un INSERT ... SELECT, PostgreSQL 16
+      // ne déduit pas le type des paramètres depuis les colonnes cibles, et $1
+      // sert ici DEUX fois (liste du SELECT + comparaison du WHERE) — sans cast,
+      // « inconsistent types deduced for parameter $1 » (42P08), défaut prouvé
+      // sur base réelle. Même classe que le correctif collect-public de la 2.25.0.
+      const r = await client.query(
+        `INSERT INTO settings (key, value, category)
+         SELECT $1::VARCHAR, $2::TEXT, $3::VARCHAR
+         WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = $1::VARCHAR)`,
+        [cle, valeur, categorie]
+      );
+      reglagesCrees0826 += r.rowCount;
+    }
+    console.log(`[INIT-DB] Réglages du chantier 26/08 : ${reglagesCrees0826} créé(s) sur ${reglagesChantier0826.length} (existants conservés) ✓`);
+
+    // ── §1.6 — Registre RGPD : messagerie interne ──────────────────────────
+    // Idempotent par WHERE NOT EXISTS (pattern des entrées art. 30 ci-dessus).
+    // La messagerie n'est PAS journalisée dans user_activity_log (volumétrie +
+    // vie privée, arbitrage §12.6) ; c'est sa PURGE qui laisse une trace, dans
+    // rgpd_audit_log.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Messagerie interne (conversations, mentions et notifications)',
+        'Communication opérationnelle interne entre les utilisateurs de l''ERP et les équipages en tournée (dont consignes aux équipages), et acheminement des notifications applicatives (alertes, échéances, événements métier) dans un canal unique consultable.',
+        'Intérêt légitime (organisation du travail et coordination des opérations)',
+        'Utilisateurs de l''ERP (salariés permanents et encadrants) et chauffeurs-collecteurs. Pour un chauffeur, l''identité de messagerie est portée par le VÉHICULE et non par un compte nominatif : le compte d''accès mobile est générique et partagé entre les camions.',
+        'Auteur du message (utilisateur ou véhicule), contenu textuel du message, horodatages d''envoi, accusés de lecture (dernier message lu par participant), mentions. AUCUNE pièce jointe. Aucune donnée de santé, d''infraction ni d''évaluation.',
+        'Les participants de la conversation uniquement (aucune diffusion à un tiers, aucun accès transversal aux conversations d''autrui).',
+        'Durée paramétrable par le réglage « messagerie.retention_jours » (365 jours par défaut) : purge planifiée des messages plus anciens et des conversations sans activité, journalisée dans rgpd_audit_log (AUTO_PURGE_MESSAGERIE).',
+        'Accès borné aux participants de la conversation (contrôle serveur, 403 sinon), périmètre véhicule pour les sessions chauffeur (un équipage ne voit que les conversations de SON véhicule), requêtes SQL paramétrées, authentification JWT obligatoire, diffusion temps réel par salles Socket.IO rejointes côté serveur uniquement.'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Messagerie interne (conversations, mentions et notifications)'
+      );
+    `);
+    console.log('[INIT-DB] Registre RGPD — traitement « Messagerie interne » ✓');
 
     // ══════════════════════════════════════════
     // HOTFIX 2026-05 — Resync des séquences SERIAL
@@ -7810,6 +8137,12 @@ async function initDatabase() {
       'badgeuse_sites', 'badgeuse_devices', 'badgeuse_badges',
       'badgeuse_badge_historique', 'badgeuse_pointages', 'badgeuse_corrections',
       'badgeuse_feuilles_temps', 'badgeuse_contenus', 'badgeuse_social_posts',
+      // Chantier 26/08/2026 (contrat §1) : messagerie, configurateur de chaîne,
+      // arrêts GPS. Le layout V7 est seedé avec des id explicites possibles —
+      // la resync évite le « duplicate key » à la première création manuelle.
+      'messagerie_conversations', 'messagerie_participants',
+      'messagerie_messages', 'messagerie_mentions',
+      'chaine_layouts', 'chaine_layout_postes', 'tour_gps_stops',
     ];
     // Garde-fou : seuls les noms de table snake_case ASCII sont acceptés
     // (la liste est statique, mais on protège quand même contre une
@@ -7881,6 +8214,31 @@ async function initDatabase() {
     } catch (e) {
       // Jamais bloquant pour le démarrage : le script manuel reste disponible.
       console.warn(`[INIT-DB] Auto-seed des modèles de tournées ignoré : ${e.message}`);
+    }
+
+    // ══════════════════════════════════════════
+    // Chantier 26/08/2026 — Auto-seed du plan de chaîne de tri V7
+    // ──────────────────────────────────────────
+    // Même doctrine que les modèles de tournées ci-dessus (pattern 2.26.4) :
+    // le plan V7 (15 personnes) est créé au premier démarrage, puis le VERROU
+    // `tri.chaine_layout_v7_seed` — posé PAR seedChaineV7 après une création
+    // réussie — empêche toute réapparition. Un plan supprimé volontairement
+    // dans le configurateur ne revient donc jamais au redémarrage.
+    // Le module de seed est livré par le lot L4 : tant qu'il n'est pas là, on
+    // le DIT (jamais un échec silencieux) et le démarrage se poursuit.
+    try {
+      const { seedChaineV7 } = require('./seed-chaine-v7');
+      if (typeof seedChaineV7 !== 'function') {
+        throw new Error('export `seedChaineV7` introuvable dans scripts/seed-chaine-v7.js');
+      }
+      const bilanV7 = await seedChaineV7(client);
+      console.log(`[INIT-DB] Plan de chaîne V7 : ${bilanV7 && bilanV7.cree ? 'créé' : 'déjà présent ou verrou posé — rien à faire'} ✓`);
+    } catch (e) {
+      if (e && e.code === 'MODULE_NOT_FOUND') {
+        console.warn('[INIT-DB] Plan de chaîne V7 non seedé : scripts/seed-chaine-v7.js absent (livré par le lot Configurateur) — nouvelle tentative au prochain démarrage');
+      } else {
+        console.warn(`[INIT-DB] Auto-seed du plan de chaîne V7 ignoré : ${e.message}`);
+      }
     }
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');

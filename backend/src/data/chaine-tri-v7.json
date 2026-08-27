@@ -1,0 +1,1023 @@
+{
+  "version": "V7",
+  "source": "Plan chaîne de tri V7 (PDF client, page 1 = disposition de référence)",
+  "note": "Positions en pourcentage 0-100 du canevas, origine haut-gauche. La page 2 du plan est une variante non seedée. Les libellés des zones sont ceux du plan ; ceux des postes suivent la nomenclature du chantier.",
+  "layout": {
+    "nom": "Plan V7 — 15 personnes",
+    "description": "Plan de la chaîne de tri V7 (deux lignes de crackage, qualités Homme/Femme, affinage recyclage). Effectif de référence : 15 personnes.",
+    "effectif_max": 15
+  },
+  "postes": [
+    {
+      "code": "CRAQ_1",
+      "libelle": "Crackage ligne 1",
+      "categorie": "poste",
+      "x": 24,
+      "y": 25,
+      "largeur": 8,
+      "hauteur": 10,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 1,
+      "proprietes": {
+        "ligne": 1
+      }
+    },
+    {
+      "code": "CRAQ_2",
+      "libelle": "Crackage ligne 2",
+      "categorie": "poste",
+      "x": 24,
+      "y": 62,
+      "largeur": 8,
+      "hauteur": 10,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 1,
+      "proprietes": {
+        "ligne": 2
+      }
+    },
+    {
+      "code": "CHAUSS_NON_TLC",
+      "libelle": "Chaussures et non TLC",
+      "categorie": "poste",
+      "x": 17,
+      "y": 45,
+      "largeur": 9,
+      "hauteur": 12,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 1,
+      "proprietes": null
+    },
+    {
+      "code": "RECYCL_REEMPLOI_1",
+      "libelle": "Recyclage VS réemploi ligne 1",
+      "categorie": "poste",
+      "x": 34,
+      "y": 27,
+      "largeur": 7.5,
+      "hauteur": 11,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 2,
+      "proprietes": {
+        "ligne": 1
+      }
+    },
+    {
+      "code": "RECYCL_REEMPLOI_2",
+      "libelle": "Recyclage VS réemploi ligne 2",
+      "categorie": "poste",
+      "x": 34,
+      "y": 64,
+      "largeur": 7.5,
+      "hauteur": 11,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 2,
+      "proprietes": {
+        "ligne": 2
+      }
+    },
+    {
+      "code": "QUALITES_HOMME",
+      "libelle": "Qualités Homme",
+      "categorie": "poste",
+      "x": 52,
+      "y": 42,
+      "largeur": 11,
+      "hauteur": 10,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 1,
+      "proprietes": null
+    },
+    {
+      "code": "QUALITES_FEMME",
+      "libelle": "Qualités Femme",
+      "categorie": "poste",
+      "x": 68,
+      "y": 42,
+      "largeur": 11,
+      "hauteur": 10,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 1,
+      "proprietes": null
+    },
+    {
+      "code": "STOCK_VAK_BTQ",
+      "libelle": "Mise en stock VAK/BTQ Homme & Femme",
+      "categorie": "poste",
+      "x": 60,
+      "y": 8,
+      "largeur": 14,
+      "hauteur": 10,
+      "obligatoire": true,
+      "actif": true,
+      "effectif_min": 1,
+      "effectif_max": 2,
+      "proprietes": null
+    },
+    {
+      "code": "QUALITE_ENFANT",
+      "libelle": "Qualité Enfant + mise en stock",
+      "categorie": "poste",
+      "x": 88,
+      "y": 75,
+      "largeur": 10,
+      "hauteur": 12,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 1,
+      "proprietes": null
+    },
+    {
+      "code": "AFFINAGE_RECYCLAGE",
+      "libelle": "Affinage recyclage (CSR / effilochage)",
+      "categorie": "poste",
+      "x": 88,
+      "y": 30,
+      "largeur": 5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 2,
+      "proprietes": null
+    },
+    {
+      "code": "PREPA_CHIF",
+      "libelle": "Prépa CHIF",
+      "categorie": "poste",
+      "x": 55,
+      "y": 82,
+      "largeur": 10,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 1,
+      "proprietes": null
+    },
+    {
+      "code": "Z_ORIGINAL_ENTRANT_TRI",
+      "libelle": "Original entrant pour tri",
+      "categorie": "entree",
+      "x": 17,
+      "y": 14,
+      "largeur": 8.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#F59E0B"
+      }
+    },
+    {
+      "code": "Z_ORIGINAL_ENTRANT_TRI_2",
+      "libelle": "Original entrant pour tri",
+      "categorie": "entree",
+      "x": 17,
+      "y": 76,
+      "largeur": 8.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#F59E0B"
+      }
+    },
+    {
+      "code": "Z_DECHETS_NON_TLC",
+      "libelle": "Déchets non TLC",
+      "categorie": "zone_depose",
+      "x": 17,
+      "y": 4,
+      "largeur": 8.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#64748B"
+      }
+    },
+    {
+      "code": "Z_POUBELLE_JAUNE",
+      "libelle": "Poubelle jaune",
+      "categorie": "zone_depose",
+      "x": 26,
+      "y": 4,
+      "largeur": 8.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#64748B"
+      }
+    },
+    {
+      "code": "Z_DECHETS_NON_TLC_2",
+      "libelle": "Déchets non TLC",
+      "categorie": "zone_depose",
+      "x": 17,
+      "y": 87,
+      "largeur": 8.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#64748B"
+      }
+    },
+    {
+      "code": "Z_POUBELLE_JAUNE_2",
+      "libelle": "Poubelle jaune",
+      "categorie": "zone_depose",
+      "x": 26,
+      "y": 87,
+      "largeur": 8.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#64748B"
+      }
+    },
+    {
+      "code": "Z_COUETTES_OREILLER",
+      "libelle": "Couettes oreiller",
+      "categorie": "zone_depose",
+      "x": 5.5,
+      "y": 15,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_PELUCHES_JOUETS",
+      "libelle": "Peluches & Jouets (non DEEE)",
+      "categorie": "zone_depose",
+      "x": 11.3,
+      "y": 15,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_DEEE",
+      "libelle": "DEEE",
+      "categorie": "zone_depose",
+      "x": 11.3,
+      "y": 26,
+      "largeur": 5.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#64748B"
+      }
+    },
+    {
+      "code": "Z_LINGE_MAISON_VAK_BTQ",
+      "libelle": "Linge de maison VAK/BTQ",
+      "categorie": "zone_depose",
+      "x": 1,
+      "y": 38,
+      "largeur": 7,
+      "hauteur": 11,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_EFFILO_MERINOS",
+      "libelle": "Effilo Mérinos",
+      "categorie": "zone_depose",
+      "x": 1,
+      "y": 50,
+      "largeur": 7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_CHAUSS_MAROQ_ACCESS_BTQ_VAK",
+      "libelle": "Chaussures et Maroquinerie (accessoires) BTQ&VAK",
+      "categorie": "zone_depose",
+      "x": 0.5,
+      "y": 60,
+      "largeur": 6,
+      "hauteur": 12,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_PRECLASSE_CHAUSS_PAIREES",
+      "libelle": "Pré-classé Chauss. Pairées",
+      "categorie": "zone_depose",
+      "x": 7,
+      "y": 62,
+      "largeur": 5,
+      "hauteur": 11,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_DECO_TEXTILES",
+      "libelle": "Déco Textiles",
+      "categorie": "zone_depose",
+      "x": 12.2,
+      "y": 62,
+      "largeur": 4.6,
+      "hauteur": 11,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_TEXTILES_MOUILLES",
+      "libelle": "Textiles mouillés",
+      "categorie": "zone_depose",
+      "x": 0.5,
+      "y": 86,
+      "largeur": 7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#64748B"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_L1",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 26,
+      "y": 14,
+      "largeur": 4.7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_FEMME_VAK_BTQ_L1",
+      "libelle": "Femme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 31,
+      "y": 14,
+      "largeur": 4.7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_HOMME_VAK_BTQ_L1",
+      "libelle": "Homme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 36,
+      "y": 14,
+      "largeur": 4.7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_ENFANT_VAK_BTQ_L1",
+      "libelle": "Enfant VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 42,
+      "y": 27,
+      "largeur": 4,
+      "hauteur": 11,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 1,
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_L2",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 26,
+      "y": 76,
+      "largeur": 4.7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_FEMME_VAK_BTQ_L2",
+      "libelle": "Femme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 31,
+      "y": 76,
+      "largeur": 4.7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_HOMME_VAK_BTQ_L2",
+      "libelle": "Homme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 36,
+      "y": 76,
+      "largeur": 4.7,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_ENFANT_VAK_BTQ_L2",
+      "libelle": "Enfant VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 42,
+      "y": 64,
+      "largeur": 4,
+      "hauteur": 11,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "ligne": 2,
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_CHAUSS",
+      "libelle": "Recyclage Chauss.",
+      "categorie": "zone_depose",
+      "x": 27.5,
+      "y": 44,
+      "largeur": 8,
+      "hauteur": 8,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_CSR_MAROQ",
+      "libelle": "CSR Maroq.",
+      "categorie": "zone_depose",
+      "x": 27.5,
+      "y": 53,
+      "largeur": 8,
+      "hauteur": 8,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_HOMME_VAK",
+      "libelle": "Homme VAK",
+      "categorie": "zone_depose",
+      "x": 46.5,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_HOMME_STD",
+      "libelle": "Homme STD",
+      "categorie": "zone_depose",
+      "x": 51.3,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_HOMME_EXTRA",
+      "libelle": "Homme EXTRA",
+      "categorie": "zone_depose",
+      "x": 56.1,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_C",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 60.9,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_FEMME_VAK",
+      "libelle": "Femme VAK",
+      "categorie": "zone_depose",
+      "x": 65.7,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED",
+        "note_plan": "Le plan porte « Homme » sur ce bloc, positionné au-dessus de Qualités Femme"
+      }
+    },
+    {
+      "code": "Z_FEMME_STD",
+      "libelle": "Femme STD",
+      "categorie": "zone_depose",
+      "x": 70.5,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED",
+        "note_plan": "Le plan porte « Homme » sur ce bloc, positionné au-dessus de Qualités Femme"
+      }
+    },
+    {
+      "code": "Z_FEMME_EXTRA",
+      "libelle": "Femme EXTRA",
+      "categorie": "zone_depose",
+      "x": 75.3,
+      "y": 32,
+      "largeur": 4.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED",
+        "note_plan": "Le plan porte « Homme » sur ce bloc, positionné au-dessus de Qualités Femme"
+      }
+    },
+    {
+      "code": "Z_HOMME_VAK_BTQ_C1",
+      "libelle": "Homme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 47,
+      "y": 55,
+      "largeur": 4.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_HOMME_VAK_BTQ_C2",
+      "libelle": "Homme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 52,
+      "y": 55,
+      "largeur": 4.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_HOMME_VAK_BTQ_C3",
+      "libelle": "Homme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 57,
+      "y": 55,
+      "largeur": 4.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_FEMME_VAK_BTQ_C1",
+      "libelle": "Femme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 63,
+      "y": 55,
+      "largeur": 4.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_FEMME_VAK_BTQ_C2",
+      "libelle": "Femme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 68,
+      "y": 55,
+      "largeur": 4.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_FEMME_VAK_BTQ_C3",
+      "libelle": "Femme VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 73,
+      "y": 55,
+      "largeur": 4.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_D1",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 80,
+      "y": 6,
+      "largeur": 6,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_D2",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 80,
+      "y": 17,
+      "largeur": 6,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_D3",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 80,
+      "y": 28,
+      "largeur": 6,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE_PRETRI_D4",
+      "libelle": "Recyclage (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 80,
+      "y": 39,
+      "largeur": 6,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_CSR_TEXTILE",
+      "libelle": "CSR Textile",
+      "categorie": "zone_depose",
+      "x": 87,
+      "y": 6,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_RECYCLAGE",
+      "libelle": "Recyclage",
+      "categorie": "zone_depose",
+      "x": 87,
+      "y": 41,
+      "largeur": 5.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_CSR_TEXTILE_2",
+      "libelle": "CSR Textile",
+      "categorie": "zone_depose",
+      "x": 87,
+      "y": 51,
+      "largeur": 5.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_EFFILO_TRICOT",
+      "libelle": "Effilo Tricot",
+      "categorie": "zone_depose",
+      "x": 93.5,
+      "y": 6,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_EFFILO_COTON",
+      "libelle": "Effilo coton",
+      "categorie": "zone_depose",
+      "x": 93.5,
+      "y": 17,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_EFFILO_JEAN",
+      "libelle": "Effilo Jean",
+      "categorie": "zone_depose",
+      "x": 93.5,
+      "y": 29,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_EFFILO_COTON_2",
+      "libelle": "Effilo coton",
+      "categorie": "zone_depose",
+      "x": 93.5,
+      "y": 40,
+      "largeur": 5.5,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_EFFILO_TRICOT_2",
+      "libelle": "Effilo Tricot",
+      "categorie": "zone_depose",
+      "x": 93.5,
+      "y": 51,
+      "largeur": 5.5,
+      "hauteur": 9,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#0891B2"
+      }
+    },
+    {
+      "code": "Z_ENFANT_VAK_BTQ_D1",
+      "libelle": "Enfant VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 80,
+      "y": 62,
+      "largeur": 6,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    },
+    {
+      "code": "Z_ENFANT_VAK_BTQ_D2",
+      "libelle": "Enfant VAK/BTQ (pré-tri)",
+      "categorie": "zone_depose",
+      "x": 80,
+      "y": 74,
+      "largeur": 6,
+      "hauteur": 10,
+      "obligatoire": false,
+      "actif": true,
+      "effectif_min": 0,
+      "effectif_max": 0,
+      "proprietes": {
+        "couleur": "#7C3AED"
+      }
+    }
+  ]
+}

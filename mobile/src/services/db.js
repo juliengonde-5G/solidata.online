@@ -29,6 +29,17 @@
  *                                     est traité comme les autres 4xx —
  *                                     purgé sans boucle, cf. sync.js)
  *
+ * Stores v6 (messagerie mobile, lot L3 26/08/2026) :
+ *   - pendingMessages                (file d'envoi : messages de la
+ *                                     messagerie interne — réponses rapides
+ *                                     ET saisie libre, POST
+ *                                     /api/messages/conversations/:id/messages.
+ *                                     Même doctrine que les autres files :
+ *                                     jamais bloquant, jamais perdu — un
+ *                                     message parti hors ligne reste visible
+ *                                     à l'écran comme « en attente » jusqu'à
+ *                                     son envoi réel, cf. sync.js)
+ *
  * Chaque entrée "pending*" porte un clientId (uuid) pour permettre une
  * idempotence côté serveur si le backend évolue (cf. contrat recommandé dans
  * DOCUMENTATION_MOBILE.md). Par défaut, on s'appuie sur la politique
@@ -36,7 +47,7 @@
  */
 
 const DB_NAME = 'solidata-mobile';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export const STORES = {
   tours: 'tours',
@@ -50,6 +61,7 @@ export const STORES = {
   pendingMessageReads: 'pendingMessageReads',
   pendingEndOfDay: 'pendingEndOfDay',
   pendingChecklists: 'pendingChecklists',
+  pendingMessages: 'pendingMessages',
 };
 
 export function openDB() {
@@ -105,6 +117,13 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.pendingChecklists)) {
         const s = db.createObjectStore(STORES.pendingChecklists, { keyPath: 'id', autoIncrement: true });
         s.createIndex('tourId', 'tourId', { unique: false });
+      }
+
+      // v6 — messages de la messagerie interne (réponses rapides + saisie libre)
+      if (!db.objectStoreNames.contains(STORES.pendingMessages)) {
+        const s = db.createObjectStore(STORES.pendingMessages, { keyPath: 'id', autoIncrement: true });
+        s.createIndex('conversationId', 'conversationId', { unique: false });
+        s.createIndex('clientId', 'clientId', { unique: false });
       }
     };
 
@@ -339,6 +358,28 @@ export async function addPendingChecklist(data) {
     degats: Array.isArray(data.degats) ? data.degats : [],
     createdAt: new Date().toISOString(),
   });
+}
+
+/**
+ * Ajoute un message de la messagerie interne à envoyer (réponse rapide ou
+ * saisie libre — même fil, même endpoint côté serveur). Affiché immédiatement
+ * dans le fil comme « en attente » (voir components/messagerie/FilConversation),
+ * envoyé dès que possible par sync.js, jamais perdu si le réseau coupe.
+ * @param {object} data - { conversationId, texte, clientId? }
+ */
+export async function addPendingMessage(data) {
+  return putItem(STORES.pendingMessages, {
+    clientId: data.clientId || newClientId(),
+    conversationId: data.conversationId,
+    texte: data.texte,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/** Messages en attente pour UNE conversation (fusionnés au fil affiché). */
+export async function getPendingMessages(conversationId) {
+  const all = await getAllItems(STORES.pendingMessages).catch(() => []);
+  return all.filter((m) => String(m.conversationId) === String(conversationId));
 }
 
 // ────────────────────────────────────────────────────────────────────────

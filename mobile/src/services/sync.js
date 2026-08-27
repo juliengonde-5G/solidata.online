@@ -17,6 +17,11 @@
  * Endpoints : écritures via authedFetch/api (JWT chauffeur + ré-auth). Le GPS
  * hors-couverture est bufferisé par TourMap (addGpsPosition) puis rejoué en lot
  * sur POST /tours/gps-batch-public ; les scans QR sur POST /tours/:id/scan-public.
+ *
+ * Messagerie interne (lot L3, 26/08/2026) : les messages (réponses rapides ET
+ * saisie libre) suivent la MÊME politique — POST
+ * /api/messages/conversations/:id/messages, file `pendingMessages`, voir
+ * sendMessagerieMessage/syncPendingMessages plus bas.
  */
 
 import {
@@ -68,7 +73,7 @@ export function __resetBackoffForTests() {
  * @returns {Promise<{ scans, weights, gps, incidents, collects, total }>}
  */
 export async function getPendingCount() {
-  const [scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists] = await Promise.all([
+  const [scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists, messages] = await Promise.all([
     countItems(STORES.pendingScans).catch(() => 0),
     countItems(STORES.pendingWeights).catch(() => 0),
     countItems(STORES.gpsBuffer).catch(() => 0),
@@ -77,9 +82,12 @@ export async function getPendingCount() {
     countItems(STORES.pendingMessageReads).catch(() => 0),
     countItems(STORES.pendingEndOfDay).catch(() => 0),
     countItems(STORES.pendingChecklists).catch(() => 0),
+    countItems(STORES.pendingMessages).catch(() => 0),
   ]);
-  const counts = { scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists };
-  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay + checklists;
+  const counts = {
+    scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists, messages,
+  };
+  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay + checklists + messages;
   emit('pending', { counts });
   return counts;
 }
@@ -581,6 +589,56 @@ export async function syncPendingChecklists() {
   return { synced, failed, pending: items.length - synced - failed };
 }
 
+/**
+ * Envoie un message de la messagerie interne (réponse rapide ou saisie
+ * libre — le serveur ne fait aucune différence entre les deux, contrat
+ * §2.3). `authedFetch` porte le JWT chauffeur + la ré-auth transparente :
+ * un 401 lève une erreur `retryable` (voir authedFetch.js), donc jamais
+ * purgée par la file — un problème d'auth n'est pas un message invalide.
+ */
+export async function sendMessagerieMessage(item) {
+  const res = await authedFetch(`/api/messages/conversations/${item.conversationId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texte: item.texte }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status, data };
+    throw err;
+  }
+  return data;
+}
+
+export async function syncPendingMessages() {
+  const store = STORES.pendingMessages;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
+  let synced = 0; let failed = 0;
+  for (const it of items) {
+    try {
+      await sendMessagerieMessage(it);
+      await deleteItem(store, it.id);
+      synced++;
+    } catch (err) {
+      if (isClientError(err)) {
+        // 400 (texte vide/trop long), 403 (périmètre/bot), 404 (conversation
+        // supprimée), 409 (conversation SOLIDATA en lecture seule) : rejouer
+        // ne changerait rien, on purge sans boucler — comme les autres files.
+        console.warn('[SYNC] Message rejeté, suppression:', err.response?.status);
+        await deleteItem(store, it.id);
+        failed++;
+      } else {
+        recordFailure(store);
+        break;
+      }
+    }
+  }
+  if (synced > 0 || failed > 0) recordSuccess(store);
+  return { synced, failed, pending: items.length - synced - failed };
+}
+
 export async function syncAll() {
   if (!navigator.onLine) {
     emit('state', { state: 'offline' });
@@ -601,6 +659,7 @@ export async function syncAll() {
       messageReads: await syncPendingMessageReads(),
       endOfDay: await syncPendingEndOfDay(),
       checklists: await syncPendingChecklists(),
+      messages: await syncPendingMessages(),
     };
     const totalSynced = Object.values(results).reduce((a, r) => a + r.synced, 0);
     const totalPending = Object.values(results).reduce((a, r) => a + r.pending, 0);

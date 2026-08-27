@@ -597,6 +597,75 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
   return "Désolé, je n'ai pas pu traiter ta demande. Réessaie ! 🔄";
 }
 
+// ── Traitement d'un message (partagé HTTP ↔ messagerie interne) ─────────
+//
+// EXTRACTION MÉCANIQUE (lot L1, contrat §2.5) : tout ce que faisait le corps de
+// `POST /api/chat` — plafond de longueur, limitation de débit, contrôle de la
+// clé, appel outillé à Claude, journalisation `chatbot_history` — vit ici, et
+// l'endpoint HTTP se contente d'appeler cette fonction. Objectif : la
+// conversation « SolidataBot » de la messagerie interne emprunte EXACTEMENT le
+// même chemin, sans une ligne de logique dupliquée (deux implémentations
+// divergeraient au premier correctif).
+//
+// Les refus sont portés par des erreurs à `code` stable, que chaque appelant
+// traduit dans SON registre : statut HTTP pour le widget, message déposé dans
+// le fil pour la messagerie. Aucun changement de comportement de l'endpoint.
+//
+// @param {object} args
+// @param {number} args.userId    identifiant du demandeur (limitation de débit + outils self-scope)
+// @param {string} args.role      rôle (filtre RGPD des outils de pilotage)
+// @param {string} args.message   texte de l'utilisateur
+// @param {string} args.sessionId fil de conversation ('msg-<conversation_id>' côté messagerie)
+// @param {string} [args.username] identifiant de connexion, pour `chatbot_history`
+//                 (optionnel : résolu en base s'il n'est pas fourni)
+// @returns {Promise<{reply: string, response_time_ms: number}>}
+async function traiterMessageBot({ userId, role, message, sessionId, username = null }) {
+  const texte = typeof message === 'string' ? message.trim() : '';
+  if (!texte) {
+    const err = new Error('Message requis');
+    err.code = 'MESSAGE_REQUIS';
+    throw err;
+  }
+  const userMessage = texte.slice(0, MAX_MSG_LENGTH);
+
+  if (!checkRateLimit(userId)) {
+    const err = new Error('Trop de messages');
+    err.code = 'RATE_LIMIT';
+    throw err;
+  }
+
+  if (!ANTHROPIC_API_KEY) {
+    const err = new Error('Service IA non configuré');
+    err.code = 'IA_NON_CONFIGUREE';
+    throw err;
+  }
+
+  const userCtx = { userId, role, username };
+
+  const startTime = Date.now();
+  const reply = await chatWithClaude(userMessage, sessionId, userCtx);
+  const responseTimeMs = Date.now() - startTime;
+
+  // Journal d'usage. `username` est résolu en base UNIQUEMENT s'il n'a pas été
+  // fourni : les deux appelants le connaissent déjà (aucune requête en plus).
+  let nomCompte = username;
+  if (nomCompte == null) {
+    try {
+      const r = await pool.query('SELECT username FROM users WHERE id = $1', [userId]);
+      nomCompte = r.rows[0] ? r.rows[0].username : null;
+    } catch (err) {
+      console.error('[SolidataBot] Identifiant de compte illisible :', err.message);
+    }
+  }
+  pool.query(
+    `INSERT INTO chatbot_history (user_id, username, session_id, user_message, bot_reply, response_time_ms)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [userId, nomCompte, sessionId, userMessage, reply, responseTimeMs]
+  ).catch(err => console.error('[SolidataBot] Log error:', err.message));
+
+  return { reply, response_time_ms: responseTimeMs };
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────
 
 // POST /api/chat
@@ -607,37 +676,26 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Message requis' });
     }
 
-    const userMessage = message.trim().slice(0, MAX_MSG_LENGTH);
     // Le JWT porte `id` (cf. routes/auth.js). L'ancien `req.user.userId` était
     // toujours undefined → rate-limit partagé globalement + outils self-scope
     // (planning/heures) incapables de résoudre l'employé courant. On privilégie
     // `id`, avec repli `userId` pour tout autre format de jeton.
     const userId = req.user.id ?? req.user.userId;
-
-    if (!checkRateLimit(userId)) {
-      return res.status(429).json({ error: 'Trop de messages. Attends un peu ! ⏳' });
-    }
-
-    if (!ANTHROPIC_API_KEY) {
-      return res.status(503).json({ error: 'Service IA non configuré. Contacte un admin. 🔧' });
-    }
-
     const sessionId = session_id || `u${userId}_${Date.now().toString(36)}`;
-    const userCtx = { userId, role: req.user.role, username: req.user.username };
 
-    const startTime = Date.now();
-    const reply = await chatWithClaude(userMessage, sessionId, userCtx);
-    const responseTimeMs = Date.now() - startTime;
-
-    // Logger dans chatbot_history
-    pool.query(
-      `INSERT INTO chatbot_history (user_id, username, session_id, user_message, bot_reply, response_time_ms)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [userId, req.user.username, sessionId, userMessage, reply, responseTimeMs]
-    ).catch(err => console.error('[SolidataBot] Log error:', err.message));
+    const { reply } = await traiterMessageBot({
+      userId, role: req.user.role, username: req.user.username,
+      message, sessionId,
+    });
 
     res.json({ reply, session_id: sessionId, timestamp: new Date().toISOString() });
   } catch (err) {
+    if (err.code === 'RATE_LIMIT') {
+      return res.status(429).json({ error: 'Trop de messages. Attends un peu ! ⏳' });
+    }
+    if (err.code === 'IA_NON_CONFIGUREE') {
+      return res.status(503).json({ error: 'Service IA non configuré. Contacte un admin. 🔧' });
+    }
     console.error('[SolidataBot] Chat error:', err.message);
     if (err.status === 429) {
       return res.status(503).json({ error: "L'IA est surchargée. Réessaie dans quelques secondes. ⏳" });
@@ -926,3 +984,6 @@ module.exports = router;
 // Exposés pour les tests (RGPD tool-gating). N'affecte pas le montage du routeur.
 module.exports.toolsForRole = toolsForRole;
 module.exports.EXTENDED_TOOL_ROLES = EXTENDED_TOOL_ROLES;
+// Consommé par la messagerie interne (routes/messages.js, conversation « bot ») :
+// même logique conversationnelle que le widget, jamais recopiée.
+module.exports.traiterMessageBot = traiterMessageBot;

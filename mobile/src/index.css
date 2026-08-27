@@ -181,6 +181,32 @@
   .sync-banner--error   { @apply bg-red-100 text-red-900 border-b border-red-200; }
   .sync-banner--pending { @apply bg-slate-100 text-slate-800 border-b border-slate-200; }
 
+  /* Bannière « Nouveau message » (messagerie mobile, lot L3). Même mécanique
+     que le bandeau de synchro : fixée en haut, hauteur RÉELLE publiée en
+     variable CSS, jamais devinée. Elle glisse sous les bandeaux démo/synchro
+     déjà présents plutôt que de leur être superposée — et le contenu
+     applicatif (l'en-tête `.screen-header`) s'écarte d'autant pour ne
+     JAMAIS être recouvert (contrat §4). z-index sous le bandeau de consigne
+     du responsable (9990) : une consigne à acquitter reste toujours
+     accessible au-dessus d'un simple toast de nouveau message. */
+  .message-banner {
+    @apply fixed left-0 right-0 shadow-lg;
+    z-index: 150;
+    top: 0;
+  }
+  body.sync-banner-on .message-banner { top: var(--sync-banner-h, 44px); }
+  body.demo-mode-on .message-banner { top: var(--demo-banner-h, 64px); }
+  body.demo-mode-on.sync-banner-on .message-banner {
+    top: calc(var(--demo-banner-h, 64px) + var(--sync-banner-h, 44px));
+  }
+
+  body.message-banner-on .screen-header {
+    padding-top: calc(1rem + var(--message-banner-h, 72px));
+  }
+  body.sync-banner-on.message-banner-on .screen-header {
+    padding-top: calc(1rem + var(--sync-banner-h, 44px) + var(--message-banner-h, 72px));
+  }
+
   /* Badge local de statut d'action (envoyé / en attente / à renvoyer). */
   .action-badge {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;
