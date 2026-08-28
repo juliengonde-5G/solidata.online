@@ -571,6 +571,7 @@ export default function Layout({ children }) {
           badgeCommunication={messagesNonLus + notifications.nonLues}
           onOuvrirDock={ouvrirDock}
           dockOuvert={dockOuvert}
+          avecMessagerie={messagerieActive}
         />
 
         <main className="flex-1 overflow-y-auto min-h-0">

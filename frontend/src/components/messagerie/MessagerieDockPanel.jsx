@@ -76,10 +76,13 @@ export default function MessagerieDockPanel({ conversationDemandee = null, onCon
         )}
         <button
           onClick={() => navigate(m.selectedId ? `/messagerie?conversation=${m.selectedId}` : '/messagerie')}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 flex-shrink-0"
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50 flex-shrink-0"
           title="Ouvrir en plein écran"
           aria-label="Ouvrir en plein écran"
         >
+          {/* Hors conversation, le libellé accompagne l'icône : la barre
+              porterait sinon un pictogramme seul au-dessus du vide. */}
+          {!m.selectedId && <span className="text-[11px] font-semibold">Plein écran</span>}
           <Maximize2 className="w-4 h-4" />
         </button>
       </header>
