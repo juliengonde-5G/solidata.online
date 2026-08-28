@@ -16,7 +16,7 @@ import {
 import FondCarte from '../components/FondCarte';
 import TourProgrammePanel from '../components/tours/TourProgrammePanel';
 import TourPeseesPanel from '../components/tours/TourPeseesPanel';
-import { libelleStatutTournee, classeStatutTournee, lienCarteGps } from '../utils/tours';
+import { libelleStatutTournee, classeStatutTournee, libelleStatutPoint, lienCarteGps } from '../utils/tours';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -743,7 +743,7 @@ export default function CollectionsLive() {
                               <div className="text-xs space-y-0.5">
                                 <p className="font-bold">{p.position}. {p.name}</p>
                                 {p.address && <p className="text-slate-500">{p.address}</p>}
-                                <p>Statut : <strong>{p.status}</strong></p>
+                                <p>Statut : <strong>{libelleStatutPoint(p.status)}</strong></p>
                                 {p.collected_at && <p>Collecté à : {fmtTime(p.collected_at)}</p>}
                                 {p.fill_level != null && <p>Remplissage : <strong>{p.fill_level}/5</strong></p>}
                                 {p.planned_passage_time && !isCollected && (
@@ -1081,7 +1081,7 @@ function ExpandedDetail({ tour, color, onRefresh, demandeParPoint, arretsGps }) 
                   <td className="py-1.5 px-2">
                     <span className={`inline-flex items-center gap-1 ${statusColor}`}>
                       <StatusIco className="w-3.5 h-3.5" />
-                      {p.status}
+                      {libelleStatutPoint(p.status)}
                     </span>
                   </td>
                   <td className="py-1.5 px-2 text-right text-slate-500">{fmtTime(p.planned_passage_time)}</td>

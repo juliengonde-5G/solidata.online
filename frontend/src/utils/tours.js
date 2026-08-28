@@ -69,6 +69,33 @@ export const classeStatutTournee = (statut) =>
   TOUR_STATUS_META[statut]?.classe || 'bg-slate-100 text-slate-600';
 
 /**
+ * États d'un POINT du programme — à ne pas confondre avec l'état de la TOURNÉE
+ * ci-dessus. Valeurs stockées dans `tour_cav.status` / `tour_association_point`
+ * (cf. init-db.js) : pending, collected, skipped, incident.
+ *
+ * Ces valeurs s'affichaient encore en anglais dans le suivi en direct (« Statut :
+ * pending » dans l'infobulle de la carte et dans le tableau des points), alors
+ * même que le reste de l'écran était traduit.
+ *
+ * Le libellé est celui du SUIVI EN DIRECT : un point non encore fait y est « à
+ * collecter », parce que la journée est en cours. Le compte rendu de tournée,
+ * lui, garde le sien (« Non fait ») : une fois la tournée close, il ne reste
+ * plus rien à collecter — même valeur en base, deux vérités selon le moment.
+ */
+export const POINT_STATUS_META = {
+  pending: { label: 'À collecter', classe: 'bg-slate-100 text-slate-600' },
+  in_progress: { label: 'En cours', classe: 'bg-blue-100 text-blue-700' },
+  collected: { label: 'Collecté', classe: 'bg-emerald-100 text-emerald-700' },
+  skipped: { label: 'Non collecté', classe: 'bg-amber-100 text-amber-800' },
+  incident: { label: 'Incident', classe: 'bg-red-100 text-red-700' },
+};
+
+/** Même doctrine que ci-dessus : une valeur inconnue se montre, elle ne se masque pas. */
+export const libelleStatutPoint = (statut) => POINT_STATUS_META[statut]?.label || statut || '—';
+export const classeStatutPoint = (statut) =>
+  POINT_STATUS_META[statut]?.classe || 'bg-slate-100 text-slate-600';
+
+/**
  * Lien de carte vers un point GPS. Google Maps est retenu (demande client
  * 27/08/2026) : c'est l'outil déjà utilisé par les chauffeurs pour naviguer
  * (mobile TourMap), et le gestionnaire qui ouvre un point depuis son historique
