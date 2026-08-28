@@ -68,7 +68,12 @@ export default function MessagerieDockPanel({ onClose }) {
           </button>
         </header>
 
-        <div className="flex-1 min-h-0 flex flex-col">
+        {/* `min-w-0` est indispensable : un élément flex a `min-width: auto`
+            par défaut, si bien qu'il refuse de rétrécir sous la largeur de son
+            contenu. Sans lui, une ligne un peu longue (« Aucun message pour
+            l'instant. Écrivez le premier ! ») ne revient pas à la ligne et
+            sort du panneau. */}
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col">
           {!m.selectedId ? (
             <ConversationsList
               conversations={m.conversations}

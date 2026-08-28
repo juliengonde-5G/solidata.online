@@ -99,13 +99,13 @@ export default function FilConversation({
   }
 
   return (
-    <div className={`relative flex flex-col min-h-0 ${className}`}>
+    <div className={`relative flex flex-col min-h-0 min-w-0 ${className}`}>
       <div
         ref={containerRef}
         onScroll={handleScroll}
         role="log"
         aria-live="polite"
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-3 bg-slate-50/40"
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden break-words px-4 py-3 bg-slate-50/40"
       >
         {error && (
           <ErrorState variant="card" title="Messages indisponibles" message={error} className="my-2" />
