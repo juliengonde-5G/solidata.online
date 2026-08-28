@@ -14,9 +14,15 @@ const TOAST_DUREE_MS = 6000;
  * non-lus temps réel, panneau compact, et toast discret à la réception d'un
  * message hors de la page /messagerie (contrat §3).
  *
- * Position bas-GAUCHE, volontairement à l'opposé du bouton flottant de
- * secours de SolidataBot (bas-droite, mobile uniquement) pour qu'ils ne se
- * chevauchent jamais, à n'importe quelle taille d'écran.
+ * PLACEMENT (revu le 28/08/2026, demande client) : à partir de `lg`, le
+ * panneau s'ancre à DROITE. En bas à gauche, il recouvrait la barre de
+ * navigation sur environ 235 px — or c'est précisément à partir de `lg` que
+ * cette barre est visible (`Layout.jsx` : `-translate-x-full lg:translate-x-0`).
+ *
+ * En dessous de `lg`, il RESTE à gauche : la navigation y est masquée (donc
+ * rien à protéger), et le bas-droite est occupé par le bouton flottant de
+ * secours de SolidataBot (`lg:hidden`). Les deux ne se chevauchent donc jamais,
+ * à aucune taille d'écran.
  */
 export default function MessagerieDock() {
   const { user } = useAuth();
@@ -72,7 +78,7 @@ export default function MessagerieDock() {
       {toast && (
         <button
           onClick={ouvrirToast}
-          className="fixed bottom-24 left-5 z-40 max-w-[320px] flex items-start gap-2.5 bg-white border border-slate-200 shadow-elevated rounded-xl px-4 py-3 text-left hover:border-primary transition-colors animate-fade-in"
+          className="fixed bottom-24 left-5 lg:left-auto lg:right-5 z-40 max-w-[320px] flex items-start gap-2.5 bg-white border border-slate-200 shadow-elevated rounded-xl px-4 py-3 text-left hover:border-primary transition-colors animate-fade-in"
         >
           <span className="chatbot-avatar w-8 h-8 flex-shrink-0">
             <MessageCircle className="w-4 h-4" />
@@ -86,7 +92,7 @@ export default function MessagerieDock() {
 
       <button
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-5 left-5 z-40 w-14 h-14 rounded-full text-white shadow-elevated transition-all hover:scale-105 grid place-items-center"
+        className="fixed bottom-5 left-5 lg:left-auto lg:right-5 z-40 w-14 h-14 rounded-full text-white shadow-elevated transition-all hover:scale-105 grid place-items-center"
         style={{ background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-primary-dark))' }}
         aria-label={open ? 'Fermer la messagerie' : 'Ouvrir la messagerie'}
         title="Messagerie"

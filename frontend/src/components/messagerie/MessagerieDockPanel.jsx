@@ -40,7 +40,7 @@ export default function MessagerieDockPanel({ onClose }) {
       <aside
         role="dialog"
         aria-label="Messagerie"
-        className="fixed left-0 bottom-0 z-50 w-[min(380px,100vw)] h-[min(600px,calc(100vh-2rem))] bg-white rounded-tr-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden sm:left-5 sm:bottom-24"
+        className="fixed left-0 bottom-0 z-50 w-[min(380px,100vw)] h-[min(600px,calc(100vh-2rem))] bg-white rounded-tr-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden sm:left-5 sm:bottom-24 lg:left-auto lg:right-5"
       >
         <header className="flex items-center gap-2 px-3.5 py-3 border-b border-slate-100 flex-shrink-0">
           {m.selectedId && (
