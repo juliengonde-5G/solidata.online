@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, MapSizeFix } from '../components';
 import api from '../services/api';
 import Modal from '../components/Modal';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
@@ -13,7 +13,9 @@ import {
   Route as RouteIcon, Users, ChevronDown, ChevronUp,
   MessageSquare, Send,
 } from 'lucide-react';
+import FondCarte from '../components/FondCarte';
 import TourProgrammePanel from '../components/tours/TourProgrammePanel';
+import TourPeseesPanel from '../components/tours/TourPeseesPanel';
 import { libelleStatutTournee, classeStatutTournee, lienCarteGps } from '../utils/tours';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -32,6 +34,29 @@ function truckIcon(color) {
     className: '',
     iconSize: [34, 34],
     iconAnchor: [17, 17],
+  });
+}
+
+/**
+ * Centre de tri — repère PERMANENT de la carte.
+ *
+ * C'est le point de départ du matin, celui du vidage quand le camion est plein,
+ * celui de la pause et celui du retour du soir : tous les trajets de la journée
+ * y commencent ou s'y terminent. La carte le passait pourtant sous silence, et
+ * une position de camion n'a de sens que rapportée à lui.
+ *
+ * Silhouette et couleur distinctes des tournées (aucune des douze couleurs de
+ * TOUR_COLORS) : ce n'est pas un point à collecter, il ne doit pas se lire
+ * comme tel.
+ */
+function centreTriIcon() {
+  return new L.DivIcon({
+    html: '<div style="background:#1E293B;color:white;border-radius:8px;width:32px;height:32px;'
+        + 'display:flex;align-items:center;justify-content:center;font-size:16px;'
+        + 'border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.45)">🏭</div>',
+    className: '',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
   });
 }
 
@@ -262,6 +287,11 @@ export default function CollectionsLive() {
   const [demandes, setDemandes] = useState([]);
   // { [tour_id]: { arrets, source, seuil_min, ... } } — arrêts GPS par tournée.
   const [arretsParTournee, setArretsParTournee] = useState({});
+  // Position du centre de tri, lue UNE fois : elle ne change pas d'une minute
+  // à l'autre. `{ disponible: false }` quand le référentiel n'a pas de
+  // coordonnées — la carte n'affiche alors AUCUN marqueur plutôt qu'un point
+  // inventé.
+  const [centreTri, setCentreTri] = useState(null);
   const socketRef = useRef(null);
 
   // `loadActive` est déclaré avant `loadArrets` : la référence évite de les
@@ -382,6 +412,20 @@ export default function CollectionsLive() {
   }, [loadActive, loadItineraires, loadReoptims]);
 
   // Initial load + polling 30s + Socket.IO pour positions GPS temps réel
+  // Le centre de tri est un point fixe : une seule lecture au montage. Un échec
+  // laisse la carte sans repère, ce qui est préférable à un repère faux — et il
+  // est logué, jamais avalé.
+  useEffect(() => {
+    let annule = false;
+    api.get('/tours/centre-tri')
+      .then((res) => { if (!annule) setCentreTri(res.data || null); })
+      .catch((err) => {
+        console.error('[CollectionsLive] centre de tri :', err);
+        if (!annule) setCentreTri({ disponible: false });
+      });
+    return () => { annule = true; };
+  }, []);
+
   useEffect(() => {
     loadActive();
     loadItineraires();
@@ -616,13 +660,39 @@ export default function CollectionsLive() {
             <div className="card-modern overflow-hidden relative" style={{ height: '60vh' }}>
               <MapContainer center={mapCenter} zoom={11} style={{ height: '100%', width: '100%' }}>
                 <MapSizeFix />
-                <TileLayer
-                  attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                />
+                {/* Fond de carte : source unique de l'application (OpenStreetMap
+                    sans clé). Les tuiles CARTO codées ici en dur affichaient
+                    « API Key required » depuis la fermeture de leur accès
+                    anonyme — la carte était devenue illisible. */}
+                <FondCarte />
 
                 {/* Événements de circulation — rafraîchi à la bbox visible, throttlé 1 min */}
                 <TrafficLayer onStatusChange={setTrafficInfo} />
+
+                {/* Centre de tri, affiché en permanence : tous les trajets de la
+                    journée en partent ou y reviennent. Rien n'est dessiné tant
+                    que la position n'est pas connue. */}
+                {centreTri?.disponible && (
+                  <Marker
+                    position={[centreTri.latitude, centreTri.longitude]}
+                    icon={centreTriIcon()}
+                    zIndexOffset={-100}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-0.5">
+                        <p className="font-bold">🏭 {centreTri.nom}</p>
+                        {centreTri.adresse && <p className="text-slate-500">{centreTri.adresse}</p>}
+                        <p className="text-slate-500">Départ, vidages, pause et retour de fin de tournée.</p>
+                        <p className="text-slate-400 select-all">📍 {fmtGps(centreTri.latitude, centreTri.longitude) || '—'}</p>
+                        {centreTri.source === 'environnement' && (
+                          <p className="text-amber-700">
+                            Position par défaut : ce lieu n'est pas encore décrit dans les lieux d'arrêt.
+                          </p>
+                        )}
+                      </div>
+                    </Popup>
+                  </Marker>
+                )}
 
                 {tours.map((tour, idx) => {
                   const color = TOUR_COLORS[idx % TOUR_COLORS.length];
@@ -728,6 +798,14 @@ export default function CollectionsLive() {
                   );
                 })}
               </MapContainer>
+
+              {/* Position du centre de tri inconnue : on le DIT, plutôt que de
+                  laisser croire à un oubli d'affichage. */}
+              {centreTri && centreTri.disponible === false && (
+                <div className="absolute bottom-3 left-3 z-[1000] bg-white/95 border border-slate-200 text-slate-600 text-[11px] rounded-lg px-2.5 py-1.5 shadow-md max-w-[280px]">
+                  {centreTri.motif || "Le centre de tri n'a pas pu être placé sur la carte."}
+                </div>
+              )}
 
               {/* Bandeau discret : le backend n'a pas d'information de circulation
                   disponible (source non configurée ou en échec) — message affiché
@@ -1041,6 +1119,11 @@ function ExpandedDetail({ tour, color, onRefresh, demandeParPoint, arretsGps }) 
           vérité propre (GET /tours/:id/programme), sans toucher au tableau
           ci-dessus ni au reste de la page. */}
       <TourProgrammePanel tourId={tour.id} onChanged={onRefresh} />
+
+      {/* Pesées de la tournée : saisie, correction et retrait par le
+          gestionnaire quand l'équipage a oublié le pont-bascule ou s'est
+          trompé de chiffre. */}
+      <TourPeseesPanel tourId={tour.id} onChanged={onRefresh} />
 
       {/* Arrêts détectés sur la trace GPS */}
       <ArretsGpsPanel bloc={arretsGps} />

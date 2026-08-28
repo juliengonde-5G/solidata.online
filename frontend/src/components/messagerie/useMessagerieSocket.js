@@ -12,15 +12,20 @@ import io from 'socket.io-client';
  * n'émet jamais rien, il ne fait qu'écouter. La reconnexion (perte réseau,
  * veille de l'onglet…) est gérée nativement par socket.io-client.
  *
- * @param {{ onNouveauMessage?: (payload) => void, onLu?: (payload) => void }} handlers
+ * `actif` (défaut true) permet à un appelant de ne PAS ouvrir de connexion —
+ * par exemple quand le module « messagerie » est masqué pour le rôle : rien à
+ * écouter, donc rien à connecter.
+ *
+ * @param {{ actif?: boolean, onNouveauMessage?: (payload) => void, onLu?: (payload) => void }} handlers
  */
-export default function useMessagerieSocket({ onNouveauMessage, onLu } = {}) {
+export default function useMessagerieSocket({ actif = true, onNouveauMessage, onLu } = {}) {
   const nouveauRef = useRef(onNouveauMessage);
   const luRef = useRef(onLu);
   nouveauRef.current = onNouveauMessage;
   luRef.current = onLu;
 
   useEffect(() => {
+    if (!actif) return undefined;
     const token = localStorage.getItem('accessToken');
     if (!token) return undefined;
 
@@ -47,5 +52,5 @@ export default function useMessagerieSocket({ onNouveauMessage, onLu } = {}) {
       socket.off('connect_error');
       socket.disconnect();
     };
-  }, []);
+  }, [actif]);
 }

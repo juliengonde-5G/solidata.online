@@ -29,9 +29,8 @@ function trierConversations(list) {
  * Contrôleur complet de la messagerie : conversations, fil de la conversation
  * sélectionnée, envoi, accusés de lecture, création de conversation, et
  * synchronisation temps réel. Utilisé identiquement par la page `/messagerie`
- * et par le panneau compact du dock — chaque instance ouvre sa propre
- * connexion Socket.IO (les deux ne sont jamais visibles en même temps, cf.
- * MessagerieDock qui masque son panneau sur la page dédiée).
+ * et par l'onglet « Messages » du dock unifié — chaque instance ouvre sa
+ * propre connexion Socket.IO.
  *
  * @param {{ onSelectedChange?: (id: number|null) => void }} [options]
  */

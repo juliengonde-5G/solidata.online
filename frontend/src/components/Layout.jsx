@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import SolidataBot from './SolidataBot';
-import MessagerieDock from './messagerie/MessagerieDock';
+import DockUnifie, { ongletParDefaut } from './messagerie/DockUnifie';
+import useNonLusBadge from './messagerie/useNonLusBadge';
+import useNotificationsNonLues from './messagerie/useNotificationsNonLues';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import {
@@ -479,6 +480,35 @@ export default function Layout({ children }) {
   const [alerts, setAlerts] = useState([]);
   const [counts, setCounts] = useState({});
 
+  // ── Point d'entrée unique « communication » (assistant IA + messagerie +
+  //    notifications), demande client du 28/08/2026. L'état vit ici parce que
+  //    le bouton est dans la barre supérieure et le panneau à côté de la barre
+  //    latérale : un seul propriétaire, donc un seul badge, et une seule
+  //    connexion temps réel pour le compteur.
+  const messagerieActive = canAccessModule('messagerie');
+  const { total: messagesNonLus } = useNonLusBadge({ actif: messagerieActive });
+  const notifications = useNotificationsNonLues(alerts);
+
+  const [dockOuvert, setDockOuvert] = useState(false);
+  const [dockOnglet, setDockOnglet] = useState(null);
+  const [dockConversation, setDockConversation] = useState(null);
+
+  const ouvrirDock = useCallback(
+    (onglet = null, conversationId = null) => {
+      setDockOnglet(
+        onglet ||
+          ongletParDefaut({
+            messagesNonLus,
+            notificationsNonLues: notifications.nonLues,
+            messagerieActive,
+          })
+      );
+      if (conversationId) setDockConversation(conversationId);
+      setDockOuvert(true);
+    },
+    [messagesNonLus, notifications.nonLues, messagerieActive]
+  );
+
   useEffect(() => {
     persistedState.collapsed = collapsed;
     try { localStorage.setItem('solidata_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* noop */ }
@@ -537,8 +567,10 @@ export default function Layout({ children }) {
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar
-          alerts={alerts}
           onMobileMenu={() => setMobileOpen((o) => !o)}
+          badgeCommunication={messagesNonLus + notifications.nonLues}
+          onOuvrirDock={ouvrirDock}
+          dockOuvert={dockOuvert}
         />
 
         <main className="flex-1 overflow-y-auto min-h-0">
@@ -548,13 +580,26 @@ export default function Layout({ children }) {
         </main>
       </div>
 
-      <SolidataBot />
-      {/* Le dock suit la MÊME habilitation que l'entrée de menu (clé
-          `messagerie` du catalogue) : masquer la section sans masquer la
-          pastille flottante laisserait une porte d'entrée juste à côté de la
-          porte qu'on vient de fermer. Le périmètre de participation reste
-          contrôlé côté serveur — ceci n'est que la cohérence de l'écran. */}
-      {canAccessModule('messagerie') && <MessagerieDock />}
+      {/* L'onglet « Messages » suit la MÊME habilitation que l'entrée de menu
+          (clé `messagerie` du catalogue) : masquer la section sans masquer
+          l'accès laisserait une porte d'entrée juste à côté de la porte qu'on
+          vient de fermer. L'assistant IA et les notifications, eux, restent
+          accessibles à tous — d'où un bouton unique et un onglet conditionnel,
+          plutôt qu'un bouton conditionnel. Le périmètre de participation reste
+          contrôlé côté serveur ; ceci n'est que la cohérence de l'écran. */}
+      <DockUnifie
+        ouvert={dockOuvert}
+        onglet={dockOnglet || ongletParDefaut({ messagesNonLus, notificationsNonLues: notifications.nonLues, messagerieActive })}
+        onChangerOnglet={setDockOnglet}
+        onFermer={() => setDockOuvert(false)}
+        onOuvrir={ouvrirDock}
+        alertes={alerts}
+        messagesNonLus={messagesNonLus}
+        notifications={notifications}
+        messagerieActive={messagerieActive}
+        conversationDemandee={dockConversation}
+        onConversationOuverte={() => setDockConversation(null)}
+      />
     </div>
   );
 }

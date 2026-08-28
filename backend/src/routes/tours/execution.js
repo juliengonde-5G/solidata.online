@@ -6,6 +6,7 @@ const { validate } = require('../../middleware/validate');
 const { ensurePlannedPassages } = require('./planned-passage');
 const { preparerProgrammeAuDemarrage } = require('./arrets');
 const { applyCompletionSideEffects } = require('./completion-effects');
+const { recalculerTotalTournee } = require('./poids');
 const { sendPushToRoles } = require('../../services/push-notifications');
 const { notifierGestionnaires } = require('./notifier');
 const {
@@ -445,11 +446,9 @@ module.exports = function createExecutionRouter(upload) {
         [req.params.id, weight_kg, employee_id || null]
       );
 
-      // Mettre à jour le total de la tournée
-      await pool.query(
-        'UPDATE tours SET total_weight_kg = (SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1) WHERE id = $1',
-        [req.params.id]
-      );
+      // Total de la tournée : même règle que partout ailleurs (poids.js) —
+      // somme de TOUTES les pesées, intermédiaires comprises.
+      await recalculerTotalTournee(pool, req.params.id);
 
       res.status(201).json(result.rows[0]);
     } catch (err) {

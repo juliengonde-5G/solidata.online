@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   GripVertical, Lock, Trash2, Plus, MapPin, AlertTriangle, Settings, ExternalLink,
+  CheckCircle2,
 } from 'lucide-react';
 import api from '../../services/api';
 import useConfirm from '../../hooks/useConfirm';
@@ -8,6 +9,7 @@ import { ErrorState, useToast } from '..';
 import TourEquipePanel from './TourEquipePanel';
 import AddCavToProgrammeModal from './AddCavToProgrammeModal';
 import AddArretModal from './AddArretModal';
+import RetourCentreModal from './RetourCentreModal';
 import { getArretCategoryMeta, getArretMotifMeta } from './arretCategories';
 
 function fmtTime(iso) {
@@ -72,6 +74,10 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
 
   const [showAddCav, setShowAddCav] = useState(false);
   const [showAddArret, setShowAddArret] = useState(false);
+  const [showRetourCentre, setShowRetourCentre] = useState(false);
+  // Point en cours de bascule vers « Fait » — désactive son bouton le temps
+  // de l'aller-retour serveur.
+  const [collecteEnCours, setCollecteEnCours] = useState(null);
   // Effet chiffré de la dernière modification. Sans lui, on déplaçait des
   // lignes sans jamais savoir ce que ça coûtait en kilomètres, en minutes, ni
   // si la journée tenait encore dans le temps de travail.
@@ -195,6 +201,45 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
       load(); // resynchronise sur l'état réel du serveur — jamais laisser l'écran mentir
     } finally {
       setRemovingId(null);
+    }
+  };
+
+  // ── « Fait » : le point a bien été collecté, l'équipage ne l'a pas déclaré ──
+  //
+  // On ne remplit AUCUN niveau de remplissage à sa place : le bureau n'a pas vu
+  // la borne. Le champ reste vide côté serveur plutôt que de recevoir un 0 ou
+  // un 100 qui se lirait ensuite comme une observation de terrain.
+  const marquerFait = async (point) => {
+    const ok = await confirm({
+      title: 'Marquer ce point comme collecté ?',
+      message: `« ${point.name} » passera en « Fait », comme si le chauffeur l'avait déclaré. `
+        + "L'heure enregistrée sera celle de cette saisie, et la mention « saisi depuis le bureau » "
+        + 'sera ajoutée aux notes du point. Le chauffeur sera prévenu.',
+      confirmLabel: 'Marquer comme collecté',
+      confirmVariant: 'primary',
+    });
+    if (!ok) return;
+    setCollecteEnCours(point.id);
+    try {
+      const url = point.kind === 'association'
+        ? `/tours/${tourId}/programme/association/${point.id}/collecte`
+        : `/tours/${tourId}/programme/cav/${point.id}/collecte`;
+      const res = await api.post(url, {});
+      setPoints(res.data.points || []);
+      toast.success(NOTIF_CHAUFFEUR);
+      await onChanged?.();
+    } catch (err) {
+      const code = err.response?.data?.code;
+      toast.error(
+        code === 'POINT_DEJA_TRAITE'
+          ? (err.response?.data?.error || 'Ce point porte déjà une déclaration du chauffeur.')
+          : code === 'TOURNEE_NON_MODIFIABLE'
+            ? "Cette tournée n'est plus modifiable."
+            : (err.response?.data?.error || 'Impossible de marquer ce point comme collecté.')
+      );
+      load(); // resynchronise sur l'état réel du serveur
+    } finally {
+      setCollecteEnCours(null);
     }
   };
 
@@ -393,6 +438,22 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
                 {skipped ? 'Sauté' : done ? 'Fait' : 'À faire'}
               </span>
 
+              {/* « Fait » : réservé aux POINTS DE COLLECTE encore à faire. Un
+                  arrêt technique se solde par l'arrivée déclarée du chauffeur,
+                  pas par une case cochée au bureau. */}
+              {isCav && point.editable && modifiable && (
+                <button
+                  type="button"
+                  onClick={() => marquerFait(point)}
+                  disabled={collecteEnCours === point.id}
+                  className="flex-shrink-0 p-1 text-slate-400 hover:text-emerald-600 disabled:opacity-40"
+                  aria-label={`Marquer ${point.name} comme collecté`}
+                  title="Marquer ce point comme collecté"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+
               {point.editable && modifiable && (
                 <button
                   type="button"
@@ -420,6 +481,14 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
           className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-3.5 h-3.5" /> Ajouter un point de collecte
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowRetourCentre(true)}
+          disabled={!modifiable}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Plus className="w-3.5 h-3.5" /> Retour au centre de tri
         </button>
         <button
           type="button"
@@ -452,6 +521,18 @@ export default function TourProgrammePanel({ tourId, onChanged }) {
           tourId={tourId}
           onClose={() => setShowAddArret(false)}
           onAdded={handlePointsUpdated}
+        />
+      )}
+      {showRetourCentre && (
+        <RetourCentreModal
+          tourId={tourId}
+          onClose={() => setShowRetourCentre(false)}
+          /* Pas d'`impact` ici, volontairement : le moteur de temps décide
+             lui-même des vidages et de la pause à partir de la charge et de
+             l'heure. Un retour posé à la main est la projection de cette
+             décision dans le programme visible — l'ajouter au calcul
+             compterait deux fois le même aller-retour. */
+          onAdded={(pts) => handlePointsUpdated(pts, undefined)}
         />
       )}
     </div>

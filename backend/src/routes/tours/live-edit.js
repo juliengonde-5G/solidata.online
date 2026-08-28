@@ -36,6 +36,11 @@ const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
 const { estimerProgramme, impactApresModification, resumerImpact } = require('./impact');
+// Retour au centre de tri : mécanique d'insertion d'étape PARTAGÉE avec le
+// parcours chauffeur (arrets.js) — jamais réécrite ici.
+const { centreDeTri, avancerRetourCentre, LIBELLE_MOTIF } = require('./arrets');
+// Poids d'une tournée : règle de calcul et bornes de saisie uniques.
+const { lirePoidsKg, recalculerTotalTournee } = require('./poids');
 
 /** Statuts de tournée sur lesquels le programme reste modifiable. */
 const STATUTS_MODIFIABLES = ['planned', 'in_progress', 'paused', 'returning'];
@@ -43,7 +48,7 @@ const STATUTS_MODIFIABLES = ['planned', 'in_progress', 'paused', 'returning'];
 const POINT_FIGE = ['collected', 'skipped', 'incident', 'done'];
 
 /** Charge la tournée et refuse tôt si elle n'est pas modifiable. */
-async function loadTourEditable(tourId, res) {
+async function loadTourEditable(tourId, res, contexte = 'programme') {
   const r = await pool.query(
     `SELECT t.id, t.date, t.status, t.vehicle_id, t.driver_employee_id,
             t.suiveur1_employee_id, t.suiveur2_employee_id, t.collection_type,
@@ -59,7 +64,18 @@ async function loadTourEditable(tourId, res) {
   const tour = r.rows[0];
   if (!STATUTS_MODIFIABLES.includes(tour.status)) {
     res.status(409).json({
-      error: 'Cette tournée est terminée ou annulée : son programme n\'est plus modifiable.',
+      // Le refus dit ce qu'il faut faire À LA PLACE. Une pesée n'est pas un
+      // simple champ : à la clôture, son poids a DÉJÀ été réparti en tonnage
+      // par borne et transformé en entrée de stock. La réécrire après coup ne
+      // rattraperait ni l'un ni l'autre et ferait diverger le total de ce qui
+      // a été distribué — doctrine de la 2.35.0 : une écriture de stock se
+      // régularise par une écriture datée, jamais par une réécriture
+      // silencieuse de l'historique.
+      error: contexte === 'pesee'
+        ? 'Cette tournée est terminée ou annulée : ses pesées ne sont plus modifiables. '
+          + 'Le tonnage et l\'entrée de stock ont déjà été enregistrés à la clôture — '
+          + 'un écart se régularise par un mouvement de stock daté, depuis le module Stock.'
+        : 'Cette tournée est terminée ou annulée : son programme n\'est plus modifiable.',
       code: 'TOURNEE_NON_MODIFIABLE',
       status: tour.status,
     });
@@ -735,6 +751,457 @@ router.patch('/:id/equipe', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     res.json({ ok: true, equipe: final });
   } catch (err) {
     console.error('[TOURS] Erreur changement d\'équipe :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// REPRENDRE LA MAIN — pesées et collectes saisies depuis le bureau
+// ──────────────────────────────────────────────────────────────────────────
+// Constat client (08/2026) : le poids d'une tournée n'était saisissable QUE
+// par le chauffeur, sur l'écran mobile de pesée. Un oubli au pont-bascule, une
+// virgule de travers, un téléphone à plat — et le tonnage de la journée était
+// faux sans aucun moyen de le corriger. Même chose pour un point réellement
+// collecté que l'équipage n'a pas déclaré : il restait « à faire » pour
+// toujours, et disparaissait du tonnage réparti à la clôture.
+//
+// Le gestionnaire peut donc ajouter, corriger et supprimer une pesée, et
+// marquer un point comme collecté. Trois garde-fous, tous délibérés :
+//
+//  1. UNIQUEMENT sur une tournée encore ouverte (`loadTourEditable`). Après la
+//     clôture, le tonnage est DÉJÀ réparti dans `tonnage_history` et le stock ;
+//     réécrire une pesée ne les rattraperait pas et ferait diverger le total de
+//     ce qui a été distribué. Doctrine de la 2.35.0 : une écriture de stock se
+//     régularise par une écriture datée, pas par une réécriture silencieuse de
+//     l'historique. Le refus le dit et renvoie vers le module Stock.
+//  2. JAMAIS de valeur inventée : un niveau de remplissage inconnu reste NULL,
+//     il ne devient ni 0 ni 5.
+//  3. La saisie est TRACÉE — `tour_weights.recorded_by` pointe sur `employees`,
+//     pas sur `users` : le compte du gestionnaire n'y entre pas. La trace de
+//     l'auteur va donc dans `rgpd_audit_log` (même pattern que la consultation
+//     du compte rendu de tournée), et la marque « saisi depuis le bureau »
+//     reste lisible dans les notes du point.
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Journalise une écriture faite depuis le bureau. Best effort : un journal
+ * indisponible ne doit jamais annuler une correction déjà enregistrée — mais
+ * l'échec est logué, jamais avalé.
+ */
+function journaliserSaisieBureau(req, action, tourId, details) {
+  pool.query(
+    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+    [req.user?.id ?? null, action, 'tours', tourId, JSON.stringify(details || {})]
+  ).catch((err) => console.error(`[TOURS] Journalisation ${action} impossible :`, err.message));
+}
+
+/** Horodatage lisible pour la marque laissée dans les notes d'un point. */
+function marqueBureau(req) {
+  const qui = [req.user?.first_name, req.user?.last_name].filter(Boolean).join(' ')
+    || req.user?.username || 'le bureau';
+  const quand = new Date().toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return `Collecte saisie depuis le bureau par ${qui} le ${quand}.`;
+}
+
+// ── GET /api/tours/:id/pesees ──────────────────────────────────────────────
+// Pesées de la tournée + total recalculé. `modifiable` dit à l'écran s'il peut
+// proposer une correction, plutôt que de la laisser tenter puis échouer.
+router.get('/:id/pesees', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
+  try {
+    const t = await pool.query(
+      'SELECT id, status, total_weight_kg FROM tours WHERE id = $1', [tourId]
+    );
+    if (t.rows.length === 0) return res.status(404).json({ error: 'Tournée non trouvée' });
+    const r = await pool.query(
+      `SELECT id, weight_kg, tare_kg, is_intermediate, notes, recorded_at
+         FROM tour_weights WHERE tour_id = $1 ORDER BY recorded_at, id`,
+      [tourId]
+    );
+    // Le total affiché est la SOMME DES PESÉES, pas la colonne stockée : cette
+    // dernière est dérivée et peut être périmée (cf. poids.js). L'écran ne doit
+    // jamais montrer un total que les lignes en dessous contredisent.
+    const total = r.rows.reduce((s, p) => s + (Number(p.weight_kg) || 0), 0);
+    res.json({
+      tour_id: tourId,
+      statut: t.rows[0].status,
+      modifiable: STATUTS_MODIFIABLES.includes(t.rows[0].status),
+      total_kg: Math.round(total * 100) / 100,
+      pesees: r.rows,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur lecture des pesées :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/** Champs d'une pesée, lus et bornés. `{ error }` si la saisie ne tient pas. */
+function lirePesee(body) {
+  const poids = lirePoidsKg(body?.weight_kg, { champ: 'Le poids collecté' });
+  if (poids.error) return { error: poids.error };
+  const tare = lirePoidsKg(body?.tare_kg, { obligatoire: false, champ: 'La tare' });
+  if (tare.error) return { error: tare.error };
+  return {
+    valeurs: {
+      weight_kg: poids.valeur,
+      tare_kg: tare.valeur,
+      is_intermediate: body?.is_intermediate === true || body?.is_intermediate === 'true',
+      notes: body?.notes ? String(body.notes).trim().slice(0, 500) : null,
+    },
+  };
+}
+
+// ── POST /api/tours/:id/pesees ─────────────────────────────────────────────
+router.post('/:id/pesees', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
+  const lu = lirePesee(req.body);
+  if (lu.error) return res.status(400).json({ error: lu.error, code: 'PESEE_INVALIDE' });
+  const tour = await loadTourEditable(tourId, res, 'pesee');
+  if (!tour) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      `INSERT INTO tour_weights (tour_id, weight_kg, tare_kg, is_intermediate, notes, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       RETURNING id, weight_kg, tare_kg, is_intermediate, notes, recorded_at`,
+      [tourId, lu.valeurs.weight_kg, lu.valeurs.tare_kg, lu.valeurs.is_intermediate, lu.valeurs.notes]
+    );
+    const total = await recalculerTotalTournee(client, tourId);
+    await client.query('COMMIT');
+    journaliserSaisieBureau(req, 'TOURNEE_PESEE_AJOUTEE', tourId, {
+      pesee_id: r.rows[0].id, poids_kg: lu.valeurs.weight_kg,
+      intermediaire: lu.valeurs.is_intermediate, total_kg: total,
+    });
+    res.status(201).json({ ok: true, pesee: r.rows[0], total_kg: total });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur ajout de pesée :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── PUT /api/tours/:id/pesees/:peseeId ─────────────────────────────────────
+router.put('/:id/pesees/:peseeId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  const peseeId = parseInt(req.params.peseeId, 10);
+  if (!Number.isInteger(tourId) || !Number.isInteger(peseeId)) {
+    return res.status(400).json({ error: 'Identifiants invalides' });
+  }
+  const lu = lirePesee(req.body);
+  if (lu.error) return res.status(400).json({ error: lu.error, code: 'PESEE_INVALIDE' });
+  const tour = await loadTourEditable(tourId, res, 'pesee');
+  if (!tour) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const avant = await client.query(
+      'SELECT weight_kg FROM tour_weights WHERE id = $1 AND tour_id = $2 FOR UPDATE',
+      [peseeId, tourId]
+    );
+    if (avant.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pesée non trouvée sur cette tournée' });
+    }
+    const r = await client.query(
+      `UPDATE tour_weights
+          SET weight_kg = $3, tare_kg = $4, is_intermediate = $5, notes = $6
+        WHERE id = $1 AND tour_id = $2
+        RETURNING id, weight_kg, tare_kg, is_intermediate, notes, recorded_at`,
+      [peseeId, tourId, lu.valeurs.weight_kg, lu.valeurs.tare_kg,
+       lu.valeurs.is_intermediate, lu.valeurs.notes]
+    );
+    const total = await recalculerTotalTournee(client, tourId);
+    await client.query('COMMIT');
+    journaliserSaisieBureau(req, 'TOURNEE_PESEE_MODIFIEE', tourId, {
+      pesee_id: peseeId,
+      poids_avant_kg: Number(avant.rows[0].weight_kg),
+      poids_apres_kg: lu.valeurs.weight_kg,
+      total_kg: total,
+    });
+    res.json({ ok: true, pesee: r.rows[0], total_kg: total });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur correction de pesée :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── DELETE /api/tours/:id/pesees/:peseeId ──────────────────────────────────
+router.delete('/:id/pesees/:peseeId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  const peseeId = parseInt(req.params.peseeId, 10);
+  if (!Number.isInteger(tourId) || !Number.isInteger(peseeId)) {
+    return res.status(400).json({ error: 'Identifiants invalides' });
+  }
+  const tour = await loadTourEditable(tourId, res, 'pesee');
+  if (!tour) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      'DELETE FROM tour_weights WHERE id = $1 AND tour_id = $2 RETURNING weight_kg, is_intermediate',
+      [peseeId, tourId]
+    );
+    if (r.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pesée non trouvée sur cette tournée' });
+    }
+    const total = await recalculerTotalTournee(client, tourId);
+    await client.query('COMMIT');
+    journaliserSaisieBureau(req, 'TOURNEE_PESEE_SUPPRIMEE', tourId, {
+      pesee_id: peseeId, poids_kg: Number(r.rows[0].weight_kg), total_kg: total,
+    });
+    res.json({ ok: true, total_kg: total });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur suppression de pesée :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── POST /api/tours/:id/programme/{cav|association}/:pointId/collecte ───────
+// « Fait » : le point a bien été collecté, l'équipage ne l'a pas déclaré.
+//
+// L'effet métier est exactement celui d'une collecte chauffeur — `status` et
+// `collected_at` —, parce que c'est de ces deux colonnes que dépend toute la
+// suite : la répartition du tonnage à la clôture, l'entrée de stock et
+// l'apprentissage du moteur prédictif lisent `status = 'collected'`.
+//
+// Ce qui n'est PAS fait, et pourquoi : aucun niveau de remplissage n'est
+// inventé (le bureau n'a pas vu la borne — le champ reste NULL si le
+// gestionnaire ne le renseigne pas) ; et aucune ré-optimisation d'ordre n'est
+// déclenchée, contrairement à la voie chauffeur, parce qu'ici le camion n'est
+// pas au point : réordonner sa route sur une saisie de rattrapage n'aurait
+// aucun sens.
+const TABLE_COLLECTE = Object.freeze({
+  cav: { table: 'tour_cav', ref: 'cav_id' },
+  association: { table: 'tour_association_point', ref: 'association_point_id' },
+});
+
+/** Niveau de remplissage facultatif : 0-5, ou `null`. Jamais deviné. */
+function lireFillLevel(brut) {
+  if (brut === undefined || brut === null || brut === '') return { valeur: null };
+  const n = Number(brut);
+  if (!Number.isInteger(n) || n < 0 || n > 5) {
+    return { error: 'Le niveau de remplissage doit être un entier entre 0 et 5.' };
+  }
+  return { valeur: n };
+}
+
+async function marquerCollecte(req, res, kind) {
+  const tourId = parseInt(req.params.id, 10);
+  const pointId = parseInt(req.params.pointId, 10);
+  if (!Number.isInteger(tourId) || !Number.isInteger(pointId)) {
+    return res.status(400).json({ error: 'Identifiants invalides' });
+  }
+  const niveau = lireFillLevel(req.body?.fill_level);
+  if (niveau.error) return res.status(400).json({ error: niveau.error });
+
+  const tour = await loadTourEditable(tourId, res);
+  if (!tour) return;
+  // Une tournée de bornes n'a pas de points association et réciproquement :
+  // refuser explicitement vaut mieux qu'un 404 qui ferait croire à un point
+  // supprimé.
+  if (kindAttendu(tour) !== kind) {
+    return res.status(400).json({
+      error: tour.collection_type === 'association'
+        ? 'Cette tournée ne collecte que des points association.'
+        : 'Cette tournée ne collecte que des bornes.',
+      code: 'TYPE_DE_POINT_INATTENDU',
+    });
+  }
+
+  const { table } = TABLE_COLLECTE[kind];
+  try {
+    const actuel = await pool.query(
+      `SELECT status, notes FROM ${table} WHERE id = $1 AND tour_id = $2`,
+      [pointId, tourId]
+    );
+    if (actuel.rows.length === 0) {
+      return res.status(404).json({ error: 'Point non trouvé dans cette tournée' });
+    }
+    const statut = actuel.rows[0].status;
+    if (POINT_FIGE.includes(statut)) {
+      // On ne réécrit pas le passé du chauffeur : un point déjà collecté,
+      // sauté ou en incident porte une déclaration de terrain, et l'écraser
+      // depuis le bureau effacerait une information qu'on n'a pas.
+      return res.status(409).json({
+        error: statut === 'collected'
+          ? 'Ce point est déjà marqué comme collecté.'
+          : 'Ce point porte déjà une déclaration du chauffeur : elle ne peut pas être remplacée depuis le bureau.',
+        code: 'POINT_DEJA_TRAITE',
+        statut,
+      });
+    }
+
+    // La marque « saisi depuis le bureau » s'AJOUTE aux notes existantes : un
+    // `collected_at` posé à l'heure du clic n'est pas l'heure du passage, et
+    // le compte rendu de tournée doit pouvoir le dire.
+    const r = await pool.query(
+      `UPDATE ${table}
+          SET status = 'collected',
+              collected_at = COALESCE(collected_at, NOW()),
+              fill_level = COALESCE($3::int, fill_level),
+              notes = NULLIF(TRIM(BOTH E'\\n' FROM COALESCE(notes || E'\\n', '') || $4::text), '')
+        WHERE id = $1 AND tour_id = $2
+        RETURNING id, position, status, fill_level, collected_at, notes`,
+      [pointId, tourId, niveau.valeur, marqueBureau(req)]
+    );
+
+    const points = await chargerProgramme(tourId);
+    const point = points.find((p) => p.kind === kind && p.id === pointId);
+    const nom = point?.name || `point #${pointId}`;
+    journaliserSaisieBureau(req, 'TOURNEE_POINT_COLLECTE_BUREAU', tourId, {
+      kind, point_id: pointId, nom, fill_level: niveau.valeur,
+    });
+    await notifierChauffeur(req, tour,
+      `Le point « ${nom} » a été marqué comme collecté depuis le bureau : il ne t'est plus demandé.`);
+    res.json({ ok: true, point: r.rows[0], points });
+  } catch (err) {
+    console.error('[TOURS] Erreur saisie « Fait » :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+}
+
+router.post('/:id/programme/cav/:pointId/collecte', authorize('ADMIN', 'MANAGER'),
+  (req, res) => marquerCollecte(req, res, 'cav'));
+router.post('/:id/programme/association/:pointId/collecte', authorize('ADMIN', 'MANAGER'),
+  (req, res) => marquerCollecte(req, res, 'association'));
+
+// ── POST /api/tours/:id/programme/retour-centre ────────────────────────────
+// Demande client (08/2026) : le gestionnaire doit pouvoir poser un retour au
+// centre de tri depuis « Collecte en direct », au même titre qu'un point de
+// collecte.
+//
+// AUCUNE mécanique d'insertion nouvelle : on appelle `avancerRetourCentre`,
+// exactement la fonction qu'utilise le geste « je rentre » du chauffeur
+// (`POST /:id/retour-centre-public`). Elle sait déjà créer l'arrêt OU déplacer
+// celui qui était prévu plus loin dans la journée, décaler les positions
+// restantes sans laisser de trou, et ne jamais empiler deux retours du même
+// motif. Écrire une seconde version, c'était garantir qu'elles divergent.
+const MOTIFS_RETOUR_GESTIONNAIRE = ['vidage', 'pause_dejeuner', 'fin_tournee'];
+
+router.post('/:id/programme/retour-centre', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  const tourId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
+  const motif = String(req.body?.motif || '');
+  if (!MOTIFS_RETOUR_GESTIONNAIRE.includes(motif)) {
+    return res.status(400).json({
+      error: 'Motif de retour inconnu.', code: 'MOTIF_INCONNU',
+      motifs_possibles: MOTIFS_RETOUR_GESTIONNAIRE,
+    });
+  }
+  const tour = await loadTourEditable(tourId, res);
+  if (!tour) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const centre = await centreDeTri(client);
+    const arret = await avancerRetourCentre(client, { tourId, motif, centre });
+    await client.query('COMMIT');
+
+    // L'estimation de la tournée n'est PAS recalculée ici, et ce n'est pas un
+    // oubli : le moteur de temps place lui-même les vidages et la pause à
+    // partir de la charge et de l'heure (cf. impact.js, `chargerPointsTournee`).
+    // Un retour posé à la main est la PROJECTION de cette décision dans le
+    // programme visible ; l'ajouter au calcul compterait deux fois le même
+    // aller-retour et gonflerait la journée d'un trajet fictif.
+    journaliserSaisieBureau(req, 'TOURNEE_RETOUR_CENTRE_BUREAU', tourId, {
+      motif, arret_id: arret.id, position: arret.position, deja_present: arret.deja_present,
+    });
+    await notifierChauffeur(req, tour,
+      `${LIBELLE_MOTIF[motif]} : cette étape a été ajoutée à ta tournée depuis le bureau.`);
+
+    res.status(201).json({
+      ok: true,
+      arret_id: arret.id,
+      position: arret.position,
+      deja_present: arret.deja_present,
+      motif,
+      destination: {
+        name: centre.nom || 'Centre de tri',
+        address: centre.adresse || null,
+        latitude: centre.latitude,
+        longitude: centre.longitude,
+      },
+      points: await chargerProgramme(tourId),
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[TOURS] Erreur ajout d\'un retour au centre :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+/** Coordonnée exploitable, ou `null`. Ni `null`, ni `''`, ni `NaN` ne valent 0. */
+function coordonnee(valeur) {
+  if (valeur === null || valeur === undefined || valeur === '') return null;
+  const n = Number(valeur);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ── GET /api/tours/centre-tri ──────────────────────────────────────────────
+// Position du centre de tri, pour l'afficher en permanence sur la carte de
+// « Collecte en direct ».
+//
+// La source est le référentiel `lieux_techniques` (catégorie `centre_tri`),
+// lui-même semé depuis CENTRE_TRI_LAT / CENTRE_TRI_LNG au premier démarrage :
+// c'est la même fonction que celle qui décide où le chauffeur est renvoyé
+// (`centreDeTri`), donc la carte ne peut pas montrer un autre endroit que
+// celui vers lequel on l'envoie.
+//
+// Un lieu sans coordonnées renvoie `disponible: false` avec son motif — et la
+// carte n'affiche AUCUN marqueur plutôt qu'un point inventé au milieu de nulle
+// part.
+router.get('/centre-tri', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const centre = await centreDeTri(pool);
+    // `Number(null)` vaut 0, et 0 est un nombre fini : lu naïvement, un lieu
+    // SANS coordonnées serait placé au large du golfe de Guinée et présenté
+    // comme une position connue. Le piège est documenté dans ce dépôt (2.38.0,
+    // `Number(null) === 0` sur la tolérance de rendez-vous) — on écarte donc
+    // explicitement l'absence de valeur, et le point 0,0 avec elle, comme le
+    // fait déjà `lienCarteGps` côté écran.
+    const lat = coordonnee(centre.latitude);
+    const lng = coordonnee(centre.longitude);
+    if (lat === null || lng === null || (lat === 0 && lng === 0)) {
+      return res.json({
+        disponible: false,
+        motif: 'Le lieu « centre de tri » du référentiel n’a pas de coordonnées : '
+             + 'renseignez-les dans les lieux d’arrêt pour le voir sur la carte.',
+      });
+    }
+    res.json({
+      disponible: true,
+      // `id` nul = le référentiel ne porte pas encore le lieu, les coordonnées
+      // viennent des variables d'environnement. Le dire permet à l'écran de ne
+      // pas présenter un repli comme une donnée saisie.
+      source: centre.id != null ? 'referentiel' : 'environnement',
+      nom: centre.nom || 'Centre de tri',
+      adresse: centre.adresse || null,
+      latitude: lat,
+      longitude: lng,
+    });
+  } catch (err) {
+    console.error('[TOURS] Erreur lecture du centre de tri :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

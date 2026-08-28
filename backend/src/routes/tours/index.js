@@ -70,6 +70,8 @@ const { arretsPourMobile, avancerRetourCentre, preparerProgrammeAuDemarrage, cen
 // Sacs collectés chez une association : validation du compteur et dérivation du
 // niveau 0-4. Règle unique, partagée avec la clôture et le compte rendu.
 const { nbSacsValide, niveauDepuisSacs, lireBornesSacs } = require('./sacs');
+// Poids d'une tournée : règle de calcul unique (voir poids.js).
+const { recalculerTotalTournee } = require('./poids');
 
 // Sub-routers
 const crudRouter = require('./crud');
@@ -1284,22 +1286,14 @@ router.post('/:id/weigh-public', async (req, res) => {
         notes ?? null,
       ]
     );
-    // Total de la tournée = somme de TOUTES les pesées.
+    // Total de la tournée = somme de TOUTES les pesées, intermédiaires
+    // comprises (correctif d'août 2026 : les kilos déposés en cours de journée
+    // disparaissaient du total, et avec eux le tonnage par borne et le stock).
     //
-    // Correctif (août 2026) : la somme ne retenait que les pesées « non
-    // intermédiaires ». Or une pesée intermédiaire n'est pas un relevé
-    // provisoire : c'est un CHARGEMENT RÉELLEMENT DÉPOSÉ au centre par un
-    // chauffeur qui repart collecter. L'exclure faisait disparaître ces kilos
-    // du total, et donc — via applyCompletionSideEffects — de tonnage_history
-    // (moteur prédictif, carte des CAV) ET des entrées de stock.
-    // Cas observé en production : une tournée avec 649 kg pesés en
-    // intermédiaire et 0 kg en pesée finale ressortait à 0 kg partout.
-    await pool.query(
-      `UPDATE tours SET total_weight_kg = (
-         SELECT COALESCE(SUM(weight_kg), 0) FROM tour_weights WHERE tour_id = $1
-       ) WHERE id = $1`,
-      [req.params.id]
-    );
+    // La règle vit désormais dans `poids.js` et n'est plus recopiée ici : la
+    // voie chauffeur et la voie gestionnaire calculent le même total par la
+    // même fonction, elles ne peuvent donc plus diverger.
+    await recalculerTotalTournee(pool, req.params.id);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('[TOURS] Erreur weigh-public:', err);
