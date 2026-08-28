@@ -113,8 +113,14 @@ export default function FilConversation({
 
         {!error && loading && messages.length === 0 && <LoadingSpinner size="sm" />}
 
+        {/* `px-6` : mesuré dans le panneau flottant (380 px de large), cette
+            phrase occupe 321 px pour 348 px disponibles — 92 % de la largeur.
+            Rien ne débordait réellement, mais elle affleurait les deux bords du
+            cadre et se lisait donc comme « coupée ». La marge la fait revenir à
+            la ligne au lieu de raser la bordure ; sur la page /messagerie,
+            large, elle tient toujours sur une seule ligne. */}
         {!loading && !error && messages.length === 0 && (
-          <div className="py-10 text-center text-sm text-slate-400">
+          <div className="py-10 px-6 text-center text-sm text-slate-400">
             Aucun message pour l'instant. Écrivez le premier !
           </div>
         )}

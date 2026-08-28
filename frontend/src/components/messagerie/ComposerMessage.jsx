@@ -214,7 +214,11 @@ export default function ComposerMessage({ onSend, onMentionSelect, sending = fal
           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>
       </div>
-      <p className="text-[10px] text-slate-400 mt-1.5 px-1">
+      {/* Même cause que l'état vide du fil : dans le panneau flottant (380 px),
+          cette aide occupe 98 % de la largeur utile. Elle n'est pas rognée, mais
+          elle rase les deux bords ; `px-2` lui laisse respirer sans rien retirer
+          au message. */}
+      <p className="text-[10px] text-slate-400 mt-1.5 px-2 leading-relaxed">
         Entrée pour envoyer · Maj+Entrée pour un retour à la ligne · @ pour écrire à quelqu'un
         {text.length > 3000 && (
           <span className="ml-1 text-slate-500">
