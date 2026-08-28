@@ -325,6 +325,44 @@ const ETAT_LABELS = {
   pending: 'Non fait', done: 'Fait', arret: 'Arrêt',
 };
 
+/**
+ * Une mesure, ou `null` — jamais un zéro fabriqué.
+ *
+ * `Number(null)` vaut `0` et passe `Number.isFinite` : une température minimale
+ * non relevée s'imprimerait « 0→19 °C », c'est-à-dire une gelée matinale que
+ * personne n'a mesurée. Ce compte rendu se relit des mois plus tard : un zéro y
+ * fait foi. Même piège que celui corrigé en 2.34.0 et 2.38.0.
+ */
+function mesure(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Conditions météo du jour, en une ligne lisible : « Pluie modérée · 8→14 °C ·
+ * 4 mm · 45 km/h » (demande client 28/08/2026).
+ *
+ * Chaque terme n'apparaît QUE s'il est connu — pas de « 0 mm » affiché faute de
+ * données, qui se lirait « il n'a pas plu » alors qu'on ne sait pas. `null`
+ * quand rien n'est disponible : l'appelant affiche alors le motif du serveur.
+ */
+export function meteoTexte(m) {
+  if (!m || m.disponible !== true) return null;
+  const bouts = [];
+  if (m.libelle) bouts.push(String(m.libelle));
+  const tmin = mesure(m.temp_min);
+  const tmax = mesure(m.temp_max);
+  if (tmin != null && tmax != null) bouts.push(`${Math.round(tmin)}→${Math.round(tmax)} °C`);
+  else if (tmax != null) bouts.push(`${Math.round(tmax)} °C`);
+  else if (tmin != null) bouts.push(`min. ${Math.round(tmin)} °C`);
+  const pluie = mesure(m.precip_mm);
+  if (pluie != null && pluie > 0) bouts.push(`${pluie.toFixed(1).replace('.', ',')} mm`);
+  const vent = mesure(m.vent_max);
+  if (vent != null && vent > 0) bouts.push(`vent ${Math.round(vent)} km/h`);
+  return bouts.length ? bouts.join(' · ') : null;
+}
+
 function ligneKpi(label, valeur, note = null, alerte = false) {
   return `<div class="kpi${alerte ? ' alerte' : ''}"><div class="l">${esc(label)}</div>`
     + `<div class="v">${valeur == null ? '<span class="gris">—</span>' : esc(valeur)}</div>`
@@ -344,18 +382,26 @@ function ligneKpi(label, valeur, note = null, alerte = false) {
  * désormais une bande de plus (vérification du camion, fin de tournée, arrêts
  * GPS) et une colonne de plus au tableau.
  *
- * RELEVÉ À 55 le 27/08/2026, à la mesure lui aussi, quand le rapport a reçu sa
- * SECONDE page : jusque-là, une tournée de 23 points basculait en colonnes
- * resserrées et y perdait « Remplissage » et « Sur place ». Le point de
- * bascule vers une TROISIÈME page a été mesuré à 64 points (charge annexe
- * maximale : 9 événements, 9 messages, 16 arrêts) ; 55 laisse la marge qui
- * absorbe des noms plus longs et des motifs de non-collecte.
+ * RELEVÉ À 55 le 27/08/2026, quand le rapport a reçu sa SECONDE page : jusque-là,
+ * une tournée de 23 points basculait en colonnes resserrées et y perdait
+ * « Remplissage » et « Sur place ».
  *
- * Au-delà, les deux colonnes restent le bon choix : une tournée de 74 bornes
- * remplit deux pages à elle seule, et c'est le DÉTAIL DE LA COLLECTE qui prime
- * — il ne se tronque jamais.
+ * RAMENÉ À 52 le 28/08/2026, après contre-mesure : la charge annexe maximale
+ * (9 événements, 9 messages, 16 arrêts, motifs de non-collecte, noms longs)
+ * faisait déborder UNE colonne dès 43 points — la bande 43→55 sortait donc en
+ * TROIS pages, ce que la note de version promettait d'exclure. Deux corrections
+ * plutôt qu'une : la commune remonte sur la ligne du nom (une colonne unique
+ * passe de 42 à 60 points tenables) et le seuil s'établit à 52, laissant la
+ * marge de sécurité que 55 n'avait plus.
+ *
+ * PLAFOND STRUCTUREL, dit honnêtement : au-delà de ~190 points, deux colonnes
+ * débordent aussi — vérifié en retirant TOUTE l'annexe, qui ne change rien :
+ * c'est le tableau seul qui ne tient plus. Seule une liste tronquée y
+ * remédierait, et elle ne le sera jamais. Sans conséquence pratique : six
+ * heures de travail bornent une tournée réelle autour de 45 points, la plus
+ * grosse observée en comptant 74.
  */
-const SEUIL_DEUX_COLONNES = 55;
+const SEUIL_DEUX_COLONNES = 52;
 
 function tableauPoints(points) {
   if (!points || points.length === 0) return '<p class="gris">Aucun point au programme.</p>';
@@ -425,11 +471,17 @@ function unTableau(points, dense) {
     const suffixe = marques.join(' ');
     // Budgets relevés (24→36 en dense, 60→78) : sur une page unique, le nom
     // d'un point était coupé alors que c'est lui qui identifie l'adresse.
+    //
+    // La commune est écrite À LA SUITE du nom, et non sur une deuxième ligne :
+    // elle en a été RETIRÉE juste avant (`sansCommune`), la remettre dessous
+    // doublait la hauteur de CHAQUE ligne du tableau pour un seul mot. Mesuré :
+    // une colonne unique passe de 42 à 60 points tenables sur deux pages. Rien
+    // n'est perdu, l'adresse complète se lit d'un trait.
     const budget = Math.max(8, (dense ? 36 : 78) - (suffixe ? suffixe.length + 1 : 0));
     return `<tr>
       <td class="rang">${p.rang ?? i + 1}</td>
       <td>${esc(court(sansCommune(p.nom, p.commune) || p.nom || '—', budget))}${
-        suffixe ? ` <span class="gris">${esc(suffixe)}</span>` : ''}${p.commune && !dense ? `<br><span class="gris" style="font-size:6.5px">${esc(p.commune)}</span>` : ''}
+        suffixe ? ` <span class="gris">${esc(suffixe)}</span>` : ''}${p.commune && !dense ? ` <span class="gris" style="font-size:6.5px">· ${esc(p.commune)}</span>` : ''}
           ${p.motif_non_collecte ? `<br><span class="moyen" style="font-size:6.5px">${esc(p.motif_non_collecte)}</span>` : ''}</td>
       <td class="num">${prevu ? esc(prevu) : '<span class="gris">—</span>'}</td>
       <td class="num">${reel ? esc(reel) : '<span class="gris">—</span>'}</td>
@@ -597,6 +649,13 @@ export function depuisApi(rep) {
     // `null` = ce rapport n'a rien à déclarer, et on n'imprime alors aucune
     // bande d'avertissement — un avertissement systématique ne s'avertit plus.
     confidentialite: (r.confidentialite && r.confidentialite.mention) || null,
+    // Conditions météo du jour de la tournée (demande client 28/08/2026). Le
+    // serveur renvoie soit le relevé interne qui a nourri le moteur prédictif,
+    // soit Open-Meteo, soit `{ disponible: false, motif }` — jamais une valeur
+    // devinée : ce compte rendu se relit des mois plus tard, une météo inventée
+    // y ferait foi. On transmet l'objet TEL QUEL, la mise en forme est faite
+    // par `meteoTexte`.
+    meteo: r.meteo || null,
     trace_gps: (gps.positions || []).map((g) => ({ lat: g.latitude, lng: g.longitude })),
     nb_positions_gps: gps.total_positions ?? null,
     centre_tri: (r.planned_route && r.planned_route.centre_tri)
@@ -642,6 +701,10 @@ export function construireRapportHtml(r) {
     ['Départ', frHeure(t.debut_reel)],
     ['Retour', frHeure(t.fin_reelle)],
     ['Km', (t.km_start != null && t.km_end != null) ? `${t.km_start} → ${t.km_end}` : null],
+    // La météo explique une part des durées et du contenu des bornes. Quand
+    // elle manque, on le DIT (motif du serveur) au lieu de laisser un blanc
+    // qu'on lirait comme « rien à signaler ».
+    ['Météo', meteoTexte(r && r.meteo) || ((r && r.meteo && r.meteo.motif) ? r.meteo.motif : null)],
   ].map(([l, v]) => `<div><b>${esc(l)} :</b> ${cell(v)}</div>`).join('');
 
   const kpis = [

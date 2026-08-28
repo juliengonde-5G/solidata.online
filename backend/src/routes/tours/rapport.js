@@ -34,6 +34,9 @@ const { centreDeTri, LIBELLE_MOTIF } = require('./arrets');
 // Répartition du poids pesé entre les points : LA MÊME règle qu'à la clôture
 // (`completion-effects.js`), pour que le rapport ne contredise pas la base.
 const { repartirPoids } = require('./sacs');
+// Coordonnées du centre de tri — source unique (variables d'environnement
+// CENTRE_TRI_LAT/LNG), utilisées ici pour la météo du jour de la tournée.
+const { CENTRE_TRI_LAT, CENTRE_TRI_LNG } = require('./context');
 
 /**
  * Journalise la consultation du compte rendu — BEST EFFORT (correctif 27/08).
@@ -165,6 +168,84 @@ function fabriqueSoft() {
     }
   };
   return { degraded, soft, softAvecRepli };
+}
+
+/** Au-delà, la météo est abandonnée : le rapport passe avant elle. */
+const METEO_DELAI_MAX_MS = 4000;
+
+/**
+ * Conditions météo du jour de la tournée (demande client 28/08/2026).
+ *
+ * Le temps qu'il a fait explique une partie de ce que le compte rendu montre :
+ * une journée de pluie allonge les arrêts, un jour de gel change le contenu des
+ * bornes, une canicule pèse sur l'équipage. Le lire à côté des durées évite
+ * d'attribuer à l'organisation ce qui revient au ciel.
+ *
+ * DEUX SOURCES, dans cet ordre :
+ *  1. `collection_context` — la météo DÉJÀ enregistrée pour cette date, celle
+ *     qui a servi au moteur prédictif. C'est la source à privilégier : le
+ *     rapport dit alors exactement ce sur quoi l'application a raisonné.
+ *  2. Open-Meteo, à défaut, pour les coordonnées du centre de tri.
+ *
+ * Aucune des deux ne répond → `disponible: false` avec un motif. Le bloc NOMME
+ * son absence plutôt que d'afficher un beau temps par défaut.
+ */
+async function meteoDuJour(dateTournee, soft) {
+  const jour = dateTournee instanceof Date
+    ? dateTournee.toISOString().slice(0, 10)
+    : String(dateTournee || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(jour)) {
+    return { disponible: false, motif: 'Date de tournée illisible' };
+  }
+
+  const ctx = await soft(
+    'SELECT weather_label, temp_max, precip_mm FROM collection_context WHERE date = $1',
+    [jour], 'meteo'
+  );
+  const l = ctx.rows[0];
+  if (l && (l.weather_label || l.temp_max != null || l.precip_mm != null)) {
+    return {
+      disponible: true,
+      source: 'releve_interne',
+      libelle: l.weather_label || null,
+      temp_max: l.temp_max != null ? Number(l.temp_max) : null,
+      temp_min: null,
+      precip_mm: l.precip_mm != null ? Number(l.precip_mm) : null,
+      vent_max: null,
+    };
+  }
+
+  // Repli Open-Meteo. Best effort : sans réseau, ou pour une tournée trop
+  // ancienne pour l'API de prévision, on l'annonce au lieu d'inventer.
+  //
+  // BORNÉ DANS LE TEMPS : `fetchOpenMeteoDaily` n'a pas de délai maximal (à la
+  // différence de sa variante « range »). Dans le job de fond du moteur
+  // prédictif, un appel qui traîne passe inaperçu ; ici il retiendrait le PDF
+  // que le gestionnaire attend à l'écran. Une ligne de météo ne vaut pas un
+  // compte rendu qui ne s'ouvre pas : passé le délai, le bloc s'efface et le
+  // dit. Le cache d'une heure du helper fait que l'attente n'est payée qu'une
+  // fois par jour de tournée.
+  try {
+    const { fetchOpenMeteoDaily } = require('../../utils/weather');
+    let horloge;
+    const m = await Promise.race([
+      fetchOpenMeteoDaily(CENTRE_TRI_LAT, CENTRE_TRI_LNG, jour),
+      new Promise((resolve) => { horloge = setTimeout(() => resolve(null), METEO_DELAI_MAX_MS); }),
+    ]).finally(() => clearTimeout(horloge));
+    if (!m) return { disponible: false, motif: 'Météo non disponible pour cette date' };
+    return {
+      disponible: true,
+      source: 'open_meteo',
+      libelle: m.label || null,
+      temp_max: m.tempMax ?? null,
+      temp_min: m.tempMin ?? null,
+      precip_mm: m.precipMm ?? null,
+      vent_max: m.windMax ?? null,
+    };
+  } catch (e) {
+    console.warn(`[TOURS] rapport — météo indisponible : ${e.message}`);
+    return { disponible: false, motif: 'Météo non disponible pour cette date' };
+  }
 }
 
 // ── GET /api/tours/:id/rapport ─────────────────────────────────────────────
@@ -802,6 +883,10 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       geolocalisation_nominative: contientDonneesLocalisationNominatives,
     });
 
+    // Best effort, après les blocs métier : une météo indisponible ne doit ni
+    // retarder le rapport ni le faire échouer.
+    const meteo = await meteoDuJour(t.date, soft);
+
     res.json({
       generated_at: new Date().toISOString(),
       tour: {
@@ -844,6 +929,10 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
       planned_route: plannedRoute,
       checklist: checklist(),
       end_of_day: eodRes.rows[0] || null,
+      // Conditions météo du jour (demande client 28/08/2026) : elles expliquent
+      // une part des durées et du contenu des bornes. `disponible: false` +
+      // motif quand ni le relevé interne ni Open-Meteo ne répondent.
+      meteo,
       // Arrêts détectés sur la trace GPS. `source` dit d'où vient la liste :
       // « table » = figée à la clôture, « live » = recalculée à l'instant (donc
       // susceptible de bouger), « indisponible » = rien de fiable à montrer.

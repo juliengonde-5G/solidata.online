@@ -87,7 +87,7 @@ function mockDb(opts = {}) {
     tour = TOUR_CAV, cavs = [], associations = [], arrets = [],
     weights = [], incidents = [], messages = [], gps = [],
     checklist = null, endOfDay = null, centre = CENTRE,
-    erreurs = [], tourIntrouvable = false,
+    erreurs = [], tourIntrouvable = false, contexteMeteo = [],
   } = opts;
   const boom = (bloc) => {
     const e = new Error(`colonne absente (${bloc})`);
@@ -108,6 +108,7 @@ function mockDb(opts = {}) {
     if (/FROM vehicle_checklists vc/.test(t)) return ko('checklist') ? boom('checklist') : Promise.resolve({ rows: checklist ? [checklist] : [] });
     if (/FROM tour_end_of_day_declarations d/.test(t)) return ko('end_of_day') ? boom('end_of_day') : Promise.resolve({ rows: endOfDay ? [endOfDay] : [] });
     if (/FROM lieux_techniques/.test(t)) return Promise.resolve({ rows: centre ? [centre] : [] });
+    if (/FROM collection_context/.test(t)) return ko('meteo') ? boom('meteo') : Promise.resolve({ rows: contexteMeteo });
     if (/FROM tours t/.test(t) || /FROM tours WHERE id/.test(t)) {
       return Promise.resolve({ rows: tourIntrouvable ? [] : [tour] });
     }
@@ -181,10 +182,10 @@ describe('forme de la réponse', () => {
     // réponse telle quelle. `arrets_gps` s'y ajoute le 26/08/2026 (bloc des
     // arrêts détectés sur la trace GPS), `confidentialite` le 27/08/2026
     // (mention portée par le document quand il réunit des arrêts géolocalisés
-    // ET un conducteur nommé).
+    // ET un conducteur nommé), `meteo` le 28/08/2026.
     expect(Object.keys(r.body).sort()).toEqual([
       'arrets_gps', 'checklist', 'confidentialite', 'degraded', 'end_of_day', 'generated_at',
-      'gps_track', 'incidents', 'kpis', 'messages', 'planned_route', 'points', 'tour',
+      'gps_track', 'incidents', 'kpis', 'messages', 'meteo', 'planned_route', 'points', 'tour',
       'warnings', 'weights',
     ]);
 
@@ -560,4 +561,120 @@ describe('géolocalisation nominative : mention portée et consultation journali
     expect(r.status).toBe(200);
     expect(r.body.confidentialite).not.toBeNull();
   });
+});
+
+// ── Météo du jour ─────────────────────────────────────────────────────────
+// Ajoutée le 28/08/2026 (demande client). Le compte rendu se relit des mois
+// plus tard : une météo devinée y ferait foi. D'où trois issues distinctes et
+// jamais confondues — relevé interne, repli Open-Meteo, absence NOMMÉE.
+//
+// CHAQUE CAS PREND SA PROPRE DATE : le helper météo garde ses résultats une
+// heure en mémoire, et une date partagée ferait relire à un test la réponse du
+// précédent — trois d'entre eux passaient ainsi sans rien prouver.
+describe('météo du jour', () => {
+  test('le relevé interne fait foi quand il existe (aucun appel réseau)', async () => {
+    // C'est la météo sur laquelle le moteur prédictif a raisonné ce jour-là :
+    // le rapport doit dire la même chose que l'application, pas autre chose.
+    const fetchOrigine = globalThis.fetch;
+    globalThis.fetch = jest.fn(() => { throw new Error('le réseau ne doit pas être appelé'); });
+    try {
+      mockDb({ contexteMeteo: [{ weather_label: 'Pluie', temp_max: 14.2, precip_mm: 6.5 }] });
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(r.body.meteo).toEqual({
+        disponible: true, source: 'releve_interne', libelle: 'Pluie',
+        temp_max: 14.2, temp_min: null, precip_mm: 6.5, vent_max: null,
+      });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = fetchOrigine;
+    }
+  });
+
+  test('une ligne de contexte VIDE ne passe pas pour un relevé', async () => {
+    // `collection_context` existe pour bien d'autres raisons (facteur trafic,
+    // durée). Une ligne sans aucune donnée météo n'est pas une météo.
+    const fetchOrigine = globalThis.fetch;
+    globalThis.fetch = jest.fn(async () => ({ ok: false }));
+    try {
+      mockDb({ tour: { ...TOUR_CAV, date: '2026-08-11' },
+        contexteMeteo: [{ weather_label: null, temp_max: null, precip_mm: null }] });
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(r.body.meteo.disponible).toBe(false);
+      expect(r.body.meteo.motif).toMatch(/non disponible/i);
+    } finally {
+      globalThis.fetch = fetchOrigine;
+    }
+  });
+
+  test('sans relevé interne, repli Open-Meteo', async () => {
+    const fetchOrigine = globalThis.fetch;
+    globalThis.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({ daily: {
+        weather_code: [61], temperature_2m_max: [17.3], temperature_2m_min: [9.1],
+        precipitation_sum: [3.4], wind_speed_10m_max: [28], sunshine_duration: [7200],
+      } }),
+    }));
+    try {
+      mockDb({ tour: { ...TOUR_CAV, date: '2026-08-12' }, contexteMeteo: [] });
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(r.body.meteo).toMatchObject({
+        disponible: true, source: 'open_meteo', libelle: 'Pluie',
+        temp_max: 17.3, temp_min: 9.1, precip_mm: 3.4, vent_max: 28,
+      });
+    } finally {
+      globalThis.fetch = fetchOrigine;
+    }
+  });
+
+  test('aucune source ne répond : absence NOMMÉE, jamais un beau temps par défaut', async () => {
+    const fetchOrigine = globalThis.fetch;
+    globalThis.fetch = jest.fn(async () => { throw new Error('réseau coupé'); });
+    try {
+      mockDb({ tour: { ...TOUR_CAV, date: '2026-08-13' }, contexteMeteo: [] });
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(r.body.meteo.disponible).toBe(false);
+      expect(typeof r.body.meteo.motif).toBe('string');
+      expect(r.body.meteo.libelle).toBeUndefined();
+    } finally {
+      globalThis.fetch = fetchOrigine;
+    }
+  });
+
+  test('la lecture du contexte en échec dégrade SEULE, le rapport part', async () => {
+    const fetchOrigine = globalThis.fetch;
+    globalThis.fetch = jest.fn(async () => ({ ok: false }));
+    try {
+      mockDb({ tour: { ...TOUR_CAV, date: '2026-08-14' }, erreurs: ['meteo'] });
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(r.body.degraded).toContain('meteo');
+      expect(r.body.meteo.disponible).toBe(false);
+      expect(r.body.points).toBeDefined();
+    } finally {
+      globalThis.fetch = fetchOrigine;
+    }
+  });
+
+  test('une météo qui traîne ne retient pas le rapport', async () => {
+    // Le helper partagé n'a aucun délai maximal : dans un job de fond un appel
+    // qui pend passe inaperçu, ici il bloquerait le PDF que le gestionnaire
+    // attend. On borne, et l'absence est dite.
+    const fetchOrigine = globalThis.fetch;
+    globalThis.fetch = jest.fn(() => new Promise(() => {})); // ne répond jamais
+    try {
+      mockDb({ tour: { ...TOUR_CAV, date: '2026-08-15' }, contexteMeteo: [] });
+      const debut = Date.now();
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(Date.now() - debut).toBeLessThan(8000);
+      expect(r.body.meteo.disponible).toBe(false);
+    } finally {
+      globalThis.fetch = fetchOrigine;
+    }
+  }, 15000);
 });
