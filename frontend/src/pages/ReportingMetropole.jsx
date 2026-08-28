@@ -6,6 +6,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import { PageHeader, Section, MapSizeFix } from '../components';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import 'leaflet/dist/leaflet.css';
+import FondCarte from '../components/FondCarte';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
@@ -454,10 +455,7 @@ export default function ReportingMetropole() {
               <div className="rounded-lg overflow-hidden border mb-4" style={{ height: '400px' }}>
                 <MapContainer center={[49.4231, 1.0993]} zoom={11} style={{ height: '100%', width: '100%' }}>
                   <MapSizeFix />
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                  />
+                  <FondCarte />
                   {filteredCavList.filter(c => c.latitude && c.longitude).map(c => (
                     <CircleMarker
                       key={c.id}

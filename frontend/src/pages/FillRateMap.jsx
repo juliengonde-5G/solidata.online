@@ -7,6 +7,7 @@ import useCavSensorSocket from '../hooks/useCavSensorSocket';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
 import 'leaflet/dist/leaflet.css';
+import FondCarte from '../components/FondCarte';
 
 // Force le recalcul de la taille Leaflet quand le conteneur change (sidebar ouverte/fermée).
 function MapSizeFix() {
@@ -209,10 +210,7 @@ export default function FillRateMap() {
           <div className="lg:col-span-2 card-modern overflow-hidden relative" style={{ height: '65vh' }}>
             <MapContainer center={center} zoom={11} style={{ height: '100%', width: '100%' }}>
               <MapSizeFix />
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              />
+              <FondCarte />
               {/* Association points */}
               {showAsso && assoPoints.map(ap => {
                 const lat = parseFloat(ap.latitude);

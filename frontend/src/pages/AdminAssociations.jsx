@@ -8,6 +8,7 @@ import api from '../services/api';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import FondCarte from '../components/FondCarte';
 
 // Fix default marker icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -363,7 +364,7 @@ export default function AdminAssociations() {
                 <div className="h-48 rounded-lg overflow-hidden border">
                   <MapContainer center={[detailItem.latitude, detailItem.longitude]} zoom={15} style={{ height: '100%' }} zoomControl={false}>
                     <MapSizeFix />
-                    <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+                    <FondCarte />
                     <Marker position={[detailItem.latitude, detailItem.longitude]} />
                   </MapContainer>
                 </div>
@@ -488,7 +489,7 @@ export default function AdminAssociations() {
                 zoomControl={false}
               >
                 <MapSizeFix />
-                <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+                <FondCarte />
                 <LocationPicker
                   position={mapPos}
                   onPick={(pos) => {
