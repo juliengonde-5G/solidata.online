@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import io from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
@@ -12,6 +12,7 @@ import { authedFetch } from '../services/authedFetch';
 import { addGpsPosition } from '../services/db';
 import { libellePoint } from '../services/pointLabel';
 import InfosPointAssociation from '../components/InfosPointAssociation';
+import FondCarte from '../components/FondCarte';
 import { infoHorairesJour, texteRdv } from '../services/pointHoraires';
 // `lireArrivee` sert au libellé du bouton chez une association (arrivée déjà
 // déclarée ou non). L'import manquait : sur une tournée ASSOCIATION, le rendu
@@ -624,7 +625,10 @@ export default function TourMap() {
 
       <div className="flex-1 relative">
         <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+          {/* Fond de carte : CARTO exigeant désormais une clé, la carte du
+              chauffeur affichait « API Key required » à la place du plan.
+              Voir components/FondCarte.jsx (OpenStreetMap, sans clé). */}
+          <FondCarte />
 
           {myPosition && (
             <Marker position={[myPosition.lat, myPosition.lng]} icon={myIcon}>
@@ -736,7 +740,7 @@ export default function TourMap() {
           {/* Étape « retour au centre » : elle occupe toute la carte, pour
               qu'on ne la confonde pas avec une borne à collecter. */}
           {arretCourant ? (
-            <div className="px-4 pt-2 pb-2">
+            <div className="px-4 pt-2 pb-2 reserve-bouton-assistance">
               <p className="text-[11px] uppercase tracking-widest text-teal-600 font-bold">
                 Étape en cours
               </p>
@@ -756,7 +760,16 @@ export default function TourMap() {
               )}
             </div>
           ) : (
-          <div className="px-4 pt-2 pb-2">
+          /* RÉSERVATION DE PLACE DU BOUTON FLOTTANT (28/08/2026) — le bouton
+              « Aide et messages » flotte en bas à droite, au-dessus de ce
+              bandeau. Il masquait la fin des lignes : « 50 % remp… » sur la
+              capture terrain du 25/08, puis la fin des adresses longues. Le
+              `pr-16` d'alors ne couvrait qu'UNE ligne et une largeur devinée ;
+              la classe ci-dessous réserve la largeur RÉELLE publiée par le
+              bouton, pour tout le bloc — titre, badges et encart association
+              compris, dont la présence fait varier ce qui tombe sous le
+              bouton. Voir index.css et components/BoutonAssistance.jsx. */
+          <div className="px-4 pt-2 pb-2 reserve-bouton-assistance">
             <p className="text-[11px] uppercase tracking-widest text-gray-400 font-bold">
               Prochain point #{currentCavIndex + 1}
             </p>
@@ -805,10 +818,8 @@ export default function TourMap() {
                 <span aria-hidden="true">📷</span> Photo à prendre
               </p>
             )}
-            {/* `pr-16` dégage le bouton flottant d'assistance, qui recouvrait
-                la fin de la ligne (« 50 % remp… » sur la capture terrain). */}
             {mode !== USAGE_MODES.DRIVING && (
-              <div className="flex items-center justify-between gap-2 mt-1 pr-16">
+              <div className="flex items-center justify-between gap-2 mt-1">
                 <p className="text-xs text-gray-500 truncate">
                   {libellePoint(currentCAV).sousTitre || currentCAV.commune}
                 </p>
@@ -846,7 +857,7 @@ export default function TourMap() {
 
       {!arretCourant && !currentCAV && cavs.length > 0 && (
         <div className="relative z-20 bg-green-50 border-t border-green-200 flex-shrink-0">
-          <div className="px-4 py-3 text-center">
+          <div className="px-4 py-3 text-center reserve-bouton-assistance">
             <p className="text-green-800 font-bold">
               Tous les {isAssociationTour ? 'points association' : 'CAV'} ont été collectés
             </p>

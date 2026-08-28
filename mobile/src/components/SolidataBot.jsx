@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 
 // ══════════════════════════════════════════
@@ -7,16 +7,33 @@ import api from '../services/api';
 
 const MAX_MSG_LENGTH = 500;
 
-export default function SolidataBot() {
+/**
+ * Assistant IA du chauffeur — PANNEAU SEUL, sans bulle flottante (28/08/2026).
+ *
+ * Ce composant portait sa propre bulle ronde en bas à droite, pendant que la
+ * messagerie en portait une identique en bas à gauche. Deux bulles, la même
+ * icône : le client l'a lu comme « le bouton messagerie apparaît deux fois ».
+ * La bulle est donc RETIRÉE d'ici — et non pas rendue optionnelle : laisser un
+ * mode autonome, c'est laisser à portée de main le geste qui reproduit le
+ * défaut. L'unique bouton flottant de l'application vit désormais dans
+ * `components/BoutonAssistance.jsx`, qui décide de l'ouverture.
+ *
+ * Le chat lui-même — suggestions, dictée, synthèse vocale, historique de
+ * session — est INCHANGÉ.
+ *
+ * @param {boolean} ouvert - le panneau est-il affiché ?
+ * @param {() => void} onFermer - fermeture demandée par l'utilisateur.
+ */
+export default function SolidataBot({ ouvert = false, onFermer } = {}) {
   const hasToken = !!localStorage.getItem('mobile_token');
-  const [isOpen, setIsOpen] = useState(false);
+  const isOpen = !!ouvert;
+  const fermer = () => { if (onFermer) onFermer(); };
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(true);
-  const [hasNewMessage, setHasNewMessage] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
   const messagesEndRef = useRef(null);
@@ -56,7 +73,7 @@ export default function SolidataBot() {
   // ── Close on Escape ──────────────────────────────────────────────────
   useEffect(() => {
     const handleEsc = (e) => {
-      if (e.key === 'Escape' && isOpen) setIsOpen(false);
+      if (e.key === 'Escape' && isOpen) fermer();
     };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
@@ -142,8 +159,6 @@ export default function SolidataBot() {
       const botMsg = { id: Date.now() + 1, role: 'bot', text: reply, time: new Date() };
       setMessages(prev => [...prev, botMsg]);
       speak(reply);
-
-      if (!isOpen) setHasNewMessage(true);
     } catch (err) {
       const errorText = err.response?.data?.error || 'Erreur de connexion. Réessaie ! 🔄';
       setMessages(prev => [...prev, {
@@ -152,19 +167,13 @@ export default function SolidataBot() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, sessionId, isOpen, speak]);
+  }, [input, isLoading, sessionId, speak]);
 
   // ── Clear conversation ───────────────────────────────────────────────
   const clearChat = () => {
     setMessages([]);
     setSessionId('');
     setShowSuggestions(true);
-  };
-
-  // ── Handle open ──────────────────────────────────────────────────────
-  const handleOpen = () => {
-    setIsOpen(true);
-    setHasNewMessage(false);
   };
 
   // ── Format time ──────────────────────────────────────────────────────
@@ -175,23 +184,6 @@ export default function SolidataBot() {
 
   return (
     <>
-      {/* ── Floating button (bulle) ── */}
-      {!isOpen && (
-        <button
-          onClick={handleOpen}
-          className="fixed bottom-20 right-4 z-[9999] w-12 h-12 rounded-full bg-primary text-white shadow-lg active:scale-95 transition-all duration-200 flex items-center justify-center"
-          aria-label="Ouvrir l'assistant SolidataBot"
-          title="SolidataBot — Assistant IA"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          {hasNewMessage && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse" />
-          )}
-        </button>
-      )}
-
       {/* ── Chat panel (fullscreen on mobile) ── */}
       {isOpen && (
         <div
@@ -228,7 +220,7 @@ export default function SolidataBot() {
                 </svg>
               </button>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={fermer}
                 className="p-2 hover:bg-white/10 rounded-lg transition"
                 aria-label="Fermer"
                 title="Fermer"

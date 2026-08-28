@@ -227,6 +227,21 @@
     padding-top: calc(1rem + var(--demo-banner-h, 64px) + var(--sync-banner-h, 44px) + var(--message-banner-h, 72px));
   }
 
+  /* RÉSERVATION DE PLACE DU BOUTON FLOTTANT D'ASSISTANCE (28/08/2026).
+     Le bouton unique « Aide et messages » est en `position: fixed` en bas à
+     droite : il sort du flux et recouvrait la fin des lignes de la carte de
+     tournée (« 50 % remp… » sur la capture terrain du 25/08). Le correctif
+     d'alors codait un `pr-16` en dur dans l'écran — une valeur qui redevient
+     fausse dès que le bouton change de taille. Le bouton publie désormais sa
+     largeur RÉELLE (marge de droite comprise) dans `--bouton-assistance-w` et
+     pose `bouton-assistance-on` sur le body ; la réservation disparaît d'elle-
+     même sur les écrans où le bouton ne s'affiche pas. Même mécanique que
+     `--sync-banner-h` / `--demo-banner-h` / `--message-banner-h`. */
+  .reserve-bouton-assistance { padding-right: 0; }
+  body.bouton-assistance-on .reserve-bouton-assistance {
+    padding-right: calc(var(--bouton-assistance-w, 76px) + 8px);
+  }
+
   /* Badge local de statut d'action (envoyé / en attente / à renvoyer). */
   .action-badge {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;

@@ -6,11 +6,10 @@ import { startAutoSync, cacheReferenceData } from './services/sync';
 import Login from './pages/Login';
 import VehicleLogin from './pages/VehicleLogin';
 import BatteryAlert from './components/BatteryAlert';
-import SolidataBot from './components/SolidataBot';
 import SyncStatusBanner from './components/SyncStatusBanner';
 import DriverMessageBanner from './components/DriverMessageBanner';
 import DemoModeBanner from './components/DemoModeBanner';
-import MessagesButton from './components/MessagesButton';
+import BoutonAssistance from './components/BoutonAssistance';
 import NouveauMessageBanner from './components/messagerie/NouveauMessageBanner';
 import ErreurApplication from './components/ErreurApplication';
 import VehicleSelect from './pages/VehicleSelect';
@@ -73,8 +72,11 @@ function App() {
           </Routes>
           </ErreurApplication>
           <BatteryAlert />
-          <MessagesButton />
-          <SolidataBot />
+          {/* UN SEUL bouton flottant (28/08/2026) : il réunit l'assistant, la
+              messagerie et l'historique des notifications. Avant, deux bulles
+              rondes à la même icône flottaient en bas d'écran — le client les
+              lisait comme « le bouton messagerie deux fois ». */}
+          <BoutonAssistance />
         </UsageModeProvider>
       </AuthProvider>
     </BrowserRouter>

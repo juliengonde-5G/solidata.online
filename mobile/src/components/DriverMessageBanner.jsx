@@ -3,6 +3,7 @@ import { authedFetch } from '../services/authedFetch';
 import { addPendingMessageRead, getAckedMessageIds } from '../services/db';
 import { syncAll } from '../services/sync';
 import { vibrateError } from '../services/haptic';
+import { EVENEMENT_CONSIGNES } from '../services/assistance';
 
 /**
  * Bannière globale « consigne du responsable » (canal manager → chauffeur, item 62).
@@ -70,6 +71,17 @@ export default function DriverMessageBanner() {
   const visible = messages.filter((m) => !ackedIds.has(m.id));
   const current = visible[0] || null;
   const remaining = visible.length;
+
+  // Le bouton d'assistance porte UN badge, total de tous les non-lus du
+  // chauffeur (messagerie + consignes). Plutôt que de lui faire sonder le même
+  // endpoint en parallèle, ce bandeau — qui l'interroge déjà toutes les 15 s —
+  // publie son décompte. Une source, une requête, et le badge affiche
+  // exactement ce que la bannière montre.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(EVENEMENT_CONSIGNES, {
+      detail: { enAttente: remaining },
+    }));
+  }, [remaining]);
 
   const acknowledge = async () => {
     if (!current || busy) return;
