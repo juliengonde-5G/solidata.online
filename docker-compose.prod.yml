@@ -105,6 +105,10 @@ services:
       # Clé de chiffrement des rapports PCM (insertion). Si non définie,
       # fallback sur JWT_SECRET (audit V1.4.2 demandait la séparation).
       PCM_ENCRYPTION_KEY: ${PCM_ENCRYPTION_KEY:-}
+      # Double authentification (2.43.0) — chiffre le secret TOTP (users.mfa_secret).
+      # Si non définie, repli sur PCM_ENCRYPTION_KEY puis JWT_SECRET (fonctionne,
+      # mais mélange deux registres de compromission) — cf. utils/mfa-crypto.js.
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
     volumes:
       - uploads:/app/uploads
       - backups:/app/backups

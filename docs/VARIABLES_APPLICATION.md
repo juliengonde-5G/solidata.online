@@ -130,6 +130,21 @@ Utilisée dans : `backend/src/routes/tours/events-auto.js`
 
 ---
 
+### 2.9 Double authentification (MFA) & smoke test
+
+| Variable | Valeur dev par défaut | Obligatoire | Description |
+|----------|-----------------------|-------------|-------------|
+| `MFA_ENCRYPTION_KEY` | *(vide)* | Non | Clé DÉDIÉE de chiffrement du secret TOTP (`users.mfa_secret`, AES-256-GCM). **Recommandée en production** : sans elle, la cascade retombe sur `PCM_ENCRYPTION_KEY` puis `JWT_SECRET` — ça fonctionne, mais mélange deux registres de compromission. |
+| `API_TOTP_SECRET` | *(vide)* | Non* | Secret TOTP (Base32) du compte de service utilisé par le smoke test post-déploiement (`scripts/tests/api-smoke.js`), **si la double authentification est activée sur ce compte**. |
+
+*Sans `API_TOTP_SECRET`, si le compte API est soumis à la double authentification, le login du smoke test répond `mfa_required` et le script se dégrade explicitement (avertissement en sortie) plutôt que d'échouer le déploiement — mais il ne couvre alors plus aucun des endpoints protégés par `requireMfa`.
+
+Utilisées dans : `backend/src/utils/mfa-crypto.js` (cascade de clé), `scripts/tests/api-smoke.js` (calcul du code TOTP du compte de service via `backend/src/utils/totp.js`).
+
+> **Mise en service (2.43.0)** : renseigner `MFA_ENCRYPTION_KEY` est recommandé mais pas bloquant. En revanche, **une action manuelle est requise après le premier déploiement** : enrôler le compte de service utilisé par `API_USER`/`API_PASSWORD` (se connecter avec ce compte, suivre l'écran d'enrôlement) puis renseigner son secret dans `API_TOTP_SECRET` sur le serveur — sans quoi le smoke test de `deploy.sh update` ne couvre plus les endpoints sensibles (`/api/insertion`, `/api/pcm`, `/api/employees`…), bien qu'il reste vert (401/403 comptent comme « endpoint protégé, OK »).
+
+---
+
 ## 3. Résumé `.env.example`
 
 ```dotenv
@@ -185,6 +200,12 @@ OSRM_BASE_URL=https://router.project-osrm.org   # Remplacer par instance propre 
 # ÉVÉNEMENTS LOCAUX (optionnel)
 # ─────────────────────────────────────────────
 OPENAGENDA_API_KEY=          # Optionnel — sources gratuites disponibles sans clé
+
+# ─────────────────────────────────────────────
+# DOUBLE AUTHENTIFICATION (MFA) & SMOKE TEST
+# ─────────────────────────────────────────────
+MFA_ENCRYPTION_KEY=          # Recommandée en prod — sinon repli sur PCM_ENCRYPTION_KEY puis JWT_SECRET
+API_TOTP_SECRET=             # Secret TOTP (Base32) du compte API, si ce compte est soumis à la double authentification
 ```
 
 ---
@@ -205,6 +226,8 @@ OPENAGENDA_API_KEY=          # Optionnel — sources gratuites disponibles sans 
 | Routage OSRM | `OSRM_BASE_URL` |
 | Météo / géolocalisation | `CENTRE_TRI_LAT`, `CENTRE_TRI_LNG` |
 | Événements locaux | `OPENAGENDA_API_KEY` |
+| Double authentification (MFA) | `MFA_ENCRYPTION_KEY` |
+| Smoke test post-déploiement | `API_USER`, `API_PASSWORD`, `API_TOTP_SECRET` |
 
 ---
 
@@ -245,3 +268,17 @@ Ces valeurs sont codées dans le code source mais modifiables via l'API pour cer
 | `returnThresholdKg` | `2000` | Poids déclenchant retour intermédiaire au centre |
 | `minutesPerCav` | `10` | Temps de collecte par défaut par CAV (si non appris) |
 | `lunchBreakAfterHours` | `4` | Déclenchement pause après N heures de collecte |
+
+### Double authentification — rôles soumis (2.43.0)
+
+Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** — comme partout dans le projet, le défaut vit dans le code, `settings` ne sert qu'à le surcharger.
+
+| Clé `settings` | Emplacement | Valeur par défaut |
+|-----------------|-------------|--------------------|
+| `securite.mfa_roles` | `backend/src/middleware/mfa.js` | `["ADMIN","RH","DPO","PCM"]` (tableau JSON de rôles de BASE — un rôle personnalisé est soumis si son rôle de base l'est) |
+
+### Note de profil initial CIP — génération automatique (2.43.0)
+
+| Clé `settings` | Emplacement | Valeur par défaut |
+|-----------------|-------------|--------------------|
+| `insertion.note_profil_auto` | `backend/src/utils/insertion-settings.js` | `true` — génération systématique à la liaison candidat→collaborateur (désactivable) |

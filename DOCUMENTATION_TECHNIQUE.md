@@ -399,6 +399,7 @@ solidata.online/
 ### Module 1 — Authentification & Administration
 - Connexion JWT (access token 8h + refresh token 7j)
 - 9 rôles intégrés : `ADMIN`, `MANAGER`, `RH`, `COLLABORATEUR`, `AUTORITE`, `RESP_BTQ`, `DPO`, `FINANCE`, `QHSE` (+ rôles personnalisés par duplication)
+- **Double authentification (2FA/TOTP, 2.43.0)** pour les rôles soumis (défaut `ADMIN`/`RH`/`DPO`/`PCM`, paramétrable) — détail complet du flux au § « Sécurité » ci-dessous
 - Gestion des utilisateurs
 - Paramètres de l'application (nom, adresse, SIRET, objectifs production)
 - Templates de messages SMS/Email
@@ -583,9 +584,9 @@ solidata.online/
 #### Authentification (4 tables)
 | Table | Description |
 |-------|-------------|
-| `users` | Utilisateurs (username, email, rôle, équipe) |
-| `refresh_tokens` | Tokens de rafraîchissement JWT |
-| `settings` | Paramètres clé/valeur par catégorie |
+| `users` | Utilisateurs (username, email, rôle, équipe) ; **2.43.0** : `mfa_enabled`, `mfa_secret` (chiffré AES-256-GCM), `mfa_enrolled_at`, `mfa_backup_codes` (JSONB, empreintes SHA-256 seules), `mfa_failed_count`/`mfa_last_failed_at` (verrou dédié) |
+| `refresh_tokens` | Tokens de rafraîchissement JWT ; **2.43.0** : colonne `mfa` (booléenne — la session a-t-elle franchi le défi TOTP) |
+| `settings` | Paramètres clé/valeur par catégorie (dont `securite.mfa_roles`, `insertion.note_profil_auto`) |
 | `message_templates` | Templates SMS/email (recrutement, etc.) |
 
 #### Recrutement (3 tables)
@@ -721,13 +722,14 @@ solidata.online/
 | `rgpd_consents` | Consentements par entité et type |
 | `rgpd_audit_log` | Journal d'audit (action, entité, user, IP, détails JSON) |
 
-#### Parcours Insertion (4 tables)
+#### Parcours Insertion (5 tables)
 | Table | Description |
 |-------|-------------|
 | `insertion_diagnostics` | Diagnostic social initial (20+ champs) |
 | `insertion_milestones` | Jalons M1/M6/M12 (entretien, 7 freins, bilan, sortie) |
 | `cip_action_plans` | Plans d'action CIP (catégorie, frein, priorité, échéance) |
 | `insertion_interview_alerts` | Alertes entretien automatiques |
+| `insertion_notes_profil` | **2.43.0** — Note de profil initial CIP : une ligne par parcours (`UNIQUE(employee_id, parcours_num)`), `contenu_chiffre` (chiffré, field-crypto), `sources` JSONB (sources mobilisées / manques nommés), `generated_by`, `communiquee_cip_at`/`communiquee_cip_by` |
 
 #### Recrutement Avancé (4 tables)
 | Table | Description |
@@ -819,6 +821,28 @@ Base URL : `https://solidata.online/api`
 | `/api/boutique-commandes` | `boutique-commandes.js` | CRUD commandes, transitions statut (envoyer/ajuster/preparer/expedier/annuler) |
 | `/api/boutique-objectifs` | `boutique-objectifs.js` | CRUD objectifs mensuels, bulk UPSERT, comparaison objectif vs réalisé |
 | `/api/boutique-meteo` | `boutique-meteo.js` | Données météo quotidiennes, corrélation pluie/CA, collecte manuelle |
+
+### Authentification — endpoints MFA (2.43.0)
+
+Portés par `routes/auth.js` (défi + enrôlement) et `routes/users.js` (réinitialisation ADMIN) :
+
+| Méthode | Endpoint | Auth | Description |
+|---------|----------|------|-------------|
+| POST | `/api/auth/login` | — | Identifiant + mot de passe. Pour un compte soumis et enrôlé, renvoie `{ mfa_required: true, mfa_challenge_token }` au lieu d'une session |
+| POST | `/api/auth/mfa/verify` | jeton de défi (5 min) | Vérifie un code TOTP (6 chiffres) ou un code de secours (`XXXXX-XXXXX`), émet la session complète |
+| POST | `/api/auth/mfa/setup` | Bearer (session non enrôlée acceptée) | Génère le secret, renvoie `{ otpauth_url, qr_data_url, secret_base32 }` |
+| POST | `/api/auth/mfa/activate` | Bearer (idem) | Vérifie le premier code, active, renvoie les 8 codes de secours (affichés une seule fois) et réémet la session |
+| PUT | `/api/users/:id/reset-mfa` | ADMIN | Réinitialise la double authentification d'un compte (téléphone perdu) |
+
+### Note de profil initial CIP — endpoints (2.43.0)
+
+Portés par `routes/insertion/routes.js`, montés **avant** `GET /api/insertion/:employeeId` (qui capture tout) :
+
+| Méthode | Endpoint | Auth | Description |
+|---------|----------|------|-------------|
+| GET | `/api/insertion/notes-profil/:employeeId` | ADMIN, RH | Lecture de la note du parcours courant, déchiffrée — consultation journalisée dans `rgpd_audit_log` |
+| POST | `/api/insertion/ia/note-profil/:employeeId` | ADMIN, RH | Génération ou régénération (appel Anthropic, `services/insertion-ai.js#analyserProfilInitial`) |
+| POST | `/api/insertion/notes-profil/:employeeId/communiquer` | ADMIN, RH | Marque « pris connaissance » (idempotent — ne réécrase pas une date déjà posée) |
 
 ### Health check
 `GET /api/health` — Retourne l'état de la base, la version PostgreSQL/PostGIS et les modules actifs.
@@ -1049,6 +1073,31 @@ HTTPS (avec avertissement navigateur) le temps de corriger.
 | **Validation** | express-validator sur les entrées API |
 | **Réseau Docker isolé** | Les conteneurs communiquent sur un réseau bridge interne |
 | **Secrets externalisés** | Mots de passe et clés dans `.env` (non versionné) |
+| **Double authentification (MFA/TOTP)** | Obligatoire pour les rôles à accès sensible (défaut ADMIN/RH/DPO/PCM), détail ci-dessous |
+
+### Double authentification (MFA/TOTP) — flux technique (2.43.0)
+
+**Option retenue : défi AU login** (le contrat interne parle d'« Option A ») — pour un compte soumis et déjà enrôlé, **aucun jeton d'accès n'est émis** avant que le code ne soit vérifié.
+
+**Claims JWT** — l'access token porte, à côté de `tv` (version de jeton, révocation), un claim **`mfa: true|false`** :
+- `true` = la session a franchi le défi TOTP, **ou** le rôle n'est pas soumis à la double authentification (posé à `true` d'office, pour que la vérification reste une simple comparaison sans cas particulier) ;
+- `false` = compte soumis mais **pas encore enrôlé** — la session existe (le front peut afficher l'écran d'enrôlement) mais les routes sensibles restent fermées côté serveur.
+
+Un **jeton de défi** distinct est émis à la place de la session lorsque le compte est soumis ET enrôlé : `{ id, purpose: 'mfa', tv }`, `expiresIn: '5m'`, signé avec le même `JWT_SECRET`. Il ne porte **aucun rôle** : `authenticate` le refuse partout où un `authorize(...)` suit ; seul `POST /auth/mfa/verify` (et une garde locale `denyChallengeToken` sur `/auth/me`, `/auth/password`, `/auth/logout`, `/auth/mfa/setup`, `/auth/mfa/activate`) le consomme.
+
+Au **refresh** (`POST /auth/refresh`), le claim `mfa` du nouveau jeton est **recalculé** — jamais recopié de l'ancien — depuis trois sources croisées : le rôle courant de l'utilisateur, l'état d'enrôlement courant (`users.mfa_enabled`), et `refresh_tokens.mfa` (le jeton de renouvellement porte lui-même si *cette session* a franchi le défi).
+
+**Colonnes ajoutées** : `users.mfa_enabled`, `users.mfa_secret` (chiffré), `users.mfa_enrolled_at`, `users.mfa_backup_codes` (JSONB, tableau de `{hash, used_at}` — jamais le code en clair), `users.mfa_failed_count`/`users.mfa_last_failed_at` ; `refresh_tokens.mfa`.
+
+**Middleware `requireMfa`** (`backend/src/middleware/mfa.js`) : exige `req.user.mfa === true` pour les rôles dont le **rôle de base** (`resolveBaseRole`) figure dans la liste des rôles soumis (settings `securite.mfa_roles`, défaut en code `['ADMIN','RH','DPO','PCM']`, cache 60 s) — no-op pour les autres rôles. Un jeton hérité (émis avant ce déploiement, donc sans claim `mfa`) d'un rôle soumis est **bloqué** (403 `MFA_REQUIRED`) plutôt que toléré jusqu'à expiration — écart assumé avec la doctrine de dégradation douce des jetons sans `tv` : ici, laisser passer offrirait jusqu'à 8h de contournement de la fonctionnalité qu'on installe.
+
+Câblé **une ligne après le `authenticate` de chaque routeur ciblé** (il lit `req.user`) sur **11 routeurs** : `/api/insertion`, `/api/pcm` (câblé route par route — `POST /submit` garde son chemin public par jeton candidat), `/api/employees`, `/api/candidates`, `/api/exports`, `/api/rgpd`, `/api/users`, `/api/permissions` (sauf `/my-modules` et `/catalog`, chargés par le front dès la connexion, avant tout enrôlement), `/api/admin-db`, `/api/activity-log`, `/api/effectifs`. Plus le **handshake Socket.IO** (`backend/src/index.js`, `io.use(...)`) : sans lui, une session non enrôlée garderait le flux temps réel (messagerie) ouvert.
+
+**Verrou anti-force-brute dédié** (`users.mfa_failed_count`/`mfa_last_failed_at`, distinct du verrou mot de passe) : 8 échecs sur une fenêtre glissante de 15 minutes verrouillent le compte 15 minutes (`users.locked_until`, partagé avec le verrou mot de passe — un attaquant bloqué sur le code ne peut pas continuer à marteler le mot de passe).
+
+**`backend/src/utils/totp.js`** — implémentation **pure, sans dépendance** (doctrine « pas de librairie sauf nécessité ») : Base32 (RFC 4648), `generateSecret()` (20 octets), `totp()` (HMAC-SHA1, troncature dynamique RFC 4226, compteur en `BigInt` pour rester correct au-delà de 2³²), `verifyTotp()` (fenêtre ±1 pas de 30 s, comparaison à **temps constant** `crypto.timingSafeEqual`), `generateBackupCodes(8)` (format `XXXXX-XXXXX`, alphabet sans `0/O/1/I`), `hashBackupCode()` (SHA-256). Les vecteurs officiels de la RFC 6238 (annexe B) sont rejoués dans `backend/tests/unit/totp.test.js`.
+
+**`backend/src/utils/mfa-crypto.js`** — chiffrement du secret TOTP stocké : **AES-256-GCM** natif (`crypto` de Node, et non `crypto-js` comme `utils/field-crypto.js` — GCM est authentifié, une mauvaise clé fait échouer le déchiffrement sans qu'il faille de sentinelle). Format `mfaenc:v1:<iv_b64>:<tag_b64>:<data_b64>`. **Cascade de clé** documentée : `MFA_ENCRYPTION_KEY` (dédiée) → `PCM_ENCRYPTION_KEY` (repli) → `JWT_SECRET` (dernier repli — mélange deux registres de compromission, à éviter en renseignant `MFA_ENCRYPTION_KEY`). Ces fonctions **ne lèvent jamais** : un échec renvoie `null` et journalise, ce qui conduit à « réinitialisez la double authentification de ce compte » (ADMIN) plutôt qu'à un 500 qui verrouillerait tout le monde.
 
 ---
 
