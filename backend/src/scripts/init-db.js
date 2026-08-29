@@ -54,6 +54,21 @@ async function initDatabase() {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP;`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;`);
 
+    // Double authentification TOTP (2.43.0) — obligatoire pour les rôles ayant
+    // accès aux données personnelles sensibles (défaut ADMIN/RH/DPO/PCM, liste
+    // paramétrable via settings « securite.mfa_roles », rôles custom résolus par
+    // base_role). Le secret TOTP est CHIFFRÉ (AES-256-GCM, jamais en clair) ;
+    // les codes de secours sont stockés HASHÉS (SHA-256), à usage unique.
+    // Compteur d'échecs DÉDIÉ au code MFA : un TOTP à 6 chiffres se brute-force
+    // bien plus vite qu'un mot de passe — le verrou réutilise locked_until
+    // (blocage temporaire du compte, jamais définitif). Idempotent.
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enrolled_at TIMESTAMP;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_backup_codes JSONB;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_failed_count INTEGER NOT NULL DEFAULT 0;`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_last_failed_at TIMESTAMP;`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS refresh_tokens (
         id SERIAL PRIMARY KEY,
@@ -68,6 +83,10 @@ async function initDatabase() {
     // par `user_id`. Idempotents.
     await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)');
+    // MFA (2.43.0) : le refresh token mémorise si la session a franchi le défi
+    // TOTP — le claim « mfa » du JWT réémis à chaque /refresh en découle (jamais
+    // de confiance aveugle dans l'ancien JWT). Idempotent.
+    await client.query(`ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS mfa BOOLEAN NOT NULL DEFAULT false;`);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -4389,6 +4408,30 @@ async function initDatabase() {
     `);
 
     console.log("[INIT-DB] Migration Lot 8 — encadrant / co-construction / période d'essai (PR3) ✓");
+
+    // Note de profil initial CIP (2.43.0) : analyse systématique du nouvel
+    // embauché (CV + entretien structuré + mises en situation + PCM) générée à
+    // la liaison candidat→collaborateur, communiquée à la CIP en préambule du
+    // diagnostic d'accueil. Le CONTENU est chiffré (field-crypto, format encv2)
+    // — il croise structure de personnalité et freins pressentis (art. 9/10
+    // adjacents) ; seules les métadonnées restent en clair. Une note par
+    // parcours (UNIQUE employee_id + parcours_num), régénération par UPSERT.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_notes_profil (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        parcours_num SMALLINT NOT NULL DEFAULT 1,
+        contenu_chiffre TEXT NOT NULL,
+        sources JSONB,
+        modele VARCHAR(100),
+        generated_at TIMESTAMP DEFAULT NOW(),
+        generated_by INTEGER REFERENCES users(id),
+        communiquee_cip_at TIMESTAMP,
+        communiquee_cip_by INTEGER REFERENCES users(id),
+        UNIQUE(employee_id, parcours_num)
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_notes_profil_emp ON insertion_notes_profil(employee_id, parcours_num);');
 
     console.log('[INIT-DB] Module Parcours Insertion ✓');
 
