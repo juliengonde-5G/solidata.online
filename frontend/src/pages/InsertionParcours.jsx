@@ -21,6 +21,7 @@ import PmsmpPanel from '../components/insertion/PmsmpPanel';
 import SatisfactionForm from '../components/insertion/SatisfactionForm';
 import CompetencesETI from '../components/insertion/CompetencesETI';
 import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
+import NoteProfilInitial from '../components/insertion/NoteProfilInitial';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
 import { formatEmployeeName, compareByName } from '../utils/names';
@@ -1170,6 +1171,20 @@ export default function InsertionParcours() {
                     <div className="bg-white rounded-lg border p-3">
                       <ChecklistEmbauche employeeId={selectedEmployee.id} canEdit={adminRh} />
                     </div>
+                    {/* Note de profil initial (2.43.0) — EN PRÉAMBULE du
+                        diagnostic : elle se lit avant de commencer l'entretien,
+                        d'où sa place juste au-dessus du bandeau ci-dessous.
+                        Gate par rôle : la note croise le PCM et le dossier de
+                        recrutement, le serveur la refuse (403) à un MANAGER —
+                        on ne monte donc pas un bloc voué à afficher une erreur. */}
+                    {adminRh && (
+                      <NoteProfilInitial
+                        employeeId={selectedEmployee.id}
+                        employee={emp}
+                        canGenerate={adminRh}
+                        onDiagnostic={() => setActiveTab('diagnostic')}
+                      />
+                    )}
                     {!analysis.has_diagnostic && (
                       <div className="bg-teal-50 border border-teal-200 rounded-lg p-4 text-center">
                         <p className="text-sm font-medium text-teal-800">

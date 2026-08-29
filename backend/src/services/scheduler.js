@@ -548,6 +548,70 @@ async function createPostSortieFollowups() {
 }
 
 /**
+ * FILET de la note de profil initial CIP (2.43.0) — job instrumenté.
+ *
+ * Le chemin nominal est le déclenchement à la liaison candidat→collaborateur
+ * (routes/candidates/conversion.js, fire-and-forget). Ce job rattrape ce qui a
+ * échoué : réseau coupé, quota Anthropic, redémarrage du conteneur pendant la
+ * génération, ou clé IA arrivée après la liaison.
+ *
+ * Périmètre volontairement ÉTROIT : salariés `en_parcours`, liés à un candidat,
+ * SANS note pour leur parcours courant, dont la liaison est récente (< 30 j).
+ * Sans cette borne, un déploiement rattraperait tout l'historique d'un coup —
+ * or la note sert à préparer un PREMIER entretien, elle n'a aucun sens deux ans
+ * après. **Borné à 5 générations par passage** pour ne pas brûler le quota API
+ * (3 passages/jour → 15 notes/jour au maximum).
+ *
+ * Le repère de fraîcheur est `employees.updated_at` : la liaison écrit
+ * `candidate_id` et `updated_at = NOW()` sur cette ligne. C'est une
+ * approximation assumée (une modification RH ultérieure rafraîchit la date) —
+ * elle ne peut qu'élargir légèrement la fenêtre, jamais générer une note pour
+ * un salarié qui en a déjà une.
+ *
+ * Résilient : table absente / colonne manquante → 0, jamais d'exception.
+ */
+const NOTES_PROFIL_MAX_PAR_PASSAGE = 5;
+async function genererNotesProfilManquantes() {
+  let generees = 0;
+  try {
+    const { readInsertionSetting } = require('../utils/insertion-settings');
+    const actif = await readInsertionSetting('insertion.note_profil_auto');
+    if (!actif || !process.env.ANTHROPIC_API_KEY) return 0;
+    const cibles = await pool.query(
+      `SELECT e.id, e.first_name, e.last_name
+       FROM employees e
+       WHERE e.candidate_id IS NOT NULL
+         AND e.insertion_status = 'en_parcours'
+         AND e.updated_at >= NOW() - INTERVAL '30 days'
+         AND NOT EXISTS (
+           SELECT 1 FROM insertion_notes_profil n
+           WHERE n.employee_id = e.id
+             AND n.parcours_num = COALESCE(e.parcours_num, 1)
+         )
+       ORDER BY e.updated_at DESC
+       LIMIT $1`,
+      [NOTES_PROFIL_MAX_PAR_PASSAGE]
+    );
+    if (cibles.rows.length === 0) return 0;
+    const { analyserProfilInitial } = require('./insertion-ai');
+    for (const emp of cibles.rows) {
+      try {
+        // generated_by = NULL : la note a été produite par le système, pas par
+        // un utilisateur — la fiche l'affiche « génération automatique ».
+        await analyserProfilInitial(emp.id, { generatedBy: null });
+        generees += 1;
+        console.log(`[SCHEDULER] Note de profil initial générée (filet) pour ${emp.first_name} ${emp.last_name}`);
+      } catch (e) {
+        console.error(`[SCHEDULER] Note de profil #${emp.id} échouée :`, e.message);
+      }
+    }
+  } catch (err) {
+    console.error('[SCHEDULER] Erreur genererNotesProfilManquantes:', err.message);
+  }
+  return generees;
+}
+
+/**
  * Échéances du module Pilotage RSE (RSEI-10) — job instrumenté.
  * Observe (journal job_runs via runInstrumented) et journalise :
  *  - actions du plan RSE en retard (échéance passée, non soldées) ;
@@ -2146,6 +2210,10 @@ async function runAllJobs() {
     await runInstrumented('checkPassIaeExpiring', checkPassIaeExpiring);
     await runInstrumented('checkRenouvellementsAPreparer', checkRenouvellementsAPreparer);
     await runInstrumented('createPostSortieFollowups', createPostSortieFollowups);
+    // Filet de la note de profil initial (2.43.0) : rattrape les liaisons dont
+    // la génération à chaud a échoué. Placé après les jobs d'insertion, il ne
+    // retarde aucune alerte.
+    await runInstrumented('genererNotesProfilManquantes', genererNotesProfilManquantes);
     await runInstrumented('checkRseEcheances', checkRseEcheances);
     await runInstrumented('checkEnergieSaisie', checkEnergieSaisie);
     await runInstrumented('checkQhseDocuments', checkQhseDocuments);
@@ -2209,6 +2277,9 @@ module.exports = {
   // Exposés pour l'observabilité (routes/monitoring.js) et les tests.
   runInstrumented,
   purgeOldJobRuns,
+  // Filet de la note de profil initial CIP (2.43.0) — exposé pour les tests
+  // et pour un déclenchement manuel de rattrapage.
+  genererNotesProfilManquantes,
   checkRseEcheances,
   checkEnergieSaisie,
   checkQhseDocuments,

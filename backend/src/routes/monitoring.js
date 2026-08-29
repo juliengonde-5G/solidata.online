@@ -97,6 +97,11 @@ const JOB_SCHEDULE = {
   checkPassIaeExpiring:           { label: 'Pass IAE à échéance (J-7/J-2 mois)', cadence: '3×/jour',           maxAgeHours: DAILY },
   checkRenouvellementsAPreparer:  { label: 'Renouvellements CDDI à préparer',   cadence: '3×/jour',            maxAgeHours: DAILY },
   createPostSortieFollowups:      { label: 'Suivis post-sortie (+3 mois)',      cadence: '3×/jour',            maxAgeHours: DAILY },
+  // 2.43.0 — filet de la note de profil initial CIP. Le chemin nominal est le
+  // déclenchement à la liaison candidat→collaborateur ; sans ce job déclaré,
+  // un arrêt du rattrapage ne se verrait nulle part (une CIP découvrirait le
+  // manque le jour de son entretien).
+  genererNotesProfilManquantes:   { label: 'Notes de profil initial manquantes', cadence: '3×/jour',           maxAgeHours: DAILY },
   purgeInsertionDossiers:         { label: 'Purge RGPD dossiers insertion',     cadence: '3×/jour',            maxAgeHours: DAILY },
   checkRseEcheances:              { label: 'Échéances plan RSE (actions/preuves)', cadence: '3×/jour',          maxAgeHours: DAILY },
   checkEnergieSaisie:             { label: 'Relevés énergie mensuels manquants', cadence: '3×/jour',           maxAgeHours: DAILY },

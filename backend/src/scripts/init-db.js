@@ -4182,6 +4182,52 @@ async function initDatabase() {
       );
     `);
 
+    // 2.43.0 — NOTE DE PROFIL INITIAL CIP : mise à jour IDEMPOTENTE de l'entrée
+    // ci-dessus (plutôt qu'une entrée séparée : c'est la même finalité, le même
+    // responsable et les mêmes personnes concernées). Le garde
+    // `NOT ILIKE '%note de profil%'` la rend rejouable sans effet et respecte
+    // un texte déjà retouché à la main par le DPO. ILIKE et non LIKE : le texte
+    // ajouté commence par « Note de profil » (majuscule) — un LIKE
+    // sensible à la casse n'aurait rien reconnu et aurait ré-appendu à chaque
+    // démarrage (vérifié sur PostgreSQL 16 : 2 passages, un seul ajout).
+    await client.query(`
+      UPDATE rgpd_registre SET
+        finalite = finalite || ' Note de profil initial : synthèse générée par IA à partir du dossier de recrutement (CV, entretien structuré, mises en situation, profil PCM), remise au CIP en préambule du diagnostic d''accueil pour préparer le premier entretien — hypothèses de travail à vérifier avec la personne, ne constituant NI un diagnostic NI un critère de sélection ; les niveaux de freins qui y sont suggérés ne sont jamais enregistrés automatiquement dans le diagnostic.',
+        categories_donnees = categories_donnees || ', note de profil initial (contenu chiffré applicativement : synthèse, repères de communication PCM, freins pressentis avec leur provenance, questions suggérées)',
+        mesures_securite = mesures_securite || ' ; note de profil initial : contenu CHIFFRÉ en base (AES-256), accès restreint ADMIN/RH (jamais l''encadrement technique), génération et CHAQUE consultation journalisées (rgpd_audit_log), pseudonymisation du dossier avant appel au sous-traitant IA (CV et textes libres nettoyés, date de naissance réduite à une tranche d''âge, détail judiciaire jamais transmis), suppression intégrale à l''anonymisation'
+      WHERE nom_traitement = 'Accompagnement socio-professionnel des salariés en insertion'
+        AND COALESCE(finalite, '') NOT ILIKE '%note de profil%';
+    `);
+
+    // (l bis) Registre RGPD (art. 30) — ÉVALUATION DE PERSONNALITÉ (PCM).
+    // 2.43.0, audit du module PCM (défaut D4, reco R6) : douze traitements
+    // étaient inscrits au registre — dont des traitements NON nominatifs
+    // (RSE, achats) — et aucun ne couvrait le recrutement, donc aucun ne
+    // couvrait le test de personnalité. C'est pourtant une évaluation portant
+    // sur une personne identifiée, conservée, restituée à des tiers internes
+    // et transmise (types seuls) au sous-traitant IA.
+    //
+    // Entrée SÉPARÉE de l'accompagnement insertion : le PCM est collecté dans
+    // le cadre du RECRUTEMENT, sur des candidats qui ne deviendront pas tous
+    // salariés — personnes concernées, base légale et durée diffèrent.
+    // Idempotent (WHERE NOT EXISTS), même pattern que les seeds voisins.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Recrutement — évaluation de personnalité (PCM)',
+        'Aide au DIALOGUE de recrutement puis à l''accompagnement : repères de communication (canal, points forts, besoins, façon de réagir sous tension) partagés entre le candidat, le recruteur et, après embauche, le CIP et l''encadrant. Questionnaire interne de 20 questions inspiré du modèle Process Communication, NON VALIDÉ scientifiquement : le résultat est une hypothèse de lecture, JAMAIS un diagnostic, JAMAIS un critère de sélection et jamais une décision automatisée (art. 22 RGPD) — aucun tri, classement ni refus de candidature n''est produit à partir de ce test.',
+        'Intérêt légitime du responsable de traitement (évaluation des aptitudes professionnelles, art. L1221-6 et L1221-8 du Code du travail : méthode portée à la connaissance du candidat, pertinente au regard de la finalité) ; après embauche, exécution du contrat et mission d''intérêt public (accompagnement IAE)',
+        'Candidats au recrutement ; salariés en parcours d''insertion pour lesquels un profil a été établi au recrutement',
+        'Réponses au questionnaire (20 choix, conservées en clair — elles rendent le profil recalculable), type de base et type de phase, rapport d''analyse chiffré (scores par type, immeuble de personnalité, repères de communication, comportements sous tension) stocké CHIFFRÉ. Aucune donnée de santé (art. 9) n''est collectée : l''indicateur historique dit « risque psychosocial » a été retiré de toutes les restitutions (artefact de cohérence des réponses, non une mesure d''état de santé).',
+        'Service RH et recruteurs, praticien PCM (rôle dédié, sans accès au reste du dossier de recrutement), CIP après embauche ; sous-traitant IA (Anthropic) pour les seuls types Base/Phase et repères de communication, sur dossier pseudonymisé — cf. traitement « Assistance IA ». Jamais l''encadrement technique, jamais un tiers externe.',
+        'Aligné sur le dossier de la personne : candidat non recruté — 24 mois après le dernier contact (suppression des sessions, réponses et rapports à l''anonymisation) ; candidat recruté — supprimé avec le dossier du salarié lors de son anonymisation (parcours + 24 mois)',
+        'Rapport CHIFFRÉ en base (AES-256, source de clés unique utils/pcm-crypto.js), accès restreint ADMIN/RH/praticien PCM avec double authentification exigée, coordonnées du candidat exclues de la liste des profils, CHAQUE consultation d''un rapport journalisée (rgpd_audit_log, action PCM_RAPPORT_CONSULTATION) et créations/soumissions tracées au journal d''activité, jeton de passation aléatoire 128 bits, pseudonymisation avant tout appel au sous-traitant IA, suppression intégrale à l''anonymisation du candidat comme du salarié'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre WHERE nom_traitement = 'Recrutement — évaluation de personnalité (PCM)'
+      );
+    `);
+
     // (m — phase B) Alertes Pass IAE : élargit le CHECK alert_type de
     // insertion_interview_alerts (pass_iae_7m / pass_iae_2m — job scheduler
     // checkPassIaeExpiring). Même pattern DROP-scan + ADD gardé ; le marqueur

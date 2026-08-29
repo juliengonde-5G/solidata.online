@@ -522,3 +522,118 @@ export function exportFicheParcoursPDF(analysis, diagnostic, competences = []) {
 
   openPrintWindow('Parcours_' + (e.last_name || e.id), body);
 }
+
+// ═══════════════════════════════════════════
+// NOTE DE PROFIL INITIAL CIP (2.43.0)
+// Variante 'dossier' UNIQUEMENT : document de travail interne au CIP, jamais
+// remis au salarié (une note d'hypothèses sur une personne n'est pas un
+// document qu'on lui tend — l'exemplaire qu'elle reçoit est le diagnostic,
+// co-construit avec elle).
+// L'ordre des blocs est délibéré et reproduit celui de l'écran : la parole de
+// la personne D'ABORD (c'est la seule section où elle est sujet), les repères
+// PCM EN DERNIER, encadrés et chapeautés.
+// ═══════════════════════════════════════════
+
+export const NOTE_PROFIL_MENTION =
+  "Analyse générée par IA à partir du dossier de recrutement — hypothèses à vérifier avec le salarié. "
+  + "Ne constitue ni un diagnostic ni un critère de sélection.";
+
+export const NOTE_PROFIL_PCM_CHAPEAU_EST =
+  "Ce que ce bloc est : des repères pour ajuster notre manière de communiquer, "
+  + "issus d'un questionnaire rempli par la personne.";
+export const NOTE_PROFIL_PCM_CHAPEAU_NEST_PAS =
+  "Ce que ce bloc n'est pas : une mesure de compétence, une prédiction, un diagnostic, "
+  + "une caractéristique stable.";
+export const NOTE_PROFIL_PCM_CLOTURE =
+  "Ces repères sont des hypothèses de travail. Si l'expérience les contredit, c'est l'expérience qui a raison.";
+
+const NOTE_SOURCE_LABELS = {
+  cv: 'CV', entretien: 'Entretien de recrutement',
+  mise_en_situation: 'Mise en situation', pcm: 'Questionnaire PCM',
+};
+
+const listeHtml = (arr) => (Array.isArray(arr) && arr.length
+  ? '<ul style="margin-left:18px">' + arr.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+  : '<em>Non renseigné.</em>');
+
+/**
+ * Note de profil initial — export PDF (impression navigateur A4).
+ * @param {object} p { employee, note } — `note` = réponse GET /insertion/notes-profil/:id
+ */
+export function exportNoteProfilPDF({ employee = {}, note = null } = {}) {
+  const nom = formatEmployeeName(employee.last_name, employee.first_name);
+  const c = (note && note.contenu) || {};
+  const sources = (note && note.sources) || {};
+  const sp = c.structure_personnalite || null;
+
+  const freinsRows = (Array.isArray(c.freins_pressentis) ? c.freins_pressentis : []).map((f) => {
+    const def = FREINS.find((x) => x.key === f.frein);
+    return '<tr><td>' + esc(def ? def.label : f.frein) + '</td>'
+      + '<td>' + (f.niveau_suggere == null ? '<em>non évaluable</em>' : esc(f.niveau_suggere) + '/5 (suggéré)') + '</td>'
+      + '<td>' + esc(NOTE_SOURCE_LABELS[f.source] || f.source || '—') + '</td>'
+      + '<td>' + esc(f.justification || '') + '</td></tr>';
+  }).join('');
+
+  const verbatims = Array.isArray(c.expression_de_la_personne) ? c.expression_de_la_personne : [];
+  const manques = Array.isArray(sources.manques) ? sources.manques : [];
+  const misesEnSituation = Array.isArray(sources.has_mise_en_situation) ? sources.has_mise_en_situation : [];
+  const sourcesLignes = [
+    'CV : ' + (sources.has_cv ? 'exploité' : 'absent'),
+    'Entretien structuré : ' + (sources.has_interview_form ? 'exploité' : 'absent'),
+    "Commentaire libre d'entretien : " + (sources.has_interview_comment ? 'exploité' : 'absent'),
+    'Mises en situation : ' + (misesEnSituation.length ? misesEnSituation.join(', ') : 'aucune'),
+    'Profil PCM : ' + (sources.has_pcm ? 'exploité' : 'absent'),
+  ];
+
+  const genPar = note && note.generated_by_name ? esc(note.generated_by_name) : 'génération automatique';
+  const body =
+    '<div class="header"><div><h1>SOLIDATA — Note de profil initial</h1>'
+    + '<div class="sub">' + esc(nom) + ' — préambule du diagnostic d\'accueil</div></div>'
+    + '<div class="sub" style="text-align:right">Générée le ' + frDate(note && note.generated_at) + '<br/>' + genPar + '</div></div>'
+    + '<div class="section"><div class="card" style="border-color:#F59E0B;background:#FFFBEB">'
+    + '<strong>' + esc(NOTE_PROFIL_MENTION) + '</strong></div></div>'
+    + '<div class="section"><div class="section-title">Synthèse</div><div class="card">'
+    + esc(c.synthese || (c._raw ? c._raw : 'Aucune synthèse disponible.')) + '</div></div>'
+    // La parole de la personne vient AVANT toute lecture qu'on fait d'elle.
+    + '<div class="section"><div class="section-title">Ce que la personne dit d\'elle-même</div>'
+    + (verbatims.length
+      ? '<div class="hl">' + verbatims.map((v) => '<p style="margin-bottom:4px">« ' + esc(v) + ' »</p>').join('') + '</div>'
+      : '<div class="card"><em>Aucun verbatim disponible — l\'entretien structuré n\'a pas été renseigné.</em></div>')
+    + '</div>'
+    + '<div class="section"><div class="section-title">Freins pressentis (suggestions à confirmer au diagnostic)</div>'
+    + (freinsRows
+      ? '<table><thead><tr><th>Frein</th><th>Niveau suggéré</th><th>Provenance</th><th>Élément du dossier</th></tr></thead><tbody>'
+        + freinsRows + '</tbody></table>'
+        + '<p style="margin-top:6px;color:#64748b">Ces niveaux ne sont pas enregistrés : le CIP les confirme ou les corrige lui-même au diagnostic.</p>'
+      : '<div class="card"><em>Aucun frein pressenti à partir des éléments disponibles.</em></div>')
+    + '</div>'
+    + '<div class="section"><div class="section-title">Compétences observées</div>' + listeHtml(c.competences_observees) + '</div>'
+    + '<div class="section"><div class="section-title">Points de vigilance pour l\'entretien</div>' + listeHtml(c.points_vigilance_entretien) + '</div>'
+    + '<div class="section"><div class="section-title">Questions suggérées pour le diagnostic</div>' + listeHtml(c.questions_suggerees_diagnostic) + '</div>'
+    // Bloc PCM EN DERNIER, visuellement distinct et doublement chapeauté.
+    + (sp
+      ? '<div class="section"><div class="section-title">Repères de communication (PCM)</div>'
+        + '<div class="card" style="border:2px solid #0D9488;background:#F0FDFA">'
+        + '<p style="margin-bottom:6px"><strong>' + esc(NOTE_PROFIL_PCM_CHAPEAU_EST) + '</strong></p>'
+        + '<p style="margin-bottom:8px">' + esc(NOTE_PROFIL_PCM_CHAPEAU_NEST_PAS) + '</p>'
+        + (sp.canaux_communication ? '<p><strong>Canal de communication :</strong> ' + esc(sp.canaux_communication) + '</p>' : '')
+        + (sp.besoins_psychologiques ? '<p><strong>Ce à quoi la personne attache de l\'importance :</strong> ' + esc(sp.besoins_psychologiques) + '</p>' : '')
+        + (Array.isArray(sp.points_forts) && sp.points_forts.length
+          ? '<p style="margin-top:6px"><strong>Appuis observés :</strong></p>' + listeHtml(sp.points_forts) : '')
+        + (Array.isArray(sp.signaux_stress_a_observer) && sp.signaux_stress_a_observer.length
+          ? '<p style="margin-top:6px"><strong>Signaux à observer, et ce qui aide alors :</strong></p>' + listeHtml(sp.signaux_stress_a_observer) : '')
+        + (Array.isArray(sp.conseils_posture_cip) && sp.conseils_posture_cip.length
+          ? '<p style="margin-top:6px"><strong>Posture d\'entretien :</strong></p>' + listeHtml(sp.conseils_posture_cip) : '')
+        + '<p style="margin-top:8px;font-style:italic">' + esc(NOTE_PROFIL_PCM_CLOTURE) + '</p>'
+        + '</div></div>'
+      : '<div class="section"><div class="section-title">Repères de communication (PCM)</div>'
+        + '<div class="card"><em>Aucun questionnaire PCM disponible pour cette personne.</em></div></div>')
+    + '<div class="section"><div class="section-title">Sources et limites</div><div class="card">'
+    + sourcesLignes.map((l) => esc(l)).join('\n')
+    + (manques.length ? '\n\nCe que la note ne permet PAS de dire :\n' + manques.map((m) => '· ' + esc(m)).join('\n') : '')
+    + (c.limites ? '\n\n' + esc(c.limites) : '')
+    + '</div></div>'
+    + RGPD_FOOTER('dossier');
+
+  openPrintWindow('Note_profil_' + (employee.last_name || employee.id || ''), body);
+}

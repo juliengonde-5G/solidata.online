@@ -53,6 +53,34 @@ async function snapshotMilestone(db, row, action, userId, motif = null) {
   );
 }
 
+// Masquage des ACTIONS CIP pour un MANAGER (correctif 2.43.0, audit
+// d'isolement §B.3). `cip_action_plans` n'est couverte ni par le registre des
+// freins (qui ne porte que sur insertion_diagnostics / insertion_milestones)
+// ni par le chiffrement applicatif : `notes` et `resultat` sont du texte libre
+// où un CIP peut légitimement recopier un élément de santé (art. 9) ou de
+// contexte judiciaire (art. 10) rattaché à l'action.
+//  - axe JUDICIAIRE : la ligne entière disparaît (même doctrine que
+//    masking.js — pour un MANAGER, l'existence même de cet axe n'est pas une
+//    information autorisée ; `action_label` étant libre, la retenir en
+//    supprimant seulement `frein_type` laisserait fuir la nature de l'action) ;
+//  - axe SANTÉ : la ligne reste visible (l'encadrant doit pouvoir suivre
+//    l'action), mais `notes` et `resultat` sont RETIRÉS (clé absente = non
+//    habilité, jamais nullifiés).
+// Le filtre judiciaire est doublé côté SQL dans les listes paginées pour que
+// le total affiché corresponde aux lignes rendues.
+const ACTIONS_TEXTE_LIBRE = ['notes', 'resultat'];
+function maskActionPlansForRole(rows, baseRole) {
+  if (!Array.isArray(rows) || baseRole !== 'MANAGER') return rows;
+  return rows
+    .filter((r) => r && r.frein_type !== 'judiciaire')
+    .map((r) => {
+      if (r.frein_type === 'sante') {
+        for (const k of ACTIONS_TEXTE_LIBRE) delete r[k];
+      }
+      return r;
+    });
+}
+
 // Déchiffre en place les champs sensibles d'une ligne de diagnostic
 // (lecture ADMIN/RH ; un MANAGER ne les voit jamais — masking.js).
 function decryptDiagRow(row) {
@@ -1005,6 +1033,11 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
 // (le rattachement à un entretien est désormais OPTIONNEL → LEFT JOIN)
 router.get('/action-plans/:employeeId', async (req, res) => {
   try {
+    // Correctif d'isolement 2.43.0 : l'axe judiciaire est écarté en SQL pour un
+    // MANAGER (art. 10) ; le masquage JS complète pour l'axe santé.
+    const baseRole = baseRoleOf(req);
+    const excludeJudiciaire = baseRole === 'MANAGER'
+      ? " AND COALESCE(ap.frein_type, '') <> 'judiciaire'" : '';
     const result = await pool.query(
       `SELECT ap.*, im.milestone_type, im.titre AS milestone_titre,
               o.titre AS objectif_titre, p.nom AS partenaire_nom
@@ -1012,11 +1045,11 @@ router.get('/action-plans/:employeeId', async (req, res) => {
        LEFT JOIN insertion_milestones im ON ap.milestone_id = im.id
        LEFT JOIN insertion_objectifs o ON o.id = ap.objectif_id
        LEFT JOIN insertion_partenaires p ON p.id = ap.partenaire_id
-       WHERE ap.employee_id = $1
+       WHERE ap.employee_id = $1${excludeJudiciaire}
        ORDER BY ap.priority DESC, ap.created_at`,
       [req.params.employeeId]
     );
-    res.json(result.rows);
+    res.json(maskActionPlansForRole(result.rows, baseRole));
   } catch (err) {
     console.error('[INSERTION] Erreur action-plans GET :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1099,7 +1132,11 @@ router.put('/action-plans/:id', [
 });
 
 // DELETE /api/insertion/action-plans/:id
-router.delete('/action-plans/:id', async (req, res) => {
+// ADMIN/RH uniquement (correctif d'isolement 2.43.0) : la suppression d'une
+// action CIP est une écriture sensible, alignée sur le reste du module
+// (objectifs, partenaires, PMSMP déjà réservés ADMIN/RH en écriture). Un
+// MANAGER pouvait jusqu'ici supprimer une action de suivi.
+router.delete('/action-plans/:id', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     await pool.query('DELETE FROM cip_action_plans WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
@@ -1389,6 +1426,11 @@ router.get('/actions-overview', [
   try {
     const params = [];
     const where = ['e.is_active = true'];
+    // Correctif d'isolement 2.43.0 : pour un MANAGER, l'axe judiciaire (art. 10)
+    // est écarté DÈS LE SQL — ainsi le `total` renvoyé correspond aux lignes
+    // rendues (un filtrage JS seul afficherait « 12 actions » puis 11 lignes).
+    const baseRole = baseRoleOf(req);
+    if (baseRole === 'MANAGER') where.push(`COALESCE(a.frein_type, '') <> 'judiciaire'`);
     if (req.query.employee_id) { params.push(req.query.employee_id); where.push(`a.employee_id = $${params.length}`); }
     if (req.query.category) { params.push(req.query.category); where.push(`a.category = $${params.length}`); }
     if (req.query.priority) { params.push(req.query.priority); where.push(`a.priority = $${params.length}`); }
@@ -1430,7 +1472,10 @@ router.get('/actions-overview', [
       params
     );
 
-    res.json({ total: totalRes.rows[0]?.n || 0, limit, offset, actions: rows.rows });
+    res.json({
+      total: totalRes.rows[0]?.n || 0, limit, offset,
+      actions: maskActionPlansForRole(rows.rows, baseRole),
+    });
   } catch (err) {
     console.error('[INSERTION] Erreur actions-overview :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -2601,12 +2646,14 @@ router.put('/objectif-sorties', authorize('ADMIN', 'RH'), async (req, res) => {
 // IMPORTANT: avant /:employeeId.
 router.get('/parametres', async (req, res) => {
   try {
-    const [echeanceActionJours, rythmeBilansMois, delaiDiagnosticJours, alertePassIaeMois, iaPreparationAuto] = await Promise.all([
+    const [echeanceActionJours, rythmeBilansMois, delaiDiagnosticJours, alertePassIaeMois,
+      iaPreparationAuto, noteProfilAuto] = await Promise.all([
       readInsertionSetting('insertion.echeance_action_defaut_jours'),
       readInsertionSetting('insertion.rythme_bilans_mois'),
       readInsertionSetting('insertion.delai_diagnostic_jours'),
       readInsertionSetting('insertion.alerte_pass_iae_mois'),
       readInsertionSetting('insertion.ia_preparation_auto'),
+      readInsertionSetting('insertion.note_profil_auto'),
     ]);
     res.json({
       echeance_action_defaut_jours: echeanceActionJours,
@@ -2614,6 +2661,9 @@ router.get('/parametres', async (req, res) => {
       delai_diagnostic_jours: delaiDiagnosticJours,
       alerte_pass_iae_mois: alertePassIaeMois,
       ia_preparation_auto: iaPreparationAuto,
+      // 2.43.0 — note de profil initial générée d'office à la liaison
+      // candidat→collaborateur (défaut true, demande client).
+      note_profil_auto: noteProfilAuto,
     });
   } catch (err) {
     console.error('[INSERTION] Erreur parametres :', err.message);
@@ -3344,6 +3394,148 @@ router.put('/checklist-embauche/:employeeId', authorize('ADMIN', 'RH'), [
 });
 
 // ══════════════════════════════════════════════════════════════
+// NOTE DE PROFIL INITIAL CIP (2.43.0)
+// Analyse IA du dossier de recrutement (CV + entretien structuré + mises en
+// situation + PCM) remise à la CIP EN PRÉAMBULE du diagnostic d'accueil.
+//
+// ADMIN/RH STRICTEMENT (jamais MANAGER) : la note croise le rapport PCM — que
+// routes/pcm.js refuse déjà au MANAGER — et le dossier de recrutement.
+// Contenu CHIFFRÉ en base (utils/field-crypto, même registre que les champs
+// sensibles du diagnostic) ; chaque lecture et chaque génération sont
+// journalisées dans rgpd_audit_log.
+// IMPORTANT : ces routes sont montées AVANT GET /:employeeId (qui capture tout).
+// ══════════════════════════════════════════════════════════════
+
+// Journalisation RGPD des accès à la note (modèle routes/tours/rapport.js) :
+// une panne du journal n'empêche jamais l'action, elle est loguée côté serveur.
+async function journaliserNoteProfil(req, action, employeeId, details) {
+  try {
+    await pool.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user?.id ?? null, action, 'insertion_notes_profil', employeeId,
+        JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
+    );
+  } catch (e) {
+    console.error(`[INSERTION] Journalisation ${action} impossible :`, e.message);
+  }
+}
+
+// Lit la note du parcours le plus récent et la déchiffre. `null` si aucune.
+async function lireNoteProfil(employeeId) {
+  const r = await pool.query(
+    `SELECT n.id, n.parcours_num, n.contenu_chiffre, n.sources, n.modele,
+            n.generated_at, n.generated_by, n.communiquee_cip_at, n.communiquee_cip_by,
+            NULLIF(TRIM(CONCAT(gu.first_name, ' ', gu.last_name)), '') AS generated_by_name,
+            NULLIF(TRIM(CONCAT(cu.first_name, ' ', cu.last_name)), '') AS communiquee_cip_by_name
+     FROM insertion_notes_profil n
+     LEFT JOIN users gu ON gu.id = n.generated_by
+     LEFT JOIN users cu ON cu.id = n.communiquee_cip_by
+     WHERE n.employee_id = $1
+     ORDER BY n.parcours_num DESC LIMIT 1`,
+    [employeeId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  // Déchiffrement : un échec renvoie null (jamais un blob illisible à l'écran).
+  const clair = decryptField(row.contenu_chiffre);
+  let contenu = null;
+  if (clair) {
+    try { contenu = JSON.parse(clair); } catch (e) {
+      console.error('[INSERTION] Note de profil : contenu illisible (JSON)', e.message);
+    }
+  }
+  return {
+    id: row.id,
+    parcours_num: row.parcours_num,
+    // `contenu` null + `contenu_illisible` : on NOMME le problème plutôt que
+    // d'afficher une note vide qui se lirait « rien à signaler ».
+    contenu,
+    contenu_illisible: !contenu,
+    sources: row.sources || null,
+    modele: row.modele || null,
+    generated_at: row.generated_at,
+    generated_by: row.generated_by,
+    generated_by_name: row.generated_by_name || null,
+    communiquee_cip_at: row.communiquee_cip_at,
+    communiquee_cip_by: row.communiquee_cip_by,
+    communiquee_cip_by_name: row.communiquee_cip_by_name || null,
+  };
+}
+
+// GET /api/insertion/notes-profil/:employeeId — lecture (journalisée)
+router.get('/notes-profil/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  const empId = parseInt(req.params.employeeId, 10);
+  try {
+    const note = await lireNoteProfil(empId);
+    if (note) {
+      await journaliserNoteProfil(req, 'INSERTION_NOTE_PROFIL_LECTURE', empId, {
+        note_id: note.id, parcours_num: note.parcours_num,
+      });
+    }
+    res.json({ note });
+  } catch (err) {
+    if (err.code === '42P01') return res.json({ note: null }); // base non migrée
+    console.error('[INSERTION] Erreur notes-profil GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/ia/note-profil/:employeeId — génération / régénération
+router.post('/ia/note-profil/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  const empId = parseInt(req.params.employeeId, 10);
+  try {
+    const { analyserProfilInitial } = require('../../services/insertion-ai');
+    const out = await analyserProfilInitial(empId, { generatedBy: req.user.id });
+    // Journal AVANT la réponse : une note générée sans trace serait un angle
+    // mort (elle croise recrutement, PCM et freins pressentis).
+    await journaliserNoteProfil(req, 'INSERTION_NOTE_PROFIL_GENERATION', empId, {
+      note_id: out.id, parcours_num: out.parcours_num,
+      sources: out.sources, modele: process.env.CLAUDE_MODEL || null,
+    });
+    const note = await lireNoteProfil(empId);
+    res.json({ note });
+  } catch (err) {
+    handleIaError(res, err, 'note-profil');
+  }
+});
+
+// POST /api/insertion/notes-profil/:employeeId/communiquer — « j'en ai pris
+// connaissance ». IDEMPOTENT : la première prise de connaissance fait foi,
+// une seconde ne la réécrit pas (c'est une trace, pas un compteur).
+router.post('/notes-profil/:employeeId/communiquer', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  const empId = parseInt(req.params.employeeId, 10);
+  try {
+    const r = await pool.query(
+      `UPDATE insertion_notes_profil n SET
+         communiquee_cip_at = COALESCE(n.communiquee_cip_at, NOW()),
+         communiquee_cip_by = COALESCE(n.communiquee_cip_by, $2)
+       WHERE n.employee_id = $1
+         AND n.parcours_num = (SELECT MAX(parcours_num) FROM insertion_notes_profil WHERE employee_id = $1)
+       RETURNING id, parcours_num, communiquee_cip_at, communiquee_cip_by`,
+      [empId, req.user.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Aucune note de profil pour ce collaborateur.' });
+    await journaliserNoteProfil(req, 'INSERTION_NOTE_PROFIL_COMMUNIQUEE', empId, {
+      note_id: r.rows[0].id, parcours_num: r.rows[0].parcours_num,
+    });
+    res.json({
+      note_id: r.rows[0].id,
+      communiquee_cip_at: r.rows[0].communiquee_cip_at,
+      communiquee_cip_by: r.rows[0].communiquee_cip_by,
+    });
+  } catch (err) {
+    console.error('[INSERTION] Erreur notes-profil communiquer :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // GET /api/insertion/:employeeId — Analyse complete d'un salarié
 // IMPORTANT: DOIT etre la DERNIERE route GET car /:employeeId capture tout
 // ══════════════════════════════════════════════════════════════
@@ -3467,7 +3659,9 @@ router.get('/:employeeId', async (req, res) => {
       const apRes = await pool.query(
         'SELECT * FROM cip_action_plans WHERE employee_id = $1 ORDER BY created_at', [empId]
       );
-      actionPlans = apRes.rows;
+      // Même masquage que /action-plans/:employeeId (correctif 2.43.0) : la
+      // fiche agrégée servait la même donnée sans aucun filtre.
+      actionPlans = maskActionPlansForRole(apRes.rows, baseRole);
     } catch (err) { /* table might not exist yet */ }
 
     // 9bis. Objectifs individualisés (Lot 3)
@@ -3503,12 +3697,40 @@ router.get('/:employeeId', async (req, res) => {
 
     // 10. Analyse complete (le diagnostic est déjà masqué pour un MANAGER →
     // l'axe judiciaire est absent de ses freins_sociaux)
+    //
+    // CLOISONNEMENT PCM (correctif 2.43.0, audit d'isolement §B.2) — le module
+    // PCM refuse explicitement la lecture d'un rapport à un MANAGER
+    // (routes/pcm.js : ADMIN/RH/PCM). Cette fiche la REPUBLIAIT : `profil_pcm`,
+    // le type PCM cité en toutes lettres dans `fiche_synthese.resume`,
+    // `pistes_metiers[].pourquoi`, `recommandations_cip`, `parcours_dev`, et un
+    // extrait de 120/200 caractères du commentaire d'entretien de recrutement.
+    // Le masquage se fait ICI DE FAÇON STRUCTURELLE : pour un MANAGER, le
+    // moteur est appelé SANS le rapport PCM et SANS le commentaire d'entretien
+    // — rien de PCM-dérivé n'est donc calculé, il n'y a plus rien à filtrer
+    // après coup (un filtre a posteriori se serait périmé au premier ajout dans
+    // engine.js). Conséquence assumée : les scores de `pistes_metiers` d'un
+    // MANAGER sont calculés sans l'apport PCM, donc différents de ceux d'un
+    // ADMIN — c'est la traduction exacte de « non habilité à cette source ».
+    const analysisCandidate = baseRole === 'MANAGER' && candidate
+      ? { ...candidate, interview_comment: null }
+      : candidate;
     const analysis = analyzeInsertion(
-      employee, contractsRes.rows, candidate, pcmReport,
+      employee, contractsRes.rows, analysisCandidate,
+      baseRole === 'MANAGER' ? null : pcmReport,
       teamMembers, position, diagnostic, milestones
     );
-    if (baseRole === 'MANAGER' && analysis.freins_sociaux?.freins) {
-      analysis.freins_sociaux.freins = analysis.freins_sociaux.freins.filter((f) => f.type !== 'judiciaire');
+    if (baseRole === 'MANAGER') {
+      if (analysis.freins_sociaux?.freins) {
+        analysis.freins_sociaux.freins = analysis.freins_sociaux.freins.filter((f) => f.type !== 'judiciaire');
+      }
+      // Retrait des CLÉS (doctrine masking.js : absence = « non habilité »,
+      // distinct de « non renseigné »). data_sources.pcm/interview diraient
+      // sinon « non disponible » alors que la source EXISTE : ce serait faux.
+      delete analysis.profil_pcm;
+      if (analysis.data_sources) {
+        delete analysis.data_sources.pcm;
+        delete analysis.data_sources.interview;
+      }
     }
 
     // 11. Timeline du parcours

@@ -5,6 +5,33 @@ const { authorize } = require('../../middleware/auth');
 const { generateMilestones, ensurePeriodeEssaiMilestone } = require('../insertion/engine');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
 
+/**
+ * Déclenche la génération de la NOTE DE PROFIL INITIAL (2.43.0) sans jamais
+ * bloquer l'appelant : `setImmediate` rend la main immédiatement, l'appel
+ * Anthropic (plusieurs secondes) se fait après la réponse HTTP.
+ *
+ * Trois gardes, dans cet ordre : le setting `insertion.note_profil_auto`
+ * (défaut true), la présence d'ANTHROPIC_API_KEY (sans clé, no-op silencieux —
+ * inutile de logger une erreur à chaque liaison sur une instance sans IA), puis
+ * un try/catch total. Aucune erreur ne remonte : la liaison est déjà commitée
+ * et sa réponse déjà partie.
+ */
+function declencherNoteProfil(employeeId, userId) {
+  setImmediate(async () => {
+    try {
+      const actif = await readInsertionSetting('insertion.note_profil_auto');
+      if (!actif) return;
+      if (!process.env.ANTHROPIC_API_KEY) return;
+      const { analyserProfilInitial } = require('../../services/insertion-ai');
+      await analyserProfilInitial(employeeId, { generatedBy: userId });
+      console.log(`[CANDIDATES] Note de profil initial générée pour le collaborateur #${employeeId}`);
+    } catch (err) {
+      // Le filet est le job scheduler `genererNotesProfilManquantes`.
+      console.error(`[CANDIDATES] Note de profil initial #${employeeId} échouée :`, err.message);
+    }
+  });
+}
+
 // Libellés FR des champs d'entretien de recrutement réutilisés pour pré-remplir
 // le diagnostic d'insertion (PROP-01 : continuité candidat→collaborateur).
 const SITUATION_LABELS = { reconversion: 'reconversion', retour_emploi: "retour à l'emploi", autre: 'autre situation' };
@@ -293,6 +320,17 @@ router.post('/:id/link-employee', authorize('ADMIN', 'RH'), async (req, res) => 
     const updated = await pool.query(
       'SELECT id, first_name, last_name, position, malibou_id, candidate_id, is_active, insertion_status, insertion_start_date FROM employees WHERE id = $1',
       [employeeId]);
+
+    // 2.43.0 — NOTE DE PROFIL INITIAL CIP, générée d'office à la liaison
+    // (setting insertion.note_profil_auto, défaut true : le client demande une
+    // analyse SYSTÉMATIQUE). Déclenchement FIRE-AND-FORGET, APRÈS le COMMIT et
+    // hors de toute transaction : un appel Anthropic dure plusieurs secondes,
+    // il n'a rien à faire dans le chemin critique de la liaison. La liaison ne
+    // doit JAMAIS échouer ni ralentir à cause de la note — toute erreur est
+    // avalée et loguée ; le job scheduler `genererNotesProfilManquantes` sert
+    // de filet pour les liaisons dont la génération a échoué.
+    declencherNoteProfil(employeeId, req.user?.id ?? null);
+
     res.json({ message: 'Fiche de recrutement liée au collaborateur.', employee: updated.rows[0], insertion });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

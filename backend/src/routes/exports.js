@@ -3,13 +3,17 @@ const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { query } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
 const { FREINS, freinColumns } = require('./insertion/freins-registry');
 const { freinsExportColumns, rowToCells, computeCompletude } = require('../utils/insertion-freins-export');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER', 'RH'));
+// Double authentification (2.43.0) : pour les rôles soumis (settings
+// « securite.mfa_roles », défaut ADMIN/RH/DPO/PCM), la session doit avoir
+// franchi le défi TOTP. No-op intégral pour les autres rôles.
+router.use(authenticate, requireMfa, authorize('ADMIN', 'MANAGER', 'RH'));
 
 // GET /api/exports/collecte — Export Excel collecte
 router.get('/collecte', async (req, res) => {

@@ -4,8 +4,50 @@ const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+// Double authentification (2.43.0) — le rôle PCM est soumis par défaut.
+// Câblé ROUTE PAR ROUTE : ce routeur pose `authenticate` sur chaque route (et
+// POST /submit emprunte un chemin public par jeton candidat, qui ne doit pas
+// être fermé).
+const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
+
+// Journal d'activité (2.43.0 — audit PCM D4/R6). Ce routeur était le SEUL du
+// domaine RH à ne laisser aucune trace : créer une session de test, soumettre
+// un profil et consulter le rapport de personnalité d'une personne passaient
+// tous les trois sans écriture, alors que 33 autres domaines journalisent.
+//
+// Posé en `router.use` AVANT les routes : `autoLogActivity` n'écrit que sur les
+// mutations réussies d'un utilisateur authentifié (POST/PUT/DELETE + req.user),
+// donc le passage public par jeton candidat (GET /sessions/:token, et le
+// POST /submit du candidat qui n'a pas de req.user) reste hors journal — ce qui
+// est correct : c'est le candidat qui répond, pas un agent de la structure.
+router.use(autoLogActivity('pcm'));
+
+/**
+ * Journalise la CONSULTATION d'un rapport de personnalité dans rgpd_audit_log.
+ *
+ * Consulter un profil PCM est une lecture de donnée d'évaluation d'une personne
+ * identifiée : le produit journalise déjà ce type de consultation ailleurs
+ * (badgeuse, note de profil initial, exports insertion). `autoLogActivity` ne
+ * couvre que les mutations — la lecture demande donc sa propre trace.
+ *
+ * NON BLOQUANT, comme le modèle de `journaliserNoteProfil` : un journal
+ * indisponible (table absente sur une base non migrée, panne d'écriture) ne
+ * doit pas priver un RH du rapport qu'il a le droit de lire. L'échec est logué.
+ */
+async function journaliserConsultationPcm(req, candidateId, details) {
+  try {
+    await pool.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user?.id ?? null, 'PCM_RAPPORT_CONSULTATION', 'pcm_reports', candidateId,
+        JSON.stringify({ candidate_id: candidateId, ...(details || {}) })]
+    );
+  } catch (e) {
+    console.error('[PCM] Journalisation de la consultation impossible :', e.message);
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR PCM (Process Communication Model) — Kahler 2024
@@ -735,7 +777,7 @@ const { encryptReport, decryptReport, decryptReportDetaille } = require('../util
 // liste des questions — inutile d'exposer /questionnaire publiquement.
 // Les options sont mélangées déterministiquement par question pour éviter
 // le biais "première position = analyseur".
-router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/questionnaire', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   res.json(PCM_QUESTIONS.map(q => ({
     num: q.num,
     category: q.category,
@@ -751,7 +793,7 @@ router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER', '
 });
 
 // GET /api/pcm/types — Référence des 6 types PCM
-router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/types', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   const types = Object.entries(PCM_TYPES).map(([key, data]) => ({
     key,
     ...data,
@@ -760,14 +802,14 @@ router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (
 });
 
 // GET /api/pcm/types/:typeKey — Détail d'un type
-router.get('/types/:typeKey', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/types/:typeKey', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   const data = PCM_TYPES[req.params.typeKey];
   if (!data) return res.status(404).json({ error: 'Type PCM inconnu' });
   res.json({ key: req.params.typeKey, ...data });
 });
 
 // POST /api/pcm/sessions — Créer une session de test
-router.post('/sessions', authenticate, authorize('ADMIN', 'RH', 'PCM'), [
+router.post('/sessions', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), [
   body('candidate_id').isInt().withMessage('ID candidat requis'),
   body('mode').notEmpty().withMessage('Mode requis'),
 ], validate, async (req, res) => {
@@ -795,7 +837,7 @@ router.post('/sessions', authenticate, authorize('ADMIN', 'RH', 'PCM'), [
 // recrutement : cette projection ne renvoie QUE l'identité, le poste visé et
 // l'état du test. Ni CV, ni compte rendu d'entretien, ni mise en situation, ni
 // notes, ni coordonnées — la page Candidats reste réservée à ADMIN/RH/MANAGER.
-router.get('/candidats', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/candidats', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT c.id, c.first_name, c.last_name, c.status,
@@ -991,12 +1033,18 @@ router.post('/submit', authenticateSubmit, [
 });
 
 // GET /api/pcm/profiles — Tous les profils
-router.get('/profiles', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const result = await pool.query(
+      // `c.email` RETIRÉ (2.43.0 — audit PCM D15/R10) : cette liste est ouverte
+      // au rôle « Praticien PCM », dont la raison d'être est justement de faire
+      // passer les tests SANS accéder au dossier de recrutement ni aux
+      // coordonnées. La projection de /candidats l'excluait déjà et un test de
+      // contrat l'y verrouille ; /profiles la laissait passer. L'identité
+      // (prénom/nom) reste nécessaire pour désigner le profil à ouvrir.
       `SELECT pr.id, pr.session_id, pr.candidate_id, pr.base_type, pr.phase_type,
        pr.risk_alert, pr.created_at,
-       c.first_name, c.last_name, c.email
+       c.first_name, c.last_name
        FROM pcm_reports pr
        JOIN candidates c ON pr.candidate_id = c.id
        ORDER BY pr.created_at DESC`
@@ -1009,7 +1057,7 @@ router.get('/profiles', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (re
 });
 
 // GET /api/pcm/profiles/:candidateId/answers — Réponses brutes d'un candidat
-router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles/:candidateId/answers', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     // Trouver la dernière session complétée pour ce candidat
     const sessionRes = await pool.query(
@@ -1068,7 +1116,7 @@ async function reconstruireRapport(sessionId) {
 }
 
 // GET /api/pcm/profiles/:candidateId — Profil d'un candidat (déchiffré)
-router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles/:candidateId', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT pr.*, c.first_name, c.last_name, c.email
@@ -1120,6 +1168,15 @@ router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM
         : 'Rapport recalculé depuis les réponses au questionnaire : le rapport chiffré '
           + "d'origine n'est plus lisible. Le profil obtenu est identique à celui du jour du test.";
     }
+
+    // Trace RGPD de la consultation (2.43.0 — audit PCM D4/R6). Écrite APRÈS
+    // que le rapport a été réellement obtenu : un 404 ou un 422 « illisible »
+    // ne sont pas des consultations. `report_source` est journalisé parce qu'un
+    // rapport RECALCULÉ n'est pas celui du jour du test — la trace doit dire
+    // laquelle des deux versions a été montrée.
+    await journaliserConsultationPcm(req, row.candidate_id, {
+      report_id: row.id, session_id: row.session_id, report_source: source,
+    });
 
     res.json({
       id: row.id,

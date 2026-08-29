@@ -3,6 +3,10 @@ import Layout from '../components/Layout';
 import { DataTable, PageHeader } from '../components';
 import { Brain, Send, Copy, Check } from 'lucide-react';
 import api from '../services/api';
+import {
+  PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_LIBELLE_COHERENCE_COURT,
+  PCM_MENTION_COHERENCE, PCM_LIBELLE_ECART, PCM_BADGE_PEU_MARQUE, echapperHtml,
+} from '../utils/pcm';
 
 const TYPE_COLORS = {
   analyseur: '#3B82F6',
@@ -61,8 +65,12 @@ function openPrintWindow(title, bodyHtml) {
   td { padding: 5px 6px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
   .tip-do { color: #15803d; } .tip-dont { color: #dc2626; }
   .stress-badge { display: inline-block; width: 20px; height: 20px; border-radius: 50%; text-align: center; line-height: 20px; color: white; font-size: 9px; font-weight: 700; margin-right: 4px; }
-  .rps-alert { background: #fef2f2; border: 2px solid #fca5a5; border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
-  .rps-alert h4 { color: #b91c1c; font-weight: 700; margin-bottom: 4px; }
+  /* Information de LECTURE, pas alarme : gris-bleu neutre et non plus rouge
+     (audit PCM 2.43.0 R1 — la couleur portait à elle seule le message). */
+  .lecture-note { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
+  .lecture-note h4 { color: #334155; font-weight: 700; margin-bottom: 4px; }
+  .methode { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-top: 10px; font-size: 9.5px; color: #475569; line-height: 1.5; }
+  .methode strong { color: #334155; }
   .footer { text-align: center; color: #9ca3af; font-size: 9px; margin-top: 16px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style></head><body>${bodyHtml}</body></html>`);
@@ -87,7 +95,16 @@ function exportResultsPDF(profile) {
   const doHtml = (r.comportementsPrincipaux?.avecManager?.do || []).map(t => `<li class="tip-do">&#10003; ${t}</li>`).join('');
   const dontHtml = (r.comportementsPrincipaux?.avecManager?.dont || []).map(t => `<li class="tip-dont">&#10007; ${t}</li>`).join('');
 
-  const rpsHtml = profile.riskAlert ? `<div class="rps-alert"><h4>Alerte Risques Psychosociaux</h4><ul>${(r.rpsIndicators || []).map(i => `<li>${i}</li>`).join('')}</ul></div>` : '';
+  // Indicateur de cohérence — jamais « alerte RPS » (audit PCM 2.43.0, R1).
+  // La mention l'accompagne DANS le bloc : ce PDF circule hors de
+  // l'application, il doit se lire seul.
+  const coherenceHtml = profile.riskAlert
+    ? `<div class="lecture-note"><h4>${echapperHtml(PCM_LIBELLE_COHERENCE)}</h4>`
+      + `<ul>${(r.rpsIndicators || []).map(i => `<li>${echapperHtml(i)}</li>`).join('')}</ul>`
+      + `<p style="margin-top:4px;font-size:9.5px;color:#475569">${echapperHtml(PCM_MENTION_COHERENCE)}</p></div>`
+    : '';
+
+  const methodeHtml = `<div class="methode"><strong>Méthode — à lire avant d'interpréter.</strong> ${echapperHtml(PCM_MENTION_METHODE)}</div>`;
 
   const body = `
     <div class="header"><div><h1>SOLIDATA — Profil PCM</h1><div class="sub">${cand.first_name} ${cand.last_name} | ${date}</div></div><div style="text-align:right"><div class="sub">Process Communication Model</div></div></div>
@@ -126,7 +143,8 @@ function exportResultsPDF(profile) {
       <div><div class="section-title">Niveaux de stress (Phase)</div>${stressHtml}</div>
     </div></div>
 
-    ${rpsHtml}
+    ${coherenceHtml}
+    ${methodeHtml}
     <div class="footer">SOLIDATA ERP — Document confidentiel — ${date}</div>
   `;
 
@@ -170,7 +188,8 @@ function exportTechnicalPDF(profile, rawAnswers) {
         <div class="card">
           <div>Base : <span class="badge" style="background:${TYPE_COLORS[profile.baseType]}">${TYPE_LABELS[profile.baseType] || profile.baseType}</span></div>
           <div style="margin-top:4px">Phase : <span class="badge" style="background:${TYPE_COLORS[profile.phaseType]}">${TYPE_LABELS[profile.phaseType] || profile.phaseType}</span></div>
-          <div style="margin-top:4px">Alerte RPS : ${profile.riskAlert ? '<span style="color:#dc2626;font-weight:700">OUI</span>' : '<span style="color:#16a34a">Non</span>'}</div>
+          <div style="margin-top:4px">${echapperHtml(PCM_LIBELLE_COHERENCE)} : ${profile.riskAlert ? '<span style="font-weight:700;color:#334155">Oui</span>' : '<span style="color:#64748b">Non</span>'}</div>
+          <div style="margin-top:2px;font-size:9px;color:#64748b">${echapperHtml(PCM_MENTION_COHERENCE)}</div>
         </div>
       </div>
       <div><div class="section-title">Scores normalises (0-100%)</div>
@@ -185,6 +204,7 @@ function exportTechnicalPDF(profile, rawAnswers) {
       </table>
     </div>
 
+    <div class="methode"><strong>Méthode — à lire avant d'interpréter.</strong> ${echapperHtml(PCM_MENTION_METHODE)}</div>
     <div class="footer">SOLIDATA ERP — Fiche technique confidentielle — ${date}</div>
   `;
 
@@ -371,7 +391,13 @@ export default function PersonalityMatrix() {
                   {p.phase_type}
                 </span>
               )},
-              { key: 'risk_alert', label: 'Alerte RPS', render: (p) => p.risk_alert && <span className="text-red-500 text-xs font-bold">Alerte</span> },
+              // Colonne d'information de lecture — plus une alerte rouge posée
+              // sur un candidat (audit PCM 2.43.0, R1). Le libellé complet ne
+              // tient pas dans une colonne : l'infobulle porte la mention.
+              { key: 'risk_alert', label: 'Cohérence des réponses',
+                render: (p) => p.risk_alert
+                  ? <span className="text-xs text-slate-600" title={`${PCM_LIBELLE_COHERENCE}. ${PCM_MENTION_COHERENCE}`}>{PCM_LIBELLE_COHERENCE_COURT}</span>
+                  : <span className="text-xs text-gray-300">—</span> },
               { key: 'created_at', label: 'Date', sortable: true, render: (p) => <span className="text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('fr-FR')}</span> },
               { key: 'actions', label: '', render: (p) => (
                 <button onClick={() => loadProfile(p.candidate_id)} className="text-primary text-xs font-medium hover:underline">
@@ -478,21 +504,32 @@ export default function PersonalityMatrix() {
                     <h3 className="font-semibold mb-2">Base : {selectedProfile.report.base?.nom}</h3>
                     <p className="text-sm text-gray-600">{selectedProfile.report.base?.perception}</p>
                     <p className="text-sm text-gray-600">Canal : {selectedProfile.report.base?.canal}</p>
+                    {/* « Fiabilité » renommé (audit PCM 2.43.0, R3) : la valeur
+                        est l'écart relatif au 2ᵉ type, pas une garantie de
+                        justesse. Sous le seuil, un badge ambre le dit. */}
                     {selectedProfile.report.confidence && (
-                      <p className={`text-xs mt-1 font-medium ${selectedProfile.report.confidence.baseIndetermine ? 'text-amber-600' : 'text-gray-400'}`}>
-                        Fiabilité : {selectedProfile.report.confidence.base}%
-                        {selectedProfile.report.confidence.baseIndetermine && ' — profil peu marqué'}
+                      <p className="text-xs mt-1 font-medium text-gray-400">
+                        {PCM_LIBELLE_ECART} : {selectedProfile.report.confidence.base}%
                       </p>
+                    )}
+                    {selectedProfile.report.confidence?.baseIndetermine && (
+                      <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+                        {PCM_BADGE_PEU_MARQUE}
+                      </span>
                     )}
                   </div>
                   <div>
                     <h3 className="font-semibold mb-2">Phase : {selectedProfile.report.phase?.nom}</h3>
                     <p className="text-sm text-gray-600">Besoin : {selectedProfile.report.phase?.besoinPsychologique}</p>
                     {selectedProfile.report.confidence && (
-                      <p className={`text-xs mt-1 font-medium ${selectedProfile.report.confidence.phaseIndetermine ? 'text-amber-600' : 'text-gray-400'}`}>
-                        Fiabilité : {selectedProfile.report.confidence.phase}%
-                        {selectedProfile.report.confidence.phaseIndetermine && ' — phase indéterminée'}
+                      <p className="text-xs mt-1 font-medium text-gray-400">
+                        {PCM_LIBELLE_ECART} : {selectedProfile.report.confidence.phase}%
                       </p>
+                    )}
+                    {selectedProfile.report.confidence?.phaseIndetermine && (
+                      <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+                        {PCM_BADGE_PEU_MARQUE}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -584,17 +621,30 @@ export default function PersonalityMatrix() {
               </div>
             )}
 
-            {/* Alerte RPS */}
+            {/* Cohérence des réponses — ex « Alerte Risques Psychosociaux »
+                (audit PCM 2.43.0, R1). L'indicateur ne mesure pas une détresse
+                mais la cohérence interne des réponses : 32 % de déclenchements
+                sur des réponses aléatoires. Ni rouge, ni « alerte » : une
+                information de lecture, accompagnée de ce qu'elle n'est pas. */}
             {selectedProfile.riskAlert && (
-              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-5">
-                <h3 className="font-bold text-red-700 mb-2">Alerte Risques Psychosociaux</h3>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+                <h3 className="font-semibold text-slate-700 mb-2">{PCM_LIBELLE_COHERENCE}</h3>
                 <ul className="space-y-1">
                   {selectedProfile.report.rpsIndicators?.map((ind, i) => (
-                    <li key={i} className="text-sm text-red-800">{ind}</li>
+                    <li key={i} className="text-sm text-slate-700">{ind}</li>
                   ))}
                 </ul>
+                <p className="text-xs text-slate-500 mt-3">{PCM_MENTION_COHERENCE}</p>
               </div>
             )}
+
+            {/* Encart de méthode (audit PCM 2.43.0, R2) — dernier bloc de la
+                fiche, comme sur les deux PDF : ce qu'on vient de lire doit être
+                remis à sa place avant d'en faire quoi que ce soit. */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold text-slate-700 mb-1">Méthode — à lire avant d'interpréter</p>
+              <p className="text-xs text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
+            </div>
           </div>
         )}
       </div>

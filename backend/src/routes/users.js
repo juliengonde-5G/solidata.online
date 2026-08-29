@@ -3,12 +3,15 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticate, authorize, validatePassword, MIN_PASSWORD_LENGTH } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
-const { autoLogActivity } = require('../middleware/activity-logger');
+const { logActivity, autoLogActivity } = require('../middleware/activity-logger');
 
-// Toutes les routes nécessitent ADMIN
-router.use(authenticate, authorize('ADMIN'));
+// Toutes les routes nécessitent ADMIN — et, pour les rôles soumis à la double
+// authentification (dont ADMIN par défaut), une session l'ayant franchie
+// (chantier 2.43.0 ; no-op pour les rôles hors périmètre).
+router.use(authenticate, requireMfa, authorize('ADMIN'));
 router.use(autoLogActivity('user'));
 
 // Rôles intégrés. DPO / FINANCE / QHSE ajoutés en vague 2 (parties prenantes) :
@@ -29,8 +32,12 @@ async function isValidRole(role) {
 // GET /api/users
 router.get('/', async (req, res) => {
   try {
+    // mfa_enabled / mfa_enrolled_at : le badge « double authentification » de
+    // l'écran Utilisateurs. Le SECRET et les codes de secours ne sortent JAMAIS
+    // d'ici — même pour un ADMIN.
     const result = await pool.query(
-      `SELECT id, username, email, role, first_name, last_name, phone, team_id, is_active, created_at, updated_at
+      `SELECT id, username, email, role, first_name, last_name, phone, team_id, is_active,
+              COALESCE(mfa_enabled, false) AS mfa_enabled, mfa_enrolled_at, created_at, updated_at
        FROM users ORDER BY created_at DESC`
     );
     res.json(result.rows);
@@ -184,6 +191,56 @@ router.put('/:id/reset-password', [
     res.json({ message: 'Mot de passe réinitialisé' });
   } catch (err) {
     console.error('[USERS] Erreur reset password :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/users/:id/reset-mfa — réinitialisation de la double authentification
+//
+// Le cas d'usage est le téléphone perdu ou changé : l'utilisateur ne peut plus
+// produire de code et personne d'autre ne le peut à sa place (c'est le but).
+// L'administrateur remet donc le compte à l'état « non enrôlé » ; au prochain
+// login, l'écran d'enrôlement le reprend depuis le début.
+//
+// Mêmes effets de révocation que la réinitialisation de mot de passe : purge
+// des jetons de renouvellement + incrément de token_version. Sans ce bump, une
+// session « mfa:true » ouverte avant la réinitialisation continuerait de passer
+// requireMfa jusqu'à 8 h — or on réinitialise précisément quand on soupçonne
+// que quelque chose a échappé au titulaire du compte.
+router.put('/:id/reset-mfa', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE users
+          SET mfa_enabled = false,
+              mfa_secret = NULL,
+              mfa_backup_codes = NULL,
+              mfa_enrolled_at = NULL,
+              mfa_failed_count = 0,
+              mfa_last_failed_at = NULL,
+              token_version = COALESCE(token_version, 0) + 1,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, username`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+
+    await pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+
+    logActivity({
+      userId: req.user.id,
+      username: req.user.username,
+      action: 'mfa_reset',
+      ip: req.ip,
+      details: { target_user_id: Number(id), target_username: result.rows[0].username },
+    });
+
+    res.json({ message: 'Double authentification réinitialisée. L\'utilisateur devra la réactiver à sa prochaine connexion.' });
+  } catch (err) {
+    console.error('[USERS] Erreur reset MFA :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

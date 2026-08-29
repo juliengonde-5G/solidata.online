@@ -60,7 +60,7 @@ const { FREINS } = require('../../src/routes/insertion/freins-registry');
 
 let app;
 let appExports;
-const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
+const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
 
 beforeAll(() => {
@@ -862,7 +862,7 @@ describe('CONTRAT PUT /insertion/diagnostic/:id — suggestions_freins (phase D)
 // PHASE D — REC-UX-18 : GET /insertion/parametres
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
-  it('sans réglage en base → défauts documentés (14 j / 2 mois / 30 j / 7 mois / IA off)', async () => {
+  it('sans réglage en base → défauts documentés (14 j / 2 mois / 30 j / 7 mois / IA off / note de profil ON)', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
     const res = await get('/api/insertion/parametres', 'MANAGER'); // tous rôles du module
     expect(res.status).toBe(200);
@@ -872,6 +872,9 @@ describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
       delai_diagnostic_jours: 30,
       alerte_pass_iae_mois: 7,
       ia_preparation_auto: false,
+      // 2.43.0 — la note de profil initial est SYSTÉMATIQUE par défaut
+      // (demande client), contrairement à la préparation d'entretien.
+      note_profil_auto: true,
     });
   });
 

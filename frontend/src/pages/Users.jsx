@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Users as UsersIcon, KeyRound, Pencil } from 'lucide-react';
+import { UserPlus, Users as UsersIcon, KeyRound, Pencil, ShieldCheck } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, StatusBadge, LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
@@ -24,6 +24,7 @@ export default function Users() {
   const [editError, setEditError] = useState('');
   const [editMsg, setEditMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmMfaReset, setConfirmMfaReset] = useState(false);
 
   useEffect(() => { loadUsers(); }, []);
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function Users() {
       email: u.email || '', role: u.role, first_name: u.first_name || '',
       last_name: u.last_name || '', phone: u.phone || '', is_active: u.is_active !== false,
     });
-    setNewPassword(''); setEditError(''); setEditMsg('');
+    setNewPassword(''); setEditError(''); setEditMsg(''); setConfirmMfaReset(false);
   };
 
   const saveEdit = async () => {
@@ -100,6 +101,19 @@ export default function Users() {
     setBusy(false);
   };
 
+  const resetMfa = async () => {
+    if (!editUser) return;
+    setBusy(true); setEditError(''); setEditMsg('');
+    try {
+      await api.put(`/users/${editUser.id}/reset-mfa`);
+      setConfirmMfaReset(false);
+      setEditUser((u) => (u ? { ...u, mfa_enabled: false } : u));
+      setEditMsg('Double authentification réinitialisée. L\'utilisateur devra ré-enrôler une application à sa prochaine connexion.');
+      loadUsers();
+    } catch (err) { setEditError(err.response?.data?.error || err.message); }
+    setBusy(false);
+  };
+
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des utilisateurs..." /></Layout>;
 
   const columns = [
@@ -122,6 +136,16 @@ export default function Users() {
     { key: 'email', label: 'Email', sortable: true, render: (u) => u.email || '—' },
     { key: 'role', label: 'Rôle', sortable: true, render: (u) => <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">{roleLabel(u.role)}</span> },
     { key: 'is_active', label: 'Statut', sortable: true, render: (u) => <StatusBadge status={u.is_active ? 'active' : 'inactive'} size="sm" /> },
+    {
+      key: 'mfa',
+      label: '2FA',
+      sortable: true,
+      render: (u) => (
+        u.mfa_enabled
+          ? <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium">Activée</span>
+          : <span className="text-xs text-slate-400">—</span>
+      ),
+    },
     {
       key: 'actions',
       label: '',
@@ -224,6 +248,45 @@ export default function Users() {
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">Réinitialiser déconnecte l'utilisateur (sessions invalidées).</p>
+              </div>
+
+              <div className="border-t pt-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5" /> Double authentification (MFA)
+                  </label>
+                  <span className={`text-xs font-medium ${editUser.mfa_enabled ? 'text-green-700' : 'text-slate-400'}`}>
+                    {editUser.mfa_enabled ? 'Activée' : 'Non activée'}
+                  </span>
+                </div>
+
+                {!confirmMfaReset ? (
+                  <button
+                    onClick={() => setConfirmMfaReset(true)}
+                    disabled={!editUser.mfa_enabled}
+                    className="w-full mt-2 px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-semibold hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Réinitialiser la double authentification
+                  </button>
+                ) : (
+                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-xs text-amber-800">
+                      L'utilisateur devra ré-enrôler une application à sa prochaine connexion.
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => setConfirmMfaReset(false)} disabled={busy} className="flex-1 btn-ghost text-xs">
+                        Annuler
+                      </button>
+                      <button
+                        onClick={resetMfa}
+                        disabled={busy}
+                        className="flex-1 px-3 py-2 rounded-lg bg-red-100 text-red-800 text-xs font-semibold hover:bg-red-200 disabled:opacity-50"
+                      >
+                        {busy ? 'Réinitialisation…' : 'Confirmer la réinitialisation'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end">

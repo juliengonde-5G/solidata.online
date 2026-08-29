@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { authenticate } = require('../../middleware/auth');
+const { requireMfa } = require('../../middleware/mfa');
 
 // ══════════════════════════════════════════
 // CONFIG MULTER (partagée entre sub-modules)
@@ -59,6 +60,10 @@ const conversionRouter = require('./conversion');
 
 // Middleware auth pour toutes les routes
 router.use(authenticate);
+// Double authentification (2.43.0) : pour les rôles soumis (settings
+// « securite.mfa_roles », défaut ADMIN/RH/DPO/PCM), la session doit avoir
+// franchi le défi TOTP. No-op intégral pour les autres rôles.
+router.use(requireMfa);
 
 // IMPORTANT: L'ordre de montage compte !
 // Les routes à chemin fixe (keywords, positions, documents, recruitment-plan,

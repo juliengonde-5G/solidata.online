@@ -19,7 +19,7 @@ app.use(express.json());
 app.use('/api/pcm', require('../../src/routes/pcm'));
 
 const jeton = (role) => 'Bearer ' + jwt.sign(
-  { id: 1, username: 'u', role, token_version: 0 }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  { id: 1, username: 'u', role, token_version: 0, mfa: true }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
 beforeEach(() => {
   pool.query.mockReset();
@@ -65,6 +65,21 @@ describe('ce que le praticien PCM peut faire', () => {
   test('lire les profils et les types', async () => {
     expect((await request(app).get('/api/pcm/profiles').set('Authorization', jeton('PCM'))).status).toBe(200);
     expect((await request(app).get('/api/pcm/types').set('Authorization', jeton('PCM'))).status).toBe(200);
+  });
+
+  test('la liste des profils ne lui donne pas non plus les e-mails', async () => {
+    // Même frontière que /candidats ci-dessus, sur la route qui l'a longtemps
+    // laissée passer (audit PCM 2.43.0, défaut D15). On vérifie la PROJECTION
+    // demandée à PostgreSQL : c'est elle qui décide de ce qui sort de la base —
+    // une assertion sur la réponse seule passerait aussi si le mock omettait
+    // simplement la colonne.
+    await request(app).get('/api/pcm/profiles').set('Authorization', jeton('PCM'));
+    const sql = pool.query.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => /FROM pcm_reports pr/i.test(s));
+    expect(sql).toBeDefined();
+    expect(sql).not.toMatch(/c\.email/);
+    expect(sql).toMatch(/c\.first_name/); // l'identité, elle, reste nécessaire
   });
 });
 

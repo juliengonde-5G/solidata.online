@@ -45,6 +45,11 @@ const INSERTION_SETTING_DEFAULTS = {
   // de période d'essai créé à la liaison candidat→collaborateur, EXG-30). Lue
   // côté serveur (conversion.js), non exposée par GET /insertion/parametres.
   'insertion.periode_essai_jours': 30,
+  // 2.43.0 — note de profil initial CIP : génération AUTOMATIQUE à la liaison
+  // candidat→collaborateur. Défaut TRUE (demande client : l'analyse doit être
+  // SYSTÉMATIQUE, pas à la demande) — contrairement à ia_preparation_auto qui
+  // reste opt-in. Sans ANTHROPIC_API_KEY le déclencheur est un no-op silencieux.
+  'insertion.note_profil_auto': true,
 };
 
 /**

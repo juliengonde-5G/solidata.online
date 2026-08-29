@@ -12,9 +12,15 @@ import ActionsPanel from '../components/insertion/ActionsPanel';
 import FriseParcours from '../components/insertion/FriseParcours';
 import CompetencesETI from '../components/insertion/CompetencesETI';
 import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
+import NoteProfilInitial from '../components/insertion/NoteProfilInitial';
 import {
-  ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS, frDate as frDateIns,
+  ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS, frDate as frDateIns, isAdminRh,
 } from '../components/insertion/freins';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE,
+  motifProfilPcmIndisponible,
+} from '../utils/pcm';
 
 const CONTRACT_LABELS = {
   CDI: 'CDI', CDD: 'CDD', CDDI: 'CDDI', interim: 'Intérim', stage: 'Stage', apprentissage: 'Apprentissage',
@@ -60,6 +66,10 @@ export default function Employees() {
   const [editForm, setEditForm] = useState({});
   const [editError, setEditError] = useState('');
   const [pcmProfile, setPcmProfile] = useState(null);
+  // Pourquoi il n'y a pas de profil à afficher : non habilité / illisible /
+  // échec de chargement. `null` = rien à signaler (absence réelle, ou profil
+  // chargé). Audit PCM 2.43.0, défaut D7.
+  const [pcmMotif, setPcmMotif] = useState(null);
   const [candidateData, setCandidateData] = useState(null);
   const [cddiDuration, setCddiDuration] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -156,10 +166,17 @@ export default function Employees() {
       api.get(`/employees/${emp.id}/cddi-duration`).then(r => setCddiDuration(r.data)).catch(() => setCddiDuration(null));
       // Charger le profil PCM et les données candidat si lié
       if (emp.candidate_id) {
-        api.get(`/pcm/profiles/${emp.candidate_id}`).then(r => setPcmProfile(r.data)).catch(() => setPcmProfile(null));
+        // L'échec n'est plus avalé : un 403 (MANAGER non habilité sur /pcm) et
+        // un 422 (rapport illisible) affichaient tous deux « Aucun profil PCM
+        // enregistré » — une absence AFFIRMÉE là où il n'y avait qu'un défaut
+        // d'habilitation ou un incident de chiffrement. Audit PCM D7.
+        api.get(`/pcm/profiles/${emp.candidate_id}`)
+          .then(r => { setPcmProfile(r.data); setPcmMotif(null); })
+          .catch((err) => { setPcmProfile(null); setPcmMotif(motifProfilPcmIndisponible(err)); });
         api.get(`/candidates/${emp.candidate_id}`).then(r => setCandidateData(r.data)).catch(() => setCandidateData(null));
       } else {
         setPcmProfile(null);
+        setPcmMotif(null);
         setCandidateData(null);
       }
     } catch (err) {
@@ -167,6 +184,7 @@ export default function Employees() {
       setContracts([]);
       setDaysOff([]);
       setPcmProfile(null);
+      setPcmMotif(null);
     }
   };
 
@@ -189,6 +207,7 @@ export default function Employees() {
       await api.post(`/candidates/${selected.candidate_id}/unlink-employee`);
       setSelected(prev => ({ ...prev, candidate_id: null }));
       setPcmProfile(null);
+      setPcmMotif(null);
       setCandidateData(null);
       loadData();
     } catch (err) {
@@ -768,7 +787,20 @@ export default function Employees() {
                       </div>
                     ) : !pcmProfile ? (
                       <div className="space-y-3">
-                        <p className="text-gray-500 italic">Aucun profil PCM enregistré pour la fiche de recrutement liée.</p>
+                        {/* Audit PCM D7 : on ne déclare « aucun profil » que
+                            lorsqu'on l'a réellement constaté. Un défaut
+                            d'habilitation ou un rapport illisible se disent. */}
+                        {pcmMotif ? (
+                          <div className={`rounded-lg border px-3 py-2 text-sm ${
+                            pcmMotif.ton === 'alerte'
+                              ? 'border-amber-300 bg-amber-50 text-amber-900'
+                              : 'border-slate-300 bg-slate-50 text-slate-700'
+                          }`}>
+                            {pcmMotif.message}
+                          </div>
+                        ) : (
+                          <p className="text-gray-500 italic">Aucun profil PCM enregistré pour la fiche de recrutement liée.</p>
+                        )}
                         <button onClick={unlinkCandidate} className="text-xs px-2.5 py-1 rounded-full bg-white border border-red-200 text-red-600 hover:bg-red-50 font-medium">Délier la fiche de recrutement</button>
                       </div>
                     ) : (
@@ -799,11 +831,23 @@ export default function Employees() {
                             </div>
                           </div>
                         )}
+                        {/* Ex-bandeau orange « Alerte RPS détectée — un suivi
+                            est recommandé » (audit PCM 2.43.0, R1). L'indicateur
+                            mesure la cohérence des réponses, pas un état de
+                            santé : il ne peut pas recommander un suivi. */}
                         {pcmProfile.riskAlert && (
-                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                            <p className="font-semibold text-orange-800 text-xs">Alerte RPS detectee — un suivi est recommande</p>
+                          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                            <p className="font-semibold text-slate-700 text-xs">{PCM_LIBELLE_COHERENCE}</p>
+                            <p className="text-[11px] text-slate-500 mt-1">{PCM_MENTION_COHERENCE}</p>
                           </div>
                         )}
+                        {/* Encart de méthode (R2) — le lecteur de cette fiche
+                            n'est pas passé par la page /pcm et n'a donc vu
+                            aucune mise en garde. */}
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-[11px] font-semibold text-slate-700 mb-1">Méthode — à lire avant d'interpréter</p>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
+                        </div>
                       </>
                     )}
                   </div>
@@ -931,6 +975,8 @@ function Field({ label, value }) {
 // Toute saisie passe par l'espace CIP (« Ouvrir dans l'espace CIP »).
 function InsertionReadOnlyTab({ employee }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const adminRh = isAdminRh(user);
   const [parcours, setParcours] = useState(null); // réponse GET /insertion/:id (timeline, milestones, objectifs, pmsmp…)
   const [contracts, setContracts] = useState([]);
   const [error, setError] = useState(null);
@@ -972,6 +1018,14 @@ function InsertionReadOnlyTab({ employee }) {
       <AlertesBloc employeeId={employee.id} />
 
       <ChecklistEmbauche employeeId={employee.id} canEdit={false} />
+
+      {/* Note de profil initial (2.43.0) — LECTURE SEULE ici : la génération,
+          la régénération et la prise de connaissance se font dans l'espace CIP
+          (REC-UX-12 : un seul chemin d'édition). ADMIN/RH uniquement — le
+          serveur refuse la lecture aux autres rôles. */}
+      {adminRh && (
+        <NoteProfilInitial employeeId={employee.id} employee={employee} canGenerate={false} />
+      )}
 
       {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Parcours indisponible : {error}</div>}
       {loading && <p className="text-xs text-gray-400">Chargement du parcours…</p>}

@@ -19,6 +19,10 @@
  *                    couvrir les endpoints protégés — sans, ils sont SKIPpés
  *                    et le smoke est aveugle aux 500 derrière l'auth)
  *   API_PASSWORD   — Mot de passe
+ *   API_TOTP_SECRET— Secret TOTP (Base32) du compte ci-dessus, si la double
+ *                    authentification y est activée. Sans lui, le login répond
+ *                    « mfa_required » et le smoke poursuit en mode dégradé (il
+ *                    l'annonce ; il ne fait PAS échouer le déploiement)
  *   SMOKE_STRICT   — Si "true", traite aussi les SKIP comme des échecs
  *                    (utile en CI/deploy pour forcer la couverture)
  *
@@ -31,6 +35,10 @@
 const BASE_URL = (process.env.BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 const API_USER = process.env.API_USER;
 const API_PASSWORD = process.env.API_PASSWORD;
+// Secret TOTP (Base32) du compte de service, si la double authentification est
+// activée sur lui (chantier 2.43.0). Sans lui, le smoke se dégrade en disant
+// explicitement ce qu'il ne couvre plus.
+const API_TOTP_SECRET = process.env.API_TOTP_SECRET;
 const STRICT = process.env.SMOKE_STRICT === 'true';
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -148,12 +156,54 @@ async function run() {
   let authH = null;
   if (API_USER && API_PASSWORD) {
     try {
-      const { status, data } = await request('POST', '/api/auth/login', { username: API_USER, password: API_PASSWORD });
+      let { status, data } = await request('POST', '/api/auth/login', { username: API_USER, password: API_PASSWORD });
+
+      // Double authentification (2.43.0) : le compte de service est un ADMIN,
+      // donc soumis. Si la double authentification est ACTIVE sur ce compte, le
+      // login ne renvoie plus de jeton mais un défi à 5 minutes.
+      if (status === 200 && data?.mfa_required === true) {
+        if (API_TOTP_SECRET) {
+          // Le code se calcule sans dépendance : le module TOTP du backend est
+          // pur et sans E/S — c'est le MÊME code que celui vérifié côté serveur.
+          const { totp } = require('../../backend/src/utils/totp');
+          const codeTotp = totp(API_TOTP_SECRET);
+          ({ status, data } = await request('POST', '/api/auth/mfa/verify', {
+            mfa_challenge_token: data.mfa_challenge_token,
+            code: codeTotp,
+          }));
+          if (status !== 200) {
+            fail('T-AUTH-03', 'Vérification du code TOTP',
+              `status=${status}${data?.error ? ` (${data.error})` : ''} — vérifiez API_TOTP_SECRET et l'heure du serveur`);
+          }
+        } else {
+          // Mode dégradé ASSUMÉ, et DIT : on ne fait pas échouer le déploiement
+          // (ce n'est pas une régression applicative), mais on annonce que la
+          // couverture derrière l'authentification est perdue.
+          console.log('\n\x1b[33m⚠️  Le compte API est soumis à la double authentification et API_TOTP_SECRET n\'est pas défini : les endpoints protégés NE SERONT PAS couverts. Renseignez API_TOTP_SECRET (secret Base32 de ce compte) dans le .env du serveur.\x1b[0m');
+          if (STRICT) {
+            fail('T-AUTH-03', 'Login valide', 'compte soumis à MFA sans API_TOTP_SECRET — couverture des endpoints protégés impossible');
+          } else {
+            skipMsg('T-AUTH-03', 'Login (compte soumis à MFA, API_TOTP_SECRET non défini)');
+            skipMsg('T-AUTH-04', 'Profil /auth/me');
+          }
+          data = null;
+        }
+      }
+
       if (status === 200 && (data?.accessToken || data?.token)) {
         token = data.accessToken || data.token;
         authH = { Authorization: `Bearer ${token}` };
-        ok('T-AUTH-03', 'Login valide', `rôle: ${data.user?.role || '?'}`);
-      } else {
+        ok('T-AUTH-03', 'Login valide', `rôle: ${data.user?.role || '?'}${API_TOTP_SECRET ? ', MFA vérifiée' : ''}`);
+
+        // PIÈGE À SIGNALER : au tout premier déploiement, le compte de service
+        // n'est pas encore enrôlé. Son jeton porte `mfa:false`, donc TOUS les
+        // endpoints protégés répondent 403 — que le smoke compte comme « OK,
+        // simplement protégé ». Le test resterait vert en ne vérifiant plus
+        // rien. Mieux vaut le dire fort que laisser croire à une couverture.
+        if (data.user?.mfa_enrollment_required === true) {
+          console.log('\n\x1b[33m⚠️  Le compte API est soumis à la double authentification mais N\'EST PAS ENCORE ENRÔLÉ : sa session ne franchit aucune route sensible (403 partout), et ce smoke ne vérifie donc plus grand-chose. Enrôlez ce compte puis renseignez API_TOTP_SECRET.\x1b[0m');
+        }
+      } else if (data !== null) {
         fail('T-AUTH-03', 'Login valide', `status=${status}${data?.error ? ` (${data.error})` : ''}`);
       }
     } catch (e) { fail('T-AUTH-03', 'Login valide', e.message); }
