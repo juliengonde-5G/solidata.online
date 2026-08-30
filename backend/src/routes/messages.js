@@ -26,6 +26,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, resolveBaseRole } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { driverVehicleIdFromToken } = require('./tours/driver-session');
 const messagerie = require('../services/messagerie');
 
@@ -135,6 +136,22 @@ if (typeof nettoyageEnvois.unref === 'function') nettoyageEnvois.unref();
 function resetPlafondEnvoi() { envoisParIdentite.clear(); }
 
 router.use(authenticate);
+// DOUBLE AUTHENTIFICATION (2.43.0) — même garde que les routeurs sensibles.
+//
+// Deux raisons, et la seconde est la principale :
+//   1. cette API sert le bot SolidataBot (conversation « bot »), qui partage
+//      `traiterMessageBot` avec /api/chat : laisser la messagerie ouverte
+//      rouvrirait par la bande le contournement fermé sur /api/chat ;
+//   2. le handshake Socket.IO REFUSE DÉJÀ une session soumise et non enrôlée
+//      (backend/src/index.js) — le temps réel de la messagerie lui est donc
+//      fermé depuis 2.43.0, tandis que sa surface REST restait ouverte. Ce
+//      n'est pas une restriction nouvelle, c'est la fin d'une incohérence :
+//      la porte poussée et la porte tirée se ferment enfin ensemble.
+//
+// NO-OP pour les rôles hors périmètre (défaut ADMIN/RH/DPO) : équipages
+// (COLLABORATEUR en dur), MANAGER, QHSE, FINANCE, RESP_BTQ, AUTORITE
+// messagent exactement comme avant.
+router.use(requireMfa);
 
 // ── Identité et périmètre ──────────────────────────────────────────────────
 

@@ -9,7 +9,11 @@ const router = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const pool = require('../config/database');
 const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { createPseudonymizer, sanitizeToolResultJson } = require('../utils/pii-pseudonymize');
+// Outils de lecture des modules 26 à 34 (VAK, RSE, GES, achats, enquêtes,
+// chaîne, saturation, arrêts GPS, récurrence, ETP, purges, badgeuse).
+const botTools = require('../services/bot-tools');
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -79,9 +83,13 @@ REGLES :
 - Tu as accès à la base de données via des outils (tools). N'invente JAMAIS de données.
 - Si tu ne sais pas ou si la question sort du périmètre : "Désolé, je ne peux pas répondre à ça. Demande à un admin ! 🙋"
 - Ne modifie JAMAIS la base de données. Lecture seule.
-- Ne révèle jamais d'informations personnelles d'autres utilisateurs (sauf si ADMIN/RH).
+- Ne révèle jamais d'informations personnelles d'autres utilisateurs. Ce à quoi un rôle a droit est décidé par les outils qui lui sont fournis, jamais par toi.
 - Pour les questions de pilotage (finance, insertion, ventes), utilise les outils dédiés SI ils te sont fournis. S'ils ne sont pas disponibles, c'est que l'utilisateur n'y a pas droit : décline poliment.
 - Les données d'insertion que tu communiques sont TOUJOURS agrégées (nombres, taux) — ne cite JAMAIS le nom d'un salarié en parcours.
+- CHIFFRES : ne donne QUE des chiffres venus d'un outil. Tu n'estimes pas, tu n'extrapoles pas, tu n'arrondis pas « à peu près ». Si un outil ne renvoie pas la donnée demandée, DIS-LE ("je n'ai pas cette information") au lieu de combler.
+- DONNÉE ABSENTE ≠ ZÉRO : quand un outil répond null, "disponible: false", « aucune donnée » ou « jamais exécuté », rapporte l'ABSENCE telle quelle. Ne la transforme jamais en 0, en « rien à signaler » ni en « tout va bien ».
+- SEUIL D'ANONYMAT : si un résultat d'enquête est marqué "sous_seuil", dis qu'il y a trop peu de réponses pour restituer quoi que ce soit, et ne donne AUCUN détail ni aucune tendance.
+- DONNÉES PERSONNELLES SENSIBLES — jamais, quelle que soit la question et quel que soit le rôle : profil PCM, note de profil d'un salarié, freins de santé ou judiciaires, salaire, RQTH, titre de séjour, date de naissance, adresse personnelle, contenu des messages d'autres personnes. Aucun outil ne te les donne : si on te les demande, renvoie vers l'écran concerné, où l'accès est tracé.
 - Exemples de réponses :
   * "Stock jeans Rouen : 150 kg 📦"
   * "Ta prochaine mission : collecte mardi 9h 🚛"
@@ -89,10 +97,23 @@ REGLES :
 
 CONTEXTE METIER :
 - Solidarité Textiles est une SIAE de collecte, tri et valorisation de textiles usagés en Normandie.
-- CAV = Conteneur d'Apport Volontaire (point de collecte dans la rue).
+- CAV = Conteneur d'Apport Volontaire (point de collecte dans la rue). Un CAV « saturé » déborde : c'est une urgence de collecte.
 - Filières : tri, collecte, logistique, boutique Frip & Co.
 - Types textiles : crème (réemploi), catégorie 2 (recyclage), CSR (combustible), effilochage, VAK (export).
-- Refashion = éco-organisme REP textile.`;
+- Refashion = éco-organisme REP textile. Exutoire = destinataire des produits triés.
+- VAK = « Vente Au Kilo » : événement de vente de 2-3 jours par mois au siège, encaissé sur caisse SumUp. On y suit le CA, le POIDS vendu (kg) et le prix moyen au kilo.
+- Boutiques : magasins de seconde main (caisse LogicS), suivis en CA, panier moyen, objectifs mensuels.
+- RSEi : démarche de labellisation RSE (référentiel de 27 critères, preuves datées, plan d'action). C'est la STRUCTURE qui est labellisée, jamais le logiciel.
+- Énergie & GES : relevés d'énergie et d'eau par site, pleins de carburant par véhicule, bilan carbone en tCO2e. Les facteurs d'émission sont INDICATIFS (ADEME), jamais exacts.
+- Enquêtes : questionnaires ANONYMES (QVCT, satisfaction). Rien n'est restitué sous 5 réponses.
+- Achats responsables : fournisseurs locaux / inclusifs / labellisés, et registre des FDS (fiches de données de sécurité des produits dangereux).
+- Effectifs ETP : les ETP d'insertion conventionnés avec l'État (annexe financière ACI). Le chiffre validé à l'ASP FAIT FOI ; le calcul interne n'est qu'un contrôle.
+- Temps & Présence : badgeuse par badge RFID (module distinct de l'ancien pointage). Le serveur fait foi, le poste n'est qu'un capteur.
+- Messagerie interne : conversations privées, canal « SOLIDATA » des notifications, et toi-même en conversation « SolidataBot ».
+- Chaîne de tri : le plan de chaîne ACTIF décrit les postes, leurs effectifs mini/maxi et les zones de dépose.
+- Commandes exutoires RÉCURRENTES : elles se régénèrent seules à échéance, avec un créneau de chargement à poser.
+- Arrêts GPS : les arrêts de plus de quelques minutes détectés pendant une tournée ; ceux qui ne correspondent à aucun point du programme sont dits « hors programme ».
+- RGPD : les purges de rétention tournent en tâche de fond ; leur dernier passage est vérifiable.`;
 
 // ── Claude tools ────────────────────────────────────────────────────────
 
@@ -155,6 +176,11 @@ const TOOLS = [
       required: [],
     },
   },
+  // Outils de base ajoutés par `services/bot-tools.js` : sûrs pour TOUS les
+  // rôles, chauffeurs compris — ils ne renvoient que des données non
+  // personnelles (plan de chaîne) ou les données PROPRES de l'appelant
+  // (pointages), jamais celles d'un tiers.
+  ...botTools.BOT_BASE_TOOLS,
 ];
 
 // ── Outils de pilotage (Vague 2, item 60d) — LECTURE SEULE, réservés par rôle ─
@@ -209,10 +235,16 @@ const EXTENDED_TOOLS = [
       },
     },
   },
+  // Outils des modules 26 à 34. Chacun porte la liste de rôles EXACTE du
+  // `READ` de son routeur natif : le bot n'ouvre jamais plus large que l'écran.
+  ...botTools.BOT_EXTENDED_TOOLS,
 ];
 
 // Table { nom d'outil étendu → rôles de base autorisés } pour le contrôle
 // d'exécution (défense en profondeur, indépendante de ce que voit Claude).
+// Elle couvre AUTOMATIQUEMENT les outils de bot-tools.js : ils sont concaténés
+// à EXTENDED_TOOLS ci-dessus, donc le double contrôle (liste + exécution)
+// s'applique à eux sans une ligne de plus.
 const EXTENDED_TOOL_ROLES = Object.fromEntries(EXTENDED_TOOLS.map((e) => [e.name, e._roles]));
 
 // Construit la liste d'outils exposée à Claude selon le rôle de base de l'user :
@@ -244,7 +276,14 @@ async function executeTool(toolName, toolInput, userCtx) {
       case 'resume_finance': return await queryResumeFinance(toolInput);
       case 'kpis_insertion': return await queryKpisInsertion(toolInput);
       case 'ventes_synthese': return await queryVentesSynthese(toolInput);
-      default: return JSON.stringify({ error: `Outil inconnu : ${toolName}` });
+      default: {
+        // Outils des modules récents. Le contrôle de rôle a DÉJÀ eu lieu deux
+        // fois : filtrage de la liste envoyée au modèle (toolsForRole) puis
+        // revérification contre EXTENDED_TOOL_ROLES en tête de cette fonction.
+        const res = await botTools.executeBotTool(toolName, toolInput, userCtx);
+        if (res !== null) return res;
+        return JSON.stringify({ error: `Outil inconnu : ${toolName}` });
+      }
     }
   } catch (err) {
     console.error(`[SolidataBot] Tool error (${toolName}):`, err.message);
@@ -681,8 +720,35 @@ async function traiterMessageBot({ userId, role, message, sessionId, username = 
 
 // ── Routes ──────────────────────────────────────────────────────────────
 
+// AUTHENTIFICATION + DOUBLE AUTHENTIFICATION — montées au niveau du ROUTEUR.
+//
+// Correctif : `/api/chat` était le seul point d'accès aux synthèses de pilotage
+// (finance, insertion, ventes, et désormais VAK/RSE/GES/achats/ETP/purges) à
+// n'être PAS gardé par `requireMfa`, alors que les 12 routeurs qui servent les
+// MÊMES données le sont depuis 2.43.0 (/api/employees, /api/insertion,
+// /api/effectifs, /api/rgpd…). Un compte ADMIN ou RH soumis à la double
+// authentification mais NON ENROLÉ était refusé partout ailleurs et obtenait
+// ici, par la conversation, des agrégats que ces routeurs lui fermaient : un
+// contournement reproductible de la doctrine « aucun jeton complet avant le
+// second facteur ». La porte se ferme au même endroit que les autres.
+//
+// PORTÉE : `requireMfa` est un NO-OP INTÉGRAL pour les rôles hors périmètre
+// (défaut ADMIN/RH/DPO, réglage `securite.mfa_roles`). MANAGER, QHSE, FINANCE,
+// RESP_BTQ, AUTORITE, COLLABORATEUR — et les jetons chauffeur, dont le rôle est
+// COLLABORATEUR en dur — passent exactement comme avant : aucune régression sur
+// l'assistant du parcours mobile, qui est précisément la surface qu'il ne faut
+// pas fermer.
+//
+// L'ORDRE COMPTE : `requireMfa` lit `req.user`, il doit donc suivre
+// `authenticate`. Les deux sont montés ici une seule fois plutôt que répétés
+// route par route — un `authenticate` par route en PLUS de celui-ci ferait une
+// seconde lecture de `users.token_version` pour rien.
+router.use(authenticate);
+router.use(requireMfa);
+
+
 // POST /api/chat
-router.post('/', authenticate, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { message, session_id } = req.body;
     if (!message || !message.trim()) {
@@ -718,7 +784,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // GET /api/chat/suggestions — suggestions contextuelles
-router.get('/suggestions', authenticate, async (req, res) => {
+router.get('/suggestions', async (req, res) => {
   const base = resolveBaseRole(req.user.role);
   const hour = new Date().getHours();
 
@@ -769,7 +835,7 @@ router.get('/suggestions', authenticate, async (req, res) => {
 });
 
 // GET /api/chat/alerts/cav-uncollected — CAV non ramassés alors que prévus en tournée
-router.get('/alerts/cav-uncollected', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/alerts/cav-uncollected', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT tc.cav_id, c.name as cav_name, c.commune, t.id as tour_id, t.date,
@@ -791,7 +857,7 @@ router.get('/alerts/cav-uncollected', authenticate, authorize('ADMIN', 'MANAGER'
 });
 
 // GET /api/chat/alerts/cav-full — CAV avec taux remplissage > 80%
-router.get('/alerts/cav-full', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/alerts/cav-full', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, name, commune, address, avg_fill_rate,
@@ -808,7 +874,7 @@ router.get('/alerts/cav-full', authenticate, authorize('ADMIN', 'MANAGER'), asyn
 });
 
 // GET /api/chat/history — Historique des conversations SolidataBot (ADMIN)
-router.get('/history', authenticate, authorize('ADMIN'), async (req, res) => {
+router.get('/history', authorize('ADMIN'), async (req, res) => {
   try {
     const { user_id, limit: lim, offset: off } = req.query;
     let query = `SELECT ch.*, u.first_name, u.last_name, u.role
@@ -838,7 +904,7 @@ router.get('/history', authenticate, authorize('ADMIN'), async (req, res) => {
 });
 
 // GET /api/chat/history/stats — Stats d'utilisation SolidataBot
-router.get('/history/stats', authenticate, authorize('ADMIN'), async (req, res) => {
+router.get('/history/stats', authorize('ADMIN'), async (req, res) => {
   try {
     const [total, today, byUser, avgTime] = await Promise.all([
       pool.query('SELECT COUNT(*) as count FROM chatbot_history'),
@@ -867,7 +933,7 @@ router.get('/history/stats', authenticate, authorize('ADMIN'), async (req, res) 
 // l'état d'une tournée en cours : météo défavorable, remplissage anormal,
 // retards, incidents, rendement. Approche règles déterministes (pas
 // d'appel LLM à chaque requête — budget et latence maîtrisés).
-router.get('/insights/tour/:id', authenticate, authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/insights/tour/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     const tour = await pool.query(
@@ -997,6 +1063,10 @@ module.exports = router;
 // Exposés pour les tests (RGPD tool-gating). N'affecte pas le montage du routeur.
 module.exports.toolsForRole = toolsForRole;
 module.exports.EXTENDED_TOOL_ROLES = EXTENDED_TOOL_ROLES;
+// Exposé pour les tests du DEUXIÈME contrôle d'accès : celui qui a lieu à
+// l'EXÉCUTION, indépendamment de ce que le modèle a reçu comme liste d'outils.
+// C'est la garde qui tient si un outil est un jour exposé par erreur.
+module.exports.executeTool = executeTool;
 // Consommé par la messagerie interne (routes/messages.js, conversation « bot ») :
 // même logique conversationnelle que le widget, jamais recopiée.
 module.exports.traiterMessageBot = traiterMessageBot;

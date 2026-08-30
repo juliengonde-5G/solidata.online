@@ -207,17 +207,28 @@ describe('60d — toolsForRole (RGPD tool-gating)', () => {
   const { toolsForRole, EXTENDED_TOOL_ROLES } = chatRouter;
   const names = (role) => toolsForRole(role).map((t) => t.name);
 
-  it('COLLABORATEUR : seulement les 5 outils de base', () => {
+  // Le comptage en dur (5 / 8) a été remplacé par le nombre RÉEL d'outils de
+  // base à l'ajout des outils des modules 26-34 : compter des outils n'a jamais
+  // été le sujet — ce que ce test doit tenir, c'est qu'AUCUN outil réservé ne
+  // fuit vers un rôle qui n'y a pas droit. Cette assertion-là est explicite
+  // ci-dessous et ne se périme pas au prochain outil ajouté.
+  const OUTILS_BASE = require('../../../src/routes/chat').toolsForRole('COLLABORATEUR');
+
+  it('COLLABORATEUR : seulement les outils de base, aucun outil réservé', () => {
     const n = names('COLLABORATEUR');
-    expect(n).toHaveLength(5);
-    expect(n).not.toContain('resume_finance');
-    expect(n).not.toContain('kpis_insertion');
-    expect(n).not.toContain('ventes_synthese');
+    expect(n).toHaveLength(OUTILS_BASE.length);
+    for (const reserve of Object.keys(EXTENDED_TOOL_ROLES)) {
+      expect(n).not.toContain(reserve);
+    }
   });
-  it('ADMIN : les 5 base + les 3 outils de pilotage', () => {
+  it('ADMIN : les outils de base + TOUS les outils de pilotage', () => {
     const n = names('ADMIN');
     expect(n).toEqual(expect.arrayContaining(['resume_finance', 'kpis_insertion', 'ventes_synthese']));
-    expect(n).toHaveLength(8);
+    // ADMIN est le seul rôle habilité sur l'ensemble des outils réservés.
+    for (const reserve of Object.keys(EXTENDED_TOOL_ROLES)) {
+      expect(n).toContain(reserve);
+    }
+    expect(n).toHaveLength(OUTILS_BASE.length + Object.keys(EXTENDED_TOOL_ROLES).length);
   });
   it('RH : insertion oui, finance/ventes non', () => {
     const n = names('RH');
@@ -239,10 +250,14 @@ describe('60d — toolsForRole (RGPD tool-gating)', () => {
   });
   it('AUTORITE (lecture seule) : aucun outil de pilotage', () => {
     const n = names('AUTORITE');
-    expect(n).toHaveLength(5);
+    expect(n).toHaveLength(OUTILS_BASE.length);
+    for (const reserve of Object.keys(EXTENDED_TOOL_ROLES)) {
+      expect(n).not.toContain(reserve);
+    }
   });
-  it('la table de rôles couvre les 3 outils étendus', () => {
-    expect(Object.keys(EXTENDED_TOOL_ROLES).sort()).toEqual(['kpis_insertion', 'resume_finance', 'ventes_synthese']);
+  it('la table de rôles couvre les 3 outils étendus historiques', () => {
+    expect(Object.keys(EXTENDED_TOOL_ROLES)).toEqual(
+      expect.arrayContaining(['kpis_insertion', 'resume_finance', 'ventes_synthese']));
     expect(EXTENDED_TOOL_ROLES.resume_finance).toContain('FINANCE');
     expect(EXTENDED_TOOL_ROLES.kpis_insertion).toContain('RH');
     expect(EXTENDED_TOOL_ROLES.ventes_synthese).toContain('RESP_BTQ');
