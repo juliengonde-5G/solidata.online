@@ -47,12 +47,15 @@ export default function SolidataBot({ ouvert = false, onFermer } = {}) {
       api.get('/chat/suggestions')
         .then(res => setSuggestions(res.data.suggestions || []))
         .catch(() => {
+          // Repli hors ligne : ces quatre questions sont DANS le périmètre du
+          // chauffeur (collecte, circulation, navigation). L'ancienne liste
+          // proposait le stock, le planning et les heures — trois sujets que
+          // l'assistant du véhicule ne traite plus : c'était proposer un refus.
           setSuggestions([
-            { icon: '📦', text: 'Quel est le stock actuel ?' },
-            { icon: '🚛', text: 'Stats collecte du jour' },
-            { icon: '📅', text: 'Mon planning cette semaine' },
-            { icon: '⏰', text: 'Mes heures cette semaine' },
-            { icon: '📍', text: 'Liste des CAV actifs' },
+            { icon: '🚛', text: 'Où en est ma tournée ?' },
+            { icon: '🗺️', text: 'Quel est mon prochain point ?' },
+            { icon: '🚦', text: 'Y a-t-il des bouchons sur mon secteur ?' },
+            { icon: '📦', text: 'Combien de kilos j\'ai déjà pesés ?' },
           ]);
         });
     }

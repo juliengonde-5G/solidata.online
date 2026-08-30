@@ -1403,120 +1403,28 @@ async function autoFeedNews() {
   }
 }
 
-/**
- * Purge automatique RGPD — Anonymise les candidats non recrutés > 24 mois (Art. 5 RGPD)
- */
-async function purgeExpiredCandidates() {
-  try {
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - 24);
-
-    const expired = await pool.query(
-      `SELECT id, first_name, last_name FROM candidates
-       WHERE status != 'hired' AND created_at < $1
-       AND first_name != 'ANONYME'`,
-      [cutoff.toISOString()]
-    );
-
-    const { anonymizeCandidate } = require('./anonymization');
-    for (const candidate of expired.rows) {
-      // Transaction par candidat + service mutualisé : couvre désormais le MÊME
-      // périmètre que la route manuelle (PCM, entretiens, mises en situation,
-      // documents) — la purge auto n'est plus moins complète que le manuel.
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        await anonymizeCandidate(client, candidate.id);
-        await client.query(
-          `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
-           VALUES (NULL, 'AUTO_PURGE_24M', 'candidate', $1, $2)`,
-          [candidate.id, JSON.stringify({ reason: 'Purge automatique RGPD 24 mois', original_name: `${candidate.first_name} ${candidate.last_name}` })]
-        );
-        await client.query('COMMIT');
-      } catch (e) {
-        await client.query('ROLLBACK');
-        console.error(`[SCHEDULER] purge candidat #${candidate.id} :`, e.message);
-      } finally {
-        client.release();
-      }
-    }
-
-    if (expired.rows.length > 0) {
-      console.log(`[SCHEDULER] RGPD: ${expired.rows.length} candidat(s) anonymisé(s) (> 24 mois)`);
-    }
-  } catch (err) {
-    console.error('[SCHEDULER] Erreur purgeExpiredCandidates:', err.message);
-  }
-}
-
-/**
- * Purge RGPD des dossiers d'insertion (EXG-40, PR 2) — rétention paramétrable.
- *
- * ANONYMISE (jamais de DELETE de lignes : le job ne supprime rien, il passe
- * par services/anonymization.anonymizeEmployee qui nullifie/placeholde) les
- * dossiers des salariés :
- *   - parcours CLOS (insertion_status 'termine' ou 'abandon') — jamais un
- *     parcours en cours ni un dossier sans parcours ;
- *   - fiche INACTIVE (is_active=false — un salarié réembauché est épargné) ;
- *   - fin de parcours antérieure à `insertion.retention_months` (défaut
- *     24 mois — référentiel CNIL secteur social 2023 : base active 2 ans après
- *     le dernier contact ; le suivi post-sortie 3-6 mois tient dans la marge).
- *
- * Le service d'anonymisation PRÉSERVE fse_entree/fse_sortie (piste d'audit
- * FSE+ ≥ 5 ans, §6bis-1) et les agrégats statistiques (scores de freins,
- * classifications de sortie). Chaque dossier est traité dans sa propre
- * transaction + entrée rgpd_audit_log (pattern purgeExpiredCandidates) ; le
- * log ne porte pas le nom (minimisation), seulement l'id et les paramètres.
- */
-async function purgeInsertionDossiers() {
-  try {
-    const { readInsertionSetting } = require('../utils/insertion-settings');
-    const raw = Number(await readInsertionSetting('insertion.retention_months'));
-    const months = Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : 24;
-
-    const expired = await pool.query(
-      `SELECT id, insertion_status, insertion_end_date
-       FROM employees
-       WHERE insertion_status IN ('termine', 'abandon')
-         AND is_active = false
-         AND insertion_end_date IS NOT NULL
-         AND insertion_end_date < NOW() - make_interval(months => $1)
-         AND first_name <> 'ANONYME'`,
-      [months]
-    );
-    if (expired.rows.length === 0) return;
-
-    const { anonymizeEmployee } = require('./anonymization');
-    let done = 0;
-    for (const e of expired.rows) {
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        await anonymizeEmployee(client, e.id);
-        await client.query(
-          `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
-           VALUES (NULL, 'AUTO_PURGE_INSERTION', 'employee', $1, $2)`,
-          [e.id, JSON.stringify({
-            reason: `Purge RGPD insertion — parcours ${e.insertion_status} clos depuis plus de ${months} mois`,
-            retention_months: months,
-            insertion_end_date: e.insertion_end_date,
-          })]
-        );
-        await client.query('COMMIT');
-        done += 1;
-        console.log(`[SCHEDULER] RGPD insertion : dossier employé #${e.id} anonymisé (${e.insertion_status}, fin ${e.insertion_end_date ? new Date(e.insertion_end_date).toISOString().slice(0, 10) : '?'})`);
-      } catch (err) {
-        await client.query('ROLLBACK');
-        console.error(`[SCHEDULER] purge dossier insertion #${e.id} :`, err.message);
-      } finally {
-        client.release();
-      }
-    }
-    console.log(`[SCHEDULER] RGPD insertion : ${done}/${expired.rows.length} dossier(s) anonymisé(s) (rétention ${months} mois)`);
-  } catch (err) {
-    console.error('[SCHEDULER] Erreur purgeInsertionDossiers:', err.message);
-  }
-}
+// ══════════════════════════════════════════
+// PURGES RGPD — corps déplacés dans services/rgpd-purges.js
+// ──────────────────────────────────────────
+// Elles vivaient ici, où une route ne pouvait pas les atteindre : requérir le
+// scheduler depuis routes/rgpd.js déclencherait ses effets de bord (timers,
+// verrou advisory). Un bouton « Lancer maintenant » qui réécrirait le SQL de
+// son côté finirait par diverger du job sans que personne le voie — la
+// doctrine du projet (services/anonymization.js) l'interdit. Le code est donc
+// passé dans un service que les DEUX appellent ; le scheduler garde son
+// enrobage runInstrumented, inchangé.
+//
+// `runAllJobs` les appelle sans argument : `trigger` vaut alors 'auto' et le
+// comportement (seuils, tables, lignes de journal) est celui d'avant.
+// ══════════════════════════════════════════
+const {
+  purgePcmNonRecrute,
+  purgeExpiredCandidates,
+  purgeInsertionDossiers,
+  purgeOldGpsPositions,
+  purgeArretsGps,
+  purgeExpiredRefreshTokens,
+} = require('./rgpd-purges');
 
 // ══════════════════════════════════════════
 // VERROU DISTRIBUÉ (Advisory Lock PostgreSQL)
@@ -1562,109 +1470,6 @@ async function releaseLock(conn) {
     await conn.query('SELECT pg_advisory_unlock($1)', [SCHEDULER_LOCK_ID]);
   } catch (err) {
     console.error('[SCHEDULER] Erreur release lock:', err.message);
-  }
-}
-
-/**
- * Purge automatique GPS — Supprime les positions > 90 jours (rétention RGPD)
- */
-async function purgeOldGpsPositions() {
-  try {
-    // Keep GPS data for 90 days, delete older positions
-    const result = await pool.query(
-      `DELETE FROM gps_positions WHERE recorded_at < NOW() - INTERVAL '90 days'`
-    );
-    if (result.rowCount > 0) {
-      console.log(`[SCHEDULER] GPS: ${result.rowCount} position(s) supprimée(s) (> 90 jours)`);
-      // Log RGPD audit
-      await pool.query(
-        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
-         VALUES (NULL, 'AUTO_PURGE_GPS_90D', 'gps_positions', 0, $1)`,
-        [JSON.stringify({ rows_deleted: result.rowCount, retention_days: 90 })]
-      );
-    }
-  } catch (err) {
-    console.error('[SCHEDULER] Erreur purgeOldGpsPositions:', err.message);
-  }
-}
-
-/** Rétention de gps_positions, en jours. Plafond de tout ce qui en dérive. */
-const GPS_RETENTION_JOURS = 90;
-
-/**
- * Purge des arrêts de tournée détectés (`tour_gps_stops`) — correctif du 27/08.
- *
- * DÉFAUT CORRIGÉ : la table a été livrée sans rétention. Or ses lignes sont
- * DÉRIVÉES de `gps_positions`, purgée à 90 jours ci-dessus au titre de la
- * proportionnalité. Sans ce job, la trace brute disparaissait pendant que les
- * arrêts qu'on en avait extraits — position, heure, durée, tournée, véhicule,
- * donc conducteur affecté — se conservaient indéfiniment. Une purge de source
- * qui ne protège rien n'est pas une purge.
- *
- * RÈGLE : la rétention est paramétrable (`collecte.arrets_retention_jours`)
- * mais BORNÉE à celle de la source. On peut la raccourcir, jamais l'allonger
- * au-delà de 90 jours : la donnée dérivée ne survit pas au relevé dont elle
- * est tirée, et un réglage mal saisi ne doit pas pouvoir renverser la règle.
- *
- * Journalisée UNIQUEMENT si elle a supprimé quelque chose (pattern
- * `badgeusePurgeRetention` / `purgeMessagerieRetention`) : un journal qui se
- * remplit de « 0 » chaque jour noie les vraies purges.
- */
-async function purgeArretsGps() {
-  let retentionJours = GPS_RETENTION_JOURS;
-  try {
-    const r = await pool.query("SELECT value FROM settings WHERE key = 'collecte.arrets_retention_jours'");
-    const brut = r.rows[0] ? parseInt(r.rows[0].value, 10) : NaN;
-    if (Number.isInteger(brut) && brut > 0) {
-      retentionJours = Math.min(brut, GPS_RETENTION_JOURS);
-      if (brut > GPS_RETENTION_JOURS) {
-        console.warn(`[SCHEDULER] Arrêts GPS : rétention réglée à ${brut} j, ramenée à ${GPS_RETENTION_JOURS} j `
-          + '(plafond de la source gps_positions — une donnée dérivée ne survit pas à son relevé).');
-      }
-    }
-  } catch (err) {
-    console.warn('[SCHEDULER] Réglage collecte.arrets_retention_jours illisible, repli 90 j :', err.message);
-  }
-
-  try {
-    const result = await pool.query(
-      "DELETE FROM tour_gps_stops WHERE debut < NOW() - ($1 || ' days')::interval",
-      [String(retentionJours)]
-    );
-    if (result.rowCount > 0) {
-      console.log(`[SCHEDULER] Arrêts GPS : ${result.rowCount} arrêt(s) supprimé(s) (> ${retentionJours} jours)`);
-      await pool.query(
-        `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
-         VALUES (NULL, 'AUTO_PURGE_ARRETS_GPS', 'tour_gps_stops', 0, $1)`,
-        [JSON.stringify({ rows_deleted: result.rowCount, retention_days: retentionJours, plafond_source_days: GPS_RETENTION_JOURS })]
-      ).catch((e) => console.error('[SCHEDULER] Journalisation purge arrêts GPS impossible :', e.message));
-    }
-    return { ok: true, arrets_supprimes: result.rowCount || 0, retention_jours: retentionJours };
-  } catch (err) {
-    // Base non migrée (table absente) : on le dit, on ne fait pas échouer le
-    // tour de jobs pour autant.
-    if (err && err.code === '42P01') {
-      console.warn('[SCHEDULER] Table tour_gps_stops absente (base non migrée) — purge des arrêts ignorée.');
-      return { ok: false, motif: 'table tour_gps_stops absente', arrets_supprimes: 0, retention_jours: retentionJours };
-    }
-    console.error('[SCHEDULER] Erreur purgeArretsGps:', err.message);
-    return { ok: false, motif: err.message, arrets_supprimes: 0, retention_jours: retentionJours };
-  }
-}
-
-/**
- * Purge des refresh tokens expirés (audit vague 3, item 3.C-4).
- * Jusqu'ici, les jetons expirés n'étaient supprimés qu'au démarrage (init-db) ;
- * la table grossissait entre deux redémarrages. Purge quotidienne planifiée.
- */
-async function purgeExpiredRefreshTokens() {
-  try {
-    const result = await pool.query('DELETE FROM refresh_tokens WHERE expires_at < NOW()');
-    if (result.rowCount > 0) {
-      console.log(`[SCHEDULER] Refresh tokens: ${result.rowCount} jeton(s) expiré(s) supprimé(s)`);
-    }
-  } catch (err) {
-    console.error('[SCHEDULER] Erreur purgeExpiredRefreshTokens:', err.message);
   }
 }
 
@@ -2225,6 +2030,10 @@ async function runAllJobs() {
     await runInstrumented('checkVehicleMaintenance', checkVehicleMaintenance);
     await runInstrumented('autoFeedNews', autoFeedNews);
     await runInstrumented('purgeExpiredCandidates', purgeExpiredCandidates);
+    // Placée juste après : le test PCM d'un candidat non recruté a une échéance
+    // BEAUCOUP plus courte (90 j) que sa fiche (24 mois) — les voir se suivre
+    // au journal rend la règle lisible.
+    await runInstrumented('purgePcmNonRecrute', purgePcmNonRecrute);
     await runInstrumented('purgeInsertionDossiers', purgeInsertionDossiers);
     await runInstrumented('purgeOldGpsPositions', purgeOldGpsPositions);
     // Immédiatement APRÈS la purge de la trace : les arrêts en sont dérivés,
@@ -2290,9 +2099,15 @@ module.exports = {
   // Purge RGPD de la messagerie interne (lot L1) — exposée pour les tests.
   // Wrapper du require paresseux (voir en-tête) : même signature, même retour.
   purgeMessagerieRetention: (...args) => messagerie().purgeMessagerieRetention(...args),
-  // Purge RGPD des arrêts de tournée dérivés des relevés GPS (correctif 27/08)
-  // — exposée pour l'observabilité (monitoring.js) et les tests.
+  // Purges RGPD (corps dans services/rgpd-purges.js) — ré-exposées ici pour les
+  // tests et l'observabilité ; le déclenchement manuel, lui, passe par le
+  // service directement (routes/rgpd.js), jamais par ce module.
   purgeArretsGps,
+  purgePcmNonRecrute,
+  purgeExpiredCandidates,
+  purgeInsertionDossiers,
+  purgeOldGpsPositions,
+  purgeExpiredRefreshTokens,
   checkBadgeuseDevices,
   syncBadgeuseSocial,
   syncBadgeusePresse,

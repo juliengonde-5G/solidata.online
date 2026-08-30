@@ -30,8 +30,14 @@ const express = require('express');
 const request = require('supertest');
 
 const VEHICULE = 1;
+// `mfa: true` : depuis le montage de `requireMfa` sur /api/messages, un jeton
+// d'un rôle SOUMIS (défaut ADMIN/RH/DPO) sans ce claim est refusé en 403 — ce
+// qui est exactement le comportement voulu, couvert par bot-mfa-contract.test.js.
+// Le périmètre de CE fichier est la messagerie (participation, identité
+// chauffeur), pas la double authentification : les jetons la franchissent donc,
+// comme le font déjà employees-masking et effectifs-contract.
 const jetonWeb = (id, username, role, first, last) => jwt.sign(
-  { id, userId: id, username, role, first_name: first, last_name: last }, JWT_SECRET, { expiresIn: '1h' });
+  { id, userId: id, username, role, first_name: first, last_name: last, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
 
 const ADMIN = jetonWeb(1, 'admin', 'ADMIN', 'Julien', 'Gondé');
 const TRIEUR = jetonWeb(3, 'ctrieur', 'COLLABORATEUR', 'Karim', 'Benali');

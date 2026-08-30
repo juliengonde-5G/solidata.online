@@ -26,6 +26,10 @@ const ACTION_LABELS = {
   // Clés API
   api_key_create: 'Clé API créée', api_key_update: 'Clé API modifiée',
   api_key_delete: 'Clé API supprimée',
+  // 2.44.0 — déclenchement manuel d'une purge de rétention depuis l'écran RGPD.
+  // Le détail (quelle purge, combien de lignes) vit dans le journal RGPD ;
+  // cette entrée-ci dit simplement QUI a lancé QUOI, dans le journal générique.
+  purge: 'Purge RGPD lancée',
 };
 const ACTION_COLORS = {
   login: 'bg-blue-100 text-blue-700', logout: 'bg-purple-100 text-purple-700',
@@ -37,6 +41,7 @@ const ACTION_COLORS = {
   permissions_matrix_update: 'bg-indigo-100 text-indigo-700',
   api_key_create: 'bg-amber-100 text-amber-800', api_key_update: 'bg-amber-100 text-amber-800',
   api_key_delete: 'bg-amber-200 text-amber-900',
+  purge: 'bg-rose-100 text-rose-700',
 };
 const ENTITY_LABELS = {
   // Collecte & logistique
@@ -67,6 +72,8 @@ const ENTITY_LABELS = {
   user: 'Utilisateur', setting: 'Paramètre', referentiel: 'Référentiel',
   newsfeed: 'Actualité', custom_role: 'Rôle personnalisé',
   role_module_access: 'Habilitations par module', api_key: 'Clé API',
+  // 2.44.0 — automatisations & purges de conformité (page RGPD).
+  rgpd: 'RGPD & conformité',
 };
 
 const TABS = [

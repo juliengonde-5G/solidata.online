@@ -91,7 +91,7 @@ const { applyCompletionSideEffects } = require('./completion-effects');
 // Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
 // `vehicle_id` du jeton et, en repli, dans le `username` historique
 // « driver_<vehicleId> ». Helper partagé avec routes/tours/execution.js.
-const { driverVehicleIdFromToken, resolveDriverEmployeeId } = require('./driver-session');
+const { driverVehicleIdFromToken, resolveDriverEmployeeId, tourneeDuJourPourVehicule } = require('./driver-session');
 const {
   proposeReoptimization,
   applyReoptimization,
@@ -297,21 +297,12 @@ async function decorerHorairesEtRdv(points, tourId, dateTournee) {
 router.get('/vehicle/:vehicleId/today', async (req, res) => {
   try {
     const { vehicleId } = req.params;
-    const tourResult = await pool.query(
-      `SELECT t.*, v.registration, v.name as vehicle_name,
-              (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = t.id) as nb_cav
-       FROM tours t
-       JOIN vehicles v ON v.id = t.vehicle_id
-       WHERE t.vehicle_id = $1
-         AND t.date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date
-         AND t.status IN ('planned', 'in_progress')
-       ORDER BY t.id DESC LIMIT 1`,
-      [vehicleId]
-    );
-    if (tourResult.rows.length === 0) {
+    // Sélection « la tournée du jour de CE véhicule » : règle unique, partagée
+    // avec l'assistant conversationnel du chauffeur (driver-session.js).
+    const tour = await tourneeDuJourPourVehicule(pool, vehicleId);
+    if (!tour) {
       return res.json({ tour: null });
     }
-    const tour = tourResult.rows[0];
     // Charger les points de la tournée selon le type de collecte
     let points = [];
     if (tour.collection_type === 'association') {

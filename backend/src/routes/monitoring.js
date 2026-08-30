@@ -129,6 +129,11 @@ const JOB_SCHEDULE = {
   checkVehicleMaintenance:        { label: 'Maintenance préventive véhicules',  cadence: '3×/jour',            maxAgeHours: DAILY },
   autoFeedNews:                   { label: 'Veille sectorielle (fil actu)',     cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredCandidates:         { label: 'Purge RGPD candidats > 24 mois',    cadence: '3×/jour',            maxAgeHours: DAILY },
+  // 2.44.0 — purge des tests PCM des personnes NON RECRUTÉES à 90 jours de la
+  // passation (demande client). Déclarée ici pour qu'un arrêt du job se voie :
+  // sans cadence attendue, un test de personnalité conservé au-delà de son
+  // échéance ne se signalerait nulle part.
+  purgePcmNonRecrute:             { label: 'Purge RGPD tests PCM non recrutés',  cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeOldGpsPositions:           { label: 'Purge RGPD GPS > 90 jours',         cadence: '3×/jour',            maxAgeHours: DAILY },
   // Correctif du 27/08 : les arrêts détectés DÉRIVENT de gps_positions. Déclaré
   // ici pour qu'un arrêt de ce job se voie — sans lui, la purge de la source
