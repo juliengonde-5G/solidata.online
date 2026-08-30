@@ -207,13 +207,34 @@ export default function VakPerformance() {
               </div>
             )}
 
+            {/* Couverture du détail produits.
+                Le chiffre d'affaires vient du TICKET (ce que SumUp a encaissé) ;
+                le poids et les répartitions par segment viennent du DÉTAIL des
+                articles, que l'API SumUp ne renvoie pas toujours. Quand le
+                détail ne couvre pas tout l'encaissement, il faut le DIRE : sans
+                cela, un poids et des segments sous-estimés se lisent comme des
+                mesures, et c'est ainsi que 727 € et 537 kg ont manqué sans que
+                rien ne le signale sur la VAK d'août 2026. */}
+            {kpis?.couverture_detail_pct != null && kpis.couverture_detail_pct < 99.5 && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <strong>Détail produits incomplet : {Number(kpis.couverture_detail_pct).toFixed(0)} % du chiffre d'affaires.</strong>{' '}
+                {formatEuro(kpis.ca_non_detaille)} encaissés n'ont pas de détail d'articles — le <strong>poids vendu</strong>,
+                le <strong>prix au kilo</strong> et la <strong>répartition par segment</strong> ci-dessous sont donc sous-estimés
+                d'autant. Le chiffre d'affaires, lui, est complet (il vient des transactions SumUp).
+                Pour rétablir le détail : réparation depuis le « Rapport des ventes » SumUp.
+              </div>
+            )}
+
             {/* Bloc 1 : KPI principaux */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <KpiCard title="CA TTC" value={formatEuro(kpis?.ca_ttc)} icon={TrendingUp} accent="primary"
-                footer={comparison?.vs_previous && <DeltaBadge value={comparison.vs_previous.ca_ttc} label="vs N-1" />} />
+                footer={comparison?.vs_previous
+                  ? <DeltaBadge value={comparison.vs_previous.ca_ttc} label="vs N-1" />
+                  : <span className="text-xs text-slate-500">encaissé (transactions SumUp)</span>} />
               <KpiCard title="Poids vendu" value={`${formatNumber(kpis?.poids_kg, 1)} kg`} icon={Weight} accent="amber"
                 footer={comparison?.vs_previous && <DeltaBadge value={comparison.vs_previous.poids_kg} label="vs N-1" />} />
-              <KpiCard title="Prix moyen / kg" value={formatEuro(kpis?.prix_moyen_kg, 2)} icon={Tag} accent="slate" />
+              <KpiCard title="Prix moyen / kg" value={formatEuro(kpis?.prix_moyen_kg, 2)} icon={Tag} accent="slate"
+                footer={<span className="text-xs text-slate-500">articles vendus au poids</span>} />
               <KpiCard title="Tickets" value={formatNumber(kpis?.nb_tickets)} icon={Receipt} accent="slate"
                 footer={comparison?.vs_previous && <DeltaBadge value={comparison.vs_previous.nb_tickets} label="vs N-1" />} />
             </div>

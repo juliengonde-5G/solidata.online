@@ -297,6 +297,27 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 // ──────────────────────────────────────────
 // Analytics par VAK
 // ──────────────────────────────────────────
+// QUELLE SOURCE FAIT FOI (arbitrage client du 30/08/2026 : « les 2 pages
+// alignées sur la donnée SumUp »)
+// ───────────────────────────────────────────────────────────────────────────
+// Deux niveaux coexistent, et ils ne disent pas la même chose :
+//   • `vak_tickets`  = ce que la CAISSE A RÉELLEMENT ENCAISSÉ. C'est SumUp qui
+//     l'écrit, transaction par transaction : c'est la vérité de l'argent.
+//   • `vak_ventes`   = la DÉCOMPOSITION en articles. Elle vient du détail
+//     produits, que l'API SumUp ne renvoie pas toujours — elle peut donc être
+//     incomplète, et elle l'était (VAK d'août 2026 : 13 033 € de lignes pour
+//     13 760 € réellement encaissés).
+//
+// Cette page sommait le CA au niveau LIGNE et le panier moyen au niveau
+// TICKET : elle se contredisait elle-même, et contredisait « Vue par jour ».
+// Désormais, une seule règle : LE CHIFFRE D'AFFAIRES VIENT DU TICKET. Les
+// lignes ne servent qu'à répartir (segments, poids, remises), et la part du
+// chiffre d'affaires qu'elles couvrent est EXPOSÉE (`couverture_detail_pct`)
+// au lieu d'être devinée par l'écart entre deux cartes.
+//
+// Corollaire assumé : les répartitions sont exprimées en part du DÉTAIL, pas
+// du CA encaissé — sinon leurs pourcentages ne feraient pas 100 quand le
+// détail est incomplet, ce qui se lirait comme une erreur de calcul.
 router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const vakId = req.params.id;
@@ -305,10 +326,9 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
     // comptée, doctrine « on n'exclut que le connu-différent »).
     const v = await pool.query(`
       SELECT
-        COALESCE(SUM(vv.total_ttc),0)::FLOAT AS ca_ttc,
-        COALESCE(SUM(vv.total_ht),0)::FLOAT  AS ca_ht,
-        COALESCE(SUM(vv.total_tva),0)::FLOAT AS tva_collectee,
+        COALESCE(SUM(vv.total_ttc),0)::FLOAT AS ca_detail_ttc,
         COUNT(*)::INT                        AS nb_lignes,
+        COALESCE(SUM(CASE WHEN vv.unite ILIKE '%kg%' THEN vv.total_ttc END), 0)::FLOAT AS ca_lignes_au_poids,
         COALESCE(SUM(CASE WHEN vv.unite ILIKE '%kg%' THEN vv.quantite END), 0)::FLOAT AS poids_kg,
         COALESCE(SUM(CASE WHEN vv.segment = 'textile_vrac' THEN vv.total_ttc END), 0)::FLOAT AS ca_textile,
         COALESCE(SUM(CASE WHEN vv.segment = 'chaussures'   THEN vv.total_ttc END), 0)::FLOAT AS ca_chaussures,
@@ -323,6 +343,9 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
     const t = await pool.query(`
       SELECT
         COUNT(*)::INT                                    AS nb_tickets,
+        COALESCE(SUM(t.total_ttc), 0)::FLOAT             AS ca_ttc,
+        COALESCE(SUM(t.total_ht), 0)::FLOAT              AS ca_ht,
+        COALESCE(SUM(t.total_tva), 0)::FLOAT             AS tva_collectee,
         COALESCE(AVG(t.total_ttc), 0)::FLOAT             AS panier_moyen,
         COALESCE(SUM(t.nb_articles), 0)::INT             AS total_articles,
         COALESCE(SUM(CASE WHEN ${payIsEspeces('t.moyen_paiement')} THEN t.total_ttc END), 0)::FLOAT AS ca_especes,
@@ -338,28 +361,50 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
     const a = v.rows[0]; const b = t.rows[0];
     const nbTickets = b.nb_tickets || 0;
     const kgApprov = meta.rows[0]?.kg_approvisionnes != null ? Number(meta.rows[0].kg_approvisionnes) : null;
+    // Couverture du détail : quelle part du CA ENCAISSÉ les lignes expliquent.
+    // 100 % = toutes les ventes sont détaillées ; en dessous, les répartitions
+    // par segment et le poids sont sous-estimés d'autant — l'écran le DIT, au
+    // lieu de laisser deux cartes se contredire en silence.
+    const caEncaisse = b.ca_ttc || 0;
+    const caDetail = a.ca_detail_ttc || 0;
+    const couverture = caEncaisse > 0 ? (caDetail / caEncaisse) * 100 : null;
+
     res.json({
-      ca_ttc: a.ca_ttc,
-      ca_ht: a.ca_ht,
-      tva_collectee: a.tva_collectee,
-      poids_kg: a.poids_kg,
+      // ── Encaissé (source : vak_tickets — la vérité SumUp) ──
+      ca_ttc: b.ca_ttc,
+      ca_ht: b.ca_ht,
+      tva_collectee: b.tva_collectee,
       nb_tickets: nbTickets,
       nb_articles: b.total_articles,
       panier_moyen: b.panier_moyen,
       ipt: nbTickets > 0 ? b.total_articles / nbTickets : 0,
-      prix_moyen_kg: a.poids_kg > 0 ? a.ca_ttc / a.poids_kg : 0,
+      // ── Détail produits (source : vak_ventes — peut être incomplet) ──
+      poids_kg: a.poids_kg,
+      ca_detail_ttc: caDetail,
+      couverture_detail_pct: couverture,
+      ca_non_detaille: Math.round((caEncaisse - caDetail) * 100) / 100,
+      // Vrai prix au kilo : le chiffre d'affaires des articles VENDUS AU POIDS
+      // divisé par ces kilos. Rapporter le CA encaissé (qui contient les sacs,
+      // vendus à la pièce, et les ventes non détaillées) à un poids issu des
+      // seules lignes mélangerait deux périmètres.
+      prix_moyen_kg: a.poids_kg > 0 ? a.ca_lignes_au_poids / a.poids_kg : 0,
       ca_textile_vrac: a.ca_textile,
       ca_chaussures: a.ca_chaussures,
       ca_consommables: a.ca_sacs,
       nb_sacs: a.nb_sacs,
-      part_chaussures_ca: a.ca_ttc > 0 ? (a.ca_chaussures / a.ca_ttc) * 100 : 0,
-      part_textile_ca: a.ca_ttc > 0 ? (a.ca_textile / a.ca_ttc) * 100 : 0,
+      // Parts exprimées sur le DÉTAIL : leur somme fait 100 % quel que soit
+      // l'état de la couverture (sur le CA encaissé, elles sembleraient fausses).
+      part_chaussures_ca: caDetail > 0 ? (a.ca_chaussures / caDetail) * 100 : 0,
+      part_textile_ca: caDetail > 0 ? (a.ca_textile / caDetail) * 100 : 0,
       ca_especes: b.ca_especes,
       ca_cb: b.ca_cb,
       nb_especes: b.nb_especes,
       nb_cb: b.nb_cb,
       taux_cb_volume: nbTickets > 0 ? (b.nb_cb / nbTickets) * 100 : 0,
-      taux_cb_ca: a.ca_ttc > 0 ? (b.ca_cb / a.ca_ttc) * 100 : 0,
+      // Numérateur ET dénominateur au niveau TICKET : ce taux mélangeait les
+      // deux niveaux et surestimait la part carte d'autant que le détail
+      // manquait (~9 % sur la VAK d'août 2026).
+      taux_cb_ca: caEncaisse > 0 ? (b.ca_cb / caEncaisse) * 100 : 0,
       remise_totale: a.remise_totale,
       // Taux d'écoulement = kg vendus (net des remboursements) / kg approvisionnés
       // (saisie manuelle sur la session). null si l'approvisionnement n'est pas renseigné.

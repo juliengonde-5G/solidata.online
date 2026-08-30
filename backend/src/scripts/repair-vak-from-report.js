@@ -272,6 +272,12 @@ function referencesDe(ref) {
 async function chercherTickets(client, ref) {
   const refs = referencesDe(ref);
   if (refs.length === 0) return [];
+  // La référence COMPLÈTE est cherchée en plus de ses parties : une passe
+  // antérieure a pu créer un ticket qui la porte telle quelle (cas d'un
+  // paiement scindé absent de la base au moment de cette passe). Sans elle, la
+  // relance ne retrouverait pas son propre ticket et tenterait de le recréer —
+  // le script perdrait son idempotence sur une contrainte d'unicité.
+  const cles = refs.length > 1 ? refs.concat([String(ref).trim()]) : refs;
   const r = await client.query(`
     SELECT t.id, t.vak_id, t.batch_id, t.source, t.ref_transaction, t.sumup_transaction_id,
            t.date_ticket, t.moyen_paiement, t.compte, t.nb_articles,
@@ -280,7 +286,7 @@ async function chercherTickets(client, ref) {
     FROM vak_tickets t
     WHERE t.ref_transaction = ANY($1) OR t.sumup_transaction_id = ANY($1)
     ORDER BY t.id
-  `, [refs]);
+  `, [cles]);
   return r.rows;
 }
 
@@ -411,12 +417,17 @@ async function main() {
       // encaissement réel. On laisse donc ces ventes en l'état, et on le DIT :
       // un script de réparation ne doit jamais dégrader ce qu'il ne sait pas
       // réparer sans inventer une répartition.
-      if (referencesDe(tx.ref).length > 1 && trouves.length > 0) {
+      const refComplete = String(tx.ref).trim();
+      const parMoitie = trouves.filter((t) => t.ref_transaction !== refComplete
+        && t.sumup_transaction_id !== refComplete);
+      if (referencesDe(tx.ref).length > 1 && parMoitie.length > 0) {
         stats.scindes_ignores++;
         stats.refs_scindees.push(tx.ref);
         continue;
       }
 
+      // Sinon : soit une référence simple, soit un ticket combiné créé par une
+      // passe antérieure de ce même script — dans les deux cas on le met à jour.
       const existant = trouves[0] || null;
       const vakId = existant
         ? existant.vak_id

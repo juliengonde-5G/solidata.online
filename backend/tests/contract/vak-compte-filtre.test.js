@@ -72,11 +72,14 @@ describe('CONTRAT — le prédicat de périmètre par caisse est présent sur to
   test('GET /api/vak/:id/analytics/kpis — lignes ET tickets filtrés, forme de réponse intacte', async () => {
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
+      // Depuis la 2.46.3, les deux niveaux sont NOMMÉS distinctement : les
+      // lignes portent le DÉTAIL (`ca_detail_ttc`), les tickets portent
+      // l'ENCAISSEMENT (`ca_ttc`). Le CA affiché vient du second.
       if (/FROM vak_ventes/.test(s)) {
-        return Promise.resolve({ rows: [{ ca_ttc: 20.95, ca_ht: 17.46, tva_collectee: 3.49, nb_lignes: 3, poids_kg: 12.17, ca_textile: 15.86, ca_chaussures: 4.79, ca_sacs: 0.3, nb_sacs: 2, remise_totale: 0 }] });
+        return Promise.resolve({ rows: [{ ca_detail_ttc: 20.95, nb_lignes: 3, ca_lignes_au_poids: 20.65, poids_kg: 12.17, ca_textile: 15.86, ca_chaussures: 4.79, ca_sacs: 0.3, nb_sacs: 2, remise_totale: 0 }] });
       }
       if (/FROM vak_tickets/.test(s)) {
-        return Promise.resolve({ rows: [{ nb_tickets: 1, panier_moyen: 20.95, total_articles: 3, ca_especes: 0, ca_cb: 20.95, nb_especes: 0, nb_cb: 1 }] });
+        return Promise.resolve({ rows: [{ nb_tickets: 1, ca_ttc: 20.95, ca_ht: 17.46, tva_collectee: 3.49, panier_moyen: 20.95, total_articles: 3, ca_especes: 0, ca_cb: 20.95, nb_especes: 0, nb_cb: 1 }] });
       }
       return Promise.resolve({ rows: [{ kg_approvisionnes: null }] });
     });
@@ -85,7 +88,9 @@ describe('CONTRAT — le prédicat de périmètre par caisse est présent sur to
     // Forme consommée par VakPerformance.jsx
     expect(res.body.ca_ttc).toBeCloseTo(20.95, 2);
     expect(res.body.poids_kg).toBeCloseTo(12.17, 3);
-    expect(res.body.prix_moyen_kg).toBeCloseTo(20.95 / 12.17, 3);
+    // Le prix au kilo porte sur les articles vendus AU POIDS, pas sur tout
+    // l'encaissement (qui contient aussi les sacs, vendus à la pièce).
+    expect(res.body.prix_moyen_kg).toBeCloseTo(20.65 / 12.17, 3);
     expect(res.body.taux_ecoulement).toBeNull();
     const qs = requetesTablesVak();
     expect(qs.length).toBeGreaterThanOrEqual(2); // vak_ventes + vak_tickets
@@ -189,5 +194,109 @@ describe('CONTRAT — compte_caisse configurable par session (VakSessions.jsx)',
     const upd = mockQuery.mock.calls.find((c) => /UPDATE vaks SET/.test(String(c[0])));
     expect(String(upd[0])).toContain('compte_caisse = $8');
     expect(upd[1][7]).toBeNull(); // '' → null (pas de filtre)
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTRAT — les deux pages VAK alignées sur la donnée SumUp (2.46.3)
+// ───────────────────────────────────────────────────────────────────────────
+// « Performance VAK » sommait le CA au niveau LIGNE et le panier moyen au
+// niveau TICKET : la page se contredisait elle-même (13 033 € affichés en
+// « CA TTC » pendant que le panier moyen était calculé sur 14 243 €) et
+// contredisait « Vue par jour ».
+//
+// RÈGLE VERROUILLÉE ICI : le chiffre d'affaires vient du TICKET — c'est ce que
+// SumUp a réellement encaissé. Les lignes ne servent qu'à répartir, et la part
+// du CA qu'elles couvrent est EXPOSÉE au lieu d'être devinée par l'écart entre
+// deux cartes.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('CONTRAT — /analytics/kpis : le CA vient du TICKET, pas des lignes', () => {
+  /** Répond aux deux requêtes de l'endpoint : lignes (détail) puis tickets. */
+  function servirKpis({ caDetail, caTickets, poids = 100, nbTickets = 10, caCb = 0 }) {
+    mockQuery.mockImplementation((sql) => {
+      const q = String(sql).replace(/\s+/g, ' ');
+      if (/FROM vak_ventes vv/.test(q)) {
+        return Promise.resolve({ rows: [{
+          ca_detail_ttc: caDetail, nb_lignes: 5, ca_lignes_au_poids: caDetail,
+          poids_kg: poids, ca_textile: caDetail * 0.9, ca_chaussures: caDetail * 0.1,
+          ca_sacs: 0, nb_sacs: 0, remise_totale: 0,
+        }] });
+      }
+      if (/FROM vak_tickets t/.test(q)) {
+        return Promise.resolve({ rows: [{
+          nb_tickets: nbTickets, ca_ttc: caTickets, ca_ht: caTickets / 1.2,
+          tva_collectee: caTickets - caTickets / 1.2,
+          // AVG sur zéro ligne renvoie NULL en SQL, ramené à 0 par COALESCE :
+          // le mock doit reproduire ce contrat, pas produire un 0/0.
+          panier_moyen: nbTickets > 0 ? caTickets / nbTickets : 0, total_articles: 20,
+          ca_especes: caTickets - caCb, ca_cb: caCb, nb_especes: 2, nb_cb: 8,
+        }] });
+      }
+      return Promise.resolve({ rows: [{ kg_approvisionnes: null }] });
+    });
+  }
+  const lire = async () => (await request(app).get('/api/vak/1/analytics/kpis')
+    .set('Authorization', `Bearer ${adminToken}`)).body;
+
+  test('« CA TTC » est l’encaissement, PAS la somme des lignes', async () => {
+    servirKpis({ caDetail: 13033, caTickets: 13760 });
+    const k = await lire();
+    expect(k.ca_ttc).toBe(13760);
+    expect(k.ca_detail_ttc).toBe(13033);
+  });
+
+  test('le panier moyen est cohérent avec le CA affiché (fin de la contradiction)', async () => {
+    servirKpis({ caDetail: 13033, caTickets: 13760, nbTickets: 10 });
+    const k = await lire();
+    // C'était LE symptôme : panier × tickets ne retombait pas sur le CA affiché.
+    expect(k.panier_moyen * k.nb_tickets).toBeCloseTo(k.ca_ttc, 2);
+  });
+
+  test('la couverture du détail est exposée, jamais devinée', async () => {
+    servirKpis({ caDetail: 13033, caTickets: 13760 });
+    const k = await lire();
+    expect(k.couverture_detail_pct).toBeCloseTo(94.72, 1);
+    expect(k.ca_non_detaille).toBeCloseTo(727, 2);
+  });
+
+  test('détail complet → couverture 100 %, aucun écart', async () => {
+    servirKpis({ caDetail: 13760, caTickets: 13760 });
+    const k = await lire();
+    expect(k.couverture_detail_pct).toBeCloseTo(100, 5);
+    expect(k.ca_non_detaille).toBe(0);
+  });
+
+  test('les parts de segments portent sur le DÉTAIL et somment à 100 %', async () => {
+    // Rapportées au CA encaissé, elles paraîtraient fausses dès que le détail
+    // est incomplet — ce qui se lirait comme une erreur de calcul.
+    servirKpis({ caDetail: 1000, caTickets: 2000 });
+    const k = await lire();
+    expect(k.part_textile_ca + k.part_chaussures_ca).toBeCloseTo(100, 5);
+  });
+
+  test('« Part CB » ne mélange plus les deux niveaux', async () => {
+    servirKpis({ caDetail: 1000, caTickets: 2000, caCb: 1000 });
+    const k = await lire();
+    // Numérateur et dénominateur au niveau ticket : 1000/2000 = 50 %.
+    // L'ancien calcul divisait par le CA des lignes et annonçait 100 %.
+    expect(k.taux_cb_ca).toBeCloseTo(50, 5);
+  });
+
+  test('le prix au kilo porte sur les articles vendus AU POIDS', async () => {
+    servirKpis({ caDetail: 600, caTickets: 5000, poids: 100 });
+    const k = await lire();
+    // 600 € de lignes au poids ÷ 100 kg = 6 €/kg — et non 5000/100 = 50 €/kg,
+    // qui rapporterait l'encaissement entier (sacs et ventes non détaillées
+    // compris) à un poids issu des seules lignes.
+    expect(k.prix_moyen_kg).toBeCloseTo(6, 5);
+  });
+
+  test('VAK sans aucune vente : aucun NaN, aucune division par zéro', async () => {
+    servirKpis({ caDetail: 0, caTickets: 0, poids: 0, nbTickets: 0 });
+    const k = await lire();
+    expect(k.ca_ttc).toBe(0);
+    expect(k.couverture_detail_pct).toBeNull();
+    [k.prix_moyen_kg, k.panier_moyen, k.taux_cb_ca, k.part_textile_ca, k.ipt]
+      .forEach((v) => expect(Number.isFinite(v)).toBe(true));
   });
 });
