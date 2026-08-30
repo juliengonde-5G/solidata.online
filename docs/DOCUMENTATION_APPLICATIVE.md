@@ -125,40 +125,57 @@ Le dashboard centralise les indicateurs clés :
 - Compteur automatique : recrutés vs objectif
 - Taux de remplissage visuel
 
-#### 2.2.3 Matrice PCM (Process Communication Model)
-**Route** : `/pcm` | **Rôles** : ADMIN, RH
+#### 2.2.3 Tests PCM (Process Communication Model)
+**Route** : `/pcm` — **console de passation** | **Rôles** : ADMIN, RH, PCM (praticien)
+**Résultats** : onglet PCM du dossier candidat (`Candidates.jsx`) et onglet Profil PCM de la fiche collaborateur (`Employees.jsx`) — ADMIN/RH
 **Fichier** : `frontend/src/pages/PersonalityMatrix.jsx`
 **Test** : `frontend/src/pages/PCMTest.jsx`
 **API** : `backend/src/routes/pcm.js` (40 Ko)
 
-**Fonctionnalités** :
-- Test interactif de personnalité (**20 questions**, 4 choix par question)
-- **6 types** : Analyseur, Persévérant, Empathique, Imagineur, Énergiseur, Promoteur
-- **Scoring pondéré** sur 5 catégories : perception, style de management, canal de communication, motivation, stress
-- **Base** (type fondamental, stable) et **Phase** (type actif, peut évoluer) identifiés automatiquement
-  - Base = type dominant dans les catégories perception + style management + canal communication (poids total 17.5)
-  - Phase = type dominant dans les catégories motivation + stress (poids total 25)
-- **Immeuble PCM** : visualisation en bâtiment (barres horizontales), Base toujours à l'étage 1 (fondation)
-- **Profil graphique radar** : 6 axes avec scores normalisés 0-100 %
-- **Alertes RPS** : détection automatique de risques psychosociaux si le score stress de la Phase dépasse 75 %
-- **Guide Manager** : comportements recommandés (DO) et à éviter (DON'T) par type de base
-- **Accessibilité FALC** : descriptions en Facile à Lire et à Comprendre pour chaque type
-- **Export PDF A4** : deux exports disponibles depuis la page profil :
-  - *Export résultats* : page de synthèse avec immeuble, base/phase, comportements, guide manager, niveaux de stress
-  - *Fiche technique* : tableau des scores bruts + détail des 20 réponses groupées par catégorie
-- **Chiffrement** : données sensibles chiffrées AES-256 en base (profils PCM)
-- Rapports chiffrés stockés en base (table `pcm_reports`)
+> **Corrigé en 2.43.0** — un audit du module (`rapports/pcm-insertion-2026-08-29/01-audit-module-pcm.md`) a établi que la description ci-dessous était fausse sur presque tous les points chiffrés (nombre d'options, catégories, poids, endpoints inexistants). Les chiffres qui suivent sont mesurés sur le moteur réel (`backend/src/routes/pcm.js`).
 
-**API PCM** :
-| Méthode | Endpoint | Description |
-|---------|----------|-------------|
-| GET | `/api/pcm/questionnaire` | Retourne les 20 questions |
-| GET | `/api/pcm/types` | Référentiel des 6 types PCM |
-| GET | `/api/pcm/types/:typeKey` | Détail d'un type |
-| POST | `/api/pcm/evaluate` | Évaluer les réponses et générer le profil |
-| GET | `/api/pcm/profiles/:candidateId` | Profil PCM d'un candidat |
-| GET | `/api/pcm/profiles/:candidateId/answers` | Réponses brutes enrichies (texte question, catégorie, libellé réponse) |
-| DELETE | `/api/pcm/:candidateId` | Supprimer le profil PCM |
+**Fonctionnalités** :
+- Test interactif de personnalité (**20 questions**, **6 options** chacune — une par type, choix unique), passation en mode **autonome** (lien candidat envoyé hors application, hors authentification) ou **accompagnée** par le praticien PCM
+- **6 types** : Analyseur, Persévérant, Empathique, Imagineur, Énergiseur, Promoteur (nomenclature 2024 ; anciens noms conservés en repère — Travaillomane, Persévérant, Empathique, Rêveur, Rebelle, Promoteur)
+- **Scoring pondéré sur 8 catégories** (et non 5), réparties en **deux jeux de questions disjoints** :
+  - **Base** (fondation, stable) : perception (Q1-3), points forts (Q4), relation (Q5), communication (Q11-13) — **7 questions, 23 points maximum**
+  - **Phase** (état motivationnel du moment) : motivation (Q6, Q9), stress (Q7-8, Q10), besoin (Q14-17), situation (Q18-20) — **13 questions, 34,5 points maximum**
+- **Immeuble PCM** : visualisation en bâtiment (barres horizontales), Base toujours à l'étage 1 (fondation) — **il n'existe pas de représentation en radar**
+- **Indicateur de cohérence des réponses** (2.43.0 — remplace l'ancien libellé « Alerte Risques Psychosociaux ») : signale que les réponses de la catégorie *stress* désignent fortement le type de Phase. C'est une **mesure de cohérence interne du questionnaire, pas un indicateur de santé ni de risque psychosocial** — une mise en garde l'accompagne systématiquement, à l'écran comme sur les deux exports PDF.
+- **Encart de méthode obligatoire** (2.43.0), affiché avant la passation (écran candidat), sur la fiche profil et sur les deux PDF : rappelle que le questionnaire est un outil interne d'aide au dialogue inspiré du Process Communication Model, **non validé scientifiquement**, et qu'il ne doit **jamais fonder seul une décision de recrutement ou d'orientation**.
+- **Guide Manager** : comportements recommandés (DO) et à éviter (DON'T), issus de la Base
+- **Accessibilité FALC** : descriptions en Facile à Lire et à Comprendre pour chaque type
+- **Le résultat se lit dans la fiche de la personne, et nulle part ailleurs** (2.43.0, demande client) : la page `/pcm` est devenue une **console de passation** — désigner la personne, lancer le test, transmettre le lien, suivre l'avancement (aucun test / lien envoyé, en attente / en cours / profil disponible) — et son référentiel des 6 types. Elle n'affiche plus **aucun résultat, pour aucun rôle** (l'ancien onglet « Profils » et la fiche détaillée ont été retirés). Le profil se consulte à un seul endroit : l'onglet **PCM du dossier candidat** et l'onglet **Profil PCM de la fiche collaborateur**, deux écrans ADMIN/RH.
+- **Export PDF A4** : deux exports depuis l'onglet PCM du dossier candidat (ils ont suivi les résultats ; module partagé `frontend/src/utils/pcm-pdf.js`), tous deux enrichis de l'encart de méthode :
+  - *Fiche PDF* : synthèse avec immeuble, base/phase, comportements, guide manager, niveaux de stress
+  - *Export technique* : tableau des scores bruts + détail des 20 réponses groupées par catégorie (les réponses sont chargées à la demande ; si elles ne le sont pas, la fiche est éditée sans elles et le dit)
+- **Chiffrement** : le rapport d'analyse est chiffré AES-256-GCM en base (`pcm_reports.encrypted_report`) ; les 20 réponses brutes (`pcm_answers`), elles, **ne sont volontairement pas chiffrées** — elles permettent de recalculer un rapport si la clé de chiffrement venait à changer.
+- **Journalisation** (2.43.0) : la création d'une session, la soumission des réponses et **chaque consultation d'un rapport** sont désormais tracées (journal d'activité + `rgpd_audit_log`, action `PCM_RAPPORT_CONSULTATION`) — ce module était jusqu'ici le seul du domaine RH à ne rien journaliser. Une entrée dédiée du registre RGPD (« Recrutement — évaluation de personnalité (PCM) ») couvre ce traitement.
+- **Double authentification obligatoire** (2.43.0) pour accéder à ce module — voir § « Double authentification (2FA/TOTP) ».
+
+**Rôles** :
+- **ADMIN et RH** : tout — créer des sessions, consulter les profils, les exporter.
+- **PCM (Praticien)** — périmètre resserré en 2.43.0 (arbitrage client) : il **fait passer** le test (désigne la personne, crée la session, transmet le lien) et suit l'**avancement**, **sans accès au reste du dossier de recrutement** (la liste de candidats qui lui est ouverte ne renvoie ni CV, ni compte rendu d'entretien, ni coordonnées) **ni aux RÉSULTATS** : ni type de base, ni phase, ni immeuble, ni scores, ni réponses, ni rapport. Les trois routes de résultats lui répondent **403**, et `POST /submit` lui accuse réception **sans** renvoyer le profil calculé — sans quoi il suffirait de soumettre les réponses pour obtenir le rapport.
+- **MANAGER** : lecture du seul référentiel (questionnaire, types de personnalité), jamais des profils individuels.
+- **Le candidat** garde sa propre restitution en fin de test (écran de passation) : c'est son résultat, la règle ci-dessus porte sur les agents de la structure.
+
+**API PCM** (`backend/src/routes/pcm.js`) :
+| Méthode | Endpoint | Rôles | Description |
+|---------|----------|-------|-------------|
+| GET | `/api/pcm/questionnaire` | ADMIN, RH, MANAGER, PCM | Les 20 questions (options mélangées par question) |
+| GET | `/api/pcm/types` | ADMIN, RH, MANAGER, PCM | Référentiel des 6 types |
+| GET | `/api/pcm/types/:typeKey` | ADMIN, RH, MANAGER, PCM | Détail d'un type |
+| POST | `/api/pcm/sessions` | ADMIN, RH, PCM | Créer une session de test pour un candidat |
+| GET | `/api/pcm/candidats` | ADMIN, RH, PCM | Liste minimale des candidats (identité, poste visé, état du test) |
+| GET | `/api/pcm/sessions/:token` | public (jeton de session) | Accès du candidat en mode autonome |
+| POST | `/api/pcm/submit` | jeton de session, ou ADMIN/RH/MANAGER/PCM | Soumission des réponses (18 minimum sur 20) et calcul du profil — **un appelant PCM authentifié reçoit un accusé de réception sans le profil** (2.43.0) |
+| GET | `/api/pcm/profiles` | **ADMIN, RH** | Liste de tous les profils |
+| GET | `/api/pcm/profiles/:candidateId` | **ADMIN, RH** | Profil déchiffré d'un candidat (consultation journalisée) |
+| GET | `/api/pcm/profiles/:candidateId/answers` | **ADMIN, RH** | Réponses brutes enrichies |
+
+Il n'existe **aucune route `POST /api/pcm/evaluate`** ni **`DELETE /api/pcm/:candidateId`** (contrairement à ce qu'indiquait cette page) — un profil PCM n'est supprimé qu'à l'anonymisation du candidat, ou du salarié auquel il est lié (purge intégrale des tables `pcm_*` correspondantes).
+
+**Trois lignes en gras dans le tableau ci-dessus (2.43.0)** : ce sont les trois portes d'accès au résultat, et elles sont fermées au rôle PCM. Le contrat `backend/tests/contract/pcm-praticien-contract.test.js` les verrouille (403 sur les trois, aucune requête envoyée en base sur un refus, aucune trace de consultation écrite pour une consultation qui n'a pas eu lieu) — et vérifie en regard que ce que le praticien doit pouvoir faire fonctionne toujours : `POST /sessions`, `GET /candidats` (état du test, jamais son résultat), référentiel des types.
 
 ### 2.3 Gestion d'Équipe
 
@@ -198,6 +215,7 @@ Le dashboard centralise les indicateurs clés :
 - **Grilles de compétences métier** (lot 8, EXG-26/27) : référentiel **administrable par filière** (`insertion_competence_referentiels` — tri/collecte/logistique/boutique/transverse, seed 34 items, `GET/POST/PUT/DELETE /competence-referentiels` ADMIN, éditable dans AdminInsertion) ; évaluations périodiques notées /10 par item ou **« N/E » exclu de la moyenne** (`insertion_competence_evaluations` + `insertion_competence_scores`, snapshot rubrique/item, statut brouillon/validé, **triple validation salarié/ETI/CIP** horodatée JSONB) via `GET/POST/PUT /competences[/:id]` (saisie ADMIN/RH/MANAGER, suppression ADMIN/RH) ; composant `CompetencesETI` (onglet « Compétences », gros boutons 0-10, moyenne live, historique + delta). **Accès non cloisonné par équipe** (données non sensibles) — documenté.
 - **Entretien de période d'essai** (lot 8, EXG-30/PROP-03) : type `periode_essai` (6e type de `milestone_type`), `periode_essai_form` JSONB + `periode_essai_decision` (`confirme`/`rompu`/`a_revoir`), **auto-créé à la liaison candidat→collaborateur** (échéance = début de contrat + `insertion.periode_essai_jours`, défaut 30 ; idempotent, un par parcours ; création manuelle possible sans verrou d'unicité) ; `EntretienForm` dédié (décision + avis, hors freins/objectifs) ; décision « rompu » → parcours clos (statut `abandon` + date de sortie).
 - **Check-list d'embauche** (lot 8, EXG-30/PROP-05, `insertion_checklist_embauche`) : une par salarié, 7 étapes JSONB (promesse, contrat, mutuelle, charte, livret, règlement, formation ; fait/date/responsable) via `GET/PUT /checklist-embauche/:employeeId` (upsert fusion, écriture ADMIN/RH) ; **pré-cochée depuis `recruitment_documents`** à la liaison ; composant `ChecklistEmbauche` (bloc « Accueil / intégration » de l'onglet Synthèse, barre de complétude).
+- **Note de profil initial** (2.43.0, `insertion_notes_profil`) : analyse IA **systématique** du dossier de recrutement (CV, entretien structuré, mises en situation, profil PCM le cas échéant), générée automatiquement **à la liaison candidat→collaborateur** (setting `insertion.note_profil_auto`, activé par défaut ; régénérable à la demande) et remise à la CIP **en préambule du diagnostic d'accueil** — onglet Synthèse, entre la check-list d'embauche et le bandeau « Commencer le diagnostic » — ainsi qu'en lecture sur la fiche salarié. Le dossier est **pseudonymisé** avant l'appel au sous-traitant IA (textes libres nettoyés, date de naissance réduite à une tranche d'âge, aucun détail judiciaire transmis). **ADMIN/RH strictement** (jamais l'encadrement technique — la note croise le profil PCM). Contenu : synthèse, **expression de la personne** (verbatims en ses mots, affichés en tout premier après la synthèse — la seule section où elle est sujet et non objet d'analyse), freins pressentis avec leur **provenance** (CV / entretien / mise en situation / PCM) et un niveau **suggéré, jamais imposé** (rien n'est écrit automatiquement dans le diagnostic — le CIP confirme ou corrige), compétences observées, points de vigilance formulés comme des questions à poser, questions suggérées pour le premier entretien, et un bloc **« Repères de communication (PCM) »** placé en dernier, encadré, doublement chapeauté (« ce que ce bloc est / n'est pas ») et clos par un rappel que ce sont des hypothèses de travail que l'expérience peut contredire — jamais de vocabulaire clinique, jamais de pronostic. Les sources manquantes sont **nommées explicitement**, jamais comblées. Bouton « J'en ai pris connaissance — préparer le diagnostic » (idempotent, journalisé) et export PDF A4. La génération et **chaque lecture sont journalisées** dans `rgpd_audit_log` ; le contenu est **chiffré** en base et purgé intégralement à l'anonymisation. Filet de rattrapage : job planifié `genererNotesProfilManquantes` (salariés liés depuis moins de 30 jours sans note, 5 par passage).
 - **9 freins périphériques** (registre unique `freins-registry.js`) : mobilité, santé (art. 9 — commentaires chiffrés AES-256), finances, famille, linguistique, administratif, numérique, **logement**, **judiciaire** (art. 10 — niveau + impact organisationnel factuel uniquement, chiffré, jamais visible d'un MANAGER, jamais suggéré automatiquement) — « non évalué » honnête (jamais compté à 1), radar 9 axes.
 - **Objectifs individualisés** (`insertion_objectifs`) : objectifs + sous-objectifs (1 niveau), origine salarié/CIP, échéance + date butoir, 6 statuts.
 - **Actions CIP** : rattachables à un entretien, un objectif et/ou un **partenaire** (référentiel `insertion_partenaires`, 16 seedés : CAF, France Travail, SPIP…), criticité, durée passée ; bouton « + Action » global (saisie ≤ 30 s, échéance par défaut paramétrée) ; tableau transversal `/insertion/actions` (filtres, retards, export).
@@ -486,9 +504,12 @@ annulee   annulee   annulee     annulee
 
 ### 2.9 Administration
 
+#### 2.9.1 Utilisateurs, rôles & référentiels
+
 | Module | Route | Description |
 |--------|-------|-------------|
-| Utilisateurs | `/users` | CRUD comptes, reset mot de passe |
+| Utilisateurs | `/users` | CRUD comptes, reset mot de passe, réinitialisation de la double authentification |
+| Habilitations | `/admin/permissions` | Matrice d'accès par module et par rôle ; création de rôles personnalisés par duplication |
 | Véhicules | `/vehicles` | Flotte, maintenance, disponibilité |
 | Configuration | `/settings` | Paramètres système |
 | Référentiels | `/referentiels` | Données de base (postes, catégories, etc.) |
@@ -496,6 +517,19 @@ annulee   annulee   annulee     annulee
 | RGPD | `/rgpd` | Registre, export, anonymisation, audit |
 | Gestion CAV | `/cav-management` | Administration containers |
 | Base de données | `/database` | Outils maintenance DB |
+
+#### 2.9.2 Double authentification (2FA / TOTP)
+
+**Depuis la version 2.43.0**, les comptes dont le rôle donne accès à des données personnelles sensibles doivent activer une **double authentification** (TOTP, RFC 6238 — même principe qu'une application comme Google Authenticator, Microsoft Authenticator ou FreeOTP).
+
+- **Qui est concerné** : la liste des rôles soumis est paramétrable (clé `securite.mfa_roles` dans `settings`), avec pour **défaut** `ADMIN`, `RH` et `DPO` (les CIP sont des comptes RH). Le rôle **`PCM` (Praticien) n'est PAS soumis** — il fait passer des tests de personnalité sans accéder au dossier de recrutement ni au parcours d'insertion ; le routeur `/api/pcm` reste néanmoins gardé, un ADMIN ou un RH qui l'emprunte étant, lui, soumis. Un rôle personnalisé (créé par duplication dans `/admin/permissions`) est soumis si son **rôle de base** l'est — dupliquer « RH » ne permet donc pas d'y échapper. **MANAGER n'est pas soumis** (ses surfaces sensibles restent masquées côté serveur, sans double authentification). Les chauffeurs (identité = véhicule) et les tâches planifiées ne sont jamais concernés.
+- **Enrôlement, bloquant** : à sa première connexion (après, le cas échéant, l'écran de changement de mot de passe obligatoire), un compte soumis voit un écran plein cadre en trois temps :
+  1. explication et liste des applications compatibles, bouton **Commencer** ;
+  2. QR code à scanner avec l'application (ou saisie manuelle de la clé secrète affichée), puis saisie du code à 6 chiffres qu'elle produit, bouton **Activer la double authentification** ;
+  3. affichage — **une seule fois** — de **8 codes de secours** au format `XXXXX-XXXXX` (boutons Copier / Imprimer), avec la case **« J'ai conservé ces codes en lieu sûr »** à cocher pour continuer.
+- **À chaque connexion suivante** : identifiant et mot de passe, puis un second écran demande le code à 6 chiffres de l'application (ou, à défaut, un code de secours à usage unique). 8 échecs de code en 15 minutes verrouillent temporairement le compte pour 15 minutes (comme pour le mot de passe).
+- **Téléphone perdu, changé ou codes de secours épuisés** : la personne prévient un administrateur, qui réinitialise sa double authentification depuis la fiche `/users` (bouton **Réinitialiser la double authentification**) — l'enrôlement repart de zéro à la connexion suivante.
+- Le secret de l'application est **chiffré** en base (AES-256-GCM) et les codes de secours ne sont jamais conservés en clair (seule leur empreinte l'est) — voir `DOCUMENTATION_TECHNIQUE.md` pour le détail du flux et le chiffrement.
 
 ---
 
@@ -589,11 +623,14 @@ POST /api/auth/logout        → { message }
 | | POST | `/api/candidates/cv/upload` | Upload CV (PDF/DOC) |
 | | GET | `/api/candidates/cv/download/:id` | Télécharger CV |
 | | GET | `/api/candidates/recruitment-plan` | Plan recrutement |
-| PCM | POST | `/api/pcm/sessions` | Nouvelle session test |
-| | POST | `/api/pcm/sessions/:id/answers` | Soumettre réponses |
-| | GET | `/api/pcm/sessions/:id/report` | Rapport profil |
+| PCM | POST | `/api/pcm/sessions` | Nouvelle session test *(corrigé 2.43.0 — voir § 2.2.3 pour le détail réel des routes)* |
+| | POST | `/api/pcm/submit` | Soumettre les réponses et calculer le profil |
+| | GET | `/api/pcm/profiles/:candidateId` | Profil déchiffré d'un candidat (consultation journalisée) |
+| Double authentification | POST | `/api/auth/mfa/verify`, `/api/auth/mfa/setup`, `/api/auth/mfa/activate` | Défi de connexion, enrôlement — voir § 2.9.2 |
+| | PUT | `/api/users/:id/reset-mfa` | Réinitialisation par un administrateur |
 | Employés | GET/POST/PUT/DELETE | `/api/employees` | CRUD collaborateurs |
 | Insertion | GET/POST/PUT | `/api/insertion` | Parcours CDDI |
+| Note de profil CIP | GET/POST | `/api/insertion/notes-profil/:employeeId`, `/api/insertion/ia/note-profil/:employeeId`, `/api/insertion/notes-profil/:employeeId/communiquer` | Lecture, génération et prise de connaissance de la note de profil initial — voir § 2.3.4 |
 | Tournées | GET/POST/PUT | `/api/tours` | Gestion tournées |
 | CAV | GET/POST/PUT | `/api/cav` | Containers |
 | Stock | GET/POST | `/api/stock` | Mouvements stock |

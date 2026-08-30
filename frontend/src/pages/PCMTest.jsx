@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Check,
 } from 'lucide-react';
+import { PCM_MENTION_METHODE, PCM_LIBELLE_ECART, PCM_BADGE_PEU_MARQUE } from '../utils/pcm';
 
 const TYPE_LABELS = {
   analyseur: 'Analyseur',
@@ -245,6 +246,15 @@ export default function PCMTest() {
               </ul>
             </div>
 
+            {/* Encart de méthode (audit PCM 2.43.0, R2) — AVANT de commencer,
+                comme le fait le parcours de formation de référence. La personne
+                qui répond doit savoir ce qu'est l'outil auquel elle répond :
+                c'est ici que la mise en garde a le plus de valeur. */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-6">
+              <p className="text-xs font-bold text-slate-700 mb-1">Ce que ce questionnaire est — et ce qu'il n'est pas</p>
+              <p className="text-xs text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
+            </div>
+
             <button
               onClick={() => setPhase('test')}
               className="w-full py-3.5 rounded-xl text-white font-bold text-base bg-teal-600 hover:bg-teal-700 shadow-teal-glow transition-all active:scale-[0.98] inline-flex items-center justify-center gap-2"
@@ -307,14 +317,23 @@ export default function PCMTest() {
                   État actuel (phase) : <span className="font-bold">{TYPE_LABELS[phaseType]}</span>
                 </p>
               )}
+              {/* « Fiabilité » renommé (audit PCM 2.43.0, R3) : ce nombre est
+                  l'écart entre le type arrivé en tête et le suivant, pas une
+                  garantie de justesse — et il était montré tel quel au
+                  candidat. Badge ambre quand le profil ne tranche pas. */}
               {baseIndetermine && (
-                <p className="text-xs text-amber-600 mt-3 font-semibold">
-                  Résultat peu marqué — des réponses complémentaires seront utiles.
+                <p className="mt-3">
+                  <span className="inline-block px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+                    {PCM_BADGE_PEU_MARQUE}
+                  </span>
+                  <span className="block text-xs text-slate-500 mt-1">
+                    Plusieurs types vous correspondent presque autant — nous en reparlerons ensemble.
+                  </span>
                 </p>
               )}
               {!baseIndetermine && baseConfidence > 0 && (
                 <p className="text-xs text-slate-400 mt-3">
-                  Fiabilité base {baseConfidence}% · phase {phaseConfidence}%
+                  {PCM_LIBELLE_ECART} — base {baseConfidence}% · phase {phaseConfidence}%
                 </p>
               )}
             </div>

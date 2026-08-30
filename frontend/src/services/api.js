@@ -45,6 +45,25 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Double authentification requise (chantier 2.43.0) : le jeton porté est
+    // valide mais n'a jamais franchi le défi TOTP (jeton hérité d'avant le
+    // déploiement, ou MFA désactivée/réinitialisée entre-temps par un admin).
+    // Contrairement à TOKEN_EXPIRED, aucun rafraîchissement silencieux ne
+    // peut résoudre ce cas — seule une reconnexion complète (qui repose le
+    // défi MFA) le peut. On purge et on renvoie vers /login, sans tenter de
+    // refresh. (Les appels faits pendant l'écran d'enrôlement obligatoire lui-
+    // même — /permissions/my-modules notamment — sont évités côté
+    // AuthContext tant que l'enrôlement n'est pas terminé, précisément pour
+    // ne jamais déclencher ce cas en pleine connexion qui vient de réussir.)
+    if (error.response?.status === 403 && error.response?.data?.code === 'MFA_REQUIRED') {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && error.response?.data?.code === 'TOKEN_EXPIRED' && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

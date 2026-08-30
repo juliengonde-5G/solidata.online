@@ -17,7 +17,7 @@ const request = require('supertest');
 let app;
 // Jetons signés sans `tv` (jetons « hérités ») → authenticate ne consulte pas la
 // base, ce qui garde les séquences de mock déterministes.
-const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', first_name: 'A', last_name: 'D' }, JWT_SECRET, { expiresIn: '1h' });
+const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', first_name: 'A', last_name: 'D', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
 
 beforeAll(() => {
   app = express();

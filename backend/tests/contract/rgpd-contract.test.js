@@ -35,7 +35,7 @@ const express = require('express');
 const request = require('supertest');
 
 const rgpd = require('../../src/routes/rgpd');
-const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
+const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
   ADMIN: tokenFor('ADMIN'), DPO: tokenFor('DPO'), RH: tokenFor('RH'),
   MANAGER: tokenFor('MANAGER'), COLLABORATEUR: tokenFor('COLLABORATEUR'),

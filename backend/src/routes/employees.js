@@ -4,7 +4,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
@@ -45,7 +46,117 @@ const runUpload = (mw) => (req, res, next) => mw(req, res, (err) => {
 });
 
 router.use(authenticate);
+// Double authentification (2.43.0) : pour les rôles soumis (settings
+// « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
+// franchi le défi TOTP. No-op intégral pour les autres rôles.
+router.use(requireMfa);
 router.use(autoLogActivity('employee'));
+
+// ════════════════════════════════════════════════════════════════════════════
+// PROJECTION PAR RÔLE DE LA FICHE COLLABORATEUR (correctif d'isolement 2.43.0)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// `GET /` et `GET /:id` faisaient un `SELECT e.*` : toutes les colonnes, à tous
+// les rôles autorisés — dont MANAGER. Or le rôle MANAGER est distribué
+// largement (responsables collecte, tri, boutiques…), et la table `employees`
+// porte le statut de travailleur handicapé (donnée de SANTÉ, art. 9 RGPD), le
+// salaire brut, le titre de séjour, l'adresse et le lieu de naissance.
+//
+// routes/teams.js avait déjà corrigé exactement ce risque sur `GET /teams/:id`,
+// avec un commentaire nommant les colonnes à ne jamais exposer — mais le
+// correctif n'avait jamais été répercuté ICI, sur la route la plus consultée,
+// qui est pourtant la SOURCE de ces données.
+//
+// Choix de mise en œuvre : masquage par `delete` (pattern de
+// routes/insertion/masking.js) plutôt que par liste blanche de colonnes SQL.
+// L'absence de la clé signale « non habilité » et se distingue d'un `null`
+// (« non renseigné ») ; et une colonne ajoutée demain à `employees` n'aura pas
+// besoin d'être re-listée pour rester visible d'ADMIN/RH.
+//
+// ADMIN et RH sont INCHANGÉS (fiche complète — c'est leur métier).
+const MANAGER_HIDDEN_EMPLOYEE_FIELDS = [
+  // Rémunération
+  'gross_salary',
+  // Santé — art. 9 RGPD (même famille que les freins santé que le module
+  // insertion masque déjà soigneusement pour MANAGER)
+  'disability_status',
+  'medical_visit_frequency',
+  'visite_medicale_resultat',   // apte / restrictions / inapte = un avis médical
+  'visite_medicale_notes',
+  // Titre de séjour — donnée d'état civil administratif à fort risque de
+  // discrimination
+  'residence_permit_type',
+  'residence_permit_number',
+  'residence_permit_renewal',
+  // Coordonnées et état civil privés. `city` est CONSERVÉE : elle est utile à
+  // l'organisation des tournées et des covoiturages, et sa sensibilité est
+  // faible comparée à l'adresse exacte ; `address` et `postal_code`, qui
+  // localisent le domicile, sont retirées.
+  'address',
+  'postal_code',
+  'personal_email',
+  'birth_date',
+  'birth_name',
+  'birth_city',
+  'birth_country',
+  'birth_department',
+  'nationality',
+  'civility',
+  // Contacts d'urgence : des tiers (conjoint, parent) qui n'ont jamais consenti
+  // à figurer dans un outil consulté par l'encadrement de terrain
+  'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_email',
+  'emergency_contact2_name', 'emergency_contact2_phone', 'emergency_contact2_email',
+  // Éligibilité IAE : les critères et le motif de dérogation CDDI énoncent
+  // littéralement « rqth » ou une situation sociale — c'est de la donnée art. 9
+  // par un autre chemin
+  'eligibilite_criteres',
+  'eligibilite_justificatifs_ref',
+  'cddi_derogation_motif',
+  // Identifiants administratifs sans usage pour l'encadrement
+  'siret',
+  'france_travail_id',
+];
+
+/**
+ * Masque une ligne `employees` selon le rôle de BASE (déjà résolu).
+ * No-op pour ADMIN/RH. Mutation en place, retourne la ligne.
+ * CONSERVÉ pour MANAGER : identité, coordonnées professionnelles, poste,
+ * équipe, contrat, statut d'insertion, permis/CACES, heures hebdomadaires,
+ * ville — tout ce dont l'encadrement a besoin pour planifier.
+ */
+function maskEmployeeRow(row, baseRole) {
+  if (!row || typeof row !== 'object') return row;
+  if (baseRole !== 'MANAGER') return row;
+  for (const key of MANAGER_HIDDEN_EMPLOYEE_FIELDS) {
+    if (key in row) delete row[key];
+  }
+  return row;
+}
+
+/** Masque un tableau de lignes (mutation en place). */
+function maskEmployeeRows(rows, baseRole) {
+  if (!Array.isArray(rows) || baseRole !== 'MANAGER') return rows;
+  for (const r of rows) maskEmployeeRow(r, baseRole);
+  return rows;
+}
+
+// Même fuite, autre porte : `GET /:id/contracts` fait un `SELECT ec.*` et la
+// table `employee_contracts` porte elle aussi `gross_salary` (import Malibou).
+// Masquer le salaire sur la fiche sans le masquer sur l'historique des avenants
+// n'aurait rien protégé du tout. Les dates, types, quotités et postes restent
+// visibles : c'est le contenu opérationnel dont l'encadrement a besoin.
+const MANAGER_HIDDEN_CONTRACT_FIELDS = ['gross_salary', 'siret'];
+
+function maskContractRows(rows, baseRole) {
+  if (!Array.isArray(rows) || baseRole !== 'MANAGER') return rows;
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    for (const key of MANAGER_HIDDEN_CONTRACT_FIELDS) {
+      if (key in r) delete r[key];
+    }
+  }
+  return rows;
+}
 
 // GET /api/employees
 router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
@@ -63,7 +174,7 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
     // affiché en majuscules côté front (formatEmployeeName).
     query += ' ORDER BY UPPER(e.last_name), UPPER(e.first_name)';
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    res.json(maskEmployeeRows(result.rows, resolveBaseRole(req.user.role)));
   } catch (err) {
     console.error('[EMPLOYEES] Erreur liste :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -79,7 +190,7 @@ router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Employé non trouvé' });
-    res.json(result.rows[0]);
+    res.json(maskEmployeeRow(result.rows[0], resolveBaseRole(req.user.role)));
   } catch (err) {
     console.error('[EMPLOYEES] Erreur détail :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -756,7 +867,7 @@ router.get('/:id/contracts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, re
        WHERE ec.employee_id = $1 ORDER BY ec.start_date DESC`,
       [req.params.id]
     );
-    res.json(result.rows);
+    res.json(maskContractRows(result.rows, resolveBaseRole(req.user.role)));
   } catch (err) {
     console.error('[EMPLOYEES] Erreur contrats :', err);
     res.status(500).json({ error: 'Erreur serveur' });

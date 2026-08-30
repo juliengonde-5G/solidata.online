@@ -54,6 +54,32 @@ Selon votre rôle, vous avez accès à différentes fonctionnalités :
 
 Contactez un administrateur pour réinitialiser votre mot de passe. Un nouveau mot de passe temporaire vous sera communiqué.
 
+### 1.4 Activer la double authentification (2FA)
+
+**Depuis la version 2.43.0**, les comptes qui accèdent à des données personnelles sensibles (ADMIN, RH — dont les CIP — et DPO ; la liste exacte est réglable par un administrateur) doivent activer une **double authentification** : en plus du mot de passe, un code à 6 chiffres généré par une application sur votre téléphone.
+
+**Ce qu'il vous faut** : une application d'authentification installée sur votre téléphone. Toutes les applications compatibles TOTP conviennent, par exemple :
+- Google Authenticator
+- Microsoft Authenticator
+- FreeOTP
+- Toute autre application « authenticator » (Aegis, Bitwarden, 1Password…)
+
+**Premier login — activation obligatoire** :
+1. Connectez-vous normalement (identifiant + mot de passe). Si votre compte est soumis, un écran **« Double authentification requise »** s'affiche et bloque l'accès tant qu'elle n'est pas activée.
+2. Cliquez sur **Commencer**.
+3. Ouvrez votre application d'authentification et **scannez le QR code** affiché à l'écran. Si vous ne pouvez pas scanner (pas de caméra, écran partagé…), dépliez **« Je ne peux pas scanner le QR code »** pour saisir la clé secrète à la main.
+4. Votre application affiche alors un code à 6 chiffres. Saisissez-le et cliquez sur **Activer la double authentification**.
+5. **8 codes de secours** s'affichent — **une seule fois**. Copiez-les ou imprimez-les et rangez-les dans un endroit sûr (ils vous permettent de vous connecter si vous n'avez plus votre téléphone). Cochez **« J'ai conservé ces codes en lieu sûr »** puis cliquez sur **Terminer**.
+
+**À chaque connexion suivante** :
+1. Saisissez votre identifiant et votre mot de passe comme d'habitude.
+2. Un second écran demande le **code affiché par votre application** (6 chiffres). Saisissez-le et validez.
+3. Si vous n'avez pas votre téléphone, cliquez sur **« Utiliser un code de secours »** et saisissez l'un des 8 codes reçus à l'activation (format `XXXXX-XXXXX`). Chaque code de secours ne fonctionne **qu'une seule fois**.
+
+> Après 8 tentatives de code erronées en 15 minutes, la connexion est temporairement bloquée 15 minutes — c'est normal, réessayez plus tard.
+
+**Si vous avez perdu votre téléphone, changé d'appareil, ou épuisé vos codes de secours** : vous ne pouvez pas vous réenrôler vous-même. Contactez un **administrateur**, qui réinitialise votre double authentification depuis la fiche Utilisateurs (`/users` → votre fiche → **« Réinitialiser la double authentification »**). Vous repartez alors de l'étape « Premier login » ci-dessus à votre prochaine connexion.
+
 ---
 
 ## 2. Navigation
@@ -69,7 +95,7 @@ Accueil
 
 Recrutement
   ├── Candidats (Kanban + Plan de recrutement)
-  └── Matrice PCM
+  └── Tests PCM (faire passer un test — les résultats sont dans la fiche du candidat)
 
 Gestion Équipe
   ├── Collaborateurs
@@ -178,14 +204,19 @@ Selon le statut du candidat, différents onglets apparaissent :
 3. Saisissez le nombre de postes à pourvoir par mois
 4. Le compteur affiche automatiquement : **recrutés / objectif**
 
-### 3.3 Matrice PCM (Process Communication Model)
+### 3.3 Tests PCM (Process Communication Model)
 
 Le test PCM évalue le profil de personnalité des candidats à travers **20 questions** à 4 choix, réparties en 5 catégories (perception, style de management, canal de communication, motivation, stress).
 
+> **Depuis la version 2.43.0 — deux écrans, deux usages.**
+> **Faire passer le test** se fait depuis la page **Tests PCM** (menu Recrutement) : on y choisit la personne, on lance le test, on copie le lien à lui transmettre, et on suit où il en est (aucun test / lien envoyé, en attente / en cours / profil disponible). Cette page **n'affiche aucun résultat**.
+> **Lire le résultat** se fait dans la **fiche de la personne** : onglet **PCM** du dossier candidat, onglet **Profil PCM** de la fiche collaborateur. Ces deux onglets sont réservés aux profils **ADMIN et RH**. Le praticien PCM, lui, fait passer les tests sans accéder aux résultats.
+
 **Lancer un test** :
-1. Depuis la fiche candidat (onglet PCM), cliquez sur **Lancer test PCM**
-2. Le candidat répond aux **20 questions** (une par une, barre de progression visible)
-3. Le résultat affiche le profil complet avec **Base**, **Phase** et **Immeuble**
+1. Depuis la fiche candidat (onglet PCM) ou depuis la page **Tests PCM**, cliquez sur **Lancer le test**
+2. Copiez le lien et transmettez-le au candidat (ou ouvrez le questionnaire à côté de lui)
+3. Le candidat répond aux **20 questions** (une par une, barre de progression visible)
+4. Une fois terminé, le profil est disponible dans l'**onglet PCM de sa fiche candidat** : **Base**, **Phase** et **Immeuble**
 
 **Les 6 types de personnalité** :
 | Type | Caractéristiques | Perception |
@@ -201,17 +232,25 @@ Le test PCM évalue le profil de personnalité des candidats à travers **20 que
 - **Base** : votre type fondamental (stable dans le temps). C'est l'étage 1 de l'immeuble — votre fondation
 - **Phase** : votre type actif actuel (peut évoluer avec les événements de vie). Détermine vos motivations et comportements sous stress
 - **Immeuble PCM** : visualisation en bâtiment avec barres horizontales. La Base est toujours en bas (fondation), les autres types sont classés par intensité
-- **Radar** : graphique à 6 axes montrant vos scores normalisés (0-100 %) pour chaque type
 
-**Alertes RPS** :
-Si le score de stress de votre Phase dépasse 75 %, une alerte de **Risques Psychosociaux** apparaît en rouge. Cela signale un niveau de stress élevé nécessitant attention.
+**Cohérence des réponses** :
+Le profil peut porter la mention « Réponses « stress » très cohérentes avec la phase ». Elle indique
+simplement que les réponses de mise sous tension désignent le même type que la phase calculée.
+**Cet indicateur reflète la cohérence des réponses, pas un état de santé, et ne doit fonder aucune
+décision.** L'ancienne « alerte Risques Psychosociaux » a été retirée en version 2.43.0 : l'audit du
+module a mesuré qu'elle se déclenchait sur près d'un tiers de jeux de réponses aléatoires.
+
+**Méthode — à lire avant d'interpréter** :
+Ce questionnaire interne d'aide au dialogue (20 questions) n'est pas l'inventaire de personnalité
+validé et propriétaire du modèle. Le résultat est une hypothèse de lecture, pas un diagnostic :
+il ne doit jamais fonder seul une décision de recrutement ou d'orientation.
 
 **Exporter le profil** :
-Depuis la page de résultats, deux boutons d'export sont disponibles :
-1. **Export résultats** (vert) : génère un PDF A4 avec l'immeuble, les descriptions base/phase, le guide manager (comportements DO/DON'T), et les niveaux de stress
-2. **Fiche technique** (gris) : génère un PDF A4 avec le tableau des scores bruts et le détail des 20 réponses groupées par catégorie
+Depuis l'**onglet PCM du dossier candidat** (là où le profil s'affiche), deux boutons d'export sont disponibles :
+1. **Fiche PDF** : génère un PDF A4 avec l'immeuble, les descriptions base/phase, le guide manager (comportements DO/DON'T), et les niveaux de stress
+2. **Export technique** : génère un PDF A4 avec le tableau des scores bruts et le détail des 20 réponses groupées par catégorie
 
-> Les deux exports s'ouvrent dans une fenêtre popup — utilisez **Ctrl+P** ou le bouton Imprimer pour sauvegarder en PDF.
+> Les deux exports s'ouvrent dans une fenêtre popup — utilisez **Ctrl+P** ou le bouton Imprimer pour sauvegarder en PDF. Si votre navigateur bloque la fenêtre, un bandeau vous le dit : autorisez les fenêtres surgissantes pour ce site, puis réessayez.
 
 ---
 
@@ -284,6 +323,32 @@ Le Conseiller en Insertion Professionnelle peut définir des actions correctives
 2. Sélectionnez la semaine
 3. Glissez-déposez les collaborateurs dans les créneaux
 4. Les **conflits** (même personne affectée deux fois) sont signalés en rouge
+
+### 4.5 La note de profil initial (CIP)
+
+**Depuis la version 2.43.0**, dès qu'une fiche de recrutement est liée à un collaborateur, une **note de profil initial** est générée automatiquement par IA à partir de son dossier (CV, entretien de recrutement, mises en situation, et profil PCM s'il a été passé). Elle est pensée pour **préparer le premier entretien** (diagnostic d'accueil), pas pour le remplacer.
+
+**Réservée à ADMIN et RH** — la note croise le profil PCM et l'entretien de recrutement, deux sources auxquelles l'encadrement technique n'a pas non plus accès ailleurs.
+
+**Où la trouver** :
+- Espace Parcours d'insertion (menu → Gestion Équipe → **Parcours insertion**) → sélectionnez le salarié → onglet **Synthèse** → carte **« Note de profil initial (analyse IA) »**, juste avant le bloc de démarrage du diagnostic.
+- Fiche du collaborateur (menu → Gestion Équipe → **Collaborateurs** → ouvrez la fiche) → onglet parcours d'insertion, en lecture seule.
+
+**Comment la lire** :
+1. **La synthèse** — quelques phrases factuelles, sans pronostic.
+2. **Ce que la personne dit d'elle-même** — des extraits mis entre guillemets, tirés de l'entretien de recrutement, EN SES MOTS.
+3. **Freins pressentis** — chacun avec sa **source** (CV, entretien, mise en situation ou PCM) et un niveau **suggéré**. Ce ne sont que des pistes : rien n'est écrit automatiquement dans le diagnostic, c'est vous qui les confirmez ou les corrigez en entretien avec la personne.
+4. **Compétences observées**, **points de vigilance** (formulés comme des questions à poser, jamais comme des conclusions) et **questions suggérées** pour l'entretien.
+5. **Repères de communication (PCM)**, en tout dernier, dans un encadré séparé : uniquement si un test PCM a été passé. Ce ne sont que des repères pour ajuster votre façon de communiquer — jamais une prédiction, jamais un diagnostic.
+
+Un bandeau permanent rappelle : « Analyse générée par IA à partir du dossier de recrutement — hypothèses à vérifier avec le salarié. Ne constitue ni un diagnostic ni un critère de sélection. » Un bloc **« Sources et limites »** nomme explicitement ce qui manque au dossier (par exemple : « entretien de recrutement structuré non renseigné ») plutôt que de laisser croire que la note est complète.
+
+**Actions disponibles** :
+- **(Ré)générer** — relance l'analyse (utile si le dossier de recrutement a été complété depuis la première génération).
+- **Export PDF** — pour l'imprimer ou l'archiver.
+- **« J'en ai pris connaissance — préparer le diagnostic »** — à cliquer une fois la note lue, avant de démarrer le diagnostic d'accueil ; ce geste est daté et conservé (il n'est pas réécrit si vous cliquez plusieurs fois).
+
+> Chaque lecture et chaque génération de cette note sont enregistrées dans le journal RGPD — c'est une donnée sensible qui croise plusieurs sources personnelles.
 
 ---
 

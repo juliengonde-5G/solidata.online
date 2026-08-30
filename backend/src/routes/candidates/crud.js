@@ -13,13 +13,28 @@ const { autoLogActivity } = require('../../middleware/activity-logger');
 
 router.use(autoLogActivity('candidate'));
 
+// Existence d'un profil PCM pour ce candidat (2.43.0 — audit PCM, défauts D9).
+// La page Candidats filtrait et badgeait sur `c.pcm_completed` / `c.pcm_type`,
+// DEUX COLONNES QUI N'EXISTENT PAS dans `candidates` : `SELECT c.*` ne les
+// ramenait donc jamais, l'onglet « Avec PCM (n) » affichait un compteur juste
+// au-dessus d'une liste systématiquement vide, et aucune carte ne portait le
+// badge. On expose la vraie information, calculée là où elle vit — même motif
+// que `employees.js` pour ses propositions de rattachement.
+//
+// EXISTS sur pcm_reports (et non sur pcm_sessions seule) : une session lancée
+// mais pas terminée n'est pas un profil, et l'écran promet « Avec PCM ».
+const HAS_PCM_SQL = `EXISTS(
+        SELECT 1 FROM pcm_reports pr WHERE pr.candidate_id = c.id
+      ) AS has_pcm`;
+
 // GET /api/candidates — Liste avec filtres
 router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const { status, search, team_id } = req.query;
     let query = `SELECT c.*, t.name as team_name,
       (SELECT em.id FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_id,
-      (SELECT UPPER(em.last_name) || ' ' || em.first_name FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_name
+      (SELECT UPPER(em.last_name) || ' ' || em.first_name FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_name,
+      ${HAS_PCM_SQL}
       FROM candidates c LEFT JOIN teams t ON c.assigned_team_id = t.id WHERE 1=1`;
     const params = [];
 
@@ -49,9 +64,13 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
   try {
     const result = await pool.query(
+      // has_pcm : c'est le kanban qui alimente RÉELLEMENT les cartes et le
+      // filtre « Avec PCM » de la page Candidats — l'exposer sur /candidates
+      // seul n'aurait rien réparé à l'écran.
       `SELECT c.*, t.name as team_name,
         (SELECT em.id FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_id,
-        (SELECT UPPER(em.last_name) || ' ' || em.first_name FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_name
+        (SELECT UPPER(em.last_name) || ' ' || em.first_name FROM employees em WHERE em.candidate_id = c.id LIMIT 1) AS linked_employee_name,
+        ${HAS_PCM_SQL}
        FROM candidates c
        LEFT JOIN teams t ON c.assigned_team_id = t.id
        ORDER BY c.updated_at DESC`

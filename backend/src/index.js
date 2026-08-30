@@ -342,6 +342,33 @@ io.use(async (socket, next) => {
   }
   socket.user = decoded;
 
+  // ── Double authentification (2.43.0) ──
+  // Sans ce contrôle, une session d'un rôle soumis mais non enrôlé — bloquée
+  // sur toutes les routes HTTP sensibles par requireMfa — garderait le flux
+  // temps réel ouvert : la messagerie interne (salle `user:<id>`) continuerait
+  // de lui pousser ses messages. Le websocket doit fermer la même porte.
+  //
+  // PLACÉ AVANT le contrôle de révocation, et non après : ce dernier sort par
+  // `return next()` dès qu'il ne peut rien vérifier (jeton sans `tv`, sans
+  // identifiant). Or un jeton sans `tv` est précisément un jeton HÉRITÉ — la
+  // population que la double authentification doit refuser. Placée après, la
+  // garde aurait laissé passer exactement ceux qu'elle vise.
+  //
+  // Le contrôle ne coûte rien (lecture d'un claim, cache mémoire des rôles) :
+  // il n'a aucune raison d'attendre la lecture base.
+  //
+  // Dégradation douce : si le module n'est pas chargeable, on journalise et on
+  // laisse passer — un défaut de cette garde ne doit jamais couper le temps
+  // réel de tout le monde.
+  try {
+    const { isMfaRole } = require('./middleware/mfa');
+    if (isMfaRole(decoded.role) && decoded.mfa !== true) {
+      return next(new Error('Double authentification requise'));
+    }
+  } catch (e) {
+    logger.warn('Socket.IO : contrôle de double authentification indisponible', { error: e.message });
+  }
+
   if (decoded.tv === undefined || decoded.tv === null) return next();
   const uid = decoded.id != null ? decoded.id : decoded.userId;
   if (uid == null) return next();

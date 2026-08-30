@@ -256,6 +256,55 @@ async function anonymizeEmployee(client, id) {
     );
   }
 
+  // Note de profil initial CIP (2.43.0) : SYNTHÈSE DÉRIVÉE du dossier de
+  // recrutement (CV, entretien, mises en situation, PCM) — elle ne porte
+  // aucune donnée d'origine, et son contenu chiffré condense précisément ce
+  // que l'anonymisation retire partout ailleurs. Purge INTÉGRALE, même
+  // doctrine que insertion_milestones_history ci-dessus : nullifier le
+  // contenu laisserait une coquille sans usage, et une note « ANONYMISÉE »
+  // n'aurait aucun sens pour une CIP. Défensif (table absente sur une base
+  // non migrée → on passe).
+  if (await tableExists(client, 'insertion_notes_profil')) {
+    await client.query('DELETE FROM insertion_notes_profil WHERE employee_id = $1', [id]);
+  }
+
+  // Profil de personnalité PCM (2.43.0 — audit du module PCM, défaut D5,
+  // reco R7). Défaut constaté : le PCM d'un candidat RECRUTÉ n'était jamais
+  // purgé. La purge planifiée des candidats exclut explicitement les recrutés
+  // (`WHERE status != 'hired'`, scheduler.js) — c'est délibéré, leur dossier
+  // suit celui du salarié — mais `anonymizeEmployee` ne touchait à AUCUNE
+  // table pcm_*. Résultat : base, phase, les 20 réponses et l'indicateur de
+  // risque survivaient indéfiniment à l'anonymisation, rattachés à une fiche
+  // `candidates` restée nominative.
+  //
+  // On supprime les SESSIONS du candidat lié : `pcm_answers` et `pcm_reports`
+  // sont en ON DELETE CASCADE sur `pcm_sessions`. `pcm_reports` est aussi
+  // supprimée directement, car elle porte sa propre FK `candidate_id` : un
+  // rapport dont la session aurait déjà disparu resterait sinon orphelin —
+  // c'est la même double précaution que `anonymizeCandidate` ci-dessus.
+  //
+  // Rien n'est conservé : contrairement aux scores de freins ou à la
+  // classification de sortie, un type de personnalité n'a aucune valeur
+  // d'agrégat pour le pilotage, et le garder pseudonymisé n'aurait servi
+  // qu'à conserver une évaluation dont la personne a demandé l'effacement.
+  //
+  // Défensif (tables absentes sur une base partielle → on passe) et sans
+  // effet si le salarié n'est lié à aucune fiche de recrutement.
+  if (await tableExists(client, 'employees') && await tableExists(client, 'pcm_sessions')) {
+    await client.query(
+      `DELETE FROM pcm_sessions
+       WHERE candidate_id IN (SELECT candidate_id FROM employees WHERE id = $1 AND candidate_id IS NOT NULL)`,
+      [id]
+    );
+  }
+  if (await tableExists(client, 'employees') && await tableExists(client, 'pcm_reports')) {
+    await client.query(
+      `DELETE FROM pcm_reports
+       WHERE candidate_id IN (SELECT candidate_id FROM employees WHERE id = $1 AND candidate_id IS NOT NULL)`,
+      [id]
+    );
+  }
+
   // Plans d'action — action_label est NOT NULL → placeholder ; notes/resultat → NULL.
   if (await tableExists(client, 'cip_action_plans')) {
     const cols = await existingColumns(client, 'cip_action_plans');

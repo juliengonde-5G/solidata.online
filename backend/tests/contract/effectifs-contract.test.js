@@ -40,7 +40,7 @@ const request = require('supertest');
 
 const effectifs = require('../../src/routes/effectifs');
 
-const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
+const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
   ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
   COLLABORATEUR: tokenFor('COLLABORATEUR'),

@@ -13,6 +13,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize, refreshCustomRoles, resolveBaseRole } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { logActivity } = require('../middleware/activity-logger');
 
 // Rôles intégrés (labels affichés). ADMIN n'est jamais restreignable/duplicable.
@@ -122,6 +123,16 @@ router.get('/catalog', authorize('ADMIN'), async (req, res) => {
   const roles = (await listAllRoles()).filter((r) => r.key !== 'ADMIN'); // ADMIN jamais restreint
   res.json({ modules: MODULE_CATALOG, roles });
 });
+
+// Double authentification (2.43.0) — à partir d'ici, l'administration de la
+// matrice exige une session ayant franchi le défi TOTP (no-op hors périmètre).
+//
+// DÉLIBÉRÉMENT EN AVAL de `/my-modules` et `/catalog` : `/my-modules` est appelé
+// par le front DÈS la connexion, avant tout enrôlement — le fermer renverrait un
+// 403 en pleine ouverture de session et casserait la navigation d'un compte qui
+// n'a pas encore pu s'enrôler. Ces deux routes ne renvoient d'ailleurs aucune
+// donnée personnelle : des clés de modules et des libellés de rôles.
+router.use(requireMfa);
 
 // Tous les rôles assignables (intégrés + personnalisés) — pour les listes déroulantes.
 router.get('/roles', authorize('ADMIN'), async (req, res) => {

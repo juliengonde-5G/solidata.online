@@ -18,9 +18,9 @@ const express = require('express');
 const request = require('supertest');
 
 let app;
-const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', first_name: 'A', last_name: 'D' }, JWT_SECRET, { expiresIn: '1h' });
-const rhToken = jwt.sign({ id: 2, username: 'rh', role: 'RH', first_name: 'R', last_name: 'H' }, JWT_SECRET, { expiresIn: '1h' });
-const collabToken = jwt.sign({ id: 3, username: 'collab', role: 'COLLABORATEUR', first_name: 'C', last_name: 'L' }, JWT_SECRET, { expiresIn: '1h' });
+const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', first_name: 'A', last_name: 'D', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+const rhToken = jwt.sign({ id: 2, username: 'rh', role: 'RH', first_name: 'R', last_name: 'H', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+const collabToken = jwt.sign({ id: 3, username: 'collab', role: 'COLLABORATEUR', first_name: 'C', last_name: 'L', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
 
 beforeAll(() => {
   app = express();

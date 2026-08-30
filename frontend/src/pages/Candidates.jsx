@@ -6,6 +6,14 @@ import { Modal, KanbanBoard, StatusBadge } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
 import { formatEmployeeName, formatLastName, compareByName } from '../utils/names';
+import {
+  PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE,
+  motifProfilPcmIndisponible,
+} from '../utils/pcm';
+// Les deux exports PDF ont suivi les résultats : ils vivaient sur l'écran
+// autonome /pcm, qui ne restitue plus de profil. C'est ici qu'on consulte le
+// résultat, c'est donc ici qu'on l'imprime.
+import { exportResultsPDF, exportTechnicalPDF } from '../utils/pcm-pdf';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
 
@@ -59,6 +67,9 @@ export default function Candidates() {
   const [history, setHistory] = useState([]);
   const [skills, setSkills] = useState([]);
   const [pcmProfile, setPcmProfile] = useState(null);
+  // Pourquoi le profil n'est pas là (non habilité / illisible / échec) plutôt
+  // qu'une absence affirmée — audit PCM 2.43.0, défaut D7.
+  const [pcmMotif, setPcmMotif] = useState(null);
   const [interviewForm, setInterviewForm] = useState(null);
   const [miseEnSituation, setMiseEnSituation] = useState([]);
   const [candidateDocuments, setCandidateDocuments] = useState([]);
@@ -92,6 +103,7 @@ export default function Candidates() {
     setDetailTab('info');
     setEditing(false);
     setPcmProfile(null);
+    setPcmMotif(null);
     setInterviewForm(null);
     setMiseEnSituation([]);
     setCandidateDocuments([]);
@@ -106,7 +118,13 @@ export default function Candidates() {
     try {
       const p = await api.get(`/pcm/profiles/${c.id}`);
       setPcmProfile(p.data);
-    } catch { setPcmProfile(null); }
+      setPcmMotif(null);
+    } catch (err) {
+      // Le `catch {}` muet affichait « Aucun profil PCM » aussi bien pour un
+      // 403 que pour un rapport illisible (audit PCM D7).
+      setPcmProfile(null);
+      setPcmMotif(motifProfilPcmIndisponible(err));
+    }
     try {
       const [iForm, mes, docs] = await Promise.all([
         api.get(`/candidates/${c.id}/interview-form`).catch(() => ({ data: null })),
@@ -298,7 +316,11 @@ export default function Candidates() {
     const matchesView = (c) => {
       if (activeView === 'all') return true;
       if (activeView === 'withCV') return !!c.cv_file_path;
-      if (activeView === 'withPCM') return !!c.pcm_completed || !!c.pcm_type;
+      // `has_pcm` vient du backend (EXISTS sur pcm_reports). Le filtre testait
+      // `c.pcm_completed || c.pcm_type` : DEUX COLONNES INEXISTANTES dans
+      // `candidates` — l'onglet « Avec PCM (n) » affichait donc un compteur
+      // juste au-dessus d'une liste toujours vide (audit PCM, défaut D9).
+      if (activeView === 'withPCM') return !!c.has_pcm;
       if (activeView === 'thisMonth') {
         if (!c.created_at) return false;
         const d = new Date(c.created_at);
@@ -387,8 +409,10 @@ export default function Candidates() {
               <FileText className="w-3 h-3 text-emerald-600" />
             </span>
           )}
-          {(c.pcm_completed || c.pcm_type) && (
-            <span className="p-1 rounded bg-purple-50" title="PCM realise">
+          {/* Même correctif que le filtre : `has_pcm` du backend, et non deux
+              colonnes qui n'ont jamais existé (audit PCM, défaut D9). */}
+          {c.has_pcm && (
+            <span className="p-1 rounded bg-purple-50" title="Profil PCM disponible">
               <Award className="w-3 h-3 text-purple-600" />
             </span>
           )}
@@ -555,7 +579,7 @@ export default function Candidates() {
                 {detailTab === 'situation' && <MiseEnSituationView candidateId={selected.id} data={miseEnSituation} onSaved={(d) => setMiseEnSituation(d)} />}
                 {detailTab === 'documents' && <DocumentsView candidateId={selected.id} delivered={candidateDocuments} onDelivered={(d) => setCandidateDocuments(d)} />}
                 {detailTab === 'history' && <HistoryView history={history} />}
-                {detailTab === 'pcm' && <PCMView profile={pcmProfile} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
+                {detailTab === 'pcm' && <PCMView candidateId={selected.id} profile={pcmProfile} motif={pcmMotif} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
               </div>
             </div>
           </div>
@@ -841,11 +865,60 @@ function HistoryView({ history }) {
   );
 }
 
-function PCMView({ profile, onStart, onOpenInApp }) {
+function PCMView({ candidateId, profile, motif, onStart, onOpenInApp }) {
+  // Les réponses brutes ne servent QU'À l'export technique : on ne les charge
+  // qu'au clic. Les appeler à l'ouverture de l'onglet ferait une requête (et
+  // une trace de consultation) pour un bouton que personne n'a pressé.
+  const [exportErreur, setExportErreur] = useState(null);
+  const [exportEnCours, setExportEnCours] = useState(null); // 'fiche' | 'technique'
+
+  const exporterFiche = () => {
+    setExportErreur(null);
+    if (exportResultsPDF(profile) === false) {
+      setExportErreur('La fenêtre d’impression a été bloquée par le navigateur. Autorisez les fenêtres surgissantes pour ce site, puis réessayez.');
+    }
+  };
+
+  const exporterTechnique = async () => {
+    setExportErreur(null);
+    setExportEnCours('technique');
+    // Échec toléré : l'export technique se compose sans les réponses (il
+    // affiche alors « 0 question » plutôt que rien). Une panne sur les
+    // réponses ne doit pas priver du reste — scores, base, phase.
+    let reponses = null;
+    let partiel = false;
+    try {
+      const r = await api.get(`/pcm/profiles/${candidateId}/answers`);
+      reponses = r.data?.answers || null;
+    } catch (err) {
+      console.error(err);
+      partiel = true;
+    }
+    setExportEnCours(null);
+    if (exportTechnicalPDF(profile, reponses) === false) {
+      setExportErreur('La fenêtre d’impression a été bloquée par le navigateur. Autorisez les fenêtres surgissantes pour ce site, puis réessayez.');
+      return;
+    }
+    if (partiel) {
+      setExportErreur('Le détail des réponses n’a pas pu être chargé : la fiche technique a été éditée sans lui (scores et profil sont bien présents).');
+    }
+  };
+
   const PCM_C = { analyseur: 'bg-blue-100 text-blue-700', perseverant: 'bg-green-100 text-green-700', empathique: 'bg-pink-100 text-pink-700', imagineur: 'bg-indigo-100 text-indigo-700', energiseur: 'bg-orange-100 text-orange-700', promoteur: 'bg-red-100 text-red-700' };
   if (!profile) return (
     <div className="text-center py-8">
-      <p className="text-gray-500 text-sm mb-4">Aucun profil PCM</p>
+      {/* Audit PCM D7 : « Aucun profil » n'est affirmé que lorsque c'est vrai. */}
+      {motif ? (
+        <div className={`mx-auto mb-4 max-w-md rounded-lg border px-3 py-2 text-sm text-left ${
+          motif.ton === 'alerte'
+            ? 'border-amber-300 bg-amber-50 text-amber-900'
+            : 'border-slate-300 bg-slate-50 text-slate-700'
+        }`}>
+          {motif.message}
+        </div>
+      ) : (
+        <p className="text-gray-500 text-sm mb-4">Aucun profil PCM</p>
+      )}
       <div className="flex flex-col sm:flex-row gap-2 justify-center">
         <button onClick={onOpenInApp} className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">
           Ouvrir le questionnaire
@@ -857,20 +930,53 @@ function PCMView({ profile, onStart, onOpenInApp }) {
       <p className="text-xs text-gray-400 mt-3">Ouvrir dans l’app ou copier le lien pour l’envoyer au candidat</p>
     </div>
   );
+  // CONTRAT (audit PCM D8) : `GET /pcm/profiles/:candidateId` renvoie
+  // `baseType` / `phaseType` / `riskAlert` et l'immeuble dans `report.immeuble`.
+  // Cet écran lisait `base_type`, `phase_type`, `risk_alert` et `immeuble` à la
+  // racine — quatre clés qui n'existent pas dans la réponse : l'onglet PCM
+  // s'affichait vide, badges compris, Y COMPRIS POUR UN ADMIN. On lit la forme
+  // renvoyée, en tolérant l'ancienne (`|| base_type`), comme le fait déjà la
+  // fiche collaborateur.
+  const baseType = profile.baseType || profile.base_type;
+  const phaseType = profile.phaseType || profile.phase_type;
+  const coherenceReponses = profile.riskAlert ?? profile.risk_alert;
+  const immeuble = profile.report?.immeuble || profile.immeuble;
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Base</p><p className={`inline-block mt-1 px-2 py-0.5 rounded text-sm font-bold ${PCM_C[profile.base_type] || 'bg-gray-100'}`}>{profile.base_type}</p></div>
-        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Phase</p><p className={`inline-block mt-1 px-2 py-0.5 rounded text-sm font-bold ${PCM_C[profile.phase_type] || 'bg-gray-100'}`}>{profile.phase_type}</p></div>
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Base</p><p className={`inline-block mt-1 px-2 py-0.5 rounded text-sm font-bold capitalize ${PCM_C[baseType] || 'bg-gray-100'}`}>{baseType || '—'}</p></div>
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-500">Phase</p><p className={`inline-block mt-1 px-2 py-0.5 rounded text-sm font-bold capitalize ${PCM_C[phaseType] || 'bg-gray-100'}`}>{phaseType || '—'}</p></div>
       </div>
-      {profile.risk_alert && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 font-medium">Alerte RPS</div>}
-      {profile.immeuble && (
+      {/* Ex « Alerte RPS » en rouge sur un dossier de recrutement (R1). */}
+      {coherenceReponses && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <p className="text-sm font-medium text-slate-700">{PCM_LIBELLE_COHERENCE}</p>
+          <p className="text-[11px] text-slate-500 mt-1">{PCM_MENTION_COHERENCE}</p>
+        </div>
+      )}
+      {immeuble && (
         <div><p className="text-xs font-semibold text-gray-500 uppercase mb-2">Immeuble PCM</p>
-          <div className="space-y-1">{profile.immeuble.map((f, i) => (
-            <div key={i} className={`rounded px-3 py-1.5 text-sm font-medium ${PCM_C[f.type] || 'bg-gray-100'}`} style={{ opacity: 1 - i * 0.12 }}>{f.type} — {f.score}%</div>
+          <div className="space-y-1">{immeuble.map((f, i) => (
+            <div key={i} className={`rounded px-3 py-1.5 text-sm font-medium capitalize ${PCM_C[f.type] || 'bg-gray-100'}`} style={{ opacity: 1 - i * 0.12 }}>{f.nom || f.type} — {f.score}%</div>
           ))}</div>
         </div>
       )}
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p className="text-[11px] font-semibold text-slate-700 mb-1">Méthode — à lire avant d'interpréter</p>
+        <p className="text-[11px] text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
+      </div>
+      {exportErreur && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {exportErreur}
+        </div>
+      )}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button onClick={exporterFiche} className="flex-1 bg-primary text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 font-medium">Fiche PDF</button>
+        <button onClick={exporterTechnique} disabled={exportEnCours === 'technique'} className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50 font-medium disabled:opacity-50">
+          {exportEnCours === 'technique' ? 'Préparation…' : 'Export technique'}
+        </button>
+      </div>
       <div className="flex flex-col sm:flex-row gap-2">
         <button onClick={onOpenInApp} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Ouvrir le questionnaire</button>
         <button onClick={onStart} className="flex-1 border border-purple-300 text-purple-600 px-4 py-2 rounded-lg text-sm hover:bg-purple-50 font-medium">Copier le lien</button>

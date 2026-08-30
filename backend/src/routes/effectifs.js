@@ -43,6 +43,7 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { query: q, param, body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
@@ -52,6 +53,10 @@ const aspParser = require('../services/asp-parser');
 const aspMatch = require('../services/asp-rapprochement');
 
 router.use(authenticate);
+// Double authentification (2.43.0) : pour les rôles soumis (settings
+// « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
+// franchi le défi TOTP. No-op intégral pour les autres rôles.
+router.use(requireMfa);
 router.use(autoLogActivity('effectifs'));
 
 const READ = authorize('ADMIN', 'RH', 'MANAGER');

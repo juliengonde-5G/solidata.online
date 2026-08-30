@@ -3,9 +3,75 @@ const router = express.Router();
 const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
+// Double authentification (2.43.0). Le rôle PCM (Praticien) a été RETIRÉ du
+// périmètre par arbitrage client : pour lui, cette garde est un no-op. Elle
+// reste posée parce qu'un ADMIN ou un RH qui emprunte ces routes, lui, y est
+// soumis. Câblé ROUTE PAR ROUTE : ce routeur pose `authenticate` sur chaque
+// route (et POST /submit emprunte un chemin public par jeton candidat, qui ne
+// doit pas être fermé).
+const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
+const { autoLogActivity } = require('../middleware/activity-logger');
+
+// ══════════════════════════════════════════════════════════════
+// PÉRIMÈTRE DU RÔLE « PCM » (Praticien) — arbitrage client 2.43.0
+//
+// Le praticien FAIT PASSER le test : il désigne un candidat (GET /candidats,
+// projection minimale), crée la session (POST /sessions), transmet le lien et
+// suit l'AVANCEMENT (aucun test / en attente / en cours / profil disponible).
+// Il ne CONSULTE PLUS les résultats : ni type de base, ni phase, ni immeuble,
+// ni scores, ni réponses, ni rapport.
+//
+// Les résultats se lisent UNIQUEMENT depuis la fiche de la personne — onglet
+// PCM du dossier candidat, onglet Profil PCM de la fiche collaborateur —, deux
+// écrans ADMIN/RH. Le test reste ancré dans le dossier de la personne ; il n'y
+// a plus d'écran autonome qui restitue des profils (la page /pcm est devenue
+// la console de passation).
+//
+// Concrètement, dans ce fichier :
+//   - GET /profiles, GET /profiles/:candidateId et /answers → ADMIN, RH
+//   - POST /sessions, GET /candidats, GET /types, /questionnaire → PCM inclus
+//   - POST /submit ne renvoie pas le profil calculé à un appelant PCM
+//     authentifié (sinon la passation accompagnée rouvrirait la porte).
+// ══════════════════════════════════════════════════════════════
+
+// Journal d'activité (2.43.0 — audit PCM D4/R6). Ce routeur était le SEUL du
+// domaine RH à ne laisser aucune trace : créer une session de test, soumettre
+// un profil et consulter le rapport de personnalité d'une personne passaient
+// tous les trois sans écriture, alors que 33 autres domaines journalisent.
+//
+// Posé en `router.use` AVANT les routes : `autoLogActivity` n'écrit que sur les
+// mutations réussies d'un utilisateur authentifié (POST/PUT/DELETE + req.user),
+// donc le passage public par jeton candidat (GET /sessions/:token, et le
+// POST /submit du candidat qui n'a pas de req.user) reste hors journal — ce qui
+// est correct : c'est le candidat qui répond, pas un agent de la structure.
+router.use(autoLogActivity('pcm'));
+
+/**
+ * Journalise la CONSULTATION d'un rapport de personnalité dans rgpd_audit_log.
+ *
+ * Consulter un profil PCM est une lecture de donnée d'évaluation d'une personne
+ * identifiée : le produit journalise déjà ce type de consultation ailleurs
+ * (badgeuse, note de profil initial, exports insertion). `autoLogActivity` ne
+ * couvre que les mutations — la lecture demande donc sa propre trace.
+ *
+ * NON BLOQUANT, comme le modèle de `journaliserNoteProfil` : un journal
+ * indisponible (table absente sur une base non migrée, panne d'écriture) ne
+ * doit pas priver un RH du rapport qu'il a le droit de lire. L'échec est logué.
+ */
+async function journaliserConsultationPcm(req, candidateId, details) {
+  try {
+    await pool.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user?.id ?? null, 'PCM_RAPPORT_CONSULTATION', 'pcm_reports', candidateId,
+        JSON.stringify({ candidate_id: candidateId, ...(details || {}) })]
+    );
+  } catch (e) {
+    console.error('[PCM] Journalisation de la consultation impossible :', e.message);
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // MOTEUR PCM (Process Communication Model) — Kahler 2024
@@ -735,7 +801,7 @@ const { encryptReport, decryptReport, decryptReportDetaille } = require('../util
 // liste des questions — inutile d'exposer /questionnaire publiquement.
 // Les options sont mélangées déterministiquement par question pour éviter
 // le biais "première position = analyseur".
-router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/questionnaire', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   res.json(PCM_QUESTIONS.map(q => ({
     num: q.num,
     category: q.category,
@@ -751,7 +817,7 @@ router.get('/questionnaire', authenticate, authorize('ADMIN', 'RH', 'MANAGER', '
 });
 
 // GET /api/pcm/types — Référence des 6 types PCM
-router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/types', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   const types = Object.entries(PCM_TYPES).map(([key, data]) => ({
     key,
     ...data,
@@ -760,14 +826,14 @@ router.get('/types', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (
 });
 
 // GET /api/pcm/types/:typeKey — Détail d'un type
-router.get('/types/:typeKey', authenticate, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/types/:typeKey', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
   const data = PCM_TYPES[req.params.typeKey];
   if (!data) return res.status(404).json({ error: 'Type PCM inconnu' });
   res.json({ key: req.params.typeKey, ...data });
 });
 
 // POST /api/pcm/sessions — Créer une session de test
-router.post('/sessions', authenticate, authorize('ADMIN', 'RH', 'PCM'), [
+router.post('/sessions', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), [
   body('candidate_id').isInt().withMessage('ID candidat requis'),
   body('mode').notEmpty().withMessage('Mode requis'),
 ], validate, async (req, res) => {
@@ -793,9 +859,14 @@ router.post('/sessions', authenticate, authorize('ADMIN', 'RH', 'PCM'), [
 //
 // Le praticien PCM doit pouvoir désigner un candidat sans accéder au dossier de
 // recrutement : cette projection ne renvoie QUE l'identité, le poste visé et
-// l'état du test. Ni CV, ni compte rendu d'entretien, ni mise en situation, ni
+// l'ÉTAT du test. Ni CV, ni compte rendu d'entretien, ni mise en situation, ni
 // notes, ni coordonnées — la page Candidats reste réservée à ADMIN/RH/MANAGER.
-router.get('/candidats', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+//
+// Et aucun RÉSULTAT : `a_un_profil` est un booléen d'avancement (le test a-t-il
+// produit un rapport ?), `session_status` l'état de la session. Ni base_type,
+// ni phase_type, ni risk_alert ne sont projetés — la liste dit où en est la
+// passation, jamais ce qu'elle a donné.
+router.get('/candidats', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT c.id, c.first_name, c.last_name, c.status,
@@ -870,6 +941,9 @@ router.get('/sessions/:token', async (req, res) => {
 // Middleware : autorise soit un utilisateur RH/ADMIN authentifié, soit
 // un access_token de session PCM (lien autonome envoyé au candidat).
 // Bloque la soumission par simple `session_id` sans preuve de légitimité.
+//
+// Le rôle PCM reste admis ICI (il fait passer les tests), mais la réponse de
+// /submit ne lui rend AUCUN résultat : voir la garde en fin de handler.
 async function authenticateSubmit(req, res, next) {
   const { access_token } = req.body || {};
   if (access_token) return next(); // token capabilité vérifié plus bas
@@ -969,6 +1043,25 @@ router.post('/submit', authenticateSubmit, [
       client.release();
     }
 
+    // Porte de derrière fermée (retrait des résultats au praticien PCM).
+    //
+    // `authenticateSubmit` laisse passer deux appelants très différents :
+    //   - le CANDIDAT, par jeton de session (aucun `req.user`) — c'est sa
+    //     propre restitution, elle est inchangée ;
+    //   - un agent AUTHENTIFIÉ, qui soumet par `session_id`.
+    // Dans le second cas, un praticien recevrait ici le profil complet (base,
+    // phase, scores, rapport) : le correctif posé sur /profiles serait
+    // contournable en soumettant lui-même les réponses. On lui accuse donc
+    // réception SANS résultat. Les réponses, elles, sont bien enregistrées :
+    // le rapport existe, il se lit dans la fiche de la personne.
+    if (req.user && resolveBaseRole(req.user.role) === 'PCM') {
+      return res.json({
+        success: true,
+        message: 'Réponses enregistrées. Le profil est consultable dans la fiche '
+          + 'de la personne, par les profils habilités.',
+      });
+    }
+
     res.json({
       message: 'Profil PCM calculé avec succès',
       profile: {
@@ -990,13 +1083,20 @@ router.post('/submit', authenticateSubmit, [
   }
 });
 
-// GET /api/pcm/profiles — Tous les profils
-router.get('/profiles', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+// GET /api/pcm/profiles — Tous les profils (ADMIN/RH).
+// Le praticien PCM n'y a plus accès : les résultats se consultent dans la
+// fiche de la personne, pas depuis une liste transverse.
+router.get('/profiles', authenticate, requireMfa, authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
+      // `c.email` RETIRÉ (2.43.0 — audit PCM D15/R10). Le motif d'origine était
+      // le rôle « Praticien PCM », qui lisait cette liste ; il ne la lit plus
+      // (route resserrée ADMIN/RH). La minimisation, elle, tient toute seule :
+      // une liste de profils de personnalité n'a aucun besoin des coordonnées
+      // pour désigner le profil à ouvrir — l'identité (prénom/nom) suffit.
       `SELECT pr.id, pr.session_id, pr.candidate_id, pr.base_type, pr.phase_type,
        pr.risk_alert, pr.created_at,
-       c.first_name, c.last_name, c.email
+       c.first_name, c.last_name
        FROM pcm_reports pr
        JOIN candidates c ON pr.candidate_id = c.id
        ORDER BY pr.created_at DESC`
@@ -1009,7 +1109,7 @@ router.get('/profiles', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (re
 });
 
 // GET /api/pcm/profiles/:candidateId/answers — Réponses brutes d'un candidat
-router.get('/profiles/:candidateId/answers', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles/:candidateId/answers', authenticate, requireMfa, authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     // Trouver la dernière session complétée pour ce candidat
     const sessionRes = await pool.query(
@@ -1068,7 +1168,7 @@ async function reconstruireRapport(sessionId) {
 }
 
 // GET /api/pcm/profiles/:candidateId — Profil d'un candidat (déchiffré)
-router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles/:candidateId', authenticate, requireMfa, authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT pr.*, c.first_name, c.last_name, c.email
@@ -1120,6 +1220,15 @@ router.get('/profiles/:candidateId', authenticate, authorize('ADMIN', 'RH', 'PCM
         : 'Rapport recalculé depuis les réponses au questionnaire : le rapport chiffré '
           + "d'origine n'est plus lisible. Le profil obtenu est identique à celui du jour du test.";
     }
+
+    // Trace RGPD de la consultation (2.43.0 — audit PCM D4/R6). Écrite APRÈS
+    // que le rapport a été réellement obtenu : un 404 ou un 422 « illisible »
+    // ne sont pas des consultations. `report_source` est journalisé parce qu'un
+    // rapport RECALCULÉ n'est pas celui du jour du test — la trace doit dire
+    // laquelle des deux versions a été montrée.
+    await journaliserConsultationPcm(req, row.candidate_id, {
+      report_id: row.id, session_id: row.session_id, report_source: source,
+    });
 
     res.json({
       id: row.id,

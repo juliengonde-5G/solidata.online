@@ -2,11 +2,16 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { anonymizeCandidate, anonymizeEmployee } = require('../services/anonymization');
 
 router.use(authenticate);
+// Double authentification (2.43.0) : pour les rôles soumis (settings
+// « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
+// franchi le défi TOTP. No-op intégral pour les autres rôles.
+router.use(requireMfa);
 
 // ══════════════════════════════════════════
 // REGISTRE DES TRAITEMENTS (Article 30 RGPD)

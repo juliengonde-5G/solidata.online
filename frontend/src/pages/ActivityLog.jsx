@@ -16,6 +16,8 @@ const ACTION_LABELS = {
   // Authentification
   login: 'Connexion', logout: 'Déconnexion', login_failed: 'Échec connexion',
   password_change: 'Changement MDP',
+  // Double authentification (2.43.0)
+  mfa_enrolled: 'Double authentification activée', mfa_reset: 'Double authentification réinitialisée',
   // Mutations génériques (autoLogActivity)
   create: 'Création', update: 'Modification', delete: 'Suppression',
   // Administration des habilitations
@@ -30,6 +32,7 @@ const ACTION_COLORS = {
   create: 'bg-green-100 text-green-700', update: 'bg-yellow-100 text-yellow-700',
   delete: 'bg-red-100 text-red-700', password_change: 'bg-orange-100 text-orange-700',
   login_failed: 'bg-red-200 text-red-800',
+  mfa_enrolled: 'bg-teal-100 text-teal-700', mfa_reset: 'bg-orange-200 text-orange-900',
   role_create: 'bg-indigo-100 text-indigo-700', role_delete: 'bg-indigo-100 text-indigo-700',
   permissions_matrix_update: 'bg-indigo-100 text-indigo-700',
   api_key_create: 'bg-amber-100 text-amber-800', api_key_update: 'bg-amber-100 text-amber-800',
@@ -47,6 +50,10 @@ const ENTITY_LABELS = {
   employee: 'Collaborateur', candidate: 'Candidat', team: 'Équipe',
   insertion: 'Insertion', pointage: 'Pointage', effectifs: 'Effectifs ETP',
   badgeuse: 'Temps & Présence',
+  // 2.43.0 — le module PCM journalise enfin (audit PCM D4/R6). Sans ce
+  // libellé, la garde anti-dérive `activity-log-libelles.test.js` échoue et
+  // l'entité serait introuvable au filtre.
+  pcm: 'Test de personnalité (PCM)',
   // Frip
   boutique: 'Boutique', boutique_vente: 'Ventes boutique',
   boutique_commande: 'Commande boutique', boutique_commandes: 'Commandes boutique',
