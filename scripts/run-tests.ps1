@@ -4,14 +4,13 @@
 #   .\scripts\run-tests.ps1
 #   .\scripts\run-tests.ps1 -Env recette
 #   .\scripts\run-tests.ps1 -BaseUrl "https://recette.solidata.online"
-#   .\scripts\run-tests.ps1 -ApiUser admin -ApiPassword "xxx"
+#   .\scripts\run-tests.ps1 -ApiKey "sol_xxxxxxxx_yyyyyyyy"
 # ============================================================
 
 param(
     [string]$Env = "prod",      # prod | recette
     [string]$BaseUrl = "",
-    [string]$ApiUser = $env:API_USER,
-    [string]$ApiPassword = $env:API_PASSWORD
+    [string]$ApiKey = $env:SMOKE_API_KEY
 )
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -27,12 +26,11 @@ if ($BaseUrl) {
 }
 
 Write-Host "[SOLIDATA] Tests sur : $url" -ForegroundColor Cyan
-if ($ApiUser) { Write-Host "[SOLIDATA] Login avec utilisateur : $ApiUser" -ForegroundColor Gray }
+if ($ApiKey) { Write-Host "[SOLIDATA] Identite de service : cle d'API (lecture seule)" -ForegroundColor Gray }
 Write-Host ""
 
 $env:BASE_URL = $url
-if ($ApiUser) { $env:API_USER = $ApiUser }
-if ($ApiPassword) { $env:API_PASSWORD = $ApiPassword }
+if ($ApiKey) { $env:SMOKE_API_KEY = $ApiKey }
 
 & node scripts/tests/api-smoke.js
 exit $LASTEXITCODE

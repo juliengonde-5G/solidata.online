@@ -1419,6 +1419,7 @@ async function autoFeedNews() {
 // ══════════════════════════════════════════
 const {
   purgePcmNonRecrute,
+  purgePcmReponses,
   purgeExpiredCandidates,
   purgeInsertionDossiers,
   purgeOldGpsPositions,
@@ -2034,6 +2035,11 @@ async function runAllJobs() {
     // BEAUCOUP plus courte (90 j) que sa fiche (24 mois) — les voir se suivre
     // au journal rend la règle lisible.
     await runInstrumented('purgePcmNonRecrute', purgePcmNonRecrute);
+    // Et juste derrière la purge des RÉPONSES détaillées (2.45.0) : délai encore
+    // plus court (30 j) et périmètre plus LARGE (recrutés compris). Les deux
+    // règles PCM se lisent alors d'affilée au journal des jobs — c'est la seule
+    // façon de voir d'un coup d'œil qu'elles ne recouvrent pas le même besoin.
+    await runInstrumented('purgePcmReponses', purgePcmReponses);
     await runInstrumented('purgeInsertionDossiers', purgeInsertionDossiers);
     await runInstrumented('purgeOldGpsPositions', purgeOldGpsPositions);
     // Immédiatement APRÈS la purge de la trace : les arrêts en sont dérivés,

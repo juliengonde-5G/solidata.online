@@ -257,8 +257,15 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
     // Seuil RÉELLEMENT appliqué par la purge des tests PCM (défaut 90 j en code,
     // réglable) — lu au même endroit que le job pour que l'écran ne puisse pas
     // annoncer une durée que le code n'applique pas.
-    const { readSetting, PCM_RETENTION_DEFAUT_JOURS } = require('../services/rgpd-purges');
+    const {
+      readSetting, PCM_RETENTION_DEFAUT_JOURS, PCM_REPONSES_RETENTION_DEFAUT_JOURS,
+    } = require('../services/rgpd-purges');
     const retentionPcmJours = await readSetting('rgpd.pcm_non_recrute_retention_jours', PCM_RETENTION_DEFAUT_JOURS);
+    // Second seuil PCM (2.45.0), plus court et sur un périmètre plus large : les
+    // réponses détaillées au questionnaire. Lu au même endroit que le job, pour
+    // la même raison — cet écran sert à PROUVER la conformité ; s'il annonçait
+    // une durée que le code n'applique pas, il ferait le contraire.
+    const retentionPcmReponsesJours = await readSetting('rgpd.pcm_reponses_retention_jours', PCM_REPONSES_RETENTION_DEFAUT_JOURS);
 
     let registreCount = null;
     try {
@@ -285,6 +292,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             valeur: `${retentionPcmJours} jours`,
             source: retentionPcmJours === PCM_RETENTION_DEFAUT_JOURS ? 'code' : 'rgpd.pcm_non_recrute_retention_jours',
             reference: 'backend/src/services/rgpd-purges.js (purgePcmNonRecrute), job planifié purgePcmNonRecrute',
+          },
+          {
+            titre: 'Réponses détaillées au questionnaire PCM (toutes les personnes)',
+            description: "Les 20 réponses au questionnaire sont supprimées passé ce délai, compté depuis la PASSATION comme ci-dessus. Seule la synthèse exploitée est conservée au-delà : types de base et de phase, et rapport d'analyse chiffré. Cette purge s'applique à TOUTES LES PERSONNES, y compris celles qui ont été RECRUTÉES — son fondement n'est pas l'issue du recrutement mais la minimisation (art. 5-1-c) : une fois le profil calculé, les réponses item par item n'ont plus d'usage opérationnel, aucun écran ne s'en sert pour décider quoi que ce soit. Conséquence assumée : passé ce délai, un rapport chiffré devenu illisible (rotation de clé) n'est plus reconstructible depuis les réponses ; les types de base et de phase, eux, sont stockés en clair et subsistent.",
+            valeur: `${retentionPcmReponsesJours} jours`,
+            source: retentionPcmReponsesJours === PCM_REPONSES_RETENTION_DEFAUT_JOURS ? 'code' : 'rgpd.pcm_reponses_retention_jours',
+            reference: 'backend/src/services/rgpd-purges.js (purgePcmReponses), job planifié purgePcmReponses',
           },
           {
             titre: "Dossiers d'insertion clos",
@@ -316,8 +330,8 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
         regles: [
           {
             titre: 'Purges automatiques planifiées',
-            description: "7 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, messagerie interne, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
-            valeur: '7 purges, 3×/jour',
+            description: "8 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, réponses détaillées au questionnaire PCM, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, messagerie interne, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
+            valeur: '8 purges, 3×/jour',
             source: 'code',
             reference: 'backend/src/services/rgpd-purges.js (registre PURGES_RGPD), backend/src/services/scheduler.js (runAllJobs)',
           },
@@ -397,6 +411,20 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             valeur: 'export à la demande',
             source: 'code',
             reference: 'backend/src/routes/rgpd.js (GET /export/:type/:id)',
+          },
+          {
+            titre: 'Information préalable du candidat (test PCM)',
+            description: "Avant la première question du test de personnalité, l'écran de passation affiche une notice en langage simple : à quoi sert le questionnaire et à quoi il ne sert pas (il n'est jamais un critère de sélection), qui voit le résultat, les DEUX durées de conservation ci-dessus, les droits de la personne et comment les exercer. Le candidat confirme l'avoir lue ; la confirmation est horodatée sur sa session (pcm_sessions.notice_acceptee_at) et la soumission des réponses est REFUSÉE sans elle — la garde est côté serveur, pas seulement à l'écran. Une personne qui ne souhaite pas répondre ne peut pas commencer, et l'écran lui indique vers qui se tourner.",
+            valeur: 'bloquante, tracée par passation',
+            source: 'code',
+            reference: 'backend/src/routes/pcm.js (POST /sessions/:token/notice, garde de POST /submit), frontend/src/pages/PCMTest.jsx',
+          },
+          {
+            titre: 'Restitution de son résultat au candidat (art. 15)',
+            description: "Depuis l'écran de fin de test, la personne peut éditer et imprimer son propre résultat, par son seul jeton de passation (elle n'a pas de compte). Le document lui rend ce que le questionnaire dit de sa manière de communiquer, avec la mention de méthode et les mentions de conservation ; il exclut l'indicateur de cohérence des réponses et tout vocabulaire clinique. Chaque restitution est journalisée (action PCM_RESTITUTION_CANDIDAT), et le jeton ne donne accès qu'au résultat de SA propre passation.",
+            valeur: 'à la demande, par jeton de session',
+            source: 'code',
+            reference: 'backend/src/routes/pcm.js (GET /sessions/:token/restitution), frontend/src/utils/pcm-pdf.js',
           },
           {
             titre: "Droit à l'effacement (art. 17)",

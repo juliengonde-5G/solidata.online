@@ -61,11 +61,18 @@ router.use(autoLogActivity('pcm'));
  * indisponible (table absente sur une base non migrée, panne d'écriture) ne
  * doit pas priver un RH du rapport qu'il a le droit de lire. L'échec est logué.
  */
-async function journaliserConsultationPcm(req, candidateId, details) {
+async function journaliserConsultationPcm(req, candidateId, details, action = 'PCM_RAPPORT_CONSULTATION') {
   try {
     await pool.query(
       'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
-      [req.user?.id ?? null, 'PCM_RAPPORT_CONSULTATION', 'pcm_reports', candidateId,
+      // Le code d'action arrive en paramètre `$2` : il n'est donc lisible nulle
+      // part dans le SQL, et la garde anti-dérive des libellés du journal RGPD
+      // (tests/unit/rgpd-audit-libelles.test.js) — qui lit le code source — ne
+      // le verrait pas. Cette liste la lui rend visible, comme le fait déjà
+      // services/rgpd-purges.js. Codes possibles : 'PCM_RAPPORT_CONSULTATION'
+      // (un agent habilité ouvre le rapport d'une personne) et
+      // 'PCM_RESTITUTION_CANDIDAT' (la personne demande SON propre résultat).
+      [req.user?.id ?? null, action, 'pcm_reports', candidateId,
         JSON.stringify({ candidate_id: candidateId, ...(details || {}) })]
     );
   } catch (e) {
@@ -938,6 +945,168 @@ router.get('/sessions/:token', async (req, res) => {
   }
 });
 
+// POST /api/pcm/sessions/:token/notice — le candidat confirme avoir lu la
+// notice d'information affichée AVANT la première question (2.45.0).
+//
+// PUBLIC, par jeton de session, comme la passation elle-même : la personne qui
+// répond n'a pas de compte. Le jeton (128 bits) est sa seule pièce d'identité.
+//
+// CE QUE CETTE ROUTE PROUVE, et ce qu'elle ne prouve pas. Elle horodate le fait
+// que la notice a été présentée et acquittée sur CETTE passation — c'est
+// l'obligation d'information (art. 12-14 RGPD ; art. L1221-8 et L1221-9 du Code
+// du travail : le candidat doit être informé des méthodes d'évaluation). Ce
+// n'est PAS un consentement au sens de l'art. 6-1-a — la base légale déclarée
+// au registre pour ce traitement est l'intérêt légitime —, et c'est pourquoi la
+// trace ne va pas dans `rgpd_consents` (le raisonnement complet est dans
+// scripts/init-db.js, à côté de la colonne).
+//
+// IDEMPOTENTE : un double clic, un rechargement de page ou une reprise après
+// coupure ne réécrivent pas l'horodatage (COALESCE) — la première confirmation
+// fait foi, et c'est elle qui est datée.
+router.post('/sessions/:token/notice', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `UPDATE pcm_sessions
+          SET notice_acceptee_at = COALESCE(notice_acceptee_at, NOW())
+        WHERE access_token = $1 AND status <> 'completed'
+        RETURNING id, notice_acceptee_at`,
+      [req.params.token]
+    );
+    if (r.rows.length === 0) {
+      // Jeton inconnu OU session déjà terminée : même réponse, pour ne pas
+      // renseigner un tiers sur l'existence d'une session (le jeton n'est pas
+      // énumérable, mais rien n'oblige à confirmer une hypothèse).
+      return res.status(404).json({ error: 'Session non trouvée' });
+    }
+    res.json({ notice_acceptee_at: r.rows[0].notice_acceptee_at });
+  } catch (err) {
+    // Base non migrée (colonne absente) : on le DIT plutôt que de laisser
+    // croire à une panne réseau — sans la colonne, la passation est bloquée et
+    // l'exploitant doit savoir pourquoi.
+    console.error('[PCM] Erreur confirmation de notice :', err);
+    res.status(500).json({ error: 'Erreur serveur', code: err.code || null });
+  }
+});
+
+/**
+ * Restitution destinée au CANDIDAT — projection en LISTE BLANCHE.
+ *
+ * Pourquoi une projection explicite plutôt qu'un filtrage du rapport : le
+ * rapport complet contient des éléments qui n'ont rien à faire dans un document
+ * remis à la personne — les niveaux de stress rédigés en vocabulaire clinique
+ * (« dépression », « paranoïa »), les masques et le driver hérités de l'analyse
+ * transactionnelle, le guide destiné au manager (il parle d'elle à un tiers) et
+ * l'indicateur de cohérence des réponses, artefact mesuré par l'audit. Une
+ * liste noire laisserait passer le prochain champ ajouté au moteur ; une liste
+ * blanche ne laisse passer que ce qui a été décidé.
+ *
+ * ROBUSTESSE : la restitution se compose d'abord depuis les types de base et de
+ * phase, stockés EN CLAIR et donc toujours disponibles. L'immeuble (les autres
+ * étages) vient du rapport chiffré : s'il n'est plus lisible, il est OMIS et
+ * l'absence est nommée — jamais un immeuble reconstitué au jugé.
+ */
+function restitutionCandidat(baseType, phaseType, report) {
+  const base = PCM_TYPES[baseType];
+  const phase = PCM_TYPES[phaseType];
+  if (!base) return null;
+  return {
+    base: {
+      type: baseType,
+      nom: base.nom,
+      perception: base.perception,
+      canal: base.canal,
+      points_forts: base.pointsForts,
+      besoin: base.besoinPsychologique,
+      avec_les_autres: base.comportementAvecAutres || null,
+      ce_qui_aide: base.environnement || null,
+    },
+    // La phase se restitue par son seul BESOIN du moment — jamais par le
+    // « driver » ni par les paliers de stress.
+    phase: phase ? { type: phaseType, nom: phase.nom, besoin: phase.besoinPsychologique } : null,
+    // Étages de l'immeuble : neutres (un ordre de proximité), utiles à la
+    // personne. `null` si le rapport n'est pas lisible.
+    immeuble: Array.isArray(report?.immeuble)
+      ? report.immeuble.map((e) => ({ etage: e.etage, nom: e.nom, score: e.score }))
+      : null,
+    profil_peu_marque: report?.confidence?.baseIndetermine === true,
+  };
+}
+
+// GET /api/pcm/sessions/:token/restitution — la personne récupère SON résultat.
+//
+// Droit d'accès (art. 15 RGPD) et principe déontologique de restitution : le
+// candidat ne voyait que son type de base en fin de test, et aucun canal ne lui
+// rendait son résultat accessible (audit PCM, défaut D6). Il l'obtient ici par
+// le MÊME jeton que sa passation : c'est sa seule pièce d'identité, et elle ne
+// désigne que sa propre session — un jeton ne peut pas atteindre le résultat
+// d'une autre personne, la session étant retrouvée PAR le jeton (jamais par un
+// identifiant de candidat qui viendrait de la requête).
+//
+// Ce que la réponse ne contient jamais : l'indicateur de cohérence des réponses
+// (`risk_alert`, ex-« alerte RPS » — artefact mesuré à 32 % de faux positifs),
+// les paliers de stress, le guide manager. Voir `restitutionCandidat`.
+router.get('/sessions/:token/restitution', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT ps.id AS session_id, ps.candidate_id, ps.completed_at,
+              pr.base_type, pr.phase_type, pr.encrypted_report, pr.created_at,
+              c.first_name
+         FROM pcm_sessions ps
+         JOIN candidates c ON c.id = ps.candidate_id
+         LEFT JOIN LATERAL (
+           SELECT base_type, phase_type, encrypted_report, created_at
+             FROM pcm_reports WHERE session_id = ps.id
+            ORDER BY created_at DESC LIMIT 1
+         ) pr ON true
+        WHERE ps.access_token = $1`,
+      [req.params.token]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Session non trouvée' });
+
+    const row = r.rows[0];
+    if (!row.base_type) {
+      // Le test n'a pas encore été soumis : il n'y a rien à restituer, et on ne
+      // le maquille pas en erreur technique.
+      return res.status(409).json({
+        error: "Ce test n'a pas encore été passé jusqu'au bout : il n'y a pas encore de résultat à vous remettre.",
+        code: 'PCM_SANS_RESULTAT',
+      });
+    }
+
+    const report = decryptReport(row.encrypted_report);
+    const restitution = restitutionCandidat(row.base_type, row.phase_type, report);
+    if (!restitution) {
+      return res.status(422).json({
+        error: "Votre résultat n'est pas lisible.",
+        code: 'PCM_ILLISIBLE',
+        detail: 'Contactez la personne qui vous a transmis le lien : elle pourra vous le remettre autrement.',
+      });
+    }
+
+    // Trace RGPD. Non bloquante, comme la consultation par un agent : un journal
+    // indisponible ne doit pas priver une personne de SES propres données —
+    // ce serait faire payer à l'intéressée une panne qui ne la concerne pas.
+    await journaliserConsultationPcm(req, row.candidate_id, {
+      session_id: row.session_id,
+      canal: 'restitution_candidat',
+      immeuble_disponible: restitution.immeuble != null,
+    }, 'PCM_RESTITUTION_CANDIDAT');
+
+    res.json({
+      prenom: row.first_name || null,
+      date_passation: row.completed_at || row.created_at,
+      ...restitution,
+      // Nommer l'absence plutôt que la laisser deviner (doctrine du dépôt).
+      note_immeuble: restitution.immeuble == null
+        ? "Le détail de votre profil n'est plus disponible : seuls votre type principal et vos repères de communication vous sont remis."
+        : null,
+    });
+  } catch (err) {
+    console.error('[PCM] Erreur restitution candidat :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // Middleware : autorise soit un utilisateur RH/ADMIN authentifié, soit
 // un access_token de session PCM (lien autonome envoyé au candidat).
 // Bloque la soumission par simple `session_id` sans preuve de légitimité.
@@ -975,6 +1144,28 @@ router.post('/submit', authenticateSubmit, [
 
     if (!session) return res.status(404).json({ error: 'Session non trouvée' });
     if (session.status === 'completed') return res.status(400).json({ error: 'Session déjà terminée' });
+
+    // GARDE D'INFORMATION PRÉALABLE (2.45.0). Sans confirmation de lecture de
+    // la notice, aucune réponse n'est enregistrée.
+    //
+    // Elle est posée ICI, côté serveur, et pas seulement sur l'écran : une
+    // obligation d'information que seul le front applique est une obligation
+    // qu'un appel direct contourne. Et elle vaut pour LES DEUX chemins de
+    // soumission — jeton du candidat comme agent authentifié : la règle porte
+    // sur la passation, pas sur celui qui appuie sur le bouton. En passation
+    // accompagnée, le praticien présente la notice sur le même écran ; il n'y a
+    // donc pas de cas légitime où la personne répond sans l'avoir vue.
+    //
+    // Les sessions ouvertes avant cette version ont `notice_acceptee_at` à NULL :
+    // leur candidat verra la notice à sa prochaine ouverture du lien et pourra
+    // la confirmer — le parcours se répare de lui-même, rien n'est perdu.
+    if (!session.notice_acceptee_at) {
+      return res.status(409).json({
+        error: "La notice d'information n'a pas été confirmée : le test ne peut pas être enregistré.",
+        code: 'PCM_NOTICE_NON_CONFIRMEE',
+        hint: "Rouvrez le lien de passation : la notice s'affiche avant la première question.",
+      });
+    }
 
     if (!answers || answers.length < 18) {
       return res.status(400).json({ error: 'Minimum 18 réponses requises pour une analyse fiable' });

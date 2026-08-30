@@ -35,6 +35,112 @@ export const PCM_MENTION_METHODE =
   + 'de recrutement ou d’orientation.';
 
 /**
+ * NOTICE D'INFORMATION PRÉALABLE (2.45.0) — affichée AVANT la première question.
+ *
+ * POURQUOI ELLE EXISTE. Le client a écarté la recommandation de déplacer la
+ * passation après l'embauche (audit PCM §6.3 a) : le test reste dans le
+ * parcours de recrutement. En contrepartie, l'information de la personne
+ * devient une obligation tenue par le logiciel et non par l'usage. L'écran de
+ * passation ne disait ni la finalité, ni les destinataires, ni la durée de
+ * conservation, ni les droits (audit, défaut D6) — deux phrases rassurantes
+ * (« pas de bonne ou mauvaise réponse », « vos réponses restent
+ * confidentielles ») en tenaient lieu.
+ *
+ * COMMENT ELLE EST ÉCRITE. En FALC : phrases courtes, une idée par phrase,
+ * mots du quotidien, pas de sigle non expliqué, pas de tournure impersonnelle.
+ * Le public de la structure est éloigné de l'écrit ; une notice juridiquement
+ * complète mais illisible n'informe personne, et l'audit relève que
+ * l'illettrisme concerne une part réelle des personnes accompagnées.
+ *
+ * CE QU'ELLE NE FAIT PAS : elle ne recueille pas un consentement. La base
+ * légale déclarée au registre est l'intérêt légitime ; ce que la personne
+ * confirme, c'est d'avoir LU. Le texte ne promet donc pas de « donner son
+ * accord » — il dit ce qui est fait, et ce qu'elle peut demander.
+ *
+ * Structure exploitée telle quelle par l'écran (une carte par bloc). La mention
+ * de méthode n'y est PAS recopiée : elle vit dans PCM_MENTION_METHODE et
+ * l'écran l'affiche à côté — une mise en garde en double exemplaire finit par
+ * diverger.
+ */
+export const PCM_NOTICE_INFORMATION = {
+  titre: 'Avant de commencer, quelques informations',
+  chapeau: 'Prenez le temps de lire. Si une phrase n’est pas claire, demandez à la personne qui vous a envoyé ce lien.',
+  blocs: [
+    {
+      cle: 'finalite',
+      titre: 'À quoi sert ce questionnaire',
+      points: [
+        'Il aide à mieux se parler : la façon dont vous aimez qu’on s’adresse à vous, ce qui vous met à l’aise au travail.',
+        'Il sert de point de départ à une discussion avec vous.',
+      ],
+    },
+    {
+      cle: 'hors_finalite',
+      titre: 'À quoi il ne sert pas',
+      points: [
+        'Ce n’est pas un examen. Il n’y a pas de bonne ni de mauvaise réponse.',
+        'Ce n’est pas un test médical. Il ne dit rien de votre santé.',
+        'Il ne sert pas à choisir qui est embauché. Le résultat ne décide de rien.',
+      ],
+    },
+    {
+      cle: 'destinataires',
+      titre: 'Qui voit le résultat',
+      points: [
+        'Les personnes des ressources humaines, et la personne qui vous accompagnera si vous êtes embauché.',
+        'Le résultat ne va pas à votre futur chef d’équipe.',
+        'Il n’est jamais envoyé à quelqu’un en dehors de la structure.',
+      ],
+    },
+    {
+      cle: 'conservation',
+      titre: 'Combien de temps c’est gardé',
+      points: [
+        'Vos réponses aux 20 questions sont effacées 30 jours après le test. Cela vaut pour tout le monde.',
+        'Si vous n’êtes pas embauché, tout le test est effacé 90 jours après le test.',
+        'Si vous êtes embauché, le résultat est gardé dans votre dossier, et effacé avec lui.',
+      ],
+    },
+    {
+      cle: 'droits',
+      titre: 'Vos droits',
+      points: [
+        'Vous pouvez demander à voir ce qui est écrit sur vous.',
+        'Vous pouvez demander à le corriger, ou à le faire effacer.',
+        'À la fin du test, vous pouvez imprimer votre résultat pour le garder.',
+        'Pour cela, parlez-en à la personne qui vous a envoyé ce lien.',
+      ],
+    },
+  ],
+  /** Case à cocher — la formulation dit « lu », pas « j'accepte ». */
+  confirmation: 'J’ai lu ces informations.',
+  /** Texte du refus, à afficher SANS reproche : ne pas répondre est un droit. */
+  refus: {
+    titre: 'Vous pouvez ne pas répondre',
+    corps: 'Vous n’êtes pas obligé de faire ce questionnaire. Fermez simplement cette page. '
+      + 'Prévenez la personne qui vous a envoyé le lien : elle prendra le relais. '
+      + 'Cela ne vous sera pas reproché.',
+  },
+};
+
+/**
+ * Les mêmes informations, en une phrase suivie, pour les documents qui se lisent
+ * SEULS — le résultat que le candidat emporte (frontend/src/utils/pcm-pdf.js).
+ *
+ * DÉRIVÉES de la notice ci-dessus, jamais recopiées : c'est le seul moyen qu'un
+ * délai modifié à un endroit ne laisse pas l'autre annoncer l'ancien. La clé de
+ * bloc (`cle`) sert d'ancrage plutôt que le titre français, qu'une relecture de
+ * confort pourrait reformuler sans savoir qu'il est load-bearing.
+ */
+function joindreBloc(cle) {
+  const bloc = PCM_NOTICE_INFORMATION.blocs.find((b) => b.cle === cle);
+  return bloc ? bloc.points.join(' ') : '';
+}
+
+export const PCM_MENTION_CONSERVATION = joindreBloc('conservation');
+export const PCM_MENTION_DROITS = joindreBloc('droits');
+
+/**
  * R1 — remplacement de l'« Alerte Risques Psychosociaux ».
  *
  * L'indicateur `pcm_reports.risk_alert` ne mesure pas une détresse : il vérifie

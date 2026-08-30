@@ -134,6 +134,11 @@ const JOB_SCHEDULE = {
   // sans cadence attendue, un test de personnalité conservé au-delà de son
   // échéance ne se signalerait nulle part.
   purgePcmNonRecrute:             { label: 'Purge RGPD tests PCM non recrutés',  cadence: '3×/jour',            maxAgeHours: DAILY },
+  // 2.45.0 — purge des RÉPONSES détaillées du questionnaire à 30 jours de la
+  // passation, recrutés compris (contrepartie du maintien du test au
+  // recrutement). Déclarée pour la même raison que la précédente : une purge
+  // qui s'arrête sans se signaler, c'est une donnée conservée sans le savoir.
+  purgePcmReponses:               { label: 'Purge RGPD réponses PCM',           cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeOldGpsPositions:           { label: 'Purge RGPD GPS > 90 jours',         cadence: '3×/jour',            maxAgeHours: DAILY },
   // Correctif du 27/08 : les arrêts détectés DÉRIVENT de gps_positions. Déclaré
   // ici pour qu'un arrêt de ce job se voie — sans lui, la purge de la source

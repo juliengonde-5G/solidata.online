@@ -523,7 +523,7 @@ curl -sS -o /dev/null -m 10 -w "mob=%{http_code}\n" --resolve m.solidata.online:
 # Santé applicative
 bash deploy/scripts/health-check.sh
 
-# Endpoints critiques (nécessite API_USER / API_PASSWORD dans .env)
+# Endpoints critiques (nécessite SMOKE_API_KEY dans .env — clé d'API de service, lecture seule)
 node scripts/tests/api-smoke.js
 ```
 

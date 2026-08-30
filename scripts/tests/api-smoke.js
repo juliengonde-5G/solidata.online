@@ -9,20 +9,29 @@
  * échouer le deploy (exit 1) dès qu'un seul retourne 5xx. Les 200/204 et
  * les 401/403 (rôle insuffisant = endpoint existe et fonctionne) sont OK.
  *
+ * IDENTITÉ — CLÉ D'API DE SERVICE (2.45.0)
+ * ─────────────────────────────────────────
+ * Ce test ne se CONNECTE plus. Il ne possède ni identifiant, ni mot de passe,
+ * ni secret de double authentification : il présente une CLÉ D'API dédiée
+ * (en-tête `X-API-Key`), en LECTURE SEULE, révocable et expirable.
+ *
+ * Pourquoi ce changement : jusqu'ici le test ouvrait une vraie session avec un
+ * compte ADMIN dont le mot de passe ET le secret TOTP vivaient côte à côte dans
+ * le `.env` du serveur — soit les deux facteurs au même endroit, ce qui annule
+ * le bénéfice de la double authentification. Une clé est un secret unique, à
+ * portée limitée, qui n'ouvre aucune session humaine et ne peut rien écrire.
+ *
  * Usage :
  *   node scripts/tests/api-smoke.js
- *   BASE_URL=https://solidata.online API_USER=admin API_PASSWORD=*** node scripts/tests/api-smoke.js
+ *   BASE_URL=https://solidata.online SMOKE_API_KEY=sol_xxx_yyy node scripts/tests/api-smoke.js
  *
  * Variables d'environnement :
  *   BASE_URL       — URL du backend (défaut: http://localhost:3001)
- *   API_USER       — Identifiant pour les tests authentifiés (requis pour
- *                    couvrir les endpoints protégés — sans, ils sont SKIPpés
- *                    et le smoke est aveugle aux 500 derrière l'auth)
- *   API_PASSWORD   — Mot de passe
- *   API_TOTP_SECRET— Secret TOTP (Base32) du compte ci-dessus, si la double
- *                    authentification y est activée. Sans lui, le login répond
- *                    « mfa_required » et le smoke poursuit en mode dégradé (il
- *                    l'annonce ; il ne fait PAS échouer le déploiement)
+ *   SMOKE_API_KEY  — Clé d'API de service (format `sol_<prefix>_<secret>`).
+ *                    Sans elle, les endpoints protégés sont SKIPpés et le smoke
+ *                    est aveugle aux 500 derrière l'authentification.
+ *                    Création : dans le conteneur backend,
+ *                    `node src/scripts/creer-cle-api.js --apply`
  *   SMOKE_STRICT   — Si "true", traite aussi les SKIP comme des échecs
  *                    (utile en CI/deploy pour forcer la couverture)
  *
@@ -33,18 +42,22 @@
  */
 
 const BASE_URL = (process.env.BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
-const API_USER = process.env.API_USER;
-const API_PASSWORD = process.env.API_PASSWORD;
-// Secret TOTP (Base32) du compte de service, si la double authentification est
-// activée sur lui (chantier 2.43.0). Sans lui, le smoke se dégrade en disant
-// explicitement ce qu'il ne couvre plus.
-const API_TOTP_SECRET = process.env.API_TOTP_SECRET;
+// Clé d'API de service (lecture seule). Remplace API_USER / API_PASSWORD /
+// API_TOTP_SECRET, qui rangeaient les deux facteurs d'un compte ADMIN au même
+// endroit. Ces trois variables ne sont PLUS lues : les laisser dans le .env
+// n'a aucun effet, il faut les retirer.
+const SMOKE_API_KEY = process.env.SMOKE_API_KEY;
 const STRICT = process.env.SMOKE_STRICT === 'true';
+
+// Identifiant RÉSERVÉ des deux sondes de sécurité ci-dessous. Il n'est créé
+// nulle part et ne peut correspondre à personne : quand ces deux échecs de
+// connexion apparaissent au journal depuis l'adresse du serveur, c'est
+// l'autocontrôle du déploiement, jamais une tentative d'intrusion.
+const IDENTIFIANT_SONDE = 'smoke-test-identifiant-invalide';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const YEAR = new Date().getFullYear();
 
-let token = null;
 let passed = 0;
 let failed = 0;
 let skipped = 0;
@@ -134,94 +147,66 @@ async function run() {
     process.exit(2);
   }
 
-  // ═══ §2 Authentification ═══
-  console.log('\n─── §2 Authentification ───');
+  // ═══ §2 Identité de service (clé d'API) ═══
+  console.log("\n─── §2 Identité de service (clé d'API) ───");
 
-  // Login invalide → 401 attendu
-  try {
-    const { status } = await request('POST', '/api/auth/login', { username: '__invalid__', password: '__wrong__' });
-    if (status === 401) ok('T-AUTH-01', 'Login invalide rejeté (401)');
-    else if (status === 429) ok('T-AUTH-01', 'Login invalide rate-limited (429)');
-    else fail('T-AUTH-01', 'Login invalide', `attendu 401, reçu ${status}`);
-  } catch (e) { fail('T-AUTH-01', 'Login invalide', e.message); }
-
-  // Accès protégé sans token → 401 attendu
+  // Accès protégé sans aucune identité → 401 attendu
   try {
     const { status } = await request('GET', '/api/candidates/kanban');
-    if (status === 401) ok('T-AUTH-02', 'Accès protégé sans token (401)');
-    else fail('T-AUTH-02', 'Accès protégé sans token', `attendu 401, reçu ${status}`);
-  } catch (e) { fail('T-AUTH-02', 'Accès protégé sans token', e.message); }
+    if (status === 401) ok('T-AUTH-01', 'Accès protégé sans identité (401)');
+    else fail('T-AUTH-01', 'Accès protégé sans identité', `attendu 401, reçu ${status}`);
+  } catch (e) { fail('T-AUTH-01', 'Accès protégé sans identité', e.message); }
 
-  // Login valide (si credentials fournis)
+  // Clé mal formée → 401 attendu (la porte de service est fermée par défaut)
+  try {
+    const { status } = await request('GET', '/api/candidates/kanban', null, { 'X-API-Key': 'sol_inexistante_zzz' });
+    if (status === 401) ok('T-AUTH-02', "Clé d'API inconnue rejetée (401)");
+    else fail('T-AUTH-02', "Clé d'API inconnue", `attendu 401, reçu ${status}`);
+  } catch (e) { fail('T-AUTH-02', "Clé d'API inconnue", e.message); }
+
+  // Une clé absente, expirée, révoquée ou mal configurée n'est PAS une
+  // régression de l'application : c'est un test qu'on ne peut pas exécuter.
+  // Confondre les deux ferait annuler par un rollback un déploiement
+  // parfaitement sain (même doctrine que le « smoke non exécuté » de deploy.sh).
+  // On dégrade donc en le DISANT fort. Seul un 5xx — le serveur qui tombe en
+  // essayant de dire qui nous sommes — est un vrai échec.
   let authH = null;
-  if (API_USER && API_PASSWORD) {
+  let motifDegradation = null;
+  if (SMOKE_API_KEY) {
     try {
-      let { status, data } = await request('POST', '/api/auth/login', { username: API_USER, password: API_PASSWORD });
-
-      // Double authentification (2.43.0) : le compte de service est un ADMIN,
-      // donc soumis. Si la double authentification est ACTIVE sur ce compte, le
-      // login ne renvoie plus de jeton mais un défi à 5 minutes.
-      if (status === 200 && data?.mfa_required === true) {
-        if (API_TOTP_SECRET) {
-          // Le code se calcule sans dépendance : le module TOTP du backend est
-          // pur et sans E/S — c'est le MÊME code que celui vérifié côté serveur.
-          const { totp } = require('../../backend/src/utils/totp');
-          const codeTotp = totp(API_TOTP_SECRET);
-          ({ status, data } = await request('POST', '/api/auth/mfa/verify', {
-            mfa_challenge_token: data.mfa_challenge_token,
-            code: codeTotp,
-          }));
-          if (status !== 200) {
-            fail('T-AUTH-03', 'Vérification du code TOTP',
-              `status=${status}${data?.error ? ` (${data.error})` : ''} — vérifiez API_TOTP_SECRET et l'heure du serveur`);
-          }
-        } else {
-          // Mode dégradé ASSUMÉ, et DIT : on ne fait pas échouer le déploiement
-          // (ce n'est pas une régression applicative), mais on annonce que la
-          // couverture derrière l'authentification est perdue.
-          console.log('\n\x1b[33m⚠️  Le compte API est soumis à la double authentification et API_TOTP_SECRET n\'est pas défini : les endpoints protégés NE SERONT PAS couverts. Renseignez API_TOTP_SECRET (secret Base32 de ce compte) dans le .env du serveur.\x1b[0m');
-          if (STRICT) {
-            fail('T-AUTH-03', 'Login valide', 'compte soumis à MFA sans API_TOTP_SECRET — couverture des endpoints protégés impossible');
-          } else {
-            skipMsg('T-AUTH-03', 'Login (compte soumis à MFA, API_TOTP_SECRET non défini)');
-            skipMsg('T-AUTH-04', 'Profil /auth/me');
-          }
-          data = null;
-        }
+      const entetes = { 'X-API-Key': SMOKE_API_KEY };
+      const { status, data } = await request('GET', '/api/auth/me', null, entetes);
+      if (status === 200 && data?.is_service === true) {
+        authH = entetes;
+        ok('T-AUTH-03', "Clé d'API de service acceptée", `rôle : ${data.role || '?'}`);
+      } else if (status >= 500) {
+        fail('T-AUTH-03', "Clé d'API de service", `5xx ${status}${data?.error ? ` (${data.error})` : ''}`);
+      } else if (status === 401) {
+        motifDegradation = 'la clé est inconnue, révoquée ou expirée — en recréer une (creer-cle-api.js)';
+      } else if (status === 403) {
+        // Clé sans le scope de service, ou sans rôle : le serveur dit lequel.
+        motifDegradation = `clé refusée — ${data?.error || 'scope ou rôle manquant'}`;
+      } else if (status === 200) {
+        motifDegradation = "le serveur a répondu sans identité de service : backend antérieur à la clé de service ?";
+      } else {
+        motifDegradation = `réponse inattendue ${status}${data?.error ? ` (${data.error})` : ''}`;
       }
-
-      if (status === 200 && (data?.accessToken || data?.token)) {
-        token = data.accessToken || data.token;
-        authH = { Authorization: `Bearer ${token}` };
-        ok('T-AUTH-03', 'Login valide', `rôle: ${data.user?.role || '?'}${API_TOTP_SECRET ? ', MFA vérifiée' : ''}`);
-
-        // PIÈGE À SIGNALER : au tout premier déploiement, le compte de service
-        // n'est pas encore enrôlé. Son jeton porte `mfa:false`, donc TOUS les
-        // endpoints protégés répondent 403 — que le smoke compte comme « OK,
-        // simplement protégé ». Le test resterait vert en ne vérifiant plus
-        // rien. Mieux vaut le dire fort que laisser croire à une couverture.
-        if (data.user?.mfa_enrollment_required === true) {
-          console.log('\n\x1b[33m⚠️  Le compte API est soumis à la double authentification mais N\'EST PAS ENCORE ENRÔLÉ : sa session ne franchit aucune route sensible (403 partout), et ce smoke ne vérifie donc plus grand-chose. Enrôlez ce compte puis renseignez API_TOTP_SECRET.\x1b[0m');
-        }
-      } else if (data !== null) {
-        fail('T-AUTH-03', 'Login valide', `status=${status}${data?.error ? ` (${data.error})` : ''}`);
-      }
-    } catch (e) { fail('T-AUTH-03', 'Login valide', e.message); }
-
-    if (token) {
-      await checkEndpoint('T-AUTH-04', '/api/auth/me', 'Profil /auth/me', { authH, expect2xx: true });
-    }
+    } catch (e) { motifDegradation = `injoignable : ${e.message}`; }
   } else {
+    motifDegradation = 'SMOKE_API_KEY non définie';
+  }
+
+  if (!authH && motifDegradation) {
     if (STRICT) {
-      fail('T-AUTH-03', 'Login valide', 'API_USER/API_PASSWORD non définis — couverture endpoints protégés impossible');
+      fail('T-AUTH-03', "Clé d'API de service", `${motifDegradation} — couverture des endpoints protégés impossible`);
     } else {
-      skipMsg('T-AUTH-03', 'Login (API_USER/API_PASSWORD non définis)');
-      skipMsg('T-AUTH-04', 'Profil /auth/me');
+      skipMsg('T-AUTH-03', `Clé d'API de service (${motifDegradation})`);
     }
   }
 
   if (!authH) {
-    console.log('\n\x1b[33m⚠️  Pas de token — seuls les endpoints publics sont testés. La majorité des bugs 500 derrière auth ne seront pas attrapés. Définis API_USER/API_PASSWORD.\x1b[0m');
+    console.log("\n\x1b[33m⚠️  Pas de clé de service exploitable — seuls les endpoints publics sont testés. La majorité des bugs 500 derrière l'authentification ne seront pas attrapés.\x1b[0m");
+    console.log("\x1b[33m   Pour la créer, dans le conteneur backend : node src/scripts/creer-cle-api.js --apply, puis SMOKE_API_KEY=... dans le .env du serveur.\x1b[0m");
   }
 
   // ═══ §3 Dashboard & Accueil (premier écran utilisateur) ═══
@@ -336,13 +321,53 @@ async function run() {
     await checkEndpoint('T-REF-03', '/api/users',                   'Utilisateurs (ADMIN seul)', { authH });
   }
 
-  // ═══ §13 Sécurité (rate limit + injection) ═══
-  console.log('\n─── §13 Sécurité ───');
+  // ═══ §13 Autocontrôles de sécurité ═══
+  //
+  // LIRE CECI SI VOUS VOYEZ DES ÉCHECS DE CONNEXION AU JOURNAL.
+  // Les deux sondes ci-dessous provoquent VOLONTAIREMENT deux échecs de
+  // connexion depuis l'adresse du serveur, à chaque déploiement. Ce ne sont pas
+  // des tentatives d'intrusion : ce sont les autocontrôles du déploiement.
+  // Elles portent toutes les deux l'identifiant réservé « smoke-test-identifiant-
+  // invalide », qui n'existe dans aucun compte — le journal est donc
+  // auto-explicatif. On les garde parce qu'elles vérifient une vraie propriété
+  // de sécurité : la porte d'entrée refuse un identifiant inconnu, et elle ne se
+  // laisse pas ouvrir par une chaîne d'injection SQL.
+  console.log('\n─── §13 Autocontrôles de sécurité ───');
   try {
-    const { status } = await request('POST', '/api/auth/login', { username: "' OR '1'='1", password: "' OR '1'='1" });
-    if (status === 401) ok('T-SEC-01', 'Injection SQL login rejetée (401)');
-    else fail('T-SEC-01', 'Injection SQL login', `attendu 401, reçu ${status}`);
-  } catch (e) { fail('T-SEC-01', 'Injection SQL login', e.message); }
+    const { status } = await request('POST', '/api/auth/login',
+      { username: IDENTIFIANT_SONDE, password: 'mot-de-passe-volontairement-faux' });
+    if (status === 401) ok('T-SEC-01', 'Identifiant inconnu refusé (401) — échec de connexion attendu au journal');
+    else if (status === 429) ok('T-SEC-01', 'Identifiant inconnu rate-limité (429)');
+    else fail('T-SEC-01', 'Identifiant inconnu refusé', `attendu 401, reçu ${status}`);
+  } catch (e) { fail('T-SEC-01', 'Identifiant inconnu refusé', e.message); }
+
+  try {
+    const { status } = await request('POST', '/api/auth/login',
+      { username: `${IDENTIFIANT_SONDE}' OR '1'='1`, password: `' OR '1'='1` });
+    if (status === 401) ok('T-SEC-02', 'Injection SQL au login refusée (401) — échec de connexion attendu au journal');
+    else if (status === 429) ok('T-SEC-02', 'Injection SQL au login rate-limitée (429)');
+    else fail('T-SEC-02', 'Injection SQL au login', `attendu 401, reçu ${status}`);
+  } catch (e) { fail('T-SEC-02', 'Injection SQL au login', e.message); }
+
+  // La clé de service est-elle RÉELLEMENT en lecture seule ? On le vérifie sur
+  // le serveur qui vient d'être déployé, pas seulement dans les tests unitaires.
+  // C'est la garantie qui rend acceptable une clé portant un rôle élevé : si
+  // elle cédait, une clé volée pourrait écrire.
+  if (authH) {
+    try {
+      const { status, data } = await request('POST', '/api/news', { title: 'sonde', content: 'sonde' }, authH);
+      if (status === 403 && data?.code === 'SERVICE_KEY_READ_ONLY') {
+        ok('T-SEC-03', "Clé de service en lecture seule : écriture refusée (403)");
+      } else if (status === 403) {
+        ok('T-SEC-03', "Clé de service : écriture refusée (403)", data?.error || '');
+      } else {
+        fail('T-SEC-03', 'Clé de service en lecture seule',
+          `ÉCRITURE NON REFUSÉE — attendu 403, reçu ${status}`);
+      }
+    } catch (e) { fail('T-SEC-03', 'Clé de service en lecture seule', e.message); }
+  } else {
+    skipMsg('T-SEC-03', 'Clé de service en lecture seule (pas de clé)');
+  }
 
   // ═══ Résumé ═══
   const total = passed + failed + skipped;

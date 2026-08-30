@@ -17,6 +17,17 @@
  *      grâce à une clé historique (sans quoi le problème reviendra à la
  *      prochaine rotation), et reconstruit ceux qu'aucune clé n'ouvre.
  *
+ * FENÊTRE DE RÉPARATION — À LIRE AVANT DE COMPTER SUR CE SCRIPT (2.45.0).
+ * La reconstruction repose ENTIÈREMENT sur `pcm_answers`. Or ces réponses sont
+ * désormais purgées 30 jours après la passation, pour tout le monde, recrutés
+ * compris (settings « rgpd.pcm_reponses_retention_jours », service
+ * services/rgpd-purges.js, job purgePcmReponses) : c'est la contrepartie du
+ * maintien du test dans le parcours de recrutement, et c'est délibéré.
+ * Passé ce délai, un rapport illisible reste illisible — ce script le dira, il
+ * ne le réparera pas. Ce qui subsiste dans tous les cas : les types de base et
+ * de phase, stockés EN CLAIR depuis toujours. Ce n'est donc pas le profil qui
+ * se perd, c'est le rapport rédigé autour de lui.
+ *
  * CE QU'IL NE FAIT PAS. Il n'invente jamais un profil : un rapport illisible
  * dont la session n'a plus de réponses est signalé et laissé tel quel. Et les
  * types Base/Phase enregistrés le jour du test ne sont JAMAIS réécrits — ils

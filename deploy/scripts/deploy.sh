@@ -440,8 +440,13 @@ case "${ACTION}" in
 
     # Smoke test endpoints critiques (couvre les bugs SQL post-déploiement)
     #
-    # Le smoke a besoin d'API_USER / API_PASSWORD : sans eux il ne couvre que
-    # les endpoints publics et passe à côté des 500 derrière auth.
+    # Le smoke a besoin de SMOKE_API_KEY — une clé d'API de SERVICE, en lecture
+    # seule (2.45.0). Elle remplace le compte ADMIN de service dont le mot de
+    # passe ET le secret TOTP vivaient côte à côte dans ce même .env : ranger
+    # les deux facteurs au même endroit annulait la double authentification.
+    # Sans clé, le smoke ne couvre que les endpoints publics — il le DIT et le
+    # déploiement continue : une couverture réduite n'est pas une régression.
+    # Création : docker compose exec backend node src/scripts/creer-cle-api.js --apply
     #
     # ATTENTION — on ne fait PAS `source .env`.
     # `source` EXÉCUTE le fichier : toute ligne qui n'est pas une affectation
@@ -460,11 +465,18 @@ case "${ACTION}" in
             | tail -n 1 \
             | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
     }
-    API_USER="$(lire_env API_USER)"
-    API_PASSWORD="$(lire_env API_PASSWORD)"
-    if [ -z "${API_USER:-}" ] || [ -z "${API_PASSWORD:-}" ]; then
-        warn "API_USER ou API_PASSWORD absent du .env — smoke test exécuté en mode dégradé (endpoints publics seulement)."
-        warn "Pour couvrir les endpoints protégés, ajoute dans .env : API_USER=<admin> et API_PASSWORD=<mot de passe>"
+    SMOKE_API_KEY="$(lire_env SMOKE_API_KEY)"
+    if [ -z "${SMOKE_API_KEY:-}" ]; then
+        warn "SMOKE_API_KEY absente du .env — smoke test exécuté en mode dégradé (endpoints publics seulement)."
+        warn "Pour couvrir les endpoints protégés, créer la clé de service (lecture seule) :"
+        warn "  docker compose -f ${COMPOSE_FILE} exec backend node src/scripts/creer-cle-api.js --apply"
+        warn "  puis reporter SMOKE_API_KEY=<clé affichée> dans .env"
+    fi
+    # Les anciennes variables ne sont PLUS lues. Le dire, plutôt que de laisser
+    # croire à une couverture qui n'existe plus.
+    if [ -n "$(lire_env API_PASSWORD)" ] || [ -n "$(lire_env API_TOTP_SECRET)" ]; then
+        warn "API_PASSWORD / API_TOTP_SECRET encore présents dans .env : ils ne sont plus utilisés par le smoke test."
+        warn "  Retirez-les (et désactivez le compte ADMIN de service) — un secret inutile reste un secret exposé."
     fi
     # On tape solidata.online (et pas localhost) pour matcher le bon vhost nginx :
     # https://localhost atterrit sur le default_server (potentiellement un autre projet) → 502.
@@ -475,18 +487,18 @@ case "${ACTION}" in
     # est le cas d'un serveur installé par init-server.sh, qui ne pose que
     # Docker — dans un conteneur jetable partageant le réseau de l'hôte.
     #
-    # Les identifiants sont exportés puis passés par « -e NOM » sans valeur :
-    # Docker les lit dans son environnement, ils n'apparaissent jamais dans la
-    # ligne de commande, donc jamais dans « ps ».
+    # La clé est exportée puis passée par « -e NOM » sans valeur : Docker la lit
+    # dans son environnement, elle n'apparaît jamais dans la ligne de commande,
+    # donc jamais dans « ps ».
     export BASE_URL="https://solidata.online"
-    export API_USER API_PASSWORD
+    export SMOKE_API_KEY
 
     run_smoke_test() {
         if command -v node >/dev/null 2>&1; then
             node scripts/tests/api-smoke.js
         elif command -v docker >/dev/null 2>&1; then
             docker run --rm --network host \
-                -e BASE_URL -e API_USER -e API_PASSWORD \
+                -e BASE_URL -e SMOKE_API_KEY \
                 -v "${APP_DIR}:/work" -w /work \
                 node:20-alpine node scripts/tests/api-smoke.js
         else
