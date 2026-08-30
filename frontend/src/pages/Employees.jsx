@@ -53,6 +53,10 @@ const DAYS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dima
 export default function Employees() {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState({ team_id: '', search: '' });
+  // Le champ de recherche est piloté LOCALEMENT et ne pousse sa valeur dans
+  // `filter` (donc dans la requête) qu'après une courte pause de frappe.
+  // Auparavant chaque caractère déclenchait immédiatement quatre appels API.
+  const [rechercheSaisie, setRechercheSaisie] = useState('');
 
   // Liaison fiche de recrutement (candidat) ↔ ce collaborateur
   const [linkCandidateOpen, setLinkCandidateOpen] = useState(false);
@@ -97,10 +101,17 @@ export default function Employees() {
       prescripteurs: prescRes.data || [],
     };
   }, [filter.team_id, filter.search]);
-  const { data, loading, error, reload: loadData } = useAsyncData(fetchData, {
+  const { data, loading, loaded, error, reload: loadData } = useAsyncData(fetchData, {
     initialData: { employees: [], teams: [], positions: [], prescripteurs: [] },
   });
   const { employees = [], teams = [], positions = [], prescripteurs = [] } = data || {};
+
+  // Report différé (300 ms) de la saisie vers le filtre appliqué.
+  useEffect(() => {
+    if (rechercheSaisie === filter.search) return;
+    const t = setTimeout(() => setFilter((f) => ({ ...f, search: rechercheSaisie })), 300);
+    return () => clearTimeout(t);
+  }, [rechercheSaisie, filter.search]);
 
   // Collaborateurs dont le contrat se termine sous 60 jours (encart RH — item 41b).
   const endingSoon = employees.filter((e) => {
@@ -310,7 +321,10 @@ export default function Employees() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des employés..." /></Layout>;
+  // Plein cadre au PREMIER chargement uniquement : sur un rechargement (filtre,
+  // recherche), remplacer la page par le sablier la démontait — le champ de
+  // recherche perdait alors le focus à chaque caractère saisi.
+  if (loading && !loaded) return <Layout><LoadingSpinner size="lg" message="Chargement des employés..." /></Layout>;
   if (error) return <Layout><div className="p-6"><ErrorState title="Impossible de charger les employés" onRetry={loadData} variant="card" /></div></Layout>;
 
   return (
@@ -349,14 +363,15 @@ export default function Employees() {
 
         <Section title="Liste">
           <div className="flex gap-3 mb-4">
-            <input placeholder="Rechercher..." value={filter.search}
-              onChange={e => setFilter({ ...filter, search: e.target.value })}
-              onKeyDown={e => e.key === 'Enter' && loadData()}
+            <input placeholder="Rechercher..." value={rechercheSaisie}
+              onChange={e => setRechercheSaisie(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { setFilter({ ...filter, search: rechercheSaisie }); } }}
               className="input-modern w-64" />
             <select value={filter.team_id} onChange={e => setFilter({ ...filter, team_id: e.target.value })} className="select-modern w-auto">
               <option value="">Toutes les équipes</option>
               {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
+            {loading && <span className="self-center text-xs text-gray-400">Recherche…</span>}
           </div>
 
           <DataTable

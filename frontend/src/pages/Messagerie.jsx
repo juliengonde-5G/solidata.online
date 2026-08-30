@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { MessageCircle, Info, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import Layout from '../components/Layout';
 import EmptyState from '../components/EmptyState';
 import useMessagerie from '../components/messagerie/useMessagerie';
 import ConversationsList from '../components/messagerie/ConversationsList';
@@ -56,6 +57,13 @@ export default function Messagerie() {
   const isSysteme = m.selectedConversation?.type === 'systeme';
 
   return (
+    // La page vit DANS le gabarit (barre latérale + barre supérieure), comme
+    // toutes les autres : l'enveloppe <Layout> manquait depuis la création du
+    // module (2.40.0) — la messagerie s'affichait donc seule, sans navigation.
+    // La hauteur ci-dessous était déjà calculée pour ce cadre : 100vh moins la
+    // barre supérieure (h-14 = 3.5rem) et les marges verticales du <main>
+    // (2 × 1.5rem) = 6.5rem. Rien d'autre n'a besoin de bouger.
+    <Layout>
     <div className="flex flex-col" style={{ height: 'calc(100vh - 6.5rem)', minHeight: '520px' }}>
       <div className="flex items-center gap-3 pb-4 flex-shrink-0">
         <div className="p-2.5 rounded-xl bg-teal-50">
@@ -138,5 +146,6 @@ export default function Messagerie() {
         </section>
       </div>
     </div>
+    </Layout>
   );
 }

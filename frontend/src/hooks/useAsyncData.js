@@ -18,6 +18,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *  - cleanup automatique : si le composant est démonté pendant le fetch,
  *    le state n'est pas mis à jour (évite les warnings React)
  *  - support du polling via { pollMs }
+ *  - `loaded` : passe à true après la première tentative — permet de n'afficher
+ *    l'écran de chargement plein cadre qu'au PREMIER chargement, et de ne pas
+ *    démonter la page (donc les champs de saisie) à chaque rechargement.
  *
  * @param {() => Promise<T>} fetcher  Fonction asynchrone qui retourne data
  * @param {object} options
@@ -30,6 +33,13 @@ export default function useAsyncData(fetcher, options = {}) {
   const [data, setData] = useState(initialData);
   const [loading, setLoading] = useState(!skip);
   const [error, setError] = useState(null);
+  // `loaded` distingue le PREMIER chargement d'un rechargement (changement de
+  // filtre, bouton Réessayer, polling). Sans lui, une page qui fait
+  // `if (loading) return <Spinner/>` se démonte ENTIÈREMENT à chaque refetch —
+  // et un champ de recherche dont la frappe déclenche le refetch perd le focus
+  // à chaque caractère (défaut constaté sur la page Collaborateurs). Ajout
+  // purement additif : aucun consommateur existant n'est modifié.
+  const [loaded, setLoaded] = useState(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -47,7 +57,10 @@ export default function useAsyncData(fetcher, options = {}) {
     } catch (err) {
       if (mountedRef.current) setError(err);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setLoaded(true);   // une tentative a abouti (succès OU échec)
+      }
     }
   }, [fetcher, skip]);
 
@@ -59,5 +72,5 @@ export default function useAsyncData(fetcher, options = {}) {
     return () => clearInterval(id);
   }, [load, pollMs, skip]);
 
-  return { data, loading, error, reload: load, setData };
+  return { data, loading, loaded, error, reload: load, setData };
 }
