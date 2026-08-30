@@ -63,6 +63,10 @@ describe('CONTRAT — le prédicat de périmètre par caisse est présent sur to
     const qs = requetesTablesVak();
     expect(qs.length).toBeGreaterThan(0);
     qs.forEach((s) => expect(s).toContain('compte_caisse'));
+    // Liste NOIRE globale (2.46.2) : la caisse Vintiz est exclue de TOUTE
+    // VAK, sans saisie. Un agrégat qui perdrait ce fragment la réintroduirait
+    // en silence — c'est exactement l'oubli constaté sur la VAK d'août 2026.
+    qs.forEach((s) => expect(s).toContain('vak.caisses_exclues'));
   });
 
   test('GET /api/vak/:id/analytics/kpis — lignes ET tickets filtrés, forme de réponse intacte', async () => {
@@ -86,6 +90,10 @@ describe('CONTRAT — le prédicat de périmètre par caisse est présent sur to
     const qs = requetesTablesVak();
     expect(qs.length).toBeGreaterThanOrEqual(2); // vak_ventes + vak_tickets
     qs.forEach((s) => expect(s).toContain('compte_caisse'));
+    // Liste NOIRE globale (2.46.2) : la caisse Vintiz est exclue de TOUTE
+    // VAK, sans saisie. Un agrégat qui perdrait ce fragment la réintroduirait
+    // en silence — c'est exactement l'oubli constaté sur la VAK d'août 2026.
+    qs.forEach((s) => expect(s).toContain('vak.caisses_exclues'));
   });
 
   test('GET /api/vak/live/current — compteurs live et ticker filtrés (NULL comptés)', async () => {
@@ -106,6 +114,10 @@ describe('CONTRAT — le prédicat de périmètre par caisse est présent sur to
     const qs = requetesTablesVak();
     expect(qs.length).toBeGreaterThanOrEqual(2); // compteurs + dernières ventes
     qs.forEach((s) => expect(s).toContain('compte_caisse'));
+    // Liste NOIRE globale (2.46.2) : la caisse Vintiz est exclue de TOUTE
+    // VAK, sans saisie. Un agrégat qui perdrait ce fragment la réintroduirait
+    // en silence — c'est exactement l'oubli constaté sur la VAK d'août 2026.
+    qs.forEach((s) => expect(s).toContain('vak.caisses_exclues'));
   });
 
   test.each([
@@ -141,6 +153,10 @@ describe('CONTRAT — le prédicat de périmètre par caisse est présent sur to
     const qs = requetesTablesVak();
     expect(qs.length).toBeGreaterThan(0);
     qs.forEach((s) => expect(s).toContain('compte_caisse'));
+    // Liste NOIRE globale (2.46.2) : la caisse Vintiz est exclue de TOUTE
+    // VAK, sans saisie. Un agrégat qui perdrait ce fragment la réintroduirait
+    // en silence — c'est exactement l'oubli constaté sur la VAK d'août 2026.
+    qs.forEach((s) => expect(s).toContain('vak.caisses_exclues'));
   });
 });
 

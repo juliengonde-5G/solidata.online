@@ -179,11 +179,15 @@ export default function VakSessions() {
               <FormField label="Caisse SumUp de l'événement (colonne Compte du rapport)" value={editing.compte_caisse || ''}
                 onChange={(e) => setEditing({ ...editing, compte_caisse: e.target.value })} />
               <p className="text-xs text-slate-500 mt-1">
-                Optionnel — filtre les KPI de la session sur cette caisse. Saisir la valeur de la colonne <strong>« Compte »</strong> du
+                Optionnel — restreint les KPI de la session à cette caisse. Saisir la valeur de la colonne <strong>« Compte »</strong> du
                 rapport des ventes SumUp (ex. <em>Caissier Frip &amp; Co</em>) ; plusieurs alias possibles séparés par des virgules
                 (nom de caisse du rapport et/ou identifiant employé SumUp). Les tickets encaissés par une <strong>autre</strong> caisse
-                connue (ex. <em>Caisse Vintiz</em>) sont exclus des indicateurs ; les tickets sans compte (API sans info) restent comptés.
-                Laisser vide = aucune exclusion.
+                connue sont alors exclus des indicateurs ; les tickets sans compte (API sans info) restent comptés.
+              </p>
+              <p className="text-xs text-slate-600 mt-2 bg-slate-50 border border-slate-200 rounded px-2 py-1.5">
+                <strong>La caisse « Caisse Vintiz » est exclue de toutes les VAK</strong>, sans aucune saisie : c'est une règle
+                générale, pas un réglage par événement. Ce champ ne sert donc qu'à restreindre en plus une session à une caisse
+                précise — le laisser vide convient dans la quasi-totalité des cas.
               </p>
             </div>
             <FormField type="textarea" label="Notes" value={editing.notes || ''}
@@ -252,7 +256,7 @@ function SessionsTab({ vaks, onCreate, onEdit, onDelete }) {
                       {formatDate(v.date_debut)} → {formatDate(v.date_fin)}
                     </td>
                     <td className="py-3 px-4 text-slate-500">{v.lieu}</td>
-                    <td className="py-3 px-4 text-slate-500 text-xs" title={v.compte_caisse ? `KPI filtrés sur : ${v.compte_caisse}` : 'Pas de filtre par caisse'}>
+                    <td className="py-3 px-4 text-slate-500 text-xs" title={v.compte_caisse ? `KPI restreints à : ${v.compte_caisse}` : 'Aucune restriction de caisse (Vintiz reste exclue de toutes les VAK)'}>
                       {v.compte_caisse || '—'}
                     </td>
                     <td className="py-3 px-4 text-right font-semibold">{formatEuro(real)}</td>

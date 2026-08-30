@@ -388,6 +388,67 @@ function extractCompteCaisse(...objs) {
   return null;
 }
 
+// ── Caisses EXCLUES de toute VAK (règle globale, arbitrage client 30/08/2026) ──
+// « Sur les VAK, l'activité de la caisse VINTIZ est à exclure. »
+//
+// Le réglage `vaks.compte_caisse` répondait déjà au besoin, mais UNE VAK À LA
+// FOIS et par liste blanche : il fallait penser à le renseigner à chaque
+// événement, et l'oubli était silencieux — c'est exactement ce qui s'est
+// produit sur la VAK d'août 2026, où les 483 € de Vintiz sont entrés dans le
+// chiffre d'affaires annoncé. Une règle qui vaut pour toutes les VAK doit être
+// écrite une fois, pas recopiée à chaque session.
+//
+// Cette liste NOIRE s'applique donc à TOUTES les VAK, passées et à venir, sans
+// aucune saisie. Elle se combine à `compte_caisse` (liste BLANCHE facultative,
+// conservée : elle sert quand un événement doit être restreint à une caisse
+// précise) — un ticket est compté s'il n'est pas exclu ET s'il passe le
+// périmètre de sa VAK.
+//
+// Défaut EN CODE, aucun seed en base (doctrine du projet) : la table `settings`
+// ne sert qu'à SURCHARGER, clé « vak.caisses_exclues » (alias séparés par des
+// virgules, comme `compte_caisse`). Une valeur VIDE est une décision légitime
+// — « plus aucune caisse n'est exclue » — et est respectée telle quelle.
+const CAISSES_EXCLUES_DEFAUT = ['Caisse Vintiz'];
+const SETTING_CAISSES_EXCLUES = 'vak.caisses_exclues';
+
+/** Littéral SQL sûr (apostrophes doublées) — les valeurs viennent du CODE. */
+const sqlTexte = (v) => `'${String(v).replace(/'/g, "''")}'`;
+
+/**
+ * Tableau SQL des caisses exclues : le réglage s'il existe, sinon le défaut en
+ * code. Le CASE distingue « réglage absent » (aucune ligne → NULL → défaut) de
+ * « réglage vidé volontairement » (ligne présente, valeur vide → aucune
+ * exclusion) — sans lui, on ne pourrait jamais désactiver la règle.
+ */
+function sqlCaissesExclues() {
+  const defaut = CAISSES_EXCLUES_DEFAUT
+    .map((c) => sqlTexte(c.trim().toLowerCase())).join(', ');
+  return `COALESCE(
+      (SELECT CASE WHEN NULLIF(TRIM(s.value), '') IS NULL THEN ARRAY[]::text[]
+                   ELSE string_to_array(REGEXP_REPLACE(TRIM(LOWER(s.value)), '\\s*,\\s*', ',', 'g'), ',')
+              END
+         FROM settings s WHERE s.key = ${sqlTexte(SETTING_CAISSES_EXCLUES)}),
+      ARRAY[${defaut}]::text[]
+    )`;
+}
+
+/**
+ * Miroir JS PUR : ce compte est-il celui d'une caisse exclue ?
+ * @param {string|null} compteTicket
+ * @param {string[]|string|null} [exclues] surcharge (défaut : la liste en code)
+ */
+function caisseExclue(compteTicket, exclues = CAISSES_EXCLUES_DEFAUT) {
+  const compte = String(compteTicket ?? '').trim().toLowerCase();
+  if (!compte) return false;   // compte inconnu → jamais exclu (doctrine honnête)
+  const liste = Array.isArray(exclues)
+    ? exclues
+    : String(exclues ?? '').split(',');
+  return liste
+    .map((c) => String(c).trim().toLowerCase())
+    .filter(Boolean)
+    .includes(compte);
+}
+
 // ── Filtre de périmètre par caisse (SÉMANTIQUE — doctrine honnête) ──────────
 // Constat prod (VAK 10-11/07/2026) : une DEUXIÈME caisse SumUp (« Caisse
 // Vintiz », ventes à la pièce toute l'année) encaisse sur le même compte
@@ -413,11 +474,18 @@ function sqlPerimetreCaisse(vakAlias, ticketAlias) {
   // Alias normalisés : minuscules + espaces autour des virgules retirés, puis
   // comparaison `= ANY(tableau)` (expression corrélée simple, pas de LATERAL).
   const aliases = `string_to_array(REGEXP_REPLACE(TRIM(LOWER(${vakAlias}.compte_caisse)), '\\s*,\\s*', ',', 'g'), ',')`;
-  return `(${caisse} IS NULL OR ${compte} IS NULL OR LOWER(${compte}) = ANY(${aliases}))`;
+  const blanche = `(${caisse} IS NULL OR ${compte} IS NULL OR LOWER(${compte}) = ANY(${aliases}))`;
+  // Liste NOIRE globale, appliquée à toutes les VAK sans saisie (cf. ci-dessus).
+  // Même doctrine que la liste blanche : un compte INCONNU n'est jamais exclu.
+  const noire = `NOT (${compte} IS NOT NULL AND LOWER(${compte}) = ANY(${sqlCaissesExclues()}))`;
+  return `(${blanche} AND ${noire})`;
 }
 
 // Miroir JS PUR de sqlPerimetreCaisse (testé, réutilisable hors SQL).
-function compteDansPerimetre(compteCaisse, compteTicket) {
+// @param {string[]|string} [exclues] liste noire (défaut : la liste en code)
+function compteDansPerimetre(compteCaisse, compteTicket, exclues = CAISSES_EXCLUES_DEFAUT) {
+  // Liste NOIRE d'abord : elle prime, et vaut pour toutes les VAK.
+  if (caisseExclue(compteTicket, exclues)) return false;
   const caisse = String(compteCaisse ?? '').trim();
   if (!caisse) return true; // pas de filtre configuré
   const compte = String(compteTicket ?? '').trim();
@@ -1447,6 +1515,12 @@ module.exports = {
   extractCompteCaisse,
   sqlPerimetreCaisse,
   compteDansPerimetre,
+  // Caisses exclues de TOUTE VAK (règle globale — arbitrage client 30/08/2026)
+  caisseExclue,
+  sqlCaissesExclues,
+  sqlTexte,
+  CAISSES_EXCLUES_DEFAUT,
+  SETTING_CAISSES_EXCLUES,
   // Remboursements (sémantique partagée CSV / API / webhook)
   isRefundTransaction,
   isSyncEligibleTransaction,

@@ -614,9 +614,16 @@ describe('sumup — extractCompteCaisse (ce que l\'API expose comme identifiant 
 });
 
 describe('sumup — compteDansPerimetre (sémantique du filtre par caisse)', () => {
-  test('pas de filtre configuré → tout compté', () => {
-    expect(compteDansPerimetre(null, 'Caisse Vintiz')).toBe(true);
-    expect(compteDansPerimetre('', 'Caisse Vintiz')).toBe(true);
+  test('pas de filtre configuré → tout compté, SAUF une caisse exclue', () => {
+    // Comportement CHANGÉ en 2.46.2 (arbitrage client) : Vintiz est exclue de
+    // toute VAK par la liste noire globale, même sans `compte_caisse`. C'est
+    // précisément l'oubli qu'on ferme — sur la VAK d'août 2026, l'absence de
+    // liste blanche a fait entrer 483 € de Vintiz dans le CA annoncé.
+    expect(compteDansPerimetre(null, 'Caisse Vintiz')).toBe(false);
+    expect(compteDansPerimetre('', 'Caisse Vintiz')).toBe(false);
+    // Toute autre caisse reste comptée quand aucun filtre n'est configuré.
+    expect(compteDansPerimetre(null, 'Caissier Frip & Co')).toBe(true);
+    expect(compteDansPerimetre('', 'Delestre Antoine')).toBe(true);
   });
 
   test('compte inconnu (NULL/vide) → JAMAIS exclu (sinon le live API disparaîtrait)', () => {
@@ -649,5 +656,74 @@ describe('sumup — compteDansPerimetre (sémantique du filtre par caisse)', () 
     expect(sql).toContain('t.compte');
     expect(sql).toContain('IS NULL OR'); // pas de filtre / compte inconnu → compté
     expect(sql).toContain('= ANY');      // liste d'alias
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CAISSES EXCLUES DE TOUTE VAK (arbitrage client du 30/08/2026)
+// ───────────────────────────────────────────────────────────────────────────
+// « Sur les VAK, l'activité de la caisse VINTIZ est à exclure. »
+// `vaks.compte_caisse` répondait déjà au besoin, mais une VAK à la fois et par
+// liste blanche : l'oubli était silencieux — et il a eu lieu (483 € de Vintiz
+// comptés dans le CA annoncé de la VAK d'août 2026). La règle vit désormais
+// dans le code, s'applique sans saisie, et reste surchargeable par réglage.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('sumup — caisses exclues de toute VAK', () => {
+  const {
+    caisseExclue, sqlCaissesExclues, compteDansPerimetre,
+    CAISSES_EXCLUES_DEFAUT, SETTING_CAISSES_EXCLUES,
+  } = require('../../../src/services/sumup');
+
+  it('le défaut vit dans le CODE et vise la caisse Vintiz', () => {
+    expect(CAISSES_EXCLUES_DEFAUT).toEqual(['Caisse Vintiz']);
+    expect(SETTING_CAISSES_EXCLUES).toBe('vak.caisses_exclues');
+  });
+
+  it('exclut Vintiz, garde la caisse de l’événement', () => {
+    expect(caisseExclue('Caisse Vintiz')).toBe(true);
+    expect(caisseExclue('Caissier Frip & Co')).toBe(false);
+  });
+
+  it('comparaison insensible à la casse et aux espaces de bord', () => {
+    expect(caisseExclue('  CAISSE VINTIZ  ')).toBe(true);
+    expect(caisseExclue('caisse vintiz')).toBe(true);
+  });
+
+  it('un compte INCONNU n’est JAMAIS exclu (même doctrine que la liste blanche)', () => {
+    // Sinon l'écran TV, alimenté par une charge webhook qui n'expose pas
+    // toujours l'identifiant de caisse, se viderait.
+    expect(caisseExclue(null)).toBe(false);
+    expect(caisseExclue('')).toBe(false);
+    expect(caisseExclue('   ')).toBe(false);
+  });
+
+  it('la liste est surchargeable, et une liste vide n’exclut plus rien', () => {
+    expect(caisseExclue('Caisse Vintiz', [])).toBe(false);
+    expect(caisseExclue('Caisse Vintiz', '')).toBe(false);
+    expect(caisseExclue('Autre Caisse', 'Autre Caisse, Caisse Vintiz')).toBe(true);
+  });
+
+  it('la liste noire PRIME sur la liste blanche de l’événement', () => {
+    // Même si quelqu'un renseignait Vintiz comme caisse de la session, la règle
+    // globale l'emporte : c'est une décision d'entreprise, pas un réglage
+    // d'écran.
+    expect(compteDansPerimetre('Caisse Vintiz', 'Caisse Vintiz')).toBe(false);
+    expect(compteDansPerimetre('Caissier Frip & Co', 'Caissier Frip & Co')).toBe(true);
+  });
+
+  it('le SQL lit le réglage et retombe sur le défaut en code', () => {
+    const sql = sqlCaissesExclues();
+    expect(sql).toContain("'vak.caisses_exclues'");
+    expect(sql).toContain("ARRAY['caisse vintiz']::text[]");
+    // Le CASE distingue « réglage absent » de « réglage vidé volontairement ».
+    expect(sql).toContain('ARRAY[]::text[]');
+  });
+
+  it('une caisse dont le nom porte une apostrophe est échappée, pas injectée', () => {
+    const { sqlTexte } = require('../../../src/services/sumup');
+    expect(sqlTexte("L'Atelier")).toBe("'L''Atelier'");
+    // Le doublement est la seule protection : sans lui, un nom de caisse
+    // refermerait le littéral et casserait toutes les requêtes VAK.
+    expect(sqlTexte("a'; DROP TABLE vaks; --")).toBe("'a''; DROP TABLE vaks; --'");
   });
 });
