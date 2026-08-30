@@ -198,3 +198,36 @@ describe('repair-vak-from-report — parseArgs', () => {
     expect(parseArgs(['--apply', '--dry-run']).apply).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAIEMENTS SCINDÉS (constat du 30/08/2026 sur l'export réel du 07-08/08)
+// ───────────────────────────────────────────────────────────────────────────
+// Une vente réglée carte + espèces apparaît dans le rapport sur UNE ligne
+// portant les DEUX références (« REF1, REF2 ») alors que l'API SumUp livre
+// DEUX transactions, une par moyen de paiement. Sur l'export réel : 8 ventes
+// concernées — et l'écart de comptage constaté à l'écran (627 tickets pour
+// 619 transactions au fichier) valait exactement 8.
+//
+// Sans découpe des références, le script ne reconnaissait aucune des deux
+// moitiés et CRÉAIT un troisième ticket portant le montant TOTAL de la vente :
+// la vente était comptée deux fois.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('referencesDe — références combinées des paiements scindés', () => {
+  const { referencesDe } = require('../../../src/scripts/repair-vak-from-report');
+
+  it('découpe une référence combinée en ses deux transactions', () => {
+    expect(referencesDe('TAAA4NHDU9G, TAAA4NHD2GE'))
+      .toEqual(['TAAA4NHDU9G', 'TAAA4NHD2GE']);
+  });
+
+  it('une référence simple donne un tableau d’un élément (aucun cas particulier)', () => {
+    expect(referencesDe('TAAA4NGRU6T')).toEqual(['TAAA4NGRU6T']);
+  });
+
+  it('tolère les espaces, les virgules en trop et les valeurs vides', () => {
+    expect(referencesDe('  A ,, B  ,')).toEqual(['A', 'B']);
+    expect(referencesDe('')).toEqual([]);
+    expect(referencesDe(null)).toEqual([]);
+    expect(referencesDe(undefined)).toEqual([]);
+  });
+});

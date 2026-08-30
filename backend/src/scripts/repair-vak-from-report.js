@@ -30,6 +30,14 @@
  *      - AUCUN ticket → le CRÉE (rattachement à la VAK couvrant sa date
  *        civile Paris, batch dédié source 'repair_csv') pour combler les
  *        trous de la sync ;
+ *      - GARDE PAIEMENTS SCINDÉS : une vente réglée en deux fois apparaît dans
+ *        le rapport sur UNE ligne portant les DEUX références (« REF1, REF2 »)
+ *        alors que l'API livre DEUX transactions, une par moyen de paiement,
+ *        dont la SOMME est déjà juste. Si l'une des deux existe en base, la
+ *        transaction est IGNORÉE et signalée : la réécrire compterait la vente
+ *        deux fois, et répartir ses articles entre les deux moitiés serait une
+ *        invention. Si aucune n'existe, le ticket est créé normalement (trou de
+ *        sync réellement comblé).
  *      - GARDE ANTI-DÉGRADATION : un ticket dont les lignes stockées sont
  *        déjà détaillées ET identiques au CSV n'est jamais réécrit
  *        (re-run = 0 changement) ; un ticket ABSENT du fichier n'est JAMAIS
@@ -241,17 +249,39 @@ async function snapshotParVak(client, vakId) {
   return r.rows;
 }
 
-async function chercherTicket(client, ref) {
+/**
+ * PAIEMENT SCINDÉ — une vente réglée en deux fois (carte + espèces) apparaît
+ * dans le rapport CSV sur UNE ligne portant les DEUX références séparées par
+ * une virgule (« TAAA4NHDU9G, TAAA4NHD2GE »), alors que l'API SumUp livre
+ * DEUX transactions distinctes, une par moyen de paiement.
+ *
+ * Découpe les références d'une cellule. Une référence simple donne un tableau
+ * d'un élément — l'appelant n'a pas à distinguer les deux cas. Fonction PURE.
+ */
+function referencesDe(ref) {
+  return String(ref || '')
+    .split(',')
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0);
+}
+
+/**
+ * Cherche le(s) ticket(s) correspondant à une cellule de référence.
+ * @returns {Promise<Array>} les tickets trouvés, dans l'ordre des références.
+ */
+async function chercherTickets(client, ref) {
+  const refs = referencesDe(ref);
+  if (refs.length === 0) return [];
   const r = await client.query(`
     SELECT t.id, t.vak_id, t.batch_id, t.source, t.ref_transaction, t.sumup_transaction_id,
            t.date_ticket, t.moyen_paiement, t.compte, t.nb_articles,
            t.poids_kg::FLOAT AS poids_kg, t.total_ttc::FLOAT AS total_ttc,
            t.total_ht::FLOAT AS total_ht, t.total_tva::FLOAT AS total_tva
     FROM vak_tickets t
-    WHERE t.ref_transaction = $1 OR t.sumup_transaction_id = $1
-    ORDER BY t.id LIMIT 1
-  `, [ref]);
-  return r.rows[0] || null;
+    WHERE t.ref_transaction = ANY($1) OR t.sumup_transaction_id = ANY($1)
+    ORDER BY t.id
+  `, [refs]);
+  return r.rows;
 }
 
 async function lignesDuTicket(client, ticketId) {
@@ -346,6 +376,7 @@ async function main() {
     const stats = {
       remplaces: 0, crees: 0, maj_ticket: 0, inchanges: 0,
       hors_vak: 0, hors_filtre: 0, comptes_renseignes: 0,
+      scindes_ignores: 0, refs_scindees: [],
     };
     let deltaPoids = 0;
     let deltaCA = 0;
@@ -369,7 +400,24 @@ async function main() {
     }
 
     for (const tx of transactions) {
-      const existant = await chercherTicket(client, tx.ref);
+      const trouves = await chercherTickets(client, tx.ref);
+
+      // GARDE — paiement scindé déjà présent en base. La ligne du rapport porte
+      // le montant TOTAL de la vente et plusieurs références ; les tickets de
+      // l'API, eux, portent chacun sa moitié — et leur SOMME est déjà juste,
+      // tout comme le mix de paiement qu'ils permettent seuls de distinguer.
+      // Créer un ticket de plus avec la référence combinée COMPTERAIT LA VENTE
+      // DEUX FOIS ; réécrire l'un des deux ferait diverger son total de son
+      // encaissement réel. On laisse donc ces ventes en l'état, et on le DIT :
+      // un script de réparation ne doit jamais dégrader ce qu'il ne sait pas
+      // réparer sans inventer une répartition.
+      if (referencesDe(tx.ref).length > 1 && trouves.length > 0) {
+        stats.scindes_ignores++;
+        stats.refs_scindees.push(tx.ref);
+        continue;
+      }
+
+      const existant = trouves[0] || null;
       const vakId = existant
         ? existant.vak_id
         : await vakCouvrante(client, sumup.parisDateStr(tx.date_ticket));
@@ -500,6 +548,15 @@ async function main() {
     console.log(`Tickets créés (trous)     : ${stats.crees}`);
     console.log(`Tickets màj (agrégats)    : ${stats.maj_ticket}`);
     console.log(`Inchangés (déjà justes)   : ${stats.inchanges}`);
+    if (stats.scindes_ignores > 0) {
+      console.log(`Paiements scindés IGNORÉS : ${stats.scindes_ignores}  (déjà en base sous leurs`);
+      console.log(`                            références individuelles — les réécrire compterait`);
+      console.log(`                            la vente deux fois ; leurs lignes restent celles de l'API)`);
+      stats.refs_scindees.slice(0, 10).forEach((r) => console.log(`    · ${r}`));
+      if (stats.refs_scindees.length > 10) {
+        console.log(`    · … ${stats.refs_scindees.length - 10} autre(s)`);
+      }
+    }
     console.log(`Hors période VAK          : ${stats.hors_vak}`);
     if (args.vakId) console.log(`Hors filtre --vak         : ${stats.hors_filtre}`);
     console.log(`Comptes de caisse posés   : ${stats.comptes_renseignes}`);
@@ -544,6 +601,7 @@ async function main() {
 module.exports = {
   parseArgs,
   parseReportCSV,
+  referencesDe,
   construireTicket,
   lignesIdentiques,
   ticketIdentique,
