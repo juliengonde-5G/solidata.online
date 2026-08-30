@@ -36,6 +36,7 @@ export const RGPD_ACTION_LABELS = {
   // ── Purges — bouton manuel (sans préfixe = déclenchement humain) ─────────
   PURGE_EXPIRED: 'Purge manuelle — candidatures non recrutées (24 mois)',
   PURGE_PCM_NON_RECRUTE: 'Purge manuelle — tests PCM de personnes non recrutées (90 jours)',
+  PURGE_PCM_REPONSES: 'Purge manuelle — réponses détaillées au questionnaire PCM (30 jours)',
   PURGE_INSERTION: 'Purge manuelle — dossiers d’insertion clos',
   PURGE_GPS: 'Purge manuelle — positions GPS anciennes',
   PURGE_ARRETS_GPS: 'Purge manuelle — arrêts GPS de collecte',
@@ -45,6 +46,7 @@ export const RGPD_ACTION_LABELS = {
   // ── Purges — job planifié (préfixe AUTO_ = déclenchement automatique) ────
   AUTO_PURGE_24M: 'Purge automatique — candidatures non recrutées (24 mois)',
   AUTO_PURGE_PCM_90J: 'Purge automatique — tests PCM de personnes non recrutées (90 jours)',
+  AUTO_PURGE_PCM_REPONSES: 'Purge automatique — réponses détaillées au questionnaire PCM (30 jours)',
   AUTO_PURGE_INSERTION: 'Purge automatique — dossiers d’insertion clos',
   AUTO_PURGE_GPS_90D: 'Purge automatique — positions GPS anciennes',
   AUTO_PURGE_ARRETS_GPS: 'Purge automatique — arrêts GPS de collecte',
@@ -60,6 +62,11 @@ export const RGPD_ACTION_LABELS = {
 
   // ── PCM (routes/pcm.js) ───────────────────────────────────────────────────
   PCM_RAPPORT_CONSULTATION: 'Consultation d’un rapport PCM',
+  // Restitution demandée par la personne elle-même depuis l'écran de fin de
+  // test (art. 15). Le libellé dit QUI a reçu la donnée : ce n'est pas un agent
+  // de la structure qui consulte un dossier, et confondre les deux au journal
+  // rendrait la ligne illisible pour le DPO.
+  PCM_RESTITUTION_CANDIDAT: 'Restitution de son résultat PCM au candidat (droit d’accès)',
 
   // ── Note de profil initial CIP (routes/insertion/routes.js) ──────────────
   INSERTION_NOTE_PROFIL_LECTURE: 'Lecture de la note de profil initial (CIP)',
@@ -115,6 +122,7 @@ export const RGPD_ENTITY_LABELS = {
   database: 'Base de données',
   pcm_sessions: 'Sessions PCM',
   pcm_reports: 'Rapports PCM',
+  pcm_answers: 'Réponses au questionnaire PCM',
   gps_positions: 'Positions GPS',
   tour_gps_stops: 'Arrêts GPS de collecte',
   messagerie_messages: 'Messages (messagerie interne)',

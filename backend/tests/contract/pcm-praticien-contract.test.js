@@ -48,11 +48,17 @@ beforeEach(() => {
     // les deux cas, un 403 attendu ailleurs reste discernable.
     if (/FROM pcm_reports pr/i.test(sql)) return Promise.resolve({ rows: [] });
     if (/FROM pcm_sessions ps/i.test(sql)) return Promise.resolve({ rows: [] });
+    // `notice_acceptee_at` : depuis la 2.45.0, POST /submit refuse (409) une
+    // session dont la notice d'information n'a pas été confirmée. Une session
+    // de test qui n'a pas franchi cette étape n'existe pas dans le produit ; la
+    // renseigner ici garde ce contrat-ci sur SON sujet — les habilitations du
+    // praticien. La garde elle-même est vérifiée par
+    // tests/contract/pcm-notice-restitution-contract.test.js.
     if (/FROM pcm_sessions WHERE id/i.test(sql)) {
-      return Promise.resolve({ rows: [{ id: 3, candidate_id: 7, status: 'in_progress' }] });
+      return Promise.resolve({ rows: [{ id: 3, candidate_id: 7, status: 'in_progress', notice_acceptee_at: '2026-08-30T09:00:00Z' }] });
     }
     if (/FROM pcm_sessions WHERE access_token/i.test(sql)) {
-      return Promise.resolve({ rows: [{ id: 3, candidate_id: 7, status: 'in_progress' }] });
+      return Promise.resolve({ rows: [{ id: 3, candidate_id: 7, status: 'in_progress', notice_acceptee_at: '2026-08-30T09:00:00Z' }] });
     }
     if (/FROM candidates/i.test(sql)) {
       return Promise.resolve({ rows: [{

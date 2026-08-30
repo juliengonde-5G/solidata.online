@@ -21,7 +21,8 @@
  * une — et un PDF est justement le support qui se lit seul.
  */
 import {
-  PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE, echapperHtml,
+  PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE,
+  PCM_MENTION_CONSERVATION, PCM_MENTION_DROITS, echapperHtml,
 } from './pcm';
 
 export const TYPE_COLORS = {
@@ -171,6 +172,100 @@ export function exportResultsPDF(profile) {
   return openPrintWindow(`PCM_${cand.last_name}_${cand.first_name}`, body);
 }
 
+/**
+ * RESTITUTION AU CANDIDAT (2.45.0) — le document que la personne emporte.
+ *
+ * Elle ne voyait que son type de base à la fin du test, et aucun canal ne lui
+ * rendait son résultat accessible (audit PCM, défaut D6 ; art. 15 RGPD et
+ * principe déontologique de restitution). Ce document est édité depuis l'écran
+ * de fin de test, par son seul jeton de passation.
+ *
+ * IL RÉUTILISE `openPrintWindow` — le même moteur, la même feuille de style A4
+ * que les deux exports internes : un second générateur divergerait au premier
+ * ajustement, et la personne recevrait un document d'une autre facture que
+ * celui qui circule en interne.
+ *
+ * CE QU'IL NE CONTIENT PAS, et c'est le cœur du sujet :
+ *   - l'indicateur de cohérence des réponses (ex-« alerte RPS ») — l'audit a
+ *     mesuré 32 % de déclenchements sur des réponses aléatoires ; remettre à
+ *     quelqu'un un signal de « stress élevé » tiré d'un artefact serait le
+ *     contraire d'une restitution ;
+ *   - les paliers de stress rédigés en vocabulaire clinique (« dépression »,
+ *     « paranoïa »), le « driver » et les « masques » ;
+ *   - le guide manager, qui parle d'elle à quelqu'un d'autre.
+ * Le serveur ne les envoie déjà pas (`restitutionCandidat`, routes/pcm.js) :
+ * cette fonction ne sait donc même pas les afficher. Deux verrous, pas un.
+ *
+ * @param {object} r  charge utile de GET /pcm/sessions/:token/restitution
+ * @returns {boolean} false si la fenêtre d'impression a été bloquée
+ */
+export function exportRestitutionCandidatPDF(r) {
+  const date = r?.date_passation ? new Date(r.date_passation).toLocaleDateString('fr-FR') : '';
+  const base = r?.base || {};
+
+  const puces = (liste) => (liste || []).map((t) => `<li>${echapperHtml(t)}</li>`).join('');
+
+  const immeubleHtml = Array.isArray(r?.immeuble) && r.immeuble.length
+    ? `<div class="section"><div class="section-title">Ce qui vous ressemble aussi</div>`
+      + `<p style="font-size:10px;color:#475569;margin-bottom:6px">Les autres manières de fonctionner, `
+      + `de la plus proche de vous à la moins proche.</p>`
+      + r.immeuble.map((e) => `<div style="padding:3px 0">${e.etage}. ${echapperHtml(e.nom)}</div>`).join('')
+      + `</div>`
+    // Absence NOMMÉE : on ne fabrique pas un classement qu'on n'a plus.
+    : (r?.note_immeuble ? `<div class="card" style="margin:12px 4px">${echapperHtml(r.note_immeuble)}</div>` : '');
+
+  const peuMarqueHtml = r?.profil_peu_marque
+    ? `<div class="card" style="margin:8px 4px"><strong>Profil peu marqué.</strong> `
+      + `Plusieurs manières de fonctionner vous correspondent presque autant. `
+      + `C'est fréquent, et ce n'est pas un problème.</div>`
+    : '';
+
+  const phaseHtml = r?.phase
+    ? `<div class="card"><div style="font-weight:700;margin-bottom:4px">En ce moment</div>`
+      + `<div style="font-size:10px;color:#4b5563">Ce qui compte le plus pour vous en ce moment : `
+      + `${echapperHtml(r.phase.besoin || '')}</div></div>`
+    : '';
+
+  const body = `
+    <div class="header"><div><h1>Votre résultat</h1><div class="sub">${echapperHtml(r?.prenom || '')}${date ? ` | ${date}` : ''}</div></div><div style="text-align:right"><div class="sub">SOLIDATA — Solidarité Textiles</div></div></div>
+
+    <div class="section">
+      <p style="font-size:11px;color:#334155">Voici ce que vos réponses disent de votre façon de communiquer.
+      C'est une piste de discussion, pas un jugement sur vous.</p>
+    </div>
+
+    <div class="section"><div class="section-title">Votre manière de communiquer</div>
+      <div class="grid2">
+        <div class="card">
+          <div style="font-weight:700;margin-bottom:4px">${echapperHtml(base.nom || '')}</div>
+          <div style="font-size:10px;color:#4b5563">Ce à quoi vous êtes attentif d'abord : ${echapperHtml(base.perception || '')}</div>
+          <div style="font-size:10px;color:#4b5563;margin-top:3px">La façon de vous parler qui marche le mieux : ${echapperHtml(base.canal || '')}</div>
+          <div style="font-size:10px;color:#4b5563;margin-top:3px">Ce dont vous avez besoin pour vous sentir bien : ${echapperHtml(base.besoin || '')}</div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:8px">
+            <div style="font-weight:700;margin-bottom:4px">Vos points forts</div>
+            <ul style="padding-left:14px;font-size:10px;color:#4b5563">${puces(base.points_forts)}</ul>
+          </div>
+          ${phaseHtml}
+        </div>
+      </div>
+    </div>
+
+    ${base.avec_les_autres ? `<div class="section"><div class="section-title">Avec les autres</div><div class="card">${echapperHtml(base.avec_les_autres)}</div></div>` : ''}
+    ${base.ce_qui_aide ? `<div class="section"><div class="section-title">Ce qui vous aide à bien travailler</div><div class="card">${echapperHtml(base.ce_qui_aide)}</div></div>` : ''}
+
+    ${immeubleHtml}
+    ${peuMarqueHtml}
+
+    <div class="methode"><strong>Comment lire ce document.</strong> ${echapperHtml(PCM_MENTION_METHODE)}</div>
+    <div class="methode"><strong>Vos données.</strong> ${echapperHtml(PCM_MENTION_CONSERVATION)} ${echapperHtml(PCM_MENTION_DROITS)}</div>
+    <div class="footer">Document remis à la personne concernée — ${date}</div>
+  `;
+
+  return openPrintWindow(`PCM_MON_RESULTAT${r?.prenom ? `_${r.prenom}` : ''}`, body);
+}
+
 export function exportTechnicalPDF(profile, rawAnswers) {
   const cand = profile.candidate;
   const date = new Date(profile.createdAt).toLocaleDateString('fr-FR');
@@ -187,7 +282,22 @@ export function exportTechnicalPDF(profile, rawAnswers) {
     groupedByCategory[a.category].push(a);
   }
 
+  // Absence NOMMÉE (2.45.0). Les réponses détaillées sont purgées 30 jours
+  // après la passation (settings « rgpd.pcm_reponses_retention_jours ») : passé
+  // ce délai, `rawAnswers` arrive vide. La tolérance existait déjà — la fiche
+  // se composait sans elles —, mais elle affichait « 0 question » au-dessus
+  // d'un tableau vide, ce qui se lit comme un défaut d'affichage. On dit
+  // pourquoi. Le cas « chargement en échec » est distinct et reste signalé par
+  // l'écran appelant (bandeau) : ici on décrit ce que le PDF sait, à savoir
+  // qu'il n'a pas de réponses.
   let answersHtml = '';
+  if (!(rawAnswers || []).length) {
+    answersHtml = `<tr><td colspan="4" style="padding:10px;color:#475569">`
+      + `Le détail des réponses n'est plus conservé. Les réponses au questionnaire sont `
+      + `supprimées peu après la passation (minimisation des données) ; seuls la synthèse, `
+      + `les scores et les types de base et de phase ci-dessus sont conservés.`
+      + `</td></tr>`;
+  }
   for (const [cat, answers] of Object.entries(groupedByCategory)) {
     answersHtml += `<tr><td colspan="4" style="background:#F0FDFA;font-weight:700;color:#0D9488;padding:6px">${CATEGORY_LABELS[cat] || cat}</td></tr>`;
     for (const a of answers) {
@@ -217,7 +327,7 @@ export function exportTechnicalPDF(profile, rawAnswers) {
       </div>
     </div></div>
 
-    <div class="section"><div class="section-title">Reponses detaillees (${(rawAnswers || []).length} questions)</div>
+    <div class="section"><div class="section-title">Reponses detaillees${(rawAnswers || []).length ? ` (${rawAnswers.length} questions)` : ' — non conservees'}</div>
       <table>
         <thead><tr><th>#</th><th>Question</th><th>Type</th><th>Reponse choisie</th></tr></thead>
         <tbody>${answersHtml}</tbody>

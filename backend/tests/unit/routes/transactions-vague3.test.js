@@ -49,7 +49,11 @@ describe('POST /api/pcm/submit — écriture atomique + ON CONFLICT', () => {
 
   it('enregistre réponses (UPSERT) + rapport + clôture session dans une transaction commitée', async () => {
     // session trouvée par access_token (hors transaction)
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 5, candidate_id: 9, status: 'in_progress' }] });
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 5, candidate_id: 9, status: 'in_progress',
+      // 2.45.0 : /submit refuse (409) une session dont la notice d'information
+      // n'a pas été confirmée. Cette suite-ci porte sur l'ATOMICITÉ de l'écriture ;
+      // la garde elle-même est vérifiée par pcm-notice-restitution-contract.
+      notice_acceptee_at: '2026-08-30T09:00:00Z' }] });
     mockClientQuery.mockResolvedValue({ rows: [] }); // BEGIN, inserts, update, COMMIT
 
     const res = await request(app).post('/api/pcm/submit').send({ access_token: 'tok-abc', answers });
@@ -68,7 +72,11 @@ describe('POST /api/pcm/submit — écriture atomique + ON CONFLICT', () => {
   });
 
   it('ROLLBACK si l’insertion du rapport échoue (aucun COMMIT)', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 5, candidate_id: 9, status: 'in_progress' }] });
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 5, candidate_id: 9, status: 'in_progress',
+      // 2.45.0 : /submit refuse (409) une session dont la notice d'information
+      // n'a pas été confirmée. Cette suite-ci porte sur l'ATOMICITÉ de l'écriture ;
+      // la garde elle-même est vérifiée par pcm-notice-restitution-contract.
+      notice_acceptee_at: '2026-08-30T09:00:00Z' }] });
     mockClientQuery.mockImplementation((sql) =>
       /INSERT INTO pcm_reports/.test(sql) ? Promise.reject(new Error('boom')) : Promise.resolve({ rows: [] }));
 

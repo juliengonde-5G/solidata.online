@@ -5,7 +5,7 @@ REM Usage:
 REM   scripts\run-tests.bat              → tests sur production
 REM   scripts\run-tests.bat recette      → tests sur recette
 REM   scripts\run-tests.bat https://...  → tests sur URL personnalisée
-REM Variables optionnelles : API_USER, API_PASSWORD (pour tests authentifiés)
+REM Variable optionnelle : SMOKE_API_KEY (cle d'API de service, tests authentifies)
 REM ============================================================
 
 setlocal

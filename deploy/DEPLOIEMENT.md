@@ -155,9 +155,8 @@ scripts\run-tests.bat recette
 REM URL personnalisée
 scripts\run-tests.bat https://recette.solidata.online
 
-REM Avec login (pour tester les routes protégées)
-set API_USER=admin
-set API_PASSWORD=votre_mot_de_passe
+REM Avec la clé d'API de service (pour tester les routes protégées)
+set SMOKE_API_KEY=sol_xxxxxxxx_yyyyyyyy
 scripts\run-tests.bat
 ```
 
@@ -166,17 +165,43 @@ scripts\run-tests.bat
 ```powershell
 .\scripts\run-tests.ps1
 .\scripts\run-tests.ps1 -Env recette
-.\scripts\run-tests.ps1 -BaseUrl "https://solidata.online" -ApiUser admin -ApiPassword "xxx"
+.\scripts\run-tests.ps1 -BaseUrl "https://solidata.online"
 ```
 
 **Ligne de commande (tous OS) :**
 
 ```bash
 BASE_URL=https://solidata.online node scripts/tests/api-smoke.js
-BASE_URL=https://solidata.online API_USER=admin API_PASSWORD=xxx node scripts/tests/api-smoke.js
+BASE_URL=https://solidata.online SMOKE_API_KEY=sol_xxx_yyy node scripts/tests/api-smoke.js
 ```
 
-Les tests vérifient : health check, login (si identifiants fournis), puis les endpoints protégés (me, historique/kpi, candidates/kanban, tours, vehicles, employees). Voir `docs/PLAN_TESTS_DEPLOIEMENT.md` pour le plan complet.
+Les tests vérifient : health check, identité de service, puis ~40 endpoints protégés. Voir `docs/PLAN_TESTS_DEPLOIEMENT.md` pour le plan complet.
+
+### Clé d'API du smoke test (2.45.0)
+
+Le smoke test **ne se connecte plus avec un compte ADMIN**. Il présente une **clé d'API de service en lecture seule** (en-tête `X-API-Key`). Le compte de service rangeait son mot de passe ET son secret TOTP dans le même `.env` : les deux facteurs au même endroit, donc plus de double authentification du tout.
+
+**À faire une fois, au déploiement :**
+
+```bash
+# 1. Créer la clé (elle n'est affichée qu'une seule fois)
+docker compose -f docker-compose.prod.yml exec backend node src/scripts/creer-cle-api.js --apply
+
+# 2. Reporter la valeur dans le .env du serveur
+#    SMOKE_API_KEY=sol_xxxxxxxx_yyyyyyyy
+
+# 3. Retirer du .env : API_USER, API_PASSWORD, API_TOTP_SECRET (ignorés désormais)
+#    puis désactiver le compte ADMIN de service dans l'écran Utilisateurs.
+```
+
+Inventaire et révocation (effet immédiat, aucune session à attendre) :
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend node src/scripts/creer-cle-api.js
+docker compose -f docker-compose.prod.yml exec backend node src/scripts/creer-cle-api.js --revoquer=<préfixe>
+```
+
+Si la clé n'est pas posée, le déploiement **n'échoue pas** : le smoke annonce qu'il ne couvre plus que les endpoints publics et va à son terme.
 
 ---
 

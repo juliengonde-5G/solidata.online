@@ -209,7 +209,7 @@ Un script Node exécutable est fourni : **`scripts/tests/api-smoke.js`**.
 - **Prérequis** : Node.js, backend accessible (URL configurable).
 - **Usage** :  
   `BASE_URL=https://recette.solidata.online node scripts/tests/api-smoke.js`  
-  Optionnel : `API_USER=... API_PASSWORD=...` pour les tests authentifiés.
+  Optionnel : `SMOKE_API_KEY=sol_xxx_yyy` (clé d'API de service, lecture seule) pour les tests authentifiés — création : `node src/scripts/creer-cle-api.js --apply` dans le conteneur backend.
 - **Contenu** : health check, login, GET /api/auth/me, GET /api/historique/kpi, GET /api/candidates/kanban (avec token), GET /api/tours (avec token MANAGER/ADMIN). Chaque étape affiche OK ou FAIL.
 
 Exécuter ce script en préproduction après chaque déploiement pour valider rapidement la couche API.

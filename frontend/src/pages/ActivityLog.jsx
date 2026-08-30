@@ -26,6 +26,11 @@ const ACTION_LABELS = {
   // Clés API
   api_key_create: 'Clé API créée', api_key_update: 'Clé API modifiée',
   api_key_delete: 'Clé API supprimée',
+  // 2.44.x — appel effectué avec une CLÉ D'API DE SERVICE (identité sans
+  // personne derrière : le test post-déploiement, par exemple). Le détail dit
+  // la méthode et le chemin ; ces appels sont TOUJOURS des lectures, une clé de
+  // service ne pouvant rien écrire.
+  service_api_call: 'Appel par clé de service',
   // 2.44.0 — déclenchement manuel d'une purge de rétention depuis l'écran RGPD.
   // Le détail (quelle purge, combien de lignes) vit dans le journal RGPD ;
   // cette entrée-ci dit simplement QUI a lancé QUOI, dans le journal générique.
@@ -41,6 +46,7 @@ const ACTION_COLORS = {
   permissions_matrix_update: 'bg-indigo-100 text-indigo-700',
   api_key_create: 'bg-amber-100 text-amber-800', api_key_update: 'bg-amber-100 text-amber-800',
   api_key_delete: 'bg-amber-200 text-amber-900',
+  service_api_call: 'bg-slate-100 text-slate-700',
   purge: 'bg-rose-100 text-rose-700',
 };
 const ENTITY_LABELS = {

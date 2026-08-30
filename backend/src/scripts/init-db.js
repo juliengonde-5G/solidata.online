@@ -291,6 +291,36 @@ async function initDatabase() {
         END IF;
       END $$;
     `);
+    // ── Information préalable du candidat (2.45.0) ────────────────────────────
+    // Trace HORODATÉE de la confirmation « j'ai lu la notice » recueillie sur
+    // l'écran de passation, AVANT la première question.
+    //
+    // POURQUOI SUR LA SESSION ET NON DANS `rgpd_consents` : trois raisons.
+    //   1. La confirmation porte sur UNE passation, pas sur la personne. Un
+    //      candidat qui repasse le test six mois plus tard doit être informé à
+    //      nouveau, et la trace du premier doit survivre — or `rgpd_consents`
+    //      est en UNIQUE(entity_type, entity_id, consent_type) : la seconde
+    //      confirmation ÉCRASERAIT la première.
+    //   2. Ce n'est pas un consentement au sens de l'art. 6-1-a : la base
+    //      légale déclarée au registre pour ce traitement est l'intérêt
+    //      légitime. C'est la preuve de l'INFORMATION préalable (art. 12-14
+    //      RGPD, art. L1221-8 et L1221-9 du Code du travail). L'inscrire au
+    //      registre des consentements ferait croire à une base légale que la
+    //      structure n'invoque pas.
+    //   3. `rgpd_consents.recorded_by` désigne l'agent QUI A RECUEILLI le
+    //      consentement ; ici personne ne recueille rien — c'est le candidat
+    //      qui confirme, seul, sur un écran public. La ligne serait à `NULL`
+    //      dans une colonne dont c'est tout le sens.
+    //
+    // La colonne est ce qui GARDE la porte : POST /pcm/submit refuse (409) une
+    // session dont la notice n'a pas été confirmée. Les sessions créées avant
+    // cette version restent à NULL : leur candidat verra la notice à sa
+    // prochaine ouverture du lien, et le parcours se répare de lui-même.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE pcm_sessions ADD COLUMN notice_acceptee_at TIMESTAMP;
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
     console.log('[INIT-DB] Module 3 (PCM) ✓');
 
     // ══════════════════════════════════════════
@@ -1318,6 +1348,17 @@ async function initDatabase() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(active);');
+    // 2.45.0 — identité de SERVICE portée par une clé d'API.
+    // `service_role` NULL = clé partenaire classique (API publique seulement,
+    // aucune identité applicative). Renseignée + scope « service:read » = la clé
+    // vaut identité de service en LECTURE SEULE pour `authenticate` (cf.
+    // middleware/auth.js). Elle remplace le compte ADMIN + mot de passe + secret
+    // TOTP qui vivaient dans le .env du serveur pour le smoke test de déploiement.
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE api_keys ADD COLUMN service_role VARCHAR(50);
+      EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    `);
     // Ajouter les colonnes distance/durée/nb_cav à tours si manquantes
     await client.query(`
       DO $$ BEGIN
@@ -4245,6 +4286,26 @@ async function initDatabase() {
         mesures_securite = mesures_securite || ' ; purge automatique planifiée des tests des personnes non recrutées à 90 jours de la passation (job purgePcmNonRecrute, suppression en cascade des réponses et du rapport chiffré), déclenchable aussi à la demande par un ADMIN/DPO depuis l''écran RGPD, chaque passage journalisé (rgpd_audit_log, actions AUTO_PURGE_PCM_90J et PURGE_PCM_NON_RECRUTE) et horodaté au journal des jobs'
       WHERE nom_traitement = 'Recrutement — évaluation de personnalité (PCM)'
         AND COALESCE(duree_conservation, '') NOT ILIKE '%90 jours%';
+    `);
+
+    // 2.45.0 — CONTREPARTIE DE LA PASSATION MAINTENUE AU RECRUTEMENT.
+    // Le client a écarté le déplacement du test après l'embauche (audit PCM,
+    // recommandation §6.3 a) ; en échange, la politique de suppression est
+    // renforcée sur trois points, qui doivent figurer au registre sous peine
+    // de le laisser décrire un traitement que le logiciel n'applique plus :
+    //   (1) information préalable tracée avant la passation ;
+    //   (2) SECONDE durée, plus courte, pour les 20 réponses détaillées —
+    //       elles n'ont aucun usage opérationnel une fois le profil calculé
+    //       (minimisation, art. 5-1-c) et disparaissent pour TOUT LE MONDE,
+    //       recrutés compris ;
+    //   (3) restitution de son résultat au candidat (art. 15).
+    // Même garde idempotente que ci-dessus, sur un marqueur propre à ce lot.
+    await client.query(`
+      UPDATE rgpd_registre SET
+        duree_conservation = duree_conservation || ' ; À COMPTER DE 2.45.0 — les RÉPONSES DÉTAILLÉES au questionnaire (les 20 choix, table pcm_answers) sont supprimées 30 jours après la passation, POUR TOUTES LES PERSONNES, y compris celles qui ont été recrutées : une fois le profil calculé, elles n''ont plus d''usage opérationnel (minimisation, art. 5-1-c). Seule la synthèse exploitée (types de base et de phase, rapport chiffré) est conservée au-delà, selon les durées ci-dessus. Délai paramétrable (settings « rgpd.pcm_reponses_retention_jours »). Conséquence assumée : passé ce délai, un rapport chiffré devenu illisible n''est plus reconstructible depuis les réponses.',
+        mesures_securite = mesures_securite || ' ; information préalable du candidat AVANT la première question (notice en langage simple : finalité, ce que le test n''est pas, destinataires, DEUX durées de conservation, droits et moyen de les exercer), confirmation de lecture horodatée sur la session (pcm_sessions.notice_acceptee_at) et refus de la soumission sans elle ; restitution de son résultat au candidat sur demande depuis l''écran de fin de test, par son seul jeton de session, journalisée (rgpd_audit_log, action PCM_RESTITUTION_CANDIDAT) et expurgée de l''indicateur de cohérence des réponses ; purge automatique des réponses détaillées à 30 jours (job purgePcmReponses, actions AUTO_PURGE_PCM_REPONSES et PURGE_PCM_REPONSES)'
+      WHERE nom_traitement = 'Recrutement — évaluation de personnalité (PCM)'
+        AND COALESCE(duree_conservation, '') NOT ILIKE '%2.45.0%';
     `);
 
     // (m — phase B) Alertes Pass IAE : élargit le CHECK alert_type de

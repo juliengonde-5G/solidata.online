@@ -12,8 +12,13 @@ import {
   Send,
   ExternalLink,
   Check,
+  ShieldCheck,
+  Printer,
 } from 'lucide-react';
-import { PCM_MENTION_METHODE, PCM_LIBELLE_ECART, PCM_BADGE_PEU_MARQUE } from '../utils/pcm';
+import {
+  PCM_MENTION_METHODE, PCM_LIBELLE_ECART, PCM_BADGE_PEU_MARQUE, PCM_NOTICE_INFORMATION,
+} from '../utils/pcm';
+import { exportRestitutionCandidatPDF } from '../utils/pcm-pdf';
 
 const TYPE_LABELS = {
   analyseur: 'Analyseur',
@@ -44,9 +49,16 @@ export default function PCMTest() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [currentQ, setCurrentQ] = useState(0);
-  const [phase, setPhase] = useState('loading'); // loading, welcome, test, submitting, done, error
+  // 'notice' s'intercale AVANT 'welcome' depuis la 2.45.0 : la personne est
+  // informée avant de voir la première question, et rien ne commence sans elle.
+  const [phase, setPhase] = useState('loading'); // loading, notice, refus, welcome, test, submitting, done, error
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [noticeLue, setNoticeLue] = useState(false);
+  const [noticeEnCours, setNoticeEnCours] = useState(false);
+  const [noticeErreur, setNoticeErreur] = useState('');
+  const [restitutionErreur, setRestitutionErreur] = useState('');
+  const [restitutionEnCours, setRestitutionEnCours] = useState(false);
 
   useEffect(() => {
     axios.get(`/api/pcm/sessions/${token}`)
@@ -58,7 +70,10 @@ export default function PCMTest() {
         }
         setSession(data.session);
         setQuestions(data.questions || []);
-        setPhase('welcome');
+        // Notice déjà confirmée (reprise après coupure, retour en arrière) : on
+        // ne la redemande pas — elle a été lue, c'est daté, et la réafficher
+        // ferait douter d'une étape déjà franchie.
+        setPhase(data.session?.notice_acceptee_at ? 'welcome' : 'notice');
       })
       .catch(err => {
         const msg = err.response?.data?.error || 'Lien invalide ou expiré.';
@@ -79,6 +94,48 @@ export default function PCMTest() {
     setTimeout(() => {
       setCurrentQ(prev => prev < totalQuestions - 1 ? prev + 1 : prev);
     }, 600);
+  };
+
+  /**
+   * Confirmation de lecture de la notice. Le serveur horodate ; l'écran ne fait
+   * qu'avancer une fois qu'il a répondu — s'il refuse, on ne laisse PAS
+   * commencer : la trace est ce qui fait tenir l'information préalable, et une
+   * confirmation qui n'aurait pas été enregistrée n'en serait pas une.
+   */
+  const confirmerNotice = async () => {
+    if (!noticeLue || noticeEnCours) return;
+    setNoticeEnCours(true);
+    setNoticeErreur('');
+    try {
+      await axios.post(`/api/pcm/sessions/${token}/notice`);
+      setPhase('welcome');
+    } catch (err) {
+      setNoticeErreur(err.response?.data?.error
+        || "Nous n'avons pas pu enregistrer votre confirmation. Vérifiez votre connexion et réessayez.");
+    } finally {
+      setNoticeEnCours(false);
+    }
+  };
+
+  /**
+   * Le candidat repart avec son résultat (art. 15). On repasse par le serveur
+   * plutôt que d'imprimer ce que la soumission a renvoyé : c'est la même
+   * projection expurgée pour tout le monde, et la demande est journalisée.
+   */
+  const imprimerMonResultat = async () => {
+    setRestitutionErreur('');
+    setRestitutionEnCours(true);
+    try {
+      const r = await axios.get(`/api/pcm/sessions/${token}/restitution`);
+      if (exportRestitutionCandidatPDF(r.data) === false) {
+        setRestitutionErreur("La fenêtre d'impression a été bloquée par votre navigateur. Autorisez les fenêtres pour ce site, puis réessayez.");
+      }
+    } catch (err) {
+      setRestitutionErreur(err.response?.data?.error
+        || "Votre résultat n'a pas pu être préparé. Réessayez, ou demandez-le à la personne qui vous a envoyé ce lien.");
+    } finally {
+      setRestitutionEnCours(false);
+    }
   };
 
   const goNext = () => {
@@ -180,6 +237,23 @@ export default function PCMTest() {
             </div>
             <h2 className="text-lg font-extrabold text-slate-800 mb-2">Test déjà complété</h2>
             <p className="text-slate-500 text-sm mb-4">Vous avez déjà soumis vos réponses pour ce test. Merci pour votre participation !</p>
+
+            {/* Le résultat reste accessible à la personne après coup (art. 15) :
+                un candidat qui a fermé la page à la fin du test n'a pas perdu
+                son droit d'en obtenir une copie. Même chemin, même document. */}
+            <button
+              onClick={imprimerMonResultat}
+              disabled={restitutionEnCours}
+              className="w-full mb-4 py-3 rounded-xl border-2 border-teal-600 text-teal-700 font-bold text-sm hover:bg-teal-50 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              <Printer className="w-4 h-4" />
+              {restitutionEnCours ? 'Préparation…' : 'Imprimer mon résultat'}
+            </button>
+            {restitutionErreur && (
+              <p className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2 text-left">
+                {restitutionErreur}
+              </p>
+            )}
             {isFromApp ? (
               <button
                 onClick={() => navigate('/pcm')}
@@ -199,6 +273,113 @@ export default function PCMTest() {
                 <ExternalLink className="w-4 h-4" />
               </a>
             )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── NOTICE D'INFORMATION PRÉALABLE (2.45.0) ────────────────────────────────
+  // Elle vient AVANT tout le reste : la personne doit savoir à quoi elle
+  // répond, qui le lira et combien de temps c'est gardé avant de répondre —
+  // pas après. Le texte vit dans utils/pcm.js (source unique, FALC).
+  if (phase === 'refus') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+        {renderHeader()}
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="section-card p-8 max-w-md w-full text-center">
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+              <Check className="w-8 h-8 text-slate-500" strokeWidth={2} />
+            </div>
+            <h2 className="text-lg font-extrabold text-slate-800 mb-3">{PCM_NOTICE_INFORMATION.refus.titre}</h2>
+            <p className="text-slate-600 text-sm leading-relaxed">{PCM_NOTICE_INFORMATION.refus.corps}</p>
+            {/* Retour possible : refuser n'est pas un aiguillage sans retour —
+                quelqu'un qui a cliqué par erreur doit pouvoir revenir. */}
+            <button
+              onClick={() => setPhase('notice')}
+              className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 rounded-button border border-slate-300 text-slate-700 font-semibold text-sm hover:bg-slate-100 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Revenir aux informations
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'notice') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+        {renderHeader()}
+        <div className="flex-1 flex items-start justify-center p-4 sm:p-6">
+          <div className="section-card p-6 sm:p-8 max-w-lg w-full my-4">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="flex-shrink-0 w-10 h-10 rounded-xl bg-teal-100 grid place-items-center">
+                <ShieldCheck className="w-5 h-5 text-teal-700" strokeWidth={2.2} />
+              </span>
+              <h2 className="text-lg sm:text-xl font-extrabold text-slate-800 tracking-tight">
+                {PCM_NOTICE_INFORMATION.titre}
+              </h2>
+            </div>
+            <p className="text-sm text-slate-600 mb-5">{PCM_NOTICE_INFORMATION.chapeau}</p>
+
+            <div className="space-y-3 mb-5">
+              {PCM_NOTICE_INFORMATION.blocs.map((bloc) => (
+                <div key={bloc.cle} className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <h3 className="font-bold text-slate-800 text-sm mb-2">{bloc.titre}</h3>
+                  <ul className="space-y-1.5">
+                    {bloc.points.map((pt, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-slate-700 leading-relaxed">
+                        <span className="text-teal-600 font-bold flex-shrink-0">•</span>
+                        <span>{pt}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            {/* Mention de méthode — la MÊME que partout ailleurs (utils/pcm.js).
+                Elle a sa place ici, où la personne décide de répondre, et non
+                plus sur l'écran suivant : c'est le moment où elle en a besoin. */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-5">
+              <p className="text-xs font-bold text-slate-700 mb-1">Ce que ce questionnaire est — et ce qu'il n'est pas</p>
+              <p className="text-xs text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
+            </div>
+
+            <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-white cursor-pointer mb-4">
+              <input
+                type="checkbox"
+                checked={noticeLue}
+                onChange={(e) => setNoticeLue(e.target.checked)}
+                className="mt-0.5 w-5 h-5 accent-teal-600 flex-shrink-0"
+              />
+              <span className="text-sm font-semibold text-slate-800">{PCM_NOTICE_INFORMATION.confirmation}</span>
+            </label>
+
+            {noticeErreur && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-sm p-3 mb-4">
+                {noticeErreur}
+              </div>
+            )}
+
+            <button
+              onClick={confirmerNotice}
+              disabled={!noticeLue || noticeEnCours}
+              className="w-full py-3.5 rounded-xl text-white font-bold text-base bg-teal-600 hover:bg-teal-700 shadow-teal-glow transition-all active:scale-[0.98] inline-flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed"
+            >
+              {noticeEnCours ? 'Enregistrement…' : 'Continuer'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            {/* Sortie possible, et sans reproche : ne pas répondre est un droit. */}
+            <button
+              onClick={() => setPhase('refus')}
+              className="w-full mt-2 py-2.5 rounded-xl text-slate-600 font-semibold text-sm hover:bg-slate-100 transition-colors"
+            >
+              Je ne souhaite pas répondre
+            </button>
           </div>
         </div>
       </div>
@@ -246,14 +427,9 @@ export default function PCMTest() {
               </ul>
             </div>
 
-            {/* Encart de méthode (audit PCM 2.43.0, R2) — AVANT de commencer,
-                comme le fait le parcours de formation de référence. La personne
-                qui répond doit savoir ce qu'est l'outil auquel elle répond :
-                c'est ici que la mise en garde a le plus de valeur. */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-6">
-              <p className="text-xs font-bold text-slate-700 mb-1">Ce que ce questionnaire est — et ce qu'il n'est pas</p>
-              <p className="text-xs text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
-            </div>
+            {/* L'encart de méthode (audit PCM 2.43.0, R2) a MIGRÉ sur l'écran de
+                notice qui précède : il y est lu au moment où la personne décide
+                de répondre. L'afficher deux fois de suite l'aurait affaibli. */}
 
             <button
               onClick={() => setPhase('test')}
@@ -334,6 +510,30 @@ export default function PCMTest() {
               {!baseIndetermine && baseConfidence > 0 && (
                 <p className="text-xs text-slate-400 mt-3">
                   {PCM_LIBELLE_ECART} — base {baseConfidence}% · phase {phaseConfidence}%
+                </p>
+              )}
+            </div>
+
+            {/* Restitution (2.45.0, art. 15 RGPD) — la personne repart avec son
+                résultat. Jusqu'ici elle voyait son type de base à l'écran et
+                repartait sans rien. Le document exclut l'indicateur de cohérence
+                des réponses et tout vocabulaire clinique (voir pcm-pdf.js). */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4 text-left">
+              <p className="text-sm font-bold text-slate-800 mb-1">Gardez votre résultat</p>
+              <p className="text-xs text-slate-600 mb-3">
+                Vous pouvez imprimer votre résultat ou l'enregistrer en PDF. Il est à vous.
+              </p>
+              <button
+                onClick={imprimerMonResultat}
+                disabled={restitutionEnCours}
+                className="w-full py-3 rounded-xl border-2 border-teal-600 text-teal-700 font-bold text-sm hover:bg-teal-50 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                <Printer className="w-4 h-4" />
+                {restitutionEnCours ? 'Préparation…' : 'Imprimer mon résultat'}
+              </button>
+              {restitutionErreur && (
+                <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                  {restitutionErreur}
                 </p>
               )}
             </div>

@@ -7,8 +7,10 @@ Ce dossier contient les scripts de tests techniques utilisés en phase de déplo
 Script Node.js (sans dépendance externe) qui enchaîne :
 
 1. **Health check** : `GET /api/health` (disponibilité + base de données)
-2. **Login** (si `API_USER` et `API_PASSWORD` fournis) : `POST /api/auth/login`
-3. **Endpoints protégés** (si token obtenu) :
+2. **Identité de service** (si `SMOKE_API_KEY` fournie) : `GET /api/auth/me` avec l'en-tête `X-API-Key`.
+   Le script **ne se connecte plus** : il présente une clé d'API de service en lecture seule.
+   Création : dans le conteneur backend, `node src/scripts/creer-cle-api.js --apply`.
+3. **Endpoints protégés** (si la clé est acceptée) :
    - `GET /api/auth/me`
    - `GET /api/historique/kpi`
    - `GET /api/candidates/kanban`
@@ -29,14 +31,15 @@ node scripts/tests/api-smoke.js
 set BASE_URL=https://recette.solidata.online
 node scripts/tests/api-smoke.js
 
-# Avec authentification (pour tester les routes protégées)
+# Avec la clé d'API de service (pour tester les routes protégées)
 set BASE_URL=https://recette.solidata.online
-set API_USER=admin
-set API_PASSWORD=votre_mot_de_passe
+set SMOKE_API_KEY=sol_xxxxxxxx_yyyyyyyy
 node scripts/tests/api-smoke.js
 ```
 
 Sous Linux/macOS : `export BASE_URL=...` puis `node scripts/tests/api-smoke.js`.
+
+> **Deux échecs de connexion volontaires au journal.** La section « Autocontrôles de sécurité » du script tente une connexion avec l'identifiant **réservé** `smoke-test-identifiant-invalide` (qui n'existe dans aucun compte), puis avec une chaîne d'injection SQL. Les deux DOIVENT être refusées : c'est ce qui est vérifié. Quand ces deux échecs apparaissent au journal depuis l'adresse du serveur juste après un déploiement, c'est l'autocontrôle — pas une intrusion.
 
 ### Sortie
 

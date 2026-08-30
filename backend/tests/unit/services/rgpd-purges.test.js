@@ -324,10 +324,12 @@ describe('purges déplacées — comportement automatique inchangé', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('registre PURGES_RGPD — source unique', () => {
-  it('couvre les 7 purges de rétention, avec des clés uniques', () => {
+  it('couvre les 8 purges de rétention, avec des clés uniques', () => {
     const cles = purges.PURGES_RGPD.map((p) => p.cle);
+    // 2.45.0 : `pcm_reponses` s'intercale juste après `pcm_non_recrute` — les
+    // deux règles PCM se lisent d'affilée à l'écran comme au journal des jobs.
     expect(cles).toEqual([
-      'pcm_non_recrute', 'candidats_expires', 'insertion_dossiers',
+      'pcm_non_recrute', 'pcm_reponses', 'candidats_expires', 'insertion_dossiers',
       'gps_positions', 'arrets_gps', 'messagerie', 'refresh_tokens',
     ]);
     expect(new Set(cles).size).toBe(cles.length);

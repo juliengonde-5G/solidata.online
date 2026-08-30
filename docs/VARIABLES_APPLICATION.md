@@ -135,13 +135,23 @@ Utilisée dans : `backend/src/routes/tours/events-auto.js`
 | Variable | Valeur dev par défaut | Obligatoire | Description |
 |----------|-----------------------|-------------|-------------|
 | `MFA_ENCRYPTION_KEY` | *(vide)* | Non | Clé DÉDIÉE de chiffrement du secret TOTP (`users.mfa_secret`, AES-256-GCM). **Recommandée en production** : sans elle, la cascade retombe sur `PCM_ENCRYPTION_KEY` puis `JWT_SECRET` — ça fonctionne, mais mélange deux registres de compromission. |
-| `API_TOTP_SECRET` | *(vide)* | Non* | Secret TOTP (Base32) du compte de service utilisé par le smoke test post-déploiement (`scripts/tests/api-smoke.js`), **si la double authentification est activée sur ce compte**. |
+| `SMOKE_API_KEY` | *(vide)* | Non* | **Clé d'API de SERVICE, en lecture seule**, présentée par le smoke test post-déploiement (`scripts/tests/api-smoke.js`) dans l'en-tête `X-API-Key`. Format `sol_<prefix>_<secret>`. |
 
-*Sans `API_TOTP_SECRET`, si le compte API est soumis à la double authentification, le login du smoke test répond `mfa_required` et le script se dégrade explicitement (avertissement en sortie) plutôt que d'échouer le déploiement — mais il ne couvre alors plus aucun des endpoints protégés par `requireMfa`.
+*Sans `SMOKE_API_KEY`, le smoke test ne couvre que les endpoints publics : il l'annonce explicitement en sortie et **le déploiement se poursuit** — une couverture réduite n'est pas une régression applicative.
 
-Utilisées dans : `backend/src/utils/mfa-crypto.js` (cascade de clé), `scripts/tests/api-smoke.js` (calcul du code TOTP du compte de service via `backend/src/utils/totp.js`).
+> **2.45.0 — fin du compte ADMIN de service.** `API_USER`, `API_PASSWORD` et `API_TOTP_SECRET` **ne sont plus lus**. Le smoke test ne se connecte plus : il rangeait dans le même `.env` le mot de passe **et** le secret TOTP d'un compte ADMIN réel, c'est-à-dire les deux facteurs au même endroit — ce qui annulait le bénéfice de la double authentification. Une clé d'API est un secret unique, à portée limitée, révocable et expirable, qui n'ouvre aucune session humaine.
+>
+> **Ce qu'une clé de service peut / ne peut pas** : elle lit ce que lit le rôle qu'elle porte (`api_keys.service_role`) ; elle ne peut **rien écrire** — la garde de lecture seule est posée dans `authenticate` (`backend/src/middleware/auth.js`), donc sur toute route de l'application, y compris celles écrites demain. Elle n'a pas non plus accès au trousseau de clés (`/api/admin/api-keys`).
+>
+> **Création (dans le conteneur backend)** :
+> ```bash
+> docker compose -f docker-compose.prod.yml exec backend node src/scripts/creer-cle-api.js --apply
+> ```
+> La clé n'est affichée **qu'une seule fois** (la base n'en garde que le hash SHA-256) — la reporter dans `SMOKE_API_KEY` du `.env` serveur. Le script est **idempotent** : relancé, il refuse de semer une seconde clé du même nom et dit quoi faire. Options : `--nom=`, `--role=` (défaut ADMIN), `--expire=AAAA-MM-JJ`, `--revoquer=<préfixe>` (effet immédiat), `--force`.
+>
+> **Migration d'un serveur existant** : créer la clé, poser `SMOKE_API_KEY`, puis **retirer `API_USER` / `API_PASSWORD` / `API_TOTP_SECRET` du `.env` et désactiver le compte ADMIN de service** (un secret devenu inutile reste un secret exposé). `deploy.sh` avertit tant qu'ils traînent.
 
-> **Mise en service (2.43.0)** : renseigner `MFA_ENCRYPTION_KEY` est recommandé mais pas bloquant. En revanche, **une action manuelle est requise après le premier déploiement** : enrôler le compte de service utilisé par `API_USER`/`API_PASSWORD` (se connecter avec ce compte, suivre l'écran d'enrôlement) puis renseigner son secret dans `API_TOTP_SECRET` sur le serveur — sans quoi le smoke test de `deploy.sh update` ne couvre plus les endpoints sensibles (`/api/insertion`, `/api/pcm`, `/api/employees`…), bien qu'il reste vert (401/403 comptent comme « endpoint protégé, OK »).
+Utilisées dans : `backend/src/utils/mfa-crypto.js` (cascade de clé), `backend/src/middleware/api-key.js` + `backend/src/middleware/auth.js` (identité de service), `scripts/tests/api-smoke.js`.
 
 ---
 
@@ -205,7 +215,7 @@ OPENAGENDA_API_KEY=          # Optionnel — sources gratuites disponibles sans 
 # DOUBLE AUTHENTIFICATION (MFA) & SMOKE TEST
 # ─────────────────────────────────────────────
 MFA_ENCRYPTION_KEY=          # Recommandée en prod — sinon repli sur PCM_ENCRYPTION_KEY puis JWT_SECRET
-API_TOTP_SECRET=             # Secret TOTP (Base32) du compte API, si ce compte est soumis à la double authentification
+SMOKE_API_KEY=               # Clé d'API de service (lecture seule) du smoke test post-déploiement
 ```
 
 ---
@@ -227,7 +237,7 @@ API_TOTP_SECRET=             # Secret TOTP (Base32) du compte API, si ce compte 
 | Météo / géolocalisation | `CENTRE_TRI_LAT`, `CENTRE_TRI_LNG` |
 | Événements locaux | `OPENAGENDA_API_KEY` |
 | Double authentification (MFA) | `MFA_ENCRYPTION_KEY` |
-| Smoke test post-déploiement | `API_USER`, `API_PASSWORD`, `API_TOTP_SECRET` |
+| Smoke test post-déploiement | `SMOKE_API_KEY` |
 
 ---
 
@@ -277,9 +287,9 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 |-----------------|-------------|--------------------|
 | `securite.mfa_roles` | `backend/src/middleware/mfa.js` | `["ADMIN","RH","DPO"]` (tableau JSON de rôles de BASE — un rôle personnalisé est soumis si son rôle de base l'est ; le rôle `PCM` a été retiré du périmètre par arbitrage client en 2.43.0) |
 
-### Purges de rétention RGPD (2.44.0)
+### Purges de rétention RGPD (2.44.0, étendues en 2.45.0)
 
-Les sept purges sont décrites dans le registre `PURGES_RGPD` de
+Les huit purges sont décrites dans le registre `PURGES_RGPD` de
 `backend/src/services/rgpd-purges.js` — source unique du job planifié **et** du bouton
 « Lancer maintenant » de l'écran RGPD. Chaque seuil se règle sans redéploiement ; l'écran
 indique s'il vient d'un réglage ou du défaut en code.
@@ -287,6 +297,13 @@ indique s'il vient d'un réglage ou du défaut en code.
 | Clé `settings` | Purge concernée | Valeur par défaut |
 |-----------------|-----------------|--------------------|
 | `rgpd.pcm_non_recrute_retention_jours` | Tests PCM des candidats non recrutés — délai compté depuis la **passation** du test (repli : création de la session si le test n'a jamais été passé) | `90` (jours) |
+| `rgpd.pcm_reponses_retention_jours` | **Réponses détaillées** au questionnaire PCM (`pcm_answers`) — même comptage depuis la **passation**, mais périmètre plus large : **toutes les personnes, recrutées comprises**. Une fois le profil calculé, les réponses item par item n'ont plus d'usage opérationnel (minimisation, art. 5-1-c). La synthèse (types de base et de phase, rapport chiffré) est conservée au-delà, selon la ligne précédente. | `30` (jours) |
+
+> **Conséquence à connaître avant de raccourcir ce délai.** Le script
+> `backend/src/scripts/reparer-rapports-pcm.js` reconstruit un rapport devenu illisible
+> (rotation de clé de chiffrement) **à partir des réponses**. Passé ce délai, il ne le peut
+> plus : il le dit et ne répare pas. Les types de base et de phase, eux, sont stockés en clair
+> et subsistent — ce n'est pas le profil qui se perd, c'est le rapport rédigé autour de lui.
 
 Les autres purges (candidatures 24 mois, dossiers d'insertion clos, positions GPS, arrêts de
 tournée, messagerie, jetons de rafraîchissement) conservent les clés de réglage qui leur étaient

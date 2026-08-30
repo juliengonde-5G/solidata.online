@@ -878,6 +878,23 @@ router.post('/logout', authFull, async (req, res) => {
 // GET /api/auth/me
 router.get('/me', authFull, async (req, res) => {
   try {
+    // Identité de SERVICE (clé d'API) : il n'y a aucune ligne `users` derrière
+    // elle. On répond ce qu'elle est, plutôt qu'un 404 trompeur — c'est aussi
+    // le point de contrôle du smoke test de déploiement (« qui suis-je ? »).
+    if (req.user && req.user.is_service) {
+      return res.json({
+        id: null,
+        username: req.user.username,
+        role: req.user.role,
+        base_role: resolveBaseRole(req.user.role),
+        is_service: true,
+        api_key_id: req.user.api_key_id || null,
+        must_change_password: false,
+        mfa_enabled: false,
+        mfa_required: false,
+        mfa_enrollment_required: false,
+      });
+    }
     const result = await pool.query(
       `SELECT id, username, email, role, first_name, last_name, phone, team_id, is_active,
               must_change_password, mfa_enabled, mfa_enrolled_at, created_at

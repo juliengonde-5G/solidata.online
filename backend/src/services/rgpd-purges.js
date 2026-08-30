@@ -38,7 +38,8 @@
  * les quatre premiers) : AUTO_PURGE_PCM_90J, PURGE_PCM_NON_RECRUTE,
  * AUTO_PURGE_24M, PURGE_EXPIRED, AUTO_PURGE_INSERTION, PURGE_INSERTION,
  * AUTO_PURGE_GPS_90D, PURGE_GPS, AUTO_PURGE_ARRETS_GPS, PURGE_ARRETS_GPS,
- * PURGE_MESSAGERIE, PURGE_REFRESH_TOKENS.
+ * PURGE_MESSAGERIE, PURGE_REFRESH_TOKENS, AUTO_PURGE_PCM_REPONSES,
+ * PURGE_PCM_REPONSES.
  */
 const pool = require('../config/database');
 
@@ -48,6 +49,13 @@ const pool = require('../config/database');
 
 /** Tests PCM des personnes non recrutées (2.44.0, demande client). */
 const PCM_RETENTION_DEFAUT_JOURS = 90;
+/**
+ * Réponses DÉTAILLÉES au questionnaire PCM (2.45.0, demande client).
+ *
+ * Bien plus court que la rétention du test lui-même, et sur un périmètre plus
+ * LARGE : voir purgePcmReponses ci-dessous.
+ */
+const PCM_REPONSES_RETENTION_DEFAUT_JOURS = 30;
 /** Rétention de gps_positions, en jours. Plafond de tout ce qui en dérive. */
 const GPS_RETENTION_JOURS = 90;
 /** Candidatures non recrutées (art. 5 RGPD, référentiel CNIL recrutement). */
@@ -97,7 +105,8 @@ async function journaliserSynthese({ action, entiteAudit, userId = null, details
       // code brut à l'écran. Codes possibles : 'AUTO_PURGE_PCM_90J',
       // 'PURGE_PCM_NON_RECRUTE', 'AUTO_PURGE_GPS_90D', 'PURGE_GPS',
       // 'AUTO_PURGE_ARRETS_GPS', 'PURGE_ARRETS_GPS', 'PURGE_MESSAGERIE',
-      // 'PURGE_REFRESH_TOKENS', 'PURGE_EXPIRED', 'PURGE_INSERTION'.
+      // 'PURGE_REFRESH_TOKENS', 'PURGE_EXPIRED', 'PURGE_INSERTION',
+      // 'AUTO_PURGE_PCM_REPONSES', 'PURGE_PCM_REPONSES'.
       [userId, action, entiteAudit, JSON.stringify(details)]
     );
     return true;
@@ -175,6 +184,94 @@ async function purgePcmNonRecrute({ trigger = 'auto', userId = null } = {}) {
   }
 
   return resume('pcm_non_recrute', { pcm_sessions: sessionsSupprimees }, retentionJours, journalise,
+    echec ? { ok: false, motif: echec } : { ok: true });
+}
+
+// ══════════════════════════════════════════
+// 1 bis. RÉPONSES DÉTAILLÉES AU QUESTIONNAIRE PCM (nouveau — 2.45.0)
+// ══════════════════════════════════════════
+
+/**
+ * Supprime les 20 RÉPONSES du questionnaire (`pcm_answers`) passé un délai
+ * court (défaut 30 jours, réglable par `rgpd.pcm_reponses_retention_jours`),
+ * en laissant la synthèse exploitée : types de base et de phase, rapport
+ * chiffré. C'est la contrepartie, demandée par le client, du maintien de la
+ * passation dans le parcours de recrutement.
+ *
+ * POURQUOI. Une fois le profil calculé, les réponses item par item n'ont plus
+ * AUCUN usage opérationnel : aucun écran ne les lit pour décider quoi que ce
+ * soit — seul l'export PDF technique les affiche, et il se compose sans elles.
+ * Les garder, c'est étendre la surface d'exposition d'un questionnaire de
+ * personnalité sans contrepartie. C'est exactement ce que recommande la
+ * recherche versée au dossier (rapports/pcm-insertion-2026-08-29/
+ * 02-recherche-bibliographique.md §6.3 c : « ne pas conserver les réponses
+ * item par item — seulement la synthèse exploitée »), et l'application du
+ * principe de minimisation (art. 5-1-c RGPD).
+ *
+ * ELLE S'APPLIQUE À TOUT LE MONDE, RECRUTÉS COMPRIS — et c'est délibéré, écrit
+ * ici pour que le choix se voie. La purge voisine (purgePcmNonRecrute) épargne
+ * les personnes recrutées, parce que son fondement est la durée du dossier de
+ * CANDIDATURE. Celle-ci ne repose pas sur l'issue du recrutement mais sur
+ * l'inutilité de la donnée : elle ne devient pas utile parce que la personne a
+ * été embauchée. Restreindre cette purge aux non-recrutés reviendrait à
+ * conserver indéfiniment les réponses de ceux dont on a le plus de données par
+ * ailleurs.
+ *
+ * MÊME COMPTAGE que la purge voisine — depuis la PASSATION (`completed_at`,
+ * repli `created_at`) : deux délais comptés depuis deux dates différentes
+ * seraient impossibles à expliquer à une personne concernée.
+ *
+ * CONSÉQUENCE ASSUMÉE, et dite à trois endroits (ici, dans la description du
+ * registre des purges, et en tête de `scripts/reparer-rapports-pcm.js`) : le
+ * script de réparation recalcule un rapport devenu illisible À PARTIR DES
+ * RÉPONSES. Passé ce délai, il ne le peut plus — le rapport reste alors
+ * illisible et l'écran le dit (422 PCM_ILLISIBLE). Les types de base et de
+ * phase, eux, sont stockés EN CLAIR et survivent : ce n'est pas le profil qui
+ * est perdu, c'est le rapport rédigé.
+ */
+async function purgePcmReponses({ trigger = 'auto', userId = null } = {}) {
+  const retentionJours = await readSetting('rgpd.pcm_reponses_retention_jours', PCM_REPONSES_RETENTION_DEFAUT_JOURS);
+  let reponsesSupprimees = 0;
+  let echec = null;
+
+  try {
+    const result = await pool.query(
+      // Aucun filtre sur le statut du candidat : voir le commentaire ci-dessus.
+      `DELETE FROM pcm_answers
+        WHERE session_id IN (
+          SELECT id FROM pcm_sessions
+           WHERE COALESCE(completed_at, created_at) < NOW() - ($1 || ' days')::interval
+        )`,
+      [String(retentionJours)]
+    );
+    reponsesSupprimees = result.rowCount || 0;
+    if (reponsesSupprimees > 0) {
+      console.log(`[RGPD-PURGES] Réponses PCM : ${reponsesSupprimees} réponse(s) supprimée(s) (> ${retentionJours} jours)`);
+    }
+  } catch (err) {
+    echec = err.message;
+    console.error('[RGPD-PURGES] Erreur purgePcmReponses :', err.message);
+  }
+
+  const manuel = trigger === 'manual';
+  let journalise = false;
+  if (manuel || reponsesSupprimees > 0) {
+    journalise = await journaliserSynthese({
+      action: manuel ? 'PURGE_PCM_REPONSES' : 'AUTO_PURGE_PCM_REPONSES',
+      entiteAudit: 'pcm_answers',
+      userId: manuel ? userId : null,
+      details: {
+        trigger,
+        retention_jours: retentionJours,
+        supprimes: { pcm_answers: reponsesSupprimees },
+        rows_deleted: reponsesSupprimees,
+        critere: "toutes les personnes (recrutées comprises), date de passation (completed_at, repli created_at)",
+        ...(echec ? { echec } : {}),
+      },
+    });
+  }
+
+  return resume('pcm_reponses', { pcm_answers: reponsesSupprimees }, retentionJours, journalise,
     echec ? { ok: false, motif: echec } : { ok: true });
 }
 
@@ -617,6 +714,19 @@ const PURGES_RGPD = [
     retentionUnite: 'jours',
   },
   {
+    cle: 'pcm_reponses',
+    libelle: 'Réponses détaillées au questionnaire PCM',
+    description: "Supprime les 20 réponses au questionnaire passé un délai court, en conservant la synthèse exploitée (types de base et de phase, rapport chiffré). Une fois le profil calculé, les réponses item par item n'ont plus d'usage opérationnel : les garder étend la surface d'exposition sans contrepartie (minimisation, art. 5-1-c). Contrairement à la purge ci-dessus, elle s'applique à TOUTES LES PERSONNES, y compris celles qui ont été recrutées — le fondement n'est pas l'issue du recrutement mais l'inutilité de la donnée. Conséquence assumée : passé ce délai, un rapport chiffré devenu illisible n'est plus reconstructible depuis les réponses (le script reparer-rapports-pcm.js le dit).",
+    fn: purgePcmReponses,
+    actionAuto: 'AUTO_PURGE_PCM_REPONSES',
+    actionManuelle: 'PURGE_PCM_REPONSES',
+    jobName: 'purgePcmReponses',
+    entiteAudit: 'pcm_answers',
+    retentionSetting: 'rgpd.pcm_reponses_retention_jours',
+    retentionDefaut: PCM_REPONSES_RETENTION_DEFAUT_JOURS,
+    retentionUnite: 'jours',
+  },
+  {
     cle: 'candidats_expires',
     libelle: 'Candidatures non recrutées de plus de 24 mois',
     description: "Anonymise (identité, CV, notes d'entretien, PCM, mises en situation, documents) les candidats non recrutés dont la fiche a été CRÉÉE il y a plus de 24 mois. Le bouton historique « Purge auto (24 mois) » de l'onglet Droits compte le même délai depuis la dernière modification de la fiche — divergence héritée, documentée dans la politique.",
@@ -726,6 +836,7 @@ module.exports = {
   trouverPurge,
   retentionEffective,
   purgePcmNonRecrute,
+  purgePcmReponses,
   purgeExpiredCandidates,
   purgeInsertionDossiers,
   purgeOldGpsPositions,
@@ -735,6 +846,7 @@ module.exports = {
   // Exposés pour les tests et pour la politique affichée à l'écran.
   readSetting,
   PCM_RETENTION_DEFAUT_JOURS,
+  PCM_REPONSES_RETENTION_DEFAUT_JOURS,
   GPS_RETENTION_JOURS,
   CANDIDATS_RETENTION_MOIS,
   INSERTION_RETENTION_DEFAUT_MOIS,
