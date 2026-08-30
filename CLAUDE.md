@@ -14,7 +14,7 @@
 - **Mobile** : https://m.solidata.online
 - **Dépôt** : https://github.com/juliengonde-5G/solidata.online
 - **Branche principale** : `main`
-- **Serveur production** : Scaleway DEV1-S, IP 51.159.144.100
+- **Serveur production** : Scaleway DEV1-S — **accès SSH `root@51.159.128.110`** ; l'IP **publique** vers laquelle pointe le DNS est `51.159.144.100` (les deux ne sont pas la même : ne pas se connecter à celle du DNS)
 - **Répertoire serveur** : `/opt/solidata.online`
 
 ---

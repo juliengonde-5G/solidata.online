@@ -22,7 +22,7 @@ Le script `deploy/scripts/backup-s3.sh` est livré. Pour l'activer :
 
 ### Installation sur le serveur prod
 ```bash
-ssh root@51.159.144.100
+ssh root@51.159.128.110
 apt-get update && apt-get install -y awscli
 
 # Fichier de credentials (lecture seule pour root, jamais en argv)

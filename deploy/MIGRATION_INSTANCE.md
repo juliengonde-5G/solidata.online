@@ -91,9 +91,9 @@ Puis, depuis votre Mac, en reprenant ces deux noms :
 
 ```bash
 mkdir -p ~/solidata-migration && cd ~/solidata-migration
-scp root@51.159.144.100:'/opt/solidata.online-backups/db_manual_AAAAMMJJ_HHMMSS.dump.gz' .
-scp root@51.159.144.100:'/opt/solidata.online-backups/uploads_manual_AAAAMMJJ_HHMMSS.tar.gz' .
-scp root@51.159.144.100:/opt/solidata.online/.env .env.production
+scp root@51.159.128.110:'/opt/solidata.online-backups/db_manual_AAAAMMJJ_HHMMSS.dump.gz' .
+scp root@51.159.128.110:'/opt/solidata.online-backups/uploads_manual_AAAAMMJJ_HHMMSS.tar.gz' .
+scp root@51.159.128.110:/opt/solidata.online/.env .env.production
 ls -lh
 ```
 
@@ -242,7 +242,7 @@ recopiez-la pendant que l'ancienne machine tourne :
 
 ```bash
 # Depuis votre Mac, facultatif
-rsync -az root@51.159.144.100:/opt/solidata.online/boutiques-csv/ ./boutiques-csv/
+rsync -az root@51.159.128.110:/opt/solidata.online/boutiques-csv/ ./boutiques-csv/
 rsync -az ./boutiques-csv/ root@<IP_TEMPORAIRE>:/opt/solidata.online/boutiques-csv/
 ```
 
@@ -379,7 +379,7 @@ extinction, ils ne seront plus accessibles.
 
 ```bash
 # Depuis votre Mac
-ssh root@51.159.144.100 "docker run --rm -v solidata-certbot-etc:/d alpine tar czf - -C /d ." > ~/solidata-migration/certs.tar.gz
+ssh root@51.159.128.110 "docker run --rm -v solidata-certbot-etc:/d alpine tar czf - -C /d ." > ~/solidata-migration/certs.tar.gz
 scp ~/solidata-migration/certs.tar.gz root@<IP_TEMPORAIRE>:/tmp/
 ```
 
@@ -399,7 +399,7 @@ nombre d'émissions par semaine et par domaine.
 ### 6.1 Arrêter proprement l'ancienne machine
 
 ```bash
-ssh root@51.159.144.100
+ssh root@51.159.128.110
 cd /opt/solidata.online
 docker compose -f docker-compose.prod.yml stop
 ```
@@ -421,7 +421,7 @@ docker compose -f docker-compose.prod.yml stop
 
 ```bash
 # Depuis votre Mac
-scp root@51.159.144.100:/tmp/final.dump ~/solidata-migration/
+scp root@51.159.128.110:/tmp/final.dump ~/solidata-migration/
 scp ~/solidata-migration/final.dump root@<IP_TEMPORAIRE>:/tmp/
 ```
 
@@ -448,7 +448,7 @@ docker run --rm -v solidata-uploads:/data -v /tmp:/b alpine \
 
 ```bash
 # Depuis votre Mac
-scp root@51.159.144.100:/tmp/uploads_final.tar.gz ~/solidata-migration/
+scp root@51.159.128.110:/tmp/uploads_final.tar.gz ~/solidata-migration/
 scp ~/solidata-migration/uploads_final.tar.gz root@<IP_TEMPORAIRE>:/tmp/
 ```
 
@@ -463,7 +463,7 @@ docker run --rm -v solidata-uploads:/data alpine sh -c 'du -sh /data; find /data
 
 Dans la console Scaleway, **Réseau → IP flexibles** :
 
-1. Repérez `51.159.144.100`
+1. Repérez `51.159.144.100` (l'IP **publique**, cible du DNS — pas l'IP SSH)
 2. **Détacher** de `solidata-erp`
 3. **Attacher** à `solidata-erp-v2`
 
@@ -575,7 +575,7 @@ changements dans la même fenêtre.
 Tant que l'ancienne instance existe, le retour est immédiat :
 
 1. Console Scaleway → détacher l'IP de `solidata-erp-v2`, la rattacher à `solidata-erp`
-2. `ssh root@51.159.144.100` puis `docker compose -f docker-compose.prod.yml up -d`
+2. `ssh root@51.159.128.110` puis `docker compose -f docker-compose.prod.yml up -d`
 
 Le service revient tel qu'il était. Les données saisies sur la nouvelle machine
 entre-temps seraient perdues — d'où l'intérêt de vérifier avant d'ouvrir aux

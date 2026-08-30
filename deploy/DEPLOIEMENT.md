@@ -8,7 +8,8 @@
 
 ## Configuration DNS (Scaleway)
 
-Créer 3 enregistrements DNS A pointant vers l'IP du serveur :
+Créer 3 enregistrements DNS A pointant vers l'IP **publique** du serveur — "
+       "distincte de l'IP d'administration utilisée pour SSH (voir ci-dessous) :
 
 ```
 A    solidata.online      → 51.159.144.100
@@ -19,8 +20,8 @@ A    m.solidata.online     → 51.159.144.100
 ## Étape 1 — Initialisation serveur
 
 ```bash
-# Se connecter en SSH
-ssh root@51.159.144.100
+# Se connecter en SSH — IP d'ADMINISTRATION, pas celle du DNS
+ssh root@51.159.128.110
 
 # Télécharger le script d'init (une seule commande)
 curl -sL https://raw.githubusercontent.com/juliengonde-5G/solidata.online/main/deploy/scripts/init-server.sh | sudo bash
@@ -136,7 +137,7 @@ bash deploy/scripts/deploy-and-test.sh
 .\scripts\deploy-prod.ps1 -SkipTests
 
 # Serveur personnalisé (ou variables d'environnement SOLIDATA_SSH_USER, SOLIDATA_SSH_HOST)
-.\scripts\deploy-prod.ps1 -SshUser root -SshHost 51.159.144.100
+.\scripts\deploy-prod.ps1 -SshUser root -SshHost 51.159.128.110
 ```
 
 ### Lancement des tests (smoke API)

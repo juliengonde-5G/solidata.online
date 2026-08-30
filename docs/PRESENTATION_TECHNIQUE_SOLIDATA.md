@@ -13,7 +13,7 @@
 ╔═══════════════════════════════════════════════════════════════════════════════════════╗
 ║                           Scaleway DEV1-S                                             ║
 ║                     2 vCPU · 2 Go RAM · 20 Go SSD                                    ║
-║                     IP: 51.159.144.100                                                ║
+║                     IP publique : 51.159.144.100                                      ║
 ║                     Répertoire: /opt/solidata.online                                  ║
 ║                                                                                       ║
 ║  Internet ──▶ UFW Firewall (22/80/443)                                                ║

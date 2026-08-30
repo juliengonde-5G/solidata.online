@@ -28,6 +28,10 @@ fi
 
 APP_DIR="/opt/solidata.online"
 DOMAIN="solidata.online"
+# IP PUBLIQUE (cible des enregistrements DNS), et NON l'IP d'administration
+# SSH (root@51.159.128.110). C'est bien celle-ci qu'il faut ici : la variable
+# ne sert qu'à vérifier que le port 80 répond depuis l'extérieur pour le défi
+# ACME de Let's Encrypt — y mettre l'IP SSH ferait échouer un contrôle sain.
 SERVER_IP="51.159.144.100"
 EMAIL="admin@solidata.online"
 COMPOSE_FILE="docker-compose.prod.yml"

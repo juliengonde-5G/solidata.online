@@ -31,13 +31,13 @@
 
 ## Instructions de déploiement
 
-### Sur le serveur production (51.159.144.100)
+### Sur le serveur production (SSH 51.159.128.110)
 
 **Option 1 : Déploiement standard (recommandé)**
 
 ```bash
 # 1. Se connecter au serveur
-ssh root@51.159.144.100
+ssh root@51.159.128.110
 
 # 2. Aller dans le répertoire application
 cd /opt/solidata.online
@@ -55,7 +55,7 @@ docker compose -f docker-compose.prod.yml ps
 **Option 2 : Redémarrage rapide (sans rebuild)**
 
 ```bash
-ssh root@51.159.144.100
+ssh root@51.159.128.110
 cd /opt/solidata.online
 bash deploy/scripts/deploy.sh restart
 ```
@@ -172,7 +172,7 @@ docker compose -f docker-compose.prod.yml restart solidata-api solidata-web
 
 - **Branche de développement** : `claude/import-collaborators-solidata-m8ajS`
 - **Branche de production** : `main`
-- **Serveur** : 51.159.144.100
+- **Serveur** : SSH `51.159.128.110` (IP publique du DNS : 51.159.144.100)
 - **Documentation** : `IMPORT_COLLABORATORS_GUIDE.md`
 
 ---

@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-SERVER="root@51.159.144.100"
+SERVER="root@51.159.128.110"
 BRANCH="claude/vehicle-link-assignment-w6YHZ"
 
 RED='\033[0;31m'

@@ -25,14 +25,14 @@ quand on en a besoin (catastrophe). Cible :
 
 ### Pré-requis
 
-- Accès SSH au serveur prod (`51.159.144.100`)
+- Accès SSH au serveur prod (`51.159.128.110`)
 - Credentials Scaleway Object Storage (`/etc/solidata-backup.env`)
 - Une instance Postgres jetable (Docker local, RAM only)
 
 ### 1. Récupérer le backup le plus récent depuis S3
 
 ```bash
-ssh root@51.159.144.100
+ssh root@51.159.128.110
 source /etc/solidata-backup.env
 
 # Lister les backups daily récents

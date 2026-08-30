@@ -175,7 +175,8 @@ Internet (utilisateurs)
 |-----------|--------|
 | **Hébergeur** | Scaleway |
 | **Type** | DEV1-S (minimum) |
-| **IP** | 51.159.144.100 |
+| **Accès SSH** | `root@51.159.128.110` |
+| **IP publique (cible du DNS)** | 51.159.144.100 |
 | **OS** | Ubuntu 22.04 LTS |
 | **CPU** | 2 vCPU |
 | **RAM** | 2 Go |
@@ -186,7 +187,9 @@ Internet (utilisateurs)
 
 ### Configuration DNS
 
-3 enregistrements A chez Scaleway DNS :
+3 enregistrements A chez Scaleway DNS. **Ils pointent sur l'IP PUBLIQUE, qui
+n'est pas celle par laquelle on administre le serveur** — se connecter en SSH
+sur l'IP du DNS ne mène nulle part (confusion constatée le 30/08/2026) :
 
 ```
 A    solidata.online      → 51.159.144.100
