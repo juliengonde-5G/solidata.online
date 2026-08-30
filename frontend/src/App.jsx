@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import ErreurApplication from './components/ErreurApplication';
 import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
 
@@ -153,6 +154,11 @@ function HomeRedirect() {
 
 function App() {
   return (
+    // Rempart le plus haut possible : au-dessus même du routeur et des
+    // fournisseurs de contexte, pour qu'un plantage des écrans bloquants
+    // (changement de mot de passe, enrôlement 2FA) ne laisse pas non plus une
+    // page blanche. Il ne dépend d'aucun d'eux.
+    <ErreurApplication>
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
@@ -318,6 +324,7 @@ function App() {
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
+    </ErreurApplication>
   );
 }
 
