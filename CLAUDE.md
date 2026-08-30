@@ -186,6 +186,7 @@ solidata.online/
 - **Chiffrement** : AES-256 via crypto-js pour données sensibles (PCM)
 
 ### Frontend
+- **Rempart anti-page-blanche (2.44.0)** : `components/ErreurApplication.jsx` enveloppe l'application entière dans `App.jsx`, AU-DESSUS du routeur et des fournisseurs de contexte (pour rattraper aussi un plantage des écrans bloquants mot de passe / 2FA) et sans aucune dépendance — navigation par `window.location` : il doit s'afficher précisément quand le reste est cassé. Deux messages distincts : « module non chargé » = application déployée entre-temps, un rechargement suffit (ce n'est pas une panne) ; toute autre erreur = écran en défaut (recharger OU revenir à l'accueil). Détail technique en console, jamais à l'écran. Le mobile a le sien depuis la 2.40.1 ; le web n'en avait aucun jusqu'ici.
 - **Pages** : un fichier par page dans `frontend/src/pages/`, composant fonctionnel React
 - **State** : React hooks (useState, useEffect, useCallback, useMemo, useRef)
 - **Auth** : `useAuth()` hook depuis AuthContext
