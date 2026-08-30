@@ -396,8 +396,21 @@ router.post('/conversations', async (req, res) => {
     let titre = null;
 
     if (dest.type === 'bot') {
-      // Un équipage n'a pas le bot : son mobile est un outil de conduite, pas
-      // un assistant conversationnel (contrat §2.2).
+      // Ce qui est fermé ici, c'est le CANAL, pas l'assistant.
+      //
+      // Le commentaire d'origine disait que « son mobile est un outil de
+      // conduite, pas un assistant conversationnel » : c'était faux, et le
+      // raisonnement de sécurité écrit ici ne décrivait donc pas le produit.
+      // L'application véhicule DONNE bien un assistant au chauffeur — par le
+      // bouton d'assistance, qui appelle `POST /api/chat` — borné par liste
+      // blanche à la collecte, à la circulation et à la navigation
+      // (services/bot-chauffeur.js, arbitrage client d'août 2026).
+      //
+      // Ce qui reste fermé, et le reste volontairement, c'est la conversation
+      // « SolidataBot » de la MESSAGERIE : côté chauffeur, la messagerie est un
+      // outil FALC à réponses rapides (« J'ai compris », « J'arrive »), pas une
+      // surface de saisie libre. Y ouvrir un fil de discussion avec le bot
+      // ferait deux entrées pour la même chose, dont une inadaptée au volant.
       if (moi.chauffeur) {
         return res.status(403).json({
           error: "L'assistant n'est pas disponible depuis l'application véhicule",

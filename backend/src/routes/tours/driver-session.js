@@ -95,9 +95,39 @@ async function resolveDriverEmployeeId(pool, user, vehicleId) {
 // créée là serait invisible de GET /vehicle/:id/today (déjà calé sur Paris).
 const SQL_TODAY_PARIS = "(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Paris')::date";
 
+/**
+ * Tournée du jour du VÉHICULE de la session — la sélection, écrite une fois.
+ *
+ * C'est la requête que `GET /tours/vehicle/:id/today` posait en ligne : « la
+ * dernière tournée à rouler de ce véhicule, datée du jour civil de Paris ».
+ * Elle est extraite ici parce qu'un second appelant en a besoin (l'assistant
+ * conversationnel du chauffeur) et que recopier la règle, c'est se donner deux
+ * définitions de « ma tournée d'aujourd'hui » qui finiront par diverger — le
+ * choix du statut (`planned`/`in_progress`), du fuseau et du tri par id
+ * décroissant n'a rien d'évident et ne doit être fait qu'à un seul endroit.
+ *
+ * @returns {Promise<object|null>} la ligne de tournée (avec immatriculation et
+ *   nombre de points), ou `null` si le véhicule n'a rien à rouler aujourd'hui.
+ */
+async function tourneeDuJourPourVehicule(db, vehicleId) {
+  const r = await db.query(
+    `SELECT t.*, v.registration, v.name as vehicle_name,
+            (SELECT COUNT(*) FROM tour_cav tc WHERE tc.tour_id = t.id) as nb_cav
+       FROM tours t
+       JOIN vehicles v ON v.id = t.vehicle_id
+      WHERE t.vehicle_id = $1
+        AND t.date = ${SQL_TODAY_PARIS}
+        AND t.status IN ('planned', 'in_progress')
+      ORDER BY t.id DESC LIMIT 1`,
+    [vehicleId]
+  );
+  return r.rows.length > 0 ? r.rows[0] : null;
+}
+
 module.exports = {
   driverVehicleIdFromToken,
   isDriverSession,
   resolveDriverEmployeeId,
+  tourneeDuJourPourVehicule,
   SQL_TODAY_PARIS,
 };

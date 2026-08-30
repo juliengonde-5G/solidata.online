@@ -14,6 +14,13 @@ const { createPseudonymizer, sanitizeToolResultJson } = require('../utils/pii-ps
 // Outils de lecture des modules 26 à 34 (VAK, RSE, GES, achats, enquêtes,
 // chaîne, saturation, arrêts GPS, récurrence, ETP, purges, badgeuse).
 const botTools = require('../services/bot-tools');
+// Périmètre du CHAUFFEUR : collecte, circulation, navigation — et rien d'autre
+// (arbitrage client, août 2026). Voir services/bot-chauffeur.js.
+const botChauffeur = require('../services/bot-chauffeur');
+// Détection d'une session chauffeur : le helper PARTAGÉ du parcours mobile,
+// jamais une détection maison — il couvre le claim `vehicle_id` comme la forme
+// historique « driver_<id> » du nom de compte (jetons hérités encore valides).
+const { driverVehicleIdFromToken } = require('./tours/driver-session');
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -247,18 +254,66 @@ const EXTENDED_TOOLS = [
 // s'applique à eux sans une ligne de plus.
 const EXTENDED_TOOL_ROLES = Object.fromEntries(EXTENDED_TOOLS.map((e) => [e.name, e._roles]));
 
-// Construit la liste d'outils exposée à Claude selon le rôle de base de l'user :
-// les 5 outils de base pour tous, + les outils de pilotage autorisés.
-function toolsForRole(role) {
+// ── LE CHAUFFEUR : une liste blanche, pas un rôle ──────────────────────────
+//
+// Un jeton chauffeur porte le rôle `COLLABORATEUR` EN DUR : le filtrage par
+// rôle ne peut donc pas le distinguer d'un salarié au bureau. Son identité est
+// son VÉHICULE, et c'est là-dessus qu'on le reconnaît. Tant qu'on ne le faisait
+// pas, il recevait tous les outils « de base » — stock, planning, heures,
+// bornes, plan de chaîne, pointages — c'est-à-dire plus que l'arbitrage client
+// ne l'autorise, et il lui manquait la circulation et la navigation.
+//
+// La liste blanche est STRICTE et de forme positive : on énumère ce qu'il a,
+// jamais ce qu'on lui retire — une liste d'exclusions vieillirait mal, chaque
+// outil ajouté au bot lui étant alors ouvert par défaut.
+function estSessionChauffeur(userCtx) {
+  return driverVehicleIdFromToken(userCtx) != null;
+}
+
+// Construit la liste d'outils exposée à Claude.
+//   - session chauffeur : les 3 outils de son périmètre, et EUX SEULS ;
+//   - sinon : les outils de base pour tous, + les outils de pilotage autorisés
+//     par le rôle de base (comportement historique, strictement inchangé).
+//
+// `userCtx` est facultatif : appelée sans lui (tests de rôle existants), la
+// fonction se comporte exactement comme avant.
+function toolsForRole(role, userCtx = null) {
+  if (estSessionChauffeur(userCtx)) return [...botChauffeur.CHAUFFEUR_TOOLS];
   const base = resolveBaseRole(role);
   const extended = EXTENDED_TOOLS.filter((e) => e._roles.includes(base)).map((e) => e.tool);
   return [...TOOLS, ...extended];
+}
+
+/** Le prompt système à employer : le registre du chauffeur n'est pas celui du bureau. */
+function systemPromptFor(userCtx) {
+  return estSessionChauffeur(userCtx) ? botChauffeur.SYSTEM_PROMPT_CHAUFFEUR : SYSTEM_PROMPT;
 }
 
 // ── Tool execution (read-only) ──────────────────────────────────────────
 
 async function executeTool(toolName, toolInput, userCtx) {
   try {
+    // ── CONTRÔLE 2/2 POUR LE CHAUFFEUR ────────────────────────────────────
+    // La liste envoyée au modèle est déjà bornée (toolsForRole). Ce second
+    // contrôle est celui qui TIENT : si le modèle invoquait malgré tout un
+    // outil hors périmètre — parce qu'il l'a vu dans un tour précédent, ou par
+    // pure invention — il est refusé ici. Le refus est posé AVANT toute
+    // requête : un accès refusé ne doit rien lire du tout, sans quoi ce serait
+    // un refus d'affichage et non un refus d'accès.
+    //
+    // Il n'est PAS porté par `EXTENDED_TOOL_ROLES`, qui indexe par rôle : le
+    // rôle d'un chauffeur est `COLLABORATEUR`, la table ne saurait pas
+    // l'exprimer. La liste blanche est donc lue directement.
+    const chauffeur = estSessionChauffeur(userCtx);
+    if (chauffeur && !botChauffeur.CHAUFFEUR_TOOL_NAMES.includes(toolName)) {
+      return JSON.stringify(botChauffeur.REFUS_HORS_PERIMETRE);
+    }
+    // Symétrie : un outil de périmètre véhicule n'a aucun sens hors d'une
+    // session chauffeur (il n'aurait pas de véhicule sur quoi se caler).
+    if (!chauffeur && botChauffeur.CHAUFFEUR_TOOL_NAMES.includes(toolName)) {
+      return JSON.stringify(botChauffeur.REFUS_HORS_VEHICULE);
+    }
+
     // Contrôle d'accès des outils de pilotage (défense en profondeur : même si
     // l'outil n'aurait pas dû être exposé, on refuse ici selon le rôle de base).
     if (EXTENDED_TOOL_ROLES[toolName]) {
@@ -277,6 +332,11 @@ async function executeTool(toolName, toolInput, userCtx) {
       case 'kpis_insertion': return await queryKpisInsertion(toolInput);
       case 'ventes_synthese': return await queryVentesSynthese(toolInput);
       default: {
+        // Périmètre chauffeur (collecte / circulation / navigation). Le
+        // contrôle a déjà eu lieu deux fois ci-dessus ; les handlers refusent
+        // en outre net si le jeton ne porte aucun véhicule.
+        const duChauffeur = await botChauffeur.executeChauffeurTool(toolName, toolInput, userCtx);
+        if (duChauffeur !== null) return duChauffeur;
         // Outils des modules récents. Le contrôle de rôle a DÉJÀ eu lieu deux
         // fois : filtrage de la liste envoyée au modèle (toolsForRole) puis
         // revérification contre EXTENDED_TOOL_ROLES en tête de cette fonction.
@@ -593,7 +653,10 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
   const maxIterations = 5;
   // Outils filtrés RGPD selon le rôle de base de l'utilisateur (les outils de
   // pilotage finance/insertion/ventes ne sont exposés qu'aux rôles autorisés).
-  const tools = toolsForRole(userCtx.role);
+  const tools = toolsForRole(userCtx.role, userCtx);
+  // Le registre s'adapte à qui parle : un chauffeur au volant ne lit pas le
+  // même français qu'un gestionnaire devant un tableau de bord.
+  const systemPrompt = systemPromptFor(userCtx);
   // RGPD (item 3.C-5) — défense en profondeur : assainit les sorties d'outils
   // avant de les transmettre à Anthropic. Les outils actuels ne renvoient que des
   // données AGRÉGÉES ou les données PROPRES de l'utilisateur (aucun nom de tiers),
@@ -605,7 +668,7 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
     const response = await client.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       tools,
       messages,
     });
@@ -667,7 +730,9 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
 // le nouveau flux d'alimentation, pas par la table elle-même.
 // Le widget SolidataBot, lui, continue de journaliser : c'est sa seule trace.
 // @returns {Promise<{reply: string, response_time_ms: number}>}
-async function traiterMessageBot({ userId, role, message, sessionId, username = null, journaliser = true }) {
+async function traiterMessageBot({
+  userId, role, message, sessionId, username = null, journaliser = true, jeton = null,
+}) {
   const texte = typeof message === 'string' ? message.trim() : '';
   if (!texte) {
     const err = new Error('Message requis');
@@ -688,7 +753,16 @@ async function traiterMessageBot({ userId, role, message, sessionId, username = 
     throw err;
   }
 
-  const userCtx = { userId, role, username };
+  // Le VÉHICULE de la session, s'il y en a un : c'est lui qui fait le
+  // chauffeur, pas le rôle (qui vaut `COLLABORATEUR` en dur pour tous). On
+  // range la valeur sous le nom du claim JWT (`vehicle_id`) pour que le helper
+  // partagé la relise telle quelle en aval — une seule voie de détection.
+  //
+  // Le repli sur `{ username }` n'est pas de la coquetterie : les jetons émis
+  // avant l'ajout du claim `vehicle_id` n'encodent le véhicule que dans le nom
+  // de compte « driver_<id> », et ils restent valides jusqu'à 8 h.
+  const vehicleId = driverVehicleIdFromToken(jeton || { username });
+  const userCtx = { userId, role, username, vehicle_id: vehicleId };
 
   const startTime = Date.now();
   const reply = await chatWithClaude(userMessage, sessionId, userCtx);
@@ -765,6 +839,9 @@ router.post('/', async (req, res) => {
     const { reply } = await traiterMessageBot({
       userId, role: req.user.role, username: req.user.username,
       message, sessionId,
+      // Le jeton complet, pour que le périmètre chauffeur se lise du claim
+      // `vehicle_id` et pas seulement du nom de compte historique.
+      jeton: req.user,
     });
 
     res.json({ reply, session_id: sessionId, timestamp: new Date().toISOString() });
@@ -785,6 +862,13 @@ router.post('/', async (req, res) => {
 
 // GET /api/chat/suggestions — suggestions contextuelles
 router.get('/suggestions', async (req, res) => {
+  // Chauffeur : uniquement des questions DANS son périmètre. Lui proposer
+  // « Quel est le stock ? », outil qui vient de lui être retiré, ne serait pas
+  // une suggestion mais un refus fabriqué d'avance.
+  if (estSessionChauffeur(req.user)) {
+    return res.json({ suggestions: botChauffeur.SUGGESTIONS_CHAUFFEUR });
+  }
+
   const base = resolveBaseRole(req.user.role);
   const hour = new Date().getHours();
 
@@ -1070,3 +1154,8 @@ module.exports.executeTool = executeTool;
 // Consommé par la messagerie interne (routes/messages.js, conversation « bot ») :
 // même logique conversationnelle que le widget, jamais recopiée.
 module.exports.traiterMessageBot = traiterMessageBot;
+// Détection d'une session chauffeur (liste blanche collecte/circulation/
+// navigation). Exposée pour les tests du périmètre.
+module.exports.estSessionChauffeur = estSessionChauffeur;
+// Prompt réellement employé selon l'appelant : le ton fait partie du contrat.
+module.exports.systemPromptFor = systemPromptFor;

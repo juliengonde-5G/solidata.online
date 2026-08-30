@@ -144,7 +144,12 @@ describe('double filtrage — liste ET exécution, outil par outil', () => {
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it('les outils de base restent accessibles à TOUS les rôles, chauffeur compris', () => {
+  // Titre corrigé : « chauffeur compris » était devenu FAUX. Le périmètre du
+  // chauffeur est désormais une liste blanche (collecte / circulation /
+  // navigation) qui ne contient aucun outil de base — ce test parle des RÔLES,
+  // et le rôle d'un chauffeur (COLLABORATEUR) ne décide plus de rien pour lui.
+  // Le cas chauffeur est verrouillé dans bot-chauffeur-contract.test.js.
+  it('les outils de base restent accessibles à tous les rôles (hors session véhicule)', () => {
     for (const role of TOUS_LES_ROLES) {
       const n = toolsForRole(role).map((t) => t.name);
       expect(n).toContain('layout_chaine_actif');
