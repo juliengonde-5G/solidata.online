@@ -55,7 +55,7 @@ async function initDatabase() {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP;`);
 
     // Double authentification TOTP (2.43.0) — obligatoire pour les rôles ayant
-    // accès aux données personnelles sensibles (défaut ADMIN/RH/DPO/PCM, liste
+    // accès aux données personnelles sensibles (défaut ADMIN/RH/DPO, liste
     // paramétrable via settings « securite.mfa_roles », rôles custom résolus par
     // base_role). Le secret TOTP est CHIFFRÉ (AES-256-GCM, jamais en clair) ;
     // les codes de secours sont stockés HASHÉS (SHA-256), à usage unique.

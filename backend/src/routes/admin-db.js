@@ -12,7 +12,7 @@ const dbBackup = require('../services/db-backup');
 
 router.use(authenticate);
 // Double authentification (2.43.0) : pour les rôles soumis (settings
-// « securite.mfa_roles », défaut ADMIN/RH/DPO/PCM), la session doit avoir
+// « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
 // franchi le défi TOTP. No-op intégral pour les autres rôles.
 router.use(requireMfa);
 router.use(authorize('ADMIN'));

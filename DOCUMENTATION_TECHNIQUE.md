@@ -1073,7 +1073,7 @@ HTTPS (avec avertissement navigateur) le temps de corriger.
 | **Validation** | express-validator sur les entrées API |
 | **Réseau Docker isolé** | Les conteneurs communiquent sur un réseau bridge interne |
 | **Secrets externalisés** | Mots de passe et clés dans `.env` (non versionné) |
-| **Double authentification (MFA/TOTP)** | Obligatoire pour les rôles à accès sensible (défaut ADMIN/RH/DPO/PCM), détail ci-dessous |
+| **Double authentification (MFA/TOTP)** | Obligatoire pour les rôles à accès sensible (défaut ADMIN/RH/DPO), détail ci-dessous |
 
 ### Double authentification (MFA/TOTP) — flux technique (2.43.0)
 
@@ -1089,7 +1089,7 @@ Au **refresh** (`POST /auth/refresh`), le claim `mfa` du nouveau jeton est **rec
 
 **Colonnes ajoutées** : `users.mfa_enabled`, `users.mfa_secret` (chiffré), `users.mfa_enrolled_at`, `users.mfa_backup_codes` (JSONB, tableau de `{hash, used_at}` — jamais le code en clair), `users.mfa_failed_count`/`users.mfa_last_failed_at` ; `refresh_tokens.mfa`.
 
-**Middleware `requireMfa`** (`backend/src/middleware/mfa.js`) : exige `req.user.mfa === true` pour les rôles dont le **rôle de base** (`resolveBaseRole`) figure dans la liste des rôles soumis (settings `securite.mfa_roles`, défaut en code `['ADMIN','RH','DPO','PCM']`, cache 60 s) — no-op pour les autres rôles. Un jeton hérité (émis avant ce déploiement, donc sans claim `mfa`) d'un rôle soumis est **bloqué** (403 `MFA_REQUIRED`) plutôt que toléré jusqu'à expiration — écart assumé avec la doctrine de dégradation douce des jetons sans `tv` : ici, laisser passer offrirait jusqu'à 8h de contournement de la fonctionnalité qu'on installe.
+**Middleware `requireMfa`** (`backend/src/middleware/mfa.js`) : exige `req.user.mfa === true` pour les rôles dont le **rôle de base** (`resolveBaseRole`) figure dans la liste des rôles soumis (settings `securite.mfa_roles`, défaut en code `['ADMIN','RH','DPO']` — le rôle `PCM` en a été retiré par arbitrage client, cache 60 s) — no-op pour les autres rôles. Un jeton hérité (émis avant ce déploiement, donc sans claim `mfa`) d'un rôle soumis est **bloqué** (403 `MFA_REQUIRED`) plutôt que toléré jusqu'à expiration — écart assumé avec la doctrine de dégradation douce des jetons sans `tv` : ici, laisser passer offrirait jusqu'à 8h de contournement de la fonctionnalité qu'on installe.
 
 Câblé **une ligne après le `authenticate` de chaque routeur ciblé** (il lit `req.user`) sur **11 routeurs** : `/api/insertion`, `/api/pcm` (câblé route par route — `POST /submit` garde son chemin public par jeton candidat), `/api/employees`, `/api/candidates`, `/api/exports`, `/api/rgpd`, `/api/users`, `/api/permissions` (sauf `/my-modules` et `/catalog`, chargés par le front dès la connexion, avant tout enrôlement), `/api/admin-db`, `/api/activity-log`, `/api/effectifs`. Plus le **handshake Socket.IO** (`backend/src/index.js`, `io.use(...)`) : sans lui, une session non enrôlée garderait le flux temps réel (messagerie) ouvert.
 

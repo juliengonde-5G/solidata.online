@@ -14,15 +14,18 @@
  *
  * QUI EST SOUMIS — liste paramétrable dans `settings`, clé
  * « securite.mfa_roles » (tableau JSON de rôles de BASE), défaut EN CODE
- * ['ADMIN','RH','DPO','PCM'] : les rôles qui accèdent à des données
- * personnelles sensibles (parcours d'insertion, santé, judiciaire, profils de
- * personnalité, registre RGPD, sauvegarde de la base). Comme partout dans le
- * projet, aucun seed en base : la valeur par défaut vit dans le code et la
- * table ne sert qu'à la surcharger.
+ * ['ADMIN','RH','DPO'] : les rôles qui accèdent à des données personnelles
+ * sensibles (parcours d'insertion, santé, judiciaire, registre RGPD,
+ * sauvegarde de la base). Comme partout dans le projet, aucun seed en base :
+ * la valeur par défaut vit dans le code et la table ne sert qu'à la surcharger.
  *
  * MANAGER n'est délibérément PAS soumis (encadrants de terrain, surfaces déjà
  * masquées) ; les chauffeurs (jetons `driver-start`, rôle COLLABORATEUR en dur)
- * et les jobs du scheduler ne passent jamais par ici.
+ * et les jobs du scheduler ne passent jamais par ici. Le rôle PCM (Praticien)
+ * a été RETIRÉ du périmètre par arbitrage client (2.43.0) : il fait passer des
+ * tests, sans accès au dossier de recrutement ni au parcours d'insertion. Le
+ * routeur /api/pcm reste gardé — un ADMIN ou un RH qui l'emprunte est, lui,
+ * toujours soumis.
  *
  * ROLES PERSONNALISÉS : un rôle dupliqué est soumis si SON RÔLE DE BASE l'est
  * (resolveBaseRole) — sans quoi dupliquer « RH » suffirait à contourner la
@@ -51,7 +54,7 @@ const pool = require('../config/database');
 const { resolveBaseRole } = require('./auth');
 
 // Défaut EN CODE (aucun seed en base) — cf. en-tête.
-const DEFAULT_MFA_ROLES = ['ADMIN', 'RH', 'DPO', 'PCM'];
+const DEFAULT_MFA_ROLES = ['ADMIN', 'RH', 'DPO'];
 const SETTING_KEY = 'securite.mfa_roles';
 const CACHE_TTL_MS = 60 * 1000;
 

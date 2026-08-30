@@ -11,12 +11,14 @@ habilité — encadrant compris — n'atteint plus ces données, même par une p
 
 ### 1.1 Qui est concerné
 
-Les rôles ayant accès à des données sensibles : **ADMIN, RH (les CIP), DPO, Praticien PCM** — ainsi
+Les rôles ayant accès à des données sensibles : **ADMIN, RH (les CIP) et DPO** — ainsi
 que tout rôle personnalisé construit sur l'un d'eux (la résolution passe par le rôle de base, on ne
 contourne pas la mesure en dupliquant « RH »). Liste paramétrable (`settings`, clé
 `securite.mfa_roles`) sans redéploiement. **Ne sont pas concernés** : encadrants MANAGER (accès
-restreint et masqué conservé), COLLABORATEUR, RESP_BTQ, AUTORITE, FINANCE, QHSE, et les chauffeurs
-(jetons véhicule, jamais de session personne).
+restreint et masqué conservé), **Praticien PCM** (retiré du périmètre par arbitrage : il fait passer
+des tests sans accéder au dossier de recrutement ni au parcours d'insertion — le routeur `/api/pcm`
+reste néanmoins gardé pour les ADMIN et RH qui l'empruntent), COLLABORATEUR, RESP_BTQ, AUTORITE,
+FINANCE, QHSE, et les chauffeurs (jetons véhicule, jamais de session personne).
 
 ### 1.2 Comment ça marche
 

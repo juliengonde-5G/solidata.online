@@ -275,7 +275,7 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 
 | Clé `settings` | Emplacement | Valeur par défaut |
 |-----------------|-------------|--------------------|
-| `securite.mfa_roles` | `backend/src/middleware/mfa.js` | `["ADMIN","RH","DPO","PCM"]` (tableau JSON de rôles de BASE — un rôle personnalisé est soumis si son rôle de base l'est) |
+| `securite.mfa_roles` | `backend/src/middleware/mfa.js` | `["ADMIN","RH","DPO"]` (tableau JSON de rôles de BASE — un rôle personnalisé est soumis si son rôle de base l'est ; le rôle `PCM` a été retiré du périmètre par arbitrage client en 2.43.0) |
 
 ### Note de profil initial CIP — génération automatique (2.43.0)
 

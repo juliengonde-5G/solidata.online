@@ -73,6 +73,13 @@ function resetDb() {
         failed_login_count: 0, last_failed_login_at: null, locked_until: null,
         mfa_enabled: false, mfa_secret: null, mfa_enrolled_at: null, mfa_backup_codes: null,
         mfa_failed_count: 0, mfa_last_failed_at: null },
+      // Praticien PCM — RETIRÉ du périmètre MFA par arbitrage client (2.43.0).
+      { id: 4, username: 'praticien', password_hash: HASH, role: 'PCM', email: null,
+        first_name: 'P', last_name: 'C', phone: null, team_id: null, is_active: true,
+        token_version: 0, must_change_password: false,
+        failed_login_count: 0, last_failed_login_at: null, locked_until: null,
+        mfa_enabled: false, mfa_secret: null, mfa_enrolled_at: null, mfa_backup_codes: null,
+        mfa_failed_count: 0, mfa_last_failed_at: null },
     ],
     refreshTokens: [],
     settings: {},
@@ -503,14 +510,32 @@ describe('4. requireMfa — fermeture effective des surfaces sensibles', () => {
     expect(refuse({ role: 'COLLABORATEUR', username: 'driver_12', vehicle_id: 12 })).toBe(false);
   });
 
-  test('les rôles par défaut sont ADMIN, RH, DPO et PCM — et personne d’autre', async () => {
+  test('les rôles par défaut sont ADMIN, RH et DPO — et personne d’autre', async () => {
     const { getMfaRoles, isMfaRole } = require('../../src/middleware/mfa');
     resetMfaRolesCache();
-    expect(await getMfaRoles()).toEqual(['ADMIN', 'RH', 'DPO', 'PCM']);
-    for (const r of ['ADMIN', 'RH', 'DPO', 'PCM']) expect(isMfaRole(r)).toBe(true);
-    for (const r of ['MANAGER', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'FINANCE', 'QHSE']) {
+    expect(await getMfaRoles()).toEqual(['ADMIN', 'RH', 'DPO']);
+    for (const r of ['ADMIN', 'RH', 'DPO']) expect(isMfaRole(r)).toBe(true);
+    // PCM (Praticien) a été RETIRÉ du périmètre par arbitrage client : il fait
+    // passer des tests sans accéder au dossier de recrutement ni au parcours.
+    for (const r of ['PCM', 'MANAGER', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'FINANCE', 'QHSE']) {
       expect(isMfaRole(r)).toBe(false);
     }
+  });
+
+  test('un praticien PCM se connecte SANS second facteur (retrait du périmètre)', async () => {
+    const { isMfaRole } = require('../../src/middleware/mfa');
+    resetMfaRolesCache();
+    const r = await login('praticien');
+    expect(r.status).toBe(200);
+    expect(r.body.mfa_required).toBeUndefined();       // aucun défi
+    expect(r.body.accessToken).toBeTruthy();           // session complète d'emblée
+    expect(claims(r.body.accessToken).mfa).toBe(true); // claim posé d'office
+    expect(r.body.user.mfa_enrollment_required).toBeFalsy();
+    // Et la garde requireMfa le laisse passer, y compris sur un jeton hérité
+    // (sans claim `mfa`) — c'est la définition d'un rôle hors périmètre.
+    const refusePcm = (jeton) => isMfaRole(jeton.role) && jeton.mfa !== true;
+    expect(refusePcm({ role: 'PCM' })).toBe(false);
+    expect(refusePcm({ role: 'PCM', mfa: true })).toBe(false);
   });
 });
 

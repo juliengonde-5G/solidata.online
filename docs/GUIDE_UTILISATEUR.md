@@ -56,7 +56,7 @@ Contactez un administrateur pour réinitialiser votre mot de passe. Un nouveau m
 
 ### 1.4 Activer la double authentification (2FA)
 
-**Depuis la version 2.43.0**, les comptes qui accèdent à des données personnelles sensibles (ADMIN, RH, DPO, praticien PCM — la liste exacte est réglable par un administrateur) doivent activer une **double authentification** : en plus du mot de passe, un code à 6 chiffres généré par une application sur votre téléphone.
+**Depuis la version 2.43.0**, les comptes qui accèdent à des données personnelles sensibles (ADMIN, RH — dont les CIP — et DPO ; la liste exacte est réglable par un administrateur) doivent activer une **double authentification** : en plus du mot de passe, un code à 6 chiffres généré par une application sur votre téléphone.
 
 **Ce qu'il vous faut** : une application d'authentification installée sur votre téléphone. Toutes les applications compatibles TOTP conviennent, par exemple :
 - Google Authenticator

@@ -4,10 +4,12 @@ const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-// Double authentification (2.43.0) — le rôle PCM est soumis par défaut.
-// Câblé ROUTE PAR ROUTE : ce routeur pose `authenticate` sur chaque route (et
-// POST /submit emprunte un chemin public par jeton candidat, qui ne doit pas
-// être fermé).
+// Double authentification (2.43.0). Le rôle PCM (Praticien) a été RETIRÉ du
+// périmètre par arbitrage client : pour lui, cette garde est un no-op. Elle
+// reste posée parce qu'un ADMIN ou un RH qui emprunte ces routes, lui, y est
+// soumis. Câblé ROUTE PAR ROUTE : ce routeur pose `authenticate` sur chaque
+// route (et POST /submit emprunte un chemin public par jeton candidat, qui ne
+// doit pas être fermé).
 const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');

@@ -1,7 +1,7 @@
 # Mail d'information aux utilisateurs — double authentification (à envoyer au déploiement de la 2.43.0)
 
 > **Mode d'emploi** : copier le texte ci-dessous dans un mail adressé aux utilisateurs concernés
-> (comptes ADMIN, RH/CIP, DPO et Praticien PCM — la liste se lit dans SOLIDATA → Utilisateurs).
+> (comptes ADMIN, RH/CIP et DPO — la liste se lit dans SOLIDATA → Utilisateurs).
 > Les autres utilisateurs (encadrants, collaborateurs, responsables boutique, chauffeurs) ne sont
 > **pas** concernés et n'ont rien à faire ; un second modèle, plus court, leur est proposé en bas
 > de page si une information générale est souhaitée.
@@ -14,7 +14,7 @@ Bonjour,
 
 Dans le cadre du renforcement de la protection des données personnelles des salariés en parcours
 d'insertion, SOLIDATA active la **double authentification** (2FA) pour les comptes qui accèdent aux
-données sensibles : administrateurs, RH/CIP, délégué à la protection des données et praticien PCM.
+données sensibles : administrateurs, RH/CIP et délégué à la protection des données.
 
 **Ce qui change pour vous, concrètement :**
 
@@ -65,7 +65,7 @@ Merci à vous,
 Bonjour,
 
 À partir du [date], les comptes SOLIDATA qui accèdent aux dossiers d'accompagnement des salariés en
-parcours (administrateurs, RH/CIP, DPO, praticien PCM) sont protégés par une **double
+parcours (administrateurs, RH/CIP, DPO) sont protégés par une **double
 authentification** : en plus du mot de passe, un code à 6 chiffres généré sur le téléphone du
 titulaire du compte. **Si vous n'êtes pas dans ces profils, rien ne change pour vous.** Cette mesure
 protège les informations personnelles des salariés que nous accompagnons ; l'isolement des données
