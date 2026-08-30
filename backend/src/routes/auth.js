@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const pool = require('../config/database');
 const { authenticate, resolveBaseRole, validatePassword, MIN_PASSWORD_LENGTH } = require('../middleware/auth');
-const { getMfaRoles } = require('../middleware/mfa');
+const { getMfaRoles, getMfaDureeHeures, mfaExpiree } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { logActivity } = require('../middleware/activity-logger');
@@ -166,12 +166,24 @@ async function mfaFlags(user) {
  *   après un bump, passer la ligne renvoyée par le UPDATE, jamais l'ancienne)
  * @param {object} opts
  * @param {boolean} opts.mfa valeur du claim `mfa` du jeton
+ * @param {boolean} [opts.mfaVerifie] un SECOND FACTEUR VIENT D'ÊTRE PRÉSENTÉ
+ *   (code TOTP ou code de secours). À ne poser que là : le claim `mfa` vaut
+ *   aussi `true` d'office pour les rôles hors périmètre, qui n'ont rien vérifié
+ *   — leur horodater une preuve inexistante donnerait 24 h d'accès sans second
+ *   facteur le jour où leur rôle entrerait dans le périmètre.
  * @param {boolean} opts.mustChangePassword drapeau à renvoyer au front
  * @param {object} opts.req / opts.res
  * @param {object} [opts.logDetails] détail joint à la trace d'activité
  * @returns {Promise<{accessToken:string, refreshToken:string, body:object}>}
  */
-async function issueSession(user, { mfa, mustChangePassword, req, res, logDetails }) {
+async function issueSession(user, { mfa, mfaVerifie, mustChangePassword, req, res, logDetails }) {
+  // Instant de la vérification RÉELLE du second facteur. Il voyage dans le
+  // jeton (claim `mfa_at`, en secondes epoch) ET en base (`refresh_tokens
+  // .mfa_verified_at`) : le premier permet à `requireMfa` et au handshake
+  // Socket.IO de trancher sans lecture base, le second permet au
+  // renouvellement de savoir s'il a encore le droit de reconduire le claim.
+  const mfaAt = mfaVerifie === true ? Math.floor(Date.now() / 1000) : null;
+
   const tokenPayload = {
     id: user.id,
     username: user.username,
@@ -183,6 +195,9 @@ async function issueSession(user, { mfa, mustChangePassword, req, res, logDetail
     // Double authentification (2.43.0) : true = défi franchi OU rôle hors périmètre.
     mfa: mfa === true,
   };
+  // Claim posé SEULEMENT quand il a un sens : un `mfa_at` sur une session qui
+  // n'a jamais présenté de second facteur serait un mensonge daté.
+  if (mfaAt != null) tokenPayload.mfa_at = mfaAt;
 
   const accessToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   const refreshToken = crypto.randomBytes(64).toString('hex');
@@ -192,8 +207,9 @@ async function issueSession(user, { mfa, mustChangePassword, req, res, logDetail
   // au refresh, de savoir si CETTE session a franchi le défi (le claim n'est
   // jamais recopié aveuglément du jeton précédent).
   await pool.query(
-    'INSERT INTO refresh_tokens (user_id, token, expires_at, mfa) VALUES ($1, $2, $3, $4)',
-    [user.id, refreshToken, expiresAt, mfa === true]
+    `INSERT INTO refresh_tokens (user_id, token, expires_at, mfa, mfa_verified_at)
+     VALUES ($1, $2, $3, $4, to_timestamp($5))`,
+    [user.id, refreshToken, expiresAt, mfa === true, mfaAt]
   );
 
   logActivity({
@@ -595,6 +611,7 @@ router.post('/mfa/verify', async (req, res) => {
 
     const { body: responseBody } = await issueSession(user, {
       mfa: true,
+      mfaVerifie: true,   // un code TOTP (ou de secours) vient d'être vérifié
       mustChangePassword: user.must_change_password === true,
       req,
       res,
@@ -732,6 +749,9 @@ router.post('/mfa/activate', authFull, async (req, res) => {
 
     const { body: responseBody } = await issueSession(updated, {
       mfa: true,
+      // L'enrôlement ne s'achève que sur un code TOTP vérifié : c'est bien un
+      // second facteur présenté, la fenêtre de validité part d'ici.
+      mfaVerifie: true,
       mustChangePassword: updated.must_change_password === true,
       req,
       res,
@@ -760,7 +780,8 @@ router.post('/refresh', async (req, res) => {
     // ambiguïté de colonne homonyme entre rt.* et u.* — le claim `mfa` du
     // nouveau jeton est RECALCULÉ à partir d'eux, jamais recopié de l'ancien.
     const result = await pool.query(
-      `SELECT rt.*, u.*, rt.mfa AS rt_mfa, u.mfa_enabled AS u_mfa_enabled
+      `SELECT rt.*, u.*, rt.mfa AS rt_mfa, rt.mfa_verified_at AS rt_mfa_verified_at,
+              u.mfa_enabled AS u_mfa_enabled
          FROM refresh_tokens rt JOIN users u ON rt.user_id = u.id
         WHERE rt.token = $1 AND rt.expires_at > NOW()`,
       [refreshToken]
@@ -791,9 +812,29 @@ router.post('/refresh', async (req, res) => {
     try { mfaRolesRefresh = await getMfaRoles(); }
     catch (e) { console.error('[AUTH] Lecture des rôles MFA (refresh) :', e.message); }
     const soumisRefresh = mfaRolesRefresh.includes(resolveBaseRole(row.role));
+
+    // ── Fraîcheur du second facteur ──
+    // Le renouvellement est le seul endroit où une session peut se prolonger.
+    // C'est donc ici que la fenêtre de validité doit être opposée : sans cela,
+    // un rafraîchissement silencieux toutes les 8 h reconduirait indéfiniment
+    // une vérification vieille de six jours, et la fenêtre ne fermerait rien.
+    //
+    // `mfa_verified_at` NULL sur une ligne `mfa = true` = session d'avant ce
+    // déploiement (ou session d'un rôle alors hors périmètre, à qui le claim
+    // avait été posé d'office sans qu'aucun code ait été présenté) : périmée
+    // dans les deux cas, l'utilisateur repasse par le second facteur une fois.
+    const mfaAtSec = row.rt_mfa_verified_at
+      ? Math.floor(new Date(row.rt_mfa_verified_at).getTime() / 1000)
+      : null;
+    let dureeMfa;
+    try { dureeMfa = await getMfaDureeHeures(); }
+    catch (e) { dureeMfa = undefined; }
+    const mfaPerime = mfaExpiree(mfaAtSec, dureeMfa);
+
     let mfaClaim;
     if (!soumisRefresh) mfaClaim = true;                       // hors périmètre : rien à vérifier
     else if (row.u_mfa_enabled !== true) mfaClaim = false;     // soumis mais pas (ou plus) enrôlé
+    else if (mfaPerime) mfaClaim = false;                      // vérification trop ancienne
     else mfaClaim = row.rt_mfa === true;                       // session ayant franchi le défi
 
     const tokenPayload = {
@@ -806,14 +847,20 @@ router.post('/refresh', async (req, res) => {
       tv: row.token_version == null ? 0 : row.token_version,
       mfa: mfaClaim,
     };
+    // L'horodatage de la vérification est RECONDUIT tel quel, jamais repoussé :
+    // un renouvellement n'est pas une nouvelle preuve d'identité. Le repousser
+    // rendrait la fenêtre infinie pour toute session simplement restée active.
+    if (mfaClaim === true && mfaAtSec != null) tokenPayload.mfa_at = mfaAtSec;
 
     const newAccessToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     const newRefreshToken = crypto.randomBytes(64).toString('hex');
     const expiresAt = new Date(Date.now() + parseExpiry(JWT_REFRESH_EXPIRES_IN));
 
     await pool.query(
-      'INSERT INTO refresh_tokens (user_id, token, expires_at, mfa) VALUES ($1, $2, $3, $4)',
-      [row.user_id, newRefreshToken, expiresAt, mfaClaim]
+      `INSERT INTO refresh_tokens (user_id, token, expires_at, mfa, mfa_verified_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [row.user_id, newRefreshToken, expiresAt, mfaClaim,
+        mfaClaim === true ? row.rt_mfa_verified_at : null]
     );
 
     // Mettre à jour la session

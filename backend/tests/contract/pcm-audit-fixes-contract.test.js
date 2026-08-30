@@ -25,7 +25,7 @@ const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 const jeton = (role) => 'Bearer ' + jwt.sign(
-  { id: 42, username: 'u', role, token_version: 0, mfa: true }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  { id: 42, username: 'u', role, token_version: 0, mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
 // ══════════════════════════════════════════════════════════════
 // (a) + (b) — routeur PCM

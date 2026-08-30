@@ -21,7 +21,7 @@ app.use(express.json());
 app.use('/api/admin/api-keys', require('../../src/routes/admin-api-keys'));
 
 const admin = () => 'Bearer ' + jwt.sign(
-  { id: 1, username: 'julien', role: 'ADMIN', tv: 0, mfa: true },
+  { id: 1, username: 'julien', role: 'ADMIN', tv: 0, mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
   process.env.JWT_SECRET, { expiresIn: '1h' });
 
 beforeEach(() => {
@@ -120,7 +120,7 @@ describe('modification d’une clé de service', () => {
 describe('qui peut administrer les clés', () => {
   test('un rôle non ADMIN reste dehors', async () => {
     for (const role of ['MANAGER', 'RH', 'DPO', 'QHSE', 'COLLABORATEUR']) {
-      const jeton = 'Bearer ' + jwt.sign({ id: 2, username: 'x', role, tv: 0, mfa: true },
+      const jeton = 'Bearer ' + jwt.sign({ id: 2, username: 'x', role, tv: 0, mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
         process.env.JWT_SECRET, { expiresIn: '1h' });
       const r = await request(app).get('/api/admin/api-keys').set('Authorization', jeton);
       expect(r.status).toBe(403);

@@ -434,7 +434,7 @@ describe('lecture seule — aucun outil n\'émet d\'écriture', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe('filet PII — ce qui part vers le modèle est assaini', () => {
   const TOKEN = jwt.sign(
-    { id: 1, userId: 1, username: 'admin', role: 'ADMIN', mfa: true },
+    { id: 1, userId: 1, username: 'admin', role: 'ADMIN', mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
     process.env.JWT_SECRET, { expiresIn: '1h' });
 
   it('un champ nominatif renvoyé par un outil est masqué avant l\'envoi', async () => {

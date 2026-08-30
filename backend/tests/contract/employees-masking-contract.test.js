@@ -42,7 +42,7 @@ app.use('/api/employees', require('../../src/routes/employees'));
 // authentification (couverte par auth-mfa-contract.test.js). Sans ce claim,
 // ADMIN et RH seraient arrêtés en amont par requireMfa.
 const jeton = (role) => jwt.sign(
-  { id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true },
+  { id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
   JWT_SECRET, { expiresIn: '1h' });
 
 // Une fiche complète, telle que la renvoie `SELECT e.*` après un import Malibou.

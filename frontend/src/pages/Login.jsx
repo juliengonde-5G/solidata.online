@@ -31,6 +31,21 @@ export default function Login() {
   const [mfaLoading, setMfaLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState('');
 
+  // Renouvellement du second facteur (2.46.0) : l'intercepteur d'api.js dépose
+  // ce marqueur avant de renvoyer ici, quand la session a été refusée parce que
+  // sa vérification TOTP datait de plus de 24 h. Sans ce mot, l'utilisateur se
+  // retrouverait devant l'écran de connexion en plein travail sans savoir
+  // pourquoi — et croirait à une panne. Lu UNE fois, puis effacé.
+  const [mfaRenouvellement] = useState(() => {
+    try {
+      const marqueur = sessionStorage.getItem('mfaExpiree');
+      if (marqueur) sessionStorage.removeItem('mfaExpiree');
+      return Boolean(marqueur);
+    } catch (_) {
+      return false;   // stockage indisponible : on n'affiche simplement rien
+    }
+  });
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -134,6 +149,13 @@ export default function Login() {
 
           {step === 'password' ? (
             <form onSubmit={handleSubmit} className="space-y-4">
+              {mfaRenouvellement && !error && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-button text-sm" role="status">
+                  Votre double authentification doit être renouvelée. Reconnectez-vous,
+                  puis saisissez le code de votre application d'authentification.
+                </div>
+              )}
+
               {error && (
                 <div className="bg-red-50 border border-red-100 text-red-700 px-4 py-3 rounded-button text-sm" role="alert">
                   {error}

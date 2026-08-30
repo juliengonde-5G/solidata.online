@@ -60,7 +60,7 @@ const { FREINS } = require('../../src/routes/insertion/freins-registry');
 
 let app;
 let appExports;
-const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
 
 beforeAll(() => {

@@ -33,7 +33,7 @@ app.use(express.json());
 app.use('/api/pcm', require('../../src/routes/pcm'));
 
 const jeton = (role) => 'Bearer ' + jwt.sign(
-  { id: 1, username: 'u', role, token_version: 0, mfa: true }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  { id: 1, username: 'u', role, token_version: 0, mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
 const REPONSES = Array.from({ length: 18 }, (_, i) => ({
   question_number: i + 1,

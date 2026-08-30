@@ -50,7 +50,7 @@ const rgpd = require('../../src/routes/rgpd');
 const { PURGES_RGPD } = require('../../src/services/rgpd-purges');
 
 const tokenFor = (role) => jwt.sign(
-  { id: 7, username: 'dpo.test', role, first_name: 'T', last_name: 'U', mfa: true },
+  { id: 7, username: 'dpo.test', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
   JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
   ADMIN: tokenFor('ADMIN'), DPO: tokenFor('DPO'), RH: tokenFor('RH'),

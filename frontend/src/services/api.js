@@ -55,6 +55,21 @@ api.interceptors.response.use(
     // même — /permissions/my-modules notamment — sont évités côté
     // AuthContext tant que l'enrôlement n'est pas terminé, précisément pour
     // ne jamais déclencher ce cas en pleine connexion qui vient de réussir.)
+    // MFA_EXPIREE (2.46.0) : la session a bien franchi le second facteur, mais
+    // il y a plus de 24 h. Même issue que MFA_REQUIRED — seule une reconnexion
+    // repose le défi —, mais on garde le MOTIF pour que l'écran de connexion
+    // dise « votre double authentification est à renouveler » plutôt que de
+    // laisser l'utilisateur devant un login inexpliqué au milieu de sa journée.
+    if (error.response?.status === 403 && error.response?.data?.code === 'MFA_EXPIREE') {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      try { sessionStorage.setItem('mfaExpiree', '1'); } catch (_) { /* stockage indisponible */ }
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 403 && error.response?.data?.code === 'MFA_REQUIRED') {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');

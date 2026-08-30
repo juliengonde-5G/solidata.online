@@ -452,7 +452,7 @@ describe('le registre du chauffeur', () => {
     { id: 9, userId: 9, username: 'chauffeur', role: 'COLLABORATEUR', vehicle_id: 12 },
     process.env.JWT_SECRET, { expiresIn: '1h' });
   const TOKEN_ADMIN = jwt.sign(
-    { id: 1, userId: 1, username: 'admin', role: 'ADMIN', mfa: true },
+    { id: 1, userId: 1, username: 'admin', role: 'ADMIN', mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
     process.env.JWT_SECRET, { expiresIn: '1h' });
 
   it('le prompt du chauffeur nomme son périmètre et interdit le hors-périmètre', () => {

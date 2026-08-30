@@ -58,11 +58,34 @@ const DEFAULT_MFA_ROLES = ['ADMIN', 'RH', 'DPO'];
 const SETTING_KEY = 'securite.mfa_roles';
 const CACHE_TTL_MS = 60 * 1000;
 
+/**
+ * DURÉE DE VALIDITÉ D'UN SECOND FACTEUR (heures).
+ *
+ * Le second facteur se périme : passé ce délai, la session doit le présenter à
+ * nouveau, même si son jeton de renouvellement est encore valide. Sans cela,
+ * une vérification TOTP faite une fois ouvrait l'accès aux données sensibles
+ * pendant TOUTE la vie de la chaîne de renouvellement — 7 jours — alors que
+ * c'est précisément la fraîcheur de cette preuve qui fait sa valeur : un poste
+ * laissé ouvert, un jeton dérobé, un départ de l'organisation gardaient une
+ * session complète une semaine durant.
+ *
+ * Défaut EN CODE (aucun seed en base), surchargeable par `settings` clé
+ * « securite.mfa_duree_heures ». Bornée : en dessous d'une heure la
+ * fonctionnalité deviendrait une gêne permanente et pousserait à la désactiver,
+ * au-delà d'une semaine elle ne renouvellerait plus rien (la chaîne de
+ * renouvellement expire d'elle-même à 7 jours).
+ */
+const DEFAULT_MFA_DUREE_HEURES = 24;
+const SETTING_DUREE = 'securite.mfa_duree_heures';
+const DUREE_MIN_HEURES = 1;
+const DUREE_MAX_HEURES = 168;
+
 // Cache mémoire : la liste est lue à chaque requête authentifiée d'un routeur
 // sensible, une lecture base par appel serait gratuite. 60 s = le même ordre de
 // grandeur que le cache des rôles personnalisés (middleware/auth.js).
 let cachedRoles = DEFAULT_MFA_ROLES.slice();
 let cachedAt = 0;
+let cachedDuree = DEFAULT_MFA_DUREE_HEURES;
 
 /** Normalise une valeur de settings en liste de rôles exploitable. */
 function parseRoles(raw) {
@@ -94,14 +117,87 @@ function parseRoles(raw) {
 async function getMfaRoles() {
   if (Date.now() - cachedAt < CACHE_TTL_MS) return cachedRoles;
   try {
-    const r = await pool.query('SELECT value FROM settings WHERE key = $1', [SETTING_KEY]);
-    const roles = parseRoles(r.rows[0]?.value);
+    // Les deux réglages sont lus ENSEMBLE : ils partagent le même cache et la
+    // même fenêtre de rafraîchissement, une seconde requête serait gratuite.
+    const r = await pool.query('SELECT key, value FROM settings WHERE key = ANY($1)',
+      [[SETTING_KEY, SETTING_DUREE]]);
+    const parLigne = Object.fromEntries(r.rows.map((row) => [row.key, row.value]));
+    const roles = parseRoles(parLigne[SETTING_KEY]);
     cachedRoles = roles === null ? DEFAULT_MFA_ROLES.slice() : roles;
+    const duree = parseDuree(parLigne[SETTING_DUREE]);
+    cachedDuree = duree === null ? DEFAULT_MFA_DUREE_HEURES : duree;
   } catch (_) {
     cachedRoles = DEFAULT_MFA_ROLES.slice();
+    cachedDuree = DEFAULT_MFA_DUREE_HEURES;
   }
   cachedAt = Date.now();
   return cachedRoles;
+}
+
+/**
+ * Durée de validité d'un second facteur, en heures. Fonction PURE de lecture
+ * d'un réglage : une valeur illisible, absente ou hors bornes retombe sur le
+ * défaut en code — jamais sur 0, qui périmerait toutes les sessions à la
+ * seconde, ni sur l'infini, qui désarmerait le renouvellement en silence.
+ */
+function parseDuree(raw) {
+  if (raw == null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim().replace(',', '.'));
+  if (!Number.isFinite(n)) return null;
+  if (n < DUREE_MIN_HEURES || n > DUREE_MAX_HEURES) {
+    console.warn(`[MFA] Réglage ${SETTING_DUREE} hors bornes (${n} h) — défaut ${DEFAULT_MFA_DUREE_HEURES} h appliqué`);
+    return null;
+  }
+  return n;
+}
+
+/**
+ * Durée de validité courante (heures). Même résilience que getMfaRoles :
+ * un incident base ne doit pas pouvoir allonger la fenêtre.
+ * @returns {Promise<number>}
+ */
+async function getMfaDureeHeures() {
+  if (Date.now() - cachedAt < CACHE_TTL_MS) return cachedDuree;
+  await getMfaRoles();          // rafraîchit le cache commun (rôles + durée)
+  return cachedDuree;
+}
+
+/**
+ * Le second facteur de cette session est-il PÉRIMÉ ? Fonction PURE.
+ *
+ * @param {number|null|undefined} mfaAt  claim `mfa_at` — instant de la
+ *   vérification réelle du second facteur, en SECONDES epoch.
+ * @param {number} dureeHeures  fenêtre de validité
+ * @param {number} [maintenantMs]  horloge (injectée par les tests)
+ * @returns {boolean}
+ *
+ * Un `mfa_at` ABSENT est traité comme périmé, et c'est délibéré : c'est le cas
+ * d'un jeton émis avant ce déploiement, dont la vérification peut dater de six
+ * jours (le claim `mfa` se propageait alors de renouvellement en
+ * renouvellement). Le tenir pour frais rouvrirait, à l'installation même du
+ * garde-fou, la fenêtre qu'il ferme. Les comptes concernés se reconnectent une
+ * fois — même doctrine que les jetons hérités de la 2.43.0.
+ *
+ * Un `mfa_at` DANS LE FUTUR (horloges désynchronisées) est accepté : refuser
+ * une session pour une dérive d'horloge serait une panne, pas une sécurité.
+ */
+function mfaExpiree(mfaAt, dureeHeures, maintenantMs = Date.now()) {
+  if (mfaAt == null) return true;
+  const t = Number(mfaAt);
+  if (!Number.isFinite(t)) return true;
+  const duree = Number.isFinite(Number(dureeHeures)) && Number(dureeHeures) > 0
+    ? Number(dureeHeures) : DEFAULT_MFA_DUREE_HEURES;
+  const ageMs = maintenantMs - t * 1000;
+  return ageMs > duree * 3600 * 1000;
+}
+
+/**
+ * Version SYNCHRONE de la péremption, sur le cache — pour les points d'appel
+ * qui ne peuvent pas attendre une lecture base (handshake Socket.IO).
+ * @param {object} decoded charge utile du jeton (claims `mfa` et `mfa_at`)
+ */
+function mfaSessionExpiree(decoded) {
+  return mfaExpiree(decoded && decoded.mfa_at, cachedDuree);
 }
 
 /**
@@ -127,6 +223,7 @@ if (_t.unref) _t.unref();
 /** Vide le cache — utilisé par les tests et après modification du réglage. */
 function resetMfaRolesCache() {
   cachedRoles = DEFAULT_MFA_ROLES.slice();
+  cachedDuree = DEFAULT_MFA_DUREE_HEURES;
   cachedAt = 0;
 }
 
@@ -149,18 +246,56 @@ async function requireMfa(req, res, next) {
   }
   const base = resolveBaseRole(req.user.role);
   if (!roles.includes(base)) return next();      // rôle hors périmètre
-  if (req.user.mfa === true) return next();      // défi franchi (ou hors périmètre à l'émission)
-  return res.status(403).json({
-    error: 'Double authentification requise. Reconnectez-vous pour l\'activer.',
-    code: 'MFA_REQUIRED',
-  });
+
+  // CLÉ D'API DE SERVICE (2.45.0) — hors de la fenêtre de renouvellement, et
+  // c'est la suite du même raisonnement : la double authentification protège
+  // des PERSONNES PHYSIQUES. Une clé n'a pas de téléphone, ne peut donc jamais
+  // présenter de second facteur, et lui en réclamer un tous les jours
+  // obligerait à ranger un secret TOTP à côté d'elle — exactement le défaut
+  // que la 2.45.0 a corrigé en supprimant le compte ADMIN du smoke test.
+  // Sa sûreté vient d'ailleurs : lecture seule STRUCTURELLE (refusée dans
+  // `authenticate` lui-même), relue à chaque requête donc révocable
+  // instantanément, expirable, et chaque appel tracé.
+  // Sans cette sortie, le smoke test ferait échouer CHAQUE déploiement.
+  if (req.user.is_service === true) return next();
+
+  if (req.user.mfa !== true) {
+    return res.status(403).json({
+      error: 'Double authentification requise. Reconnectez-vous pour l\'activer.',
+      code: 'MFA_REQUIRED',
+    });
+  }
+  // Le défi a été franchi — reste à savoir QUAND. Au-delà de la fenêtre, la
+  // preuve n'a plus la fraîcheur qui fait sa valeur : la session est renvoyée
+  // au second facteur. Code DISTINCT de MFA_REQUIRED : ce n'est pas un compte à
+  // enrôler, c'est une vérification à refaire — l'écran doit pouvoir le dire.
+  let duree;
+  try {
+    duree = await getMfaDureeHeures();
+  } catch (_) {
+    duree = DEFAULT_MFA_DUREE_HEURES;
+  }
+  if (mfaExpiree(req.user.mfa_at, duree)) {
+    return res.status(403).json({
+      error: `Votre double authentification date de plus de ${duree} h. `
+        + 'Reconnectez-vous pour la renouveler.',
+      code: 'MFA_EXPIREE',
+      duree_heures: duree,
+    });
+  }
+  return next();
 }
 
 module.exports = {
   requireMfa,
   isMfaRole,
   getMfaRoles,
+  getMfaDureeHeures,
+  mfaExpiree,
+  mfaSessionExpiree,
   resetMfaRolesCache,
   DEFAULT_MFA_ROLES,
+  DEFAULT_MFA_DUREE_HEURES,
   SETTING_KEY,
+  SETTING_DUREE,
 };

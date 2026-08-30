@@ -36,6 +36,16 @@ jest.mock('../../src/middleware/activity-logger', () => ({
 const express = require('express');
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
+
+/**
+ * Instant de vérification du second facteur, en secondes epoch (claim `mfa_at`,
+ * 2.46.0). Une session RÉELLE en porte toujours un : c'est `issueSession` qui
+ * le pose quand un code TOTP vient d'être vérifié. Les jetons forgés par ces
+ * tests simulent des sessions vivantes — ils doivent donc en porter un aussi,
+ * faute de quoi ils simuleraient des jetons HÉRITÉS, dont le refus est vérifié
+ * séparément (section « fenêtre de validité »).
+ */
+const maintenantMfa = () => Math.floor(Date.now() / 1000);
 const bcrypt = require('bcryptjs');
 
 const totpLib = require('../../src/utils/totp');
@@ -97,6 +107,13 @@ function dispatch(sql, params = []) {
     return { rows: u ? [{ token_version: u.token_version }] : [] };
   }
   if (/FROM custom_roles/i.test(q)) return { rows: db.customRoles };
+  // Les réglages MFA (rôles soumis + durée de validité) sont lus ENSEMBLE
+  // depuis la 2.46.0 : une seule requête, deux clés.
+  if (/SELECT key, value FROM settings WHERE key = ANY/i.test(q)) {
+    const cles = Array.isArray(params[0]) ? params[0] : [];
+    return { rows: cles.filter((k) => db.settings[k] !== undefined)
+      .map((k) => ({ key: k, value: db.settings[k] })) };
+  }
   if (/SELECT value FROM settings WHERE key/i.test(q)) {
     const v = db.settings[params[0]];
     return { rows: v === undefined ? [] : [{ value: v }] };
@@ -125,10 +142,19 @@ function dispatch(sql, params = []) {
     const rt = db.refreshTokens.find((r) => r.token === params[0]);
     if (!rt) return { rows: [] };
     const u = user(rt.user_id);
-    return { rows: [{ ...u, ...rt, user_id: rt.user_id, rt_mfa: rt.mfa, u_mfa_enabled: u.mfa_enabled }] };
+    return { rows: [{ ...u, ...rt, user_id: rt.user_id, rt_mfa: rt.mfa,
+      rt_mfa_verified_at: rt.mfa_verified_at ?? null, u_mfa_enabled: u.mfa_enabled }] };
   }
   if (/^INSERT INTO refresh_tokens/i.test(q)) {
-    db.refreshTokens.push({ user_id: params[0], token: params[1], expires_at: params[2], mfa: params[3] === true });
+    // `to_timestamp($5)` à l'émission (secondes epoch), valeur déjà typée au
+    // renouvellement : le magasin mémoire normalise les deux en Date.
+    const brut = params[4];
+    const verifieLe = brut == null ? null
+      : (brut instanceof Date ? brut : new Date(Number(brut) * 1000));
+    db.refreshTokens.push({
+      user_id: params[0], token: params[1], expires_at: params[2],
+      mfa: params[3] === true, mfa_verified_at: verifieLe,
+    });
     return { rows: [] };
   }
   if (/^DELETE FROM refresh_tokens WHERE user_id/i.test(q)) {
@@ -352,7 +378,7 @@ describe('2. VÉRIFICATION du code', () => {
 
   test('un jeton d’accès ordinaire ne peut pas servir de défi', async () => {
     // Le défi doit porter purpose:'mfa' : un JWT de session, même valide, est refusé.
-    const acces = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+    const acces = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true, mfa_at: maintenantMfa() }, JWT_SECRET, { expiresIn: '1h' });
     const r = await request(app).post('/api/auth/mfa/verify').send({ mfa_challenge_token: acces, code: '123456' });
     expect(r.status).toBe(401);
     expect(r.body.code).toBe('MFA_CHALLENGE_INVALID');
@@ -398,7 +424,7 @@ describe('3. ENRÔLEMENT', () => {
 
   test('setup refusé si la double authentification est DÉJÀ active (passer par le reset ADMIN)', async () => {
     enroler(1);
-    const jeton = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+    const jeton = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true, mfa_at: maintenantMfa() }, JWT_SECRET, { expiresIn: '1h' });
     const r = await request(app).post('/api/auth/mfa/setup').set('Authorization', `Bearer ${jeton}`).send({});
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('MFA_ALREADY_ENABLED');
@@ -473,7 +499,7 @@ describe('4. requireMfa — fermeture effective des surfaces sensibles', () => {
   });
 
   test('jeton mfa:true → passe', async () => {
-    const jeton = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+    const jeton = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true, mfa_at: maintenantMfa() }, JWT_SECRET, { expiresIn: '1h' });
     expect((await request(app).get('/api/users').set('Authorization', `Bearer ${jeton}`)).status).toBe(200);
   });
 
@@ -582,9 +608,136 @@ describe('5. REFRESH — le claim est RECALCULÉ, jamais recopié', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// 7. RENOUVELLEMENT DU SECOND FACTEUR (2.46.0)
+// ───────────────────────────────────────────────────────────────────────────
+// Le claim `mfa` disait « ce défi a été franchi », jamais QUAND. La preuve se
+// reconduisait donc de renouvellement en renouvellement pendant les 7 jours du
+// jeton : une vérification faite lundi ouvrait encore les données sensibles le
+// dimanche suivant. Ces tests verrouillent la fenêtre, et surtout le point qui
+// la rend efficace — le renouvellement ne repousse PAS l'horodatage.
+// ════════════════════════════════════════════════════════════════════════════
+describe('7. Renouvellement du second facteur — la fenêtre de 24 h', () => {
+  const H = 3600;
+  const jetonAvecAge = (heures) => jwt.sign(
+    { id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true,
+      mfa_at: maintenantMfa() - Math.round(heures * H) },
+    JWT_SECRET, { expiresIn: '8h' }
+  );
+
+  /** Session réelle ayant franchi le défi : renvoie ses deux jetons. */
+  async function sessionVerifiee() {
+    const secret = enroler(1);
+    const defi = (await login()).body.mfa_challenge_token;
+    const r = await request(app).post('/api/auth/mfa/verify')
+      .send({ mfa_challenge_token: defi, code: totpLib.totp(secret) });
+    return r.body;
+  }
+
+  test('la vérification du code HORODATE la session (claim mfa_at + colonne)', async () => {
+    const avant = Math.floor(Date.now() / 1000);
+    const session = await sessionVerifiee();
+    const c = claims(session.accessToken);
+    expect(c.mfa).toBe(true);
+    expect(c.mfa_at).toBeGreaterThanOrEqual(avant);
+    // La même preuve est posée en base : c'est elle que le renouvellement lira.
+    const ligne = db.refreshTokens.find((x) => x.token === session.refreshToken);
+    expect(ligne.mfa_verified_at).toBeInstanceOf(Date);
+  });
+
+  test('dans la fenêtre, la surface sensible reste ouverte', async () => {
+    const r = await request(app).get('/api/users')
+      .set('Authorization', `Bearer ${jetonAvecAge(23)}`);
+    expect(r.status).toBe(200);
+  });
+
+  test('au-delà de 24 h → 403 MFA_EXPIREE (code DISTINCT de MFA_REQUIRED)', async () => {
+    const r = await request(app).get('/api/users')
+      .set('Authorization', `Bearer ${jetonAvecAge(25)}`);
+    expect(r.status).toBe(403);
+    // Le code doit être distinct : ce n'est pas un compte à enrôler, c'est une
+    // vérification à refaire — l'écran doit pouvoir le dire à l'utilisateur.
+    expect(r.body.code).toBe('MFA_EXPIREE');
+    expect(r.body.duree_heures).toBe(24);
+  });
+
+  test('jeton mfa:true SANS horodatage (hérité d’avant le déploiement) → refusé', async () => {
+    // Sa vérification peut dater de six jours : le tenir pour frais rouvrirait,
+    // à l'installation même du garde-fou, la fenêtre qu'il ferme.
+    const herite = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true },
+      JWT_SECRET, { expiresIn: '8h' });
+    const r = await request(app).get('/api/users').set('Authorization', `Bearer ${herite}`);
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('MFA_EXPIREE');
+  });
+
+  test('un rôle HORS PÉRIMÈTRE n’est jamais concerné (non-régression)', async () => {
+    const manager = jwt.sign({ id: 3, username: 'manager', role: 'MANAGER', tv: 0, mfa: true },
+      JWT_SECRET, { expiresIn: '8h' });
+    // Aucun mfa_at, et pourtant aucun refus : la fenêtre ne s'applique qu'aux
+    // rôles soumis, comme le reste de la double authentification.
+    const { requireMfa } = require('../../src/middleware/mfa');
+    const res = { status: jest.fn(() => res), json: jest.fn(() => res) };
+    const next = jest.fn();
+    await requireMfa({ user: jwt.verify(manager, JWT_SECRET) }, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test('le RENOUVELLEMENT reconduit l’horodatage, il ne le repousse PAS', async () => {
+    const session = await sessionVerifiee();
+    const origine = claims(session.accessToken).mfa_at;
+    // Une session simplement restée active ne doit pas se re-certifier seule :
+    // sans cela, un rafraîchissement toutes les 8 h rendrait la fenêtre infinie.
+    const r = await request(app).post('/api/auth/refresh')
+      .send({ refreshToken: session.refreshToken });
+    expect(r.status).toBe(200);
+    expect(claims(r.body.accessToken).mfa).toBe(true);
+    expect(claims(r.body.accessToken).mfa_at).toBe(origine);
+  });
+
+  test('au-delà de la fenêtre, le renouvellement retombe à mfa:false', async () => {
+    const session = await sessionVerifiee();
+    // On vieillit la preuve en base, comme le temps l'aurait fait.
+    const ligne = db.refreshTokens.find((x) => x.token === session.refreshToken);
+    ligne.mfa_verified_at = new Date(Date.now() - 25 * 3600 * 1000);
+    const r = await request(app).post('/api/auth/refresh')
+      .send({ refreshToken: session.refreshToken });
+    expect(r.status).toBe(200);
+    expect(claims(r.body.accessToken).mfa).toBe(false);
+    expect(claims(r.body.accessToken).mfa_at).toBeUndefined();
+    // Et la preuve périmée n'est pas recopiée sur la nouvelle ligne.
+    expect(db.refreshTokens.find((x) => x.token === r.body.refreshToken).mfa_verified_at).toBeNull();
+  });
+
+  test('la fenêtre est paramétrable (securite.mfa_duree_heures)', async () => {
+    db.settings['securite.mfa_duree_heures'] = '8';
+    resetMfaRolesCache();
+    const r = await request(app).get('/api/users')
+      .set('Authorization', `Bearer ${jetonAvecAge(9)}`);
+    expect(r.status).toBe(403);
+    expect(r.body.duree_heures).toBe(8);
+    expect((await request(app).get('/api/users')
+      .set('Authorization', `Bearer ${jetonAvecAge(7)}`)).status).toBe(200);
+    delete db.settings['securite.mfa_duree_heures'];
+    resetMfaRolesCache();
+  });
+
+  test('un réglage aberrant retombe sur 24 h, jamais sur « toujours valide »', async () => {
+    db.settings['securite.mfa_duree_heures'] = '100000';   // hors bornes
+    resetMfaRolesCache();
+    const r = await request(app).get('/api/users')
+      .set('Authorization', `Bearer ${jetonAvecAge(30)}`);
+    expect(r.status).toBe(403);
+    expect(r.body.duree_heures).toBe(24);
+    delete db.settings['securite.mfa_duree_heures'];
+    resetMfaRolesCache();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 describe('6. RÉINITIALISATION par un administrateur', () => {
   const jetonAdmin = () => jwt.sign(
-    { id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+    { id: 1, username: 'admin', role: 'ADMIN', tv: 0, mfa: true, mfa_at: maintenantMfa() }, JWT_SECRET, { expiresIn: '1h' });
 
   test('reset-mfa remet le compte à « non enrôlé » et coupe ses sessions', async () => {
     enroler(2);
@@ -613,7 +766,7 @@ describe('6. RÉINITIALISATION par un administrateur', () => {
   });
 
   test('reset-mfa est réservé à l’ADMIN', async () => {
-    const rh = jwt.sign({ id: 2, username: 'rh', role: 'RH', tv: 0, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+    const rh = jwt.sign({ id: 2, username: 'rh', role: 'RH', tv: 0, mfa: true, mfa_at: maintenantMfa() }, JWT_SECRET, { expiresIn: '1h' });
     expect((await request(app).put('/api/users/1/reset-mfa').set('Authorization', `Bearer ${rh}`).send({})).status).toBe(403);
   });
 
@@ -640,7 +793,7 @@ describe('7. GET /auth/me — drapeaux consommés par l’écran d’enrôlement
   });
 
   test('rôle hors périmètre : aucun enrôlement réclamé', async () => {
-    const jeton = jwt.sign({ id: 3, username: 'manager', role: 'MANAGER', tv: 0, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+    const jeton = jwt.sign({ id: 3, username: 'manager', role: 'MANAGER', tv: 0, mfa: true, mfa_at: maintenantMfa() }, JWT_SECRET, { expiresIn: '1h' });
     const r = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${jeton}`);
     expect(r.body).toMatchObject({ mfa_required: false, mfa_enrollment_required: false });
   });

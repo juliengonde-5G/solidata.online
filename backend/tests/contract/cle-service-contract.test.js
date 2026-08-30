@@ -68,7 +68,7 @@ app.use('/api/metier', metier);
 app.use('/api/admin/api-keys', require('../../src/routes/admin-api-keys'));
 
 const jetonHumain = (role = 'ADMIN', extra = {}) => 'Bearer ' + jwt.sign(
-  { id: 42, username: 'julien', role, tv: 0, mfa: true, ...extra },
+  { id: 42, username: 'julien', role, tv: 0, mfa: true, mfa_at: Math.floor(Date.now() / 1000), ...extra },
   process.env.JWT_SECRET, { expiresIn: '1h' });
 
 beforeEach(() => {
@@ -97,10 +97,22 @@ describe('la clé de service vaut identité en lecture', () => {
       id: null,
       username: 'api:Smoke test de déploiement',
       role: 'ADMIN',
+      // `mfa: true` par construction, et SANS `mfa_at` : une clé ne présente
+      // jamais de second facteur — c'est `is_service` qui la fait sortir de la
+      // fenêtre de renouvellement (2.46.0), pas un horodatage inventé.
       mfa: true,
       is_service: true,
       api_key_id: 1,
     });
+  });
+
+  test('la fenêtre de renouvellement du second facteur ne s\'applique pas à une clé', async () => {
+    // Sans cette sortie, le smoke test de `deploy.sh` — qui porte un rôle
+    // ADMIN — serait refusé en MFA_EXPIREE et ferait échouer CHAQUE
+    // déploiement : une clé n'a par nature aucun second facteur à présenter.
+    const r = await request(app).get('/api/sensible/liste').set('X-API-Key', CLE_SERVICE);
+    expect(r.status).toBe(200);
+    expect(r.body.user.mfa_at).toBeUndefined();
   });
 
   test('`mfa: true` par construction — la garde MFA ne bloque pas une clé', async () => {

@@ -40,7 +40,7 @@ const { encryptField } = require('../../src/utils/field-crypto');
 
 let app;
 const tokenFor = (role) => jwt.sign(
-  { id: 9, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+  { id: 9, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
 
 beforeAll(() => {

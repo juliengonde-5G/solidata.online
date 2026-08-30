@@ -37,7 +37,7 @@ const VEHICULE = 1;
 // chauffeur), pas la double authentification : les jetons la franchissent donc,
 // comme le font déjà employees-masking et effectifs-contract.
 const jetonWeb = (id, username, role, first, last) => jwt.sign(
-  { id, userId: id, username, role, first_name: first, last_name: last, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+  { id, userId: id, username, role, first_name: first, last_name: last, mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
 
 const ADMIN = jetonWeb(1, 'admin', 'ADMIN', 'Julien', 'Gondé');
 const TRIEUR = jetonWeb(3, 'ctrieur', 'COLLABORATEUR', 'Karim', 'Benali');

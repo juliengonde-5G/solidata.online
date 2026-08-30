@@ -137,6 +137,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
     mockQuery
       .mockResolvedValueOnce({ rows: [{ id: 42 }] })          // cascade 1 : employé du jeton
       .mockResolvedValueOnce({ rows: [] })                     // pas de tournée en cours
+      .mockResolvedValueOnce({ rows: [{ id: 5, is_demo: false }] })  // lecture du véhicule (existe, pas la démo)
       .mockResolvedValueOnce({ rows: [{ id: 91, vehicle_id: 5 }] }); // INSERT
 
     const res = await request(app).post('/api/tours/claim-vehicle')
@@ -145,7 +146,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(91);
     const insert = mockQuery.mock.calls.find((c) => /INSERT INTO tours/.test(String(c[0])));
-    expect(insert[1]).toEqual([5, 42]);
+    expect(insert[1]).toEqual([5, 42, false]);
     // Le message de blocage historique a disparu.
     expect(JSON.stringify(res.body)).not.toMatch(/fiche employe/i);
   });
@@ -155,6 +156,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
       .mockResolvedValueOnce({ rows: [] })  // cascade 2 : aucun employé lié au compte générique
       .mockResolvedValueOnce({ rows: [{ assigned_driver_id: null }] }) // cascade 3 : véhicule sans chauffeur
       .mockResolvedValueOnce({ rows: [] })  // pas de tournée en cours
+      .mockResolvedValueOnce({ rows: [{ id: 7, is_demo: false }] })  // lecture du véhicule (existe, pas la démo)
       .mockResolvedValueOnce({ rows: [{ id: 92, vehicle_id: 7 }] });
 
     const res = await request(app).post('/api/tours/claim-vehicle')
@@ -162,7 +164,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
 
     expect(res.status).toBe(200);
     const insert = mockQuery.mock.calls.find((c) => /INSERT INTO tours/.test(String(c[0])));
-    expect(insert[1]).toEqual([7, null]);
+    expect(insert[1]).toEqual([7, null, false]);
   });
 
   it('jeton hérité : le chauffeur est relu depuis l\'affectation du véhicule', async () => {
@@ -170,6 +172,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
       .mockResolvedValueOnce({ rows: [] })  // cascade 2 : compte générique sans fiche
       .mockResolvedValueOnce({ rows: [{ assigned_driver_id: 42 }] }) // cascade 3
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 5, is_demo: false }] })  // lecture du véhicule (existe, pas la démo)
       .mockResolvedValueOnce({ rows: [{ id: 93, vehicle_id: 5 }] });
 
     const res = await request(app).post('/api/tours/claim-vehicle')
@@ -177,7 +180,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
 
     expect(res.status).toBe(200);
     const insert = mockQuery.mock.calls.find((c) => /INSERT INTO tours/.test(String(c[0])));
-    expect(insert[1]).toEqual([5, 42]);
+    expect(insert[1]).toEqual([5, 42, false]);
   });
 
   it('REFUSE (403) la prise du véhicule d\'un autre, sans toucher la base', async () => {
@@ -192,6 +195,7 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
     mockQuery
       .mockResolvedValueOnce({ rows: [{ id: 42 }] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 5, is_demo: false }] })  // lecture du véhicule (existe, pas la démo)
       .mockResolvedValueOnce({ rows: [{ id: 94 }] });
 
     await request(app).post('/api/tours/claim-vehicle')
@@ -200,6 +204,12 @@ describe('POST /api/tours/claim-vehicle — le véhicule porte l\'accès, pas la
     const insert = String(mockQuery.mock.calls.find((c) => /INSERT INTO tours/.test(String(c[0])))[0]);
     expect(insert).toMatch(/Europe\/Paris/);
     expect(insert).not.toMatch(/CURRENT_DATE/);
+    // `mode` est NOT NULL en base : l'omettre faisait échouer l'INSERT en
+    // 23502, donc rendait impossible TOUT départ sur un véhicule libre (500
+    // « Erreur serveur » du 30/08/2026, camion école compris). Le mock ne peut
+    // pas porter la contrainte — la garde tests/unit/tours-colonnes-obligatoires
+    // la vérifie sur la source ; ici on épingle simplement la colonne.
+    expect(insert).toMatch(/INSERT INTO tours \([^)]*\bmode\b/);
   });
 });
 

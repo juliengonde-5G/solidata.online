@@ -44,7 +44,7 @@ const { resetMfaRolesCache, DEFAULT_MFA_ROLES } = require('../../src/middleware/
 const jeton = (props) => jwt.sign({ id: 1, username: 'u', first_name: 'T', last_name: 'U', ...props },
   JWT_SECRET, { expiresIn: '1h' });
 
-const ADMIN_ENROLE = jeton({ role: 'ADMIN', mfa: true });
+const ADMIN_ENROLE = jeton({ role: 'ADMIN', mfa: true, mfa_at: Math.floor(Date.now() / 1000) });
 const ADMIN_NON_ENROLE = jeton({ role: 'ADMIN', mfa: false });
 const ADMIN_JETON_HERITE = jeton({ role: 'ADMIN' }); // émis avant 2.43.0 : pas de claim
 const RH_NON_ENROLE = jeton({ role: 'RH', mfa: false });

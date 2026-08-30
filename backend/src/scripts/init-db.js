@@ -87,6 +87,13 @@ async function initDatabase() {
     // TOTP — le claim « mfa » du JWT réémis à chaque /refresh en découle (jamais
     // de confiance aveugle dans l'ancien JWT). Idempotent.
     await client.query(`ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS mfa BOOLEAN NOT NULL DEFAULT false;`);
+    // Renouvellement du second facteur (2.46.0) : INSTANT de la vérification
+    // TOTP réelle de cette session. Le claim `mfa` seul disait « ce défi a été
+    // franchi », jamais QUAND — la preuve se reconduisait donc de
+    // renouvellement en renouvellement pendant les 7 jours du jeton. NULLABLE
+    // à dessein : les sessions déjà ouvertes n'ont pas d'horodatage, elles sont
+    // traitées comme périmées et repassent une fois par le second facteur.
+    await client.query(`ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS mfa_verified_at TIMESTAMP;`);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS settings (

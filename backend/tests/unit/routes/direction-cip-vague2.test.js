@@ -33,7 +33,7 @@ jest.mock('../../../src/middleware/activity-logger', () => ({
 const express = require('express');
 const request = require('supertest');
 
-const tok = (role) => jwt.sign({ id: 1, username: role.toLowerCase(), role, first_name: 'T', last_name: role, mfa: true }, JWT_SECRET, { expiresIn: '1h' });
+const tok = (role) => jwt.sign({ id: 1, username: role.toLowerCase(), role, first_name: 'T', last_name: role, mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
   ADMIN: tok('ADMIN'), MANAGER: tok('MANAGER'), RH: tok('RH'),
   COLLABORATEUR: tok('COLLABORATEUR'), AUTORITE: tok('AUTORITE'),

@@ -361,9 +361,18 @@ io.use(async (socket, next) => {
   // laisse passer — un défaut de cette garde ne doit jamais couper le temps
   // réel de tout le monde.
   try {
-    const { isMfaRole } = require('./middleware/mfa');
-    if (isMfaRole(decoded.role) && decoded.mfa !== true) {
-      return next(new Error('Double authentification requise'));
+    const { isMfaRole, mfaSessionExpiree } = require('./middleware/mfa');
+    if (isMfaRole(decoded.role)) {
+      if (decoded.mfa !== true) {
+        return next(new Error('Double authentification requise'));
+      }
+      // Le second facteur se périme (2.46.0). Sans ce contrôle ici, le flux
+      // temps réel — la messagerie — resterait ouvert au-delà de la fenêtre
+      // alors que toutes les routes REST équivalentes seraient fermées : une
+      // socket établie avant la péremption vivrait le temps de la connexion.
+      if (mfaSessionExpiree(decoded)) {
+        return next(new Error('Double authentification à renouveler'));
+      }
     }
   } catch (e) {
     logger.warn('Socket.IO : contrôle de double authentification indisponible', { error: e.message });

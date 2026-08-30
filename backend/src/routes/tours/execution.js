@@ -14,6 +14,35 @@ const {
   resolveDriverEmployeeId,
   SQL_TODAY_PARIS,
 } = require('./driver-session');
+// Mode démo : recomposition du scénario de formation. `resetDemoTour` est la
+// source UNIQUE, partagée avec le bouton « Réinitialiser la démo » du formateur.
+const { resetDemoTour } = require('../../scripts/seed-demo-formation');
+
+/**
+ * Camion école qui repart : recompose le scénario de formation et renvoie
+ * l'identifiant de la tournée prête, ou `null` si elle n'a pas pu être
+ * composée. L'appelant a déjà établi qu'il s'agit du véhicule de démonstration.
+ *
+ * La composition est déléguée à `resetDemoTour`, qui est DÉJÀ la source unique
+ * du bouton « Réinitialiser la démo » de l'écran formateur : le stagiaire
+ * suivant obtient exactement le même exercice, aux mêmes points, sans qu'une
+ * seconde recette de scénario existe quelque part.
+ *
+ * Dégradation assumée : si le scénario ne peut pas être composé (base sans
+ * aucun CAV géolocalisé — `resetDemoTour` refuse alors d'inventer des points),
+ * on ne bloque pas le départ. L'appelant retombe sur la création ordinaire :
+ * le stagiaire aura une tournée vide, ce qui est une démonstration pauvre mais
+ * honnête, là où un refus lui fermerait la porte au nez.
+ */
+async function recomposerScenarioDemo() {
+  try {
+    const { tourId } = await resetDemoTour(pool, { log: () => {} });
+    return tourId;
+  } catch (err) {
+    console.warn('[TOURS] Scénario de démonstration non recomposé :', err.message);
+    return null;
+  }
+}
 
 // Upload is passed from index.js via router factory
 module.exports = function createExecutionRouter(upload) {
@@ -205,19 +234,59 @@ module.exports = function createExecutionRouter(upload) {
         return res.status(400).json({ error: 'Ce vehicule est deja en tournee aujourd\'hui' });
       }
 
+      // Le véhicule est lu UNE fois : son existence et son drapeau de
+      // formation décident de la suite.
+      const vRes = await pool.query(
+        'SELECT id, COALESCE(is_demo, false) AS is_demo FROM vehicles WHERE id = $1',
+        [vehicleId]
+      );
+      if (vRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Véhicule introuvable' });
+      }
+      const estDemo = vRes.rows[0].is_demo === true;
+
+      // Camion école : on ne part JAMAIS à vide. Une tournée créée à la volée
+      // n'aurait aucun point de collecte — le stagiaire arriverait sur une
+      // carte sans borne, ce qui n'est pas une démonstration. Le scénario est
+      // recomposé par la MÊME fonction que le bouton « Réinitialiser la démo »
+      // du formateur (aucune seconde implémentation qui pourrait diverger).
+      // Le cas ne se présente que lorsqu'aucune tournée n'est en cours ni
+      // planifiée pour aujourd'hui — un exercice commencé ne peut donc pas
+      // être effacé sous les pieds d'un stagiaire.
+      const tourneeDemo = estDemo ? await recomposerScenarioDemo() : null;
+      if (tourneeDemo) {
+        const claim = await pool.query(
+          `UPDATE tours SET driver_employee_id = COALESCE($1, driver_employee_id),
+                            status = 'in_progress',
+                            started_at = COALESCE(started_at, NOW()),
+                            updated_at = NOW()
+            WHERE id = $2 RETURNING *`,
+          [employeeId, tourneeDemo]
+        );
+        ensurePlannedPassages(tourneeDemo).catch(() => {});
+        return res.json(claim.rows[0]);
+      }
+
       // Creer une tournee a la volee. `is_demo` est HÉRITÉ du véhicule : c'est
       // le lien « 1 URL = 1 véhicule » qui décide si l'on est en formation, et
       // le chauffeur n'a donc rien à activer (ni à pouvoir désactiver).
+      //
+      // `mode` est OBLIGATOIRE en base (NOT NULL sans valeur par défaut, cf.
+      // init-db.js) : l'omettre faisait échouer l'INSERT en 23502, donc rendait
+      // impossible TOUT départ sur un véhicule libre — le camion école entre
+      // deux stagiaires, mais aussi n'importe quel camion sans tournée
+      // planifiée. C'est la seule des huit créations de tournée du dépôt qui
+      // ne renseignait pas la colonne, et les tests de contrat n'ont pas pu le
+      // voir : ils simulent PostgreSQL, qui seul porte la contrainte.
+      // La valeur est 'manual' et non 'intelligent' : la tournée est composée
+      // point par point par le chauffeur au fil de la journée, aucun moteur ni
+      // modèle ne l'a préparée.
       const result = await pool.query(
-        `INSERT INTO tours (vehicle_id, driver_employee_id, date, status, started_at, is_demo, created_at, updated_at)
-         SELECT $1, $2, ${SQL_TODAY_PARIS}, 'in_progress', NOW(), COALESCE(v.is_demo, false), NOW(), NOW()
-           FROM vehicles v WHERE v.id = $1
+        `INSERT INTO tours (vehicle_id, driver_employee_id, date, mode, status, started_at, is_demo, created_at, updated_at)
+         VALUES ($1, $2, ${SQL_TODAY_PARIS}, 'manual', 'in_progress', NOW(), $3, NOW(), NOW())
          RETURNING *`,
-        [vehicleId, employeeId]
+        [vehicleId, employeeId, estDemo]
       );
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Véhicule introuvable' });
-      }
 
       // Best-effort : calcul OSRM si la tournée est ensuite alimentée avec des CAV
       ensurePlannedPassages(result.rows[0].id).catch(() => {});
