@@ -10,6 +10,10 @@ import {
   PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE,
   motifProfilPcmIndisponible,
 } from '../utils/pcm';
+// Les deux exports PDF ont suivi les résultats : ils vivaient sur l'écran
+// autonome /pcm, qui ne restitue plus de profil. C'est ici qu'on consulte le
+// résultat, c'est donc ici qu'on l'imprime.
+import { exportResultsPDF, exportTechnicalPDF } from '../utils/pcm-pdf';
 
 const STATUSES = ['received', 'interview', 'hired', 'rejected'];
 
@@ -575,7 +579,7 @@ export default function Candidates() {
                 {detailTab === 'situation' && <MiseEnSituationView candidateId={selected.id} data={miseEnSituation} onSaved={(d) => setMiseEnSituation(d)} />}
                 {detailTab === 'documents' && <DocumentsView candidateId={selected.id} delivered={candidateDocuments} onDelivered={(d) => setCandidateDocuments(d)} />}
                 {detailTab === 'history' && <HistoryView history={history} />}
-                {detailTab === 'pcm' && <PCMView profile={pcmProfile} motif={pcmMotif} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
+                {detailTab === 'pcm' && <PCMView candidateId={selected.id} profile={pcmProfile} motif={pcmMotif} onStart={() => startPCMTest(selected.id)} onOpenInApp={() => openPCMTestInApp(selected.id)} />}
               </div>
             </div>
           </div>
@@ -861,7 +865,45 @@ function HistoryView({ history }) {
   );
 }
 
-function PCMView({ profile, motif, onStart, onOpenInApp }) {
+function PCMView({ candidateId, profile, motif, onStart, onOpenInApp }) {
+  // Les réponses brutes ne servent QU'À l'export technique : on ne les charge
+  // qu'au clic. Les appeler à l'ouverture de l'onglet ferait une requête (et
+  // une trace de consultation) pour un bouton que personne n'a pressé.
+  const [exportErreur, setExportErreur] = useState(null);
+  const [exportEnCours, setExportEnCours] = useState(null); // 'fiche' | 'technique'
+
+  const exporterFiche = () => {
+    setExportErreur(null);
+    if (exportResultsPDF(profile) === false) {
+      setExportErreur('La fenêtre d’impression a été bloquée par le navigateur. Autorisez les fenêtres surgissantes pour ce site, puis réessayez.');
+    }
+  };
+
+  const exporterTechnique = async () => {
+    setExportErreur(null);
+    setExportEnCours('technique');
+    // Échec toléré : l'export technique se compose sans les réponses (il
+    // affiche alors « 0 question » plutôt que rien). Une panne sur les
+    // réponses ne doit pas priver du reste — scores, base, phase.
+    let reponses = null;
+    let partiel = false;
+    try {
+      const r = await api.get(`/pcm/profiles/${candidateId}/answers`);
+      reponses = r.data?.answers || null;
+    } catch (err) {
+      console.error(err);
+      partiel = true;
+    }
+    setExportEnCours(null);
+    if (exportTechnicalPDF(profile, reponses) === false) {
+      setExportErreur('La fenêtre d’impression a été bloquée par le navigateur. Autorisez les fenêtres surgissantes pour ce site, puis réessayez.');
+      return;
+    }
+    if (partiel) {
+      setExportErreur('Le détail des réponses n’a pas pu être chargé : la fiche technique a été éditée sans lui (scores et profil sont bien présents).');
+    }
+  };
+
   const PCM_C = { analyseur: 'bg-blue-100 text-blue-700', perseverant: 'bg-green-100 text-green-700', empathique: 'bg-pink-100 text-pink-700', imagineur: 'bg-indigo-100 text-indigo-700', energiseur: 'bg-orange-100 text-orange-700', promoteur: 'bg-red-100 text-red-700' };
   if (!profile) return (
     <div className="text-center py-8">
@@ -923,6 +965,17 @@ function PCMView({ profile, motif, onStart, onOpenInApp }) {
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <p className="text-[11px] font-semibold text-slate-700 mb-1">Méthode — à lire avant d'interpréter</p>
         <p className="text-[11px] text-slate-600 leading-relaxed">{PCM_MENTION_METHODE}</p>
+      </div>
+      {exportErreur && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {exportErreur}
+        </div>
+      )}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button onClick={exporterFiche} className="flex-1 bg-primary text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 font-medium">Fiche PDF</button>
+        <button onClick={exporterTechnique} disabled={exportEnCours === 'technique'} className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50 font-medium disabled:opacity-50">
+          {exportEnCours === 'technique' ? 'Préparation…' : 'Export technique'}
+        </button>
       </div>
       <div className="flex flex-col sm:flex-row gap-2">
         <button onClick={onOpenInApp} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 font-medium">Ouvrir le questionnaire</button>

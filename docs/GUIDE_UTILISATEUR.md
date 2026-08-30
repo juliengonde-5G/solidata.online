@@ -95,7 +95,7 @@ Accueil
 
 Recrutement
   ├── Candidats (Kanban + Plan de recrutement)
-  └── Matrice PCM
+  └── Tests PCM (faire passer un test — les résultats sont dans la fiche du candidat)
 
 Gestion Équipe
   ├── Collaborateurs
@@ -204,14 +204,19 @@ Selon le statut du candidat, différents onglets apparaissent :
 3. Saisissez le nombre de postes à pourvoir par mois
 4. Le compteur affiche automatiquement : **recrutés / objectif**
 
-### 3.3 Matrice PCM (Process Communication Model)
+### 3.3 Tests PCM (Process Communication Model)
 
 Le test PCM évalue le profil de personnalité des candidats à travers **20 questions** à 4 choix, réparties en 5 catégories (perception, style de management, canal de communication, motivation, stress).
 
+> **Depuis la version 2.43.0 — deux écrans, deux usages.**
+> **Faire passer le test** se fait depuis la page **Tests PCM** (menu Recrutement) : on y choisit la personne, on lance le test, on copie le lien à lui transmettre, et on suit où il en est (aucun test / lien envoyé, en attente / en cours / profil disponible). Cette page **n'affiche aucun résultat**.
+> **Lire le résultat** se fait dans la **fiche de la personne** : onglet **PCM** du dossier candidat, onglet **Profil PCM** de la fiche collaborateur. Ces deux onglets sont réservés aux profils **ADMIN et RH**. Le praticien PCM, lui, fait passer les tests sans accéder aux résultats.
+
 **Lancer un test** :
-1. Depuis la fiche candidat (onglet PCM), cliquez sur **Lancer test PCM**
-2. Le candidat répond aux **20 questions** (une par une, barre de progression visible)
-3. Le résultat affiche le profil complet avec **Base**, **Phase** et **Immeuble**
+1. Depuis la fiche candidat (onglet PCM) ou depuis la page **Tests PCM**, cliquez sur **Lancer le test**
+2. Copiez le lien et transmettez-le au candidat (ou ouvrez le questionnaire à côté de lui)
+3. Le candidat répond aux **20 questions** (une par une, barre de progression visible)
+4. Une fois terminé, le profil est disponible dans l'**onglet PCM de sa fiche candidat** : **Base**, **Phase** et **Immeuble**
 
 **Les 6 types de personnalité** :
 | Type | Caractéristiques | Perception |
@@ -227,17 +232,25 @@ Le test PCM évalue le profil de personnalité des candidats à travers **20 que
 - **Base** : votre type fondamental (stable dans le temps). C'est l'étage 1 de l'immeuble — votre fondation
 - **Phase** : votre type actif actuel (peut évoluer avec les événements de vie). Détermine vos motivations et comportements sous stress
 - **Immeuble PCM** : visualisation en bâtiment avec barres horizontales. La Base est toujours en bas (fondation), les autres types sont classés par intensité
-- **Radar** : graphique à 6 axes montrant vos scores normalisés (0-100 %) pour chaque type
 
-**Alertes RPS** :
-Si le score de stress de votre Phase dépasse 75 %, une alerte de **Risques Psychosociaux** apparaît en rouge. Cela signale un niveau de stress élevé nécessitant attention.
+**Cohérence des réponses** :
+Le profil peut porter la mention « Réponses « stress » très cohérentes avec la phase ». Elle indique
+simplement que les réponses de mise sous tension désignent le même type que la phase calculée.
+**Cet indicateur reflète la cohérence des réponses, pas un état de santé, et ne doit fonder aucune
+décision.** L'ancienne « alerte Risques Psychosociaux » a été retirée en version 2.43.0 : l'audit du
+module a mesuré qu'elle se déclenchait sur près d'un tiers de jeux de réponses aléatoires.
+
+**Méthode — à lire avant d'interpréter** :
+Ce questionnaire interne d'aide au dialogue (20 questions) n'est pas l'inventaire de personnalité
+validé et propriétaire du modèle. Le résultat est une hypothèse de lecture, pas un diagnostic :
+il ne doit jamais fonder seul une décision de recrutement ou d'orientation.
 
 **Exporter le profil** :
-Depuis la page de résultats, deux boutons d'export sont disponibles :
-1. **Export résultats** (vert) : génère un PDF A4 avec l'immeuble, les descriptions base/phase, le guide manager (comportements DO/DON'T), et les niveaux de stress
-2. **Fiche technique** (gris) : génère un PDF A4 avec le tableau des scores bruts et le détail des 20 réponses groupées par catégorie
+Depuis l'**onglet PCM du dossier candidat** (là où le profil s'affiche), deux boutons d'export sont disponibles :
+1. **Fiche PDF** : génère un PDF A4 avec l'immeuble, les descriptions base/phase, le guide manager (comportements DO/DON'T), et les niveaux de stress
+2. **Export technique** : génère un PDF A4 avec le tableau des scores bruts et le détail des 20 réponses groupées par catégorie
 
-> Les deux exports s'ouvrent dans une fenêtre popup — utilisez **Ctrl+P** ou le bouton Imprimer pour sauvegarder en PDF.
+> Les deux exports s'ouvrent dans une fenêtre popup — utilisez **Ctrl+P** ou le bouton Imprimer pour sauvegarder en PDF. Si votre navigateur bloque la fenêtre, un bandeau vous le dit : autorisez les fenêtres surgissantes pour ce site, puis réessayez.
 
 ---
 

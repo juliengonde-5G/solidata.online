@@ -296,7 +296,7 @@ solidata.online/
 │           ├── NewsFeed.jsx           # Fil d'actualités
 │           │   ── RECRUTEMENT & RH ──
 │           ├── Candidates.jsx         # Kanban 5 colonnes, CV, entretiens, mise en situation
-│           ├── PersonalityMatrix.jsx  # Résultats PCM + export PDF A4
+│           ├── PersonalityMatrix.jsx  # Console de passation PCM (aucun résultat — 2.43.0)
 │           ├── PCMTest.jsx            # Test PCM autonome (public, token)
 │           ├── Employees.jsx          # Fiches, contrats, disponibilités
 │           ├── WorkHours.jsx          # Saisie/validation heures
@@ -399,7 +399,7 @@ solidata.online/
 ### Module 1 — Authentification & Administration
 - Connexion JWT (access token 8h + refresh token 7j)
 - 9 rôles intégrés : `ADMIN`, `MANAGER`, `RH`, `COLLABORATEUR`, `AUTORITE`, `RESP_BTQ`, `DPO`, `FINANCE`, `QHSE` (+ rôles personnalisés par duplication)
-- **Double authentification (2FA/TOTP, 2.43.0)** pour les rôles soumis (défaut `ADMIN`/`RH`/`DPO`/`PCM`, paramétrable) — détail complet du flux au § « Sécurité » ci-dessous
+- **Double authentification (2FA/TOTP, 2.43.0)** pour les rôles soumis (défaut `ADMIN`/`RH`/`DPO`, paramétrable) — détail complet du flux au § « Sécurité » ci-dessous
 - Gestion des utilisateurs
 - Paramètres de l'application (nom, adresse, SIRET, objectifs production)
 - Templates de messages SMS/Email
@@ -420,8 +420,9 @@ solidata.online/
 - **Immeuble de personnalité** : Base toujours en étage 1 (fondation), autres types classés par score
 - Détection RPS (Risques Psychosociaux) si 2+ réponses stress correspondent au type Phase
 - Rapports chiffrés AES-256 (données sensibles)
-- **Export PDF A4** : page résultats (immeuble, comportements, guide manager) + fiche technique (réponses brutes)
+- **Export PDF A4** : page résultats (immeuble, comportements, guide manager) + fiche technique (réponses brutes) — depuis l'onglet PCM du dossier candidat (module partagé `frontend/src/utils/pcm-pdf.js`)
 - Textes simplifiés FALC (Facile À Lire et À Comprendre) pour chaque question
+- **Séparation passation / résultats (2.43.0, arbitrage client)** : le rôle `PCM` (Praticien) fait passer le test et suit son avancement, mais n'accède plus aux résultats. Les trois routes de résultats (`GET /api/pcm/profiles`, `/profiles/:candidateId`, `/profiles/:candidateId/answers`) sont resserrées **ADMIN/RH** ; `POST /api/pcm/submit` reste ouvert au praticien mais lui répond **sans le profil calculé** (sinon la restriction se contournerait en soumettant les réponses). Le résultat se lit dans la fiche de la personne uniquement — la page `/pcm` est devenue une console de passation. Contrat : `backend/tests/contract/pcm-praticien-contract.test.js`.
 
 ### Module 4 — Gestion RH
 - Fiches employés (coordonnées, photo, compétences)
@@ -872,7 +873,7 @@ URL : `https://solidata.online`
 | Connexion | `/login` | Tous | Page de login |
 | Dashboard | `/` | Tous | Tableau de bord principal |
 | Candidats | `/candidates` | ADMIN, RH | Kanban recrutement |
-| PCM | `/pcm` | ADMIN, RH | Sessions test personnalité |
+| PCM | `/pcm` | ADMIN, RH, PCM | Console de passation (lancer un test, suivre l'avancement) — **aucun résultat affiché** ; les profils se consultent dans la fiche candidat/collaborateur |
 | Test PCM | `/pcm-test/:token` | Public (token) | Passage du test PCM |
 | Employés | `/employees` | ADMIN, RH, MANAGER | Fiches salariés |
 | Heures | `/work-hours` | ADMIN, RH, MANAGER | Saisie heures travaillées |

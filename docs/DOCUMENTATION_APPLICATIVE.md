@@ -125,8 +125,9 @@ Le dashboard centralise les indicateurs clés :
 - Compteur automatique : recrutés vs objectif
 - Taux de remplissage visuel
 
-#### 2.2.3 Matrice PCM (Process Communication Model)
-**Route** : `/pcm` | **Rôles** : ADMIN, RH
+#### 2.2.3 Tests PCM (Process Communication Model)
+**Route** : `/pcm` — **console de passation** | **Rôles** : ADMIN, RH, PCM (praticien)
+**Résultats** : onglet PCM du dossier candidat (`Candidates.jsx`) et onglet Profil PCM de la fiche collaborateur (`Employees.jsx`) — ADMIN/RH
 **Fichier** : `frontend/src/pages/PersonalityMatrix.jsx`
 **Test** : `frontend/src/pages/PCMTest.jsx`
 **API** : `backend/src/routes/pcm.js` (40 Ko)
@@ -144,14 +145,19 @@ Le dashboard centralise les indicateurs clés :
 - **Encart de méthode obligatoire** (2.43.0), affiché avant la passation (écran candidat), sur la fiche profil et sur les deux PDF : rappelle que le questionnaire est un outil interne d'aide au dialogue inspiré du Process Communication Model, **non validé scientifiquement**, et qu'il ne doit **jamais fonder seul une décision de recrutement ou d'orientation**.
 - **Guide Manager** : comportements recommandés (DO) et à éviter (DON'T), issus de la Base
 - **Accessibilité FALC** : descriptions en Facile à Lire et à Comprendre pour chaque type
-- **Export PDF A4** : deux exports depuis la fiche profil, tous deux enrichis de l'encart de méthode :
-  - *Export résultats* : synthèse avec immeuble, base/phase, comportements, guide manager, niveaux de stress
-  - *Fiche technique* : tableau des scores bruts + détail des 20 réponses groupées par catégorie
+- **Le résultat se lit dans la fiche de la personne, et nulle part ailleurs** (2.43.0, demande client) : la page `/pcm` est devenue une **console de passation** — désigner la personne, lancer le test, transmettre le lien, suivre l'avancement (aucun test / lien envoyé, en attente / en cours / profil disponible) — et son référentiel des 6 types. Elle n'affiche plus **aucun résultat, pour aucun rôle** (l'ancien onglet « Profils » et la fiche détaillée ont été retirés). Le profil se consulte à un seul endroit : l'onglet **PCM du dossier candidat** et l'onglet **Profil PCM de la fiche collaborateur**, deux écrans ADMIN/RH.
+- **Export PDF A4** : deux exports depuis l'onglet PCM du dossier candidat (ils ont suivi les résultats ; module partagé `frontend/src/utils/pcm-pdf.js`), tous deux enrichis de l'encart de méthode :
+  - *Fiche PDF* : synthèse avec immeuble, base/phase, comportements, guide manager, niveaux de stress
+  - *Export technique* : tableau des scores bruts + détail des 20 réponses groupées par catégorie (les réponses sont chargées à la demande ; si elles ne le sont pas, la fiche est éditée sans elles et le dit)
 - **Chiffrement** : le rapport d'analyse est chiffré AES-256-GCM en base (`pcm_reports.encrypted_report`) ; les 20 réponses brutes (`pcm_answers`), elles, **ne sont volontairement pas chiffrées** — elles permettent de recalculer un rapport si la clé de chiffrement venait à changer.
 - **Journalisation** (2.43.0) : la création d'une session, la soumission des réponses et **chaque consultation d'un rapport** sont désormais tracées (journal d'activité + `rgpd_audit_log`, action `PCM_RAPPORT_CONSULTATION`) — ce module était jusqu'ici le seul du domaine RH à ne rien journaliser. Une entrée dédiée du registre RGPD (« Recrutement — évaluation de personnalité (PCM) ») couvre ce traitement.
 - **Double authentification obligatoire** (2.43.0) pour accéder à ce module — voir § « Double authentification (2FA/TOTP) ».
 
-**Rôles** : ADMIN, RH et **PCM** (rôle dédié au praticien qui fait passer les tests, **sans accès au reste du dossier de recrutement** — la liste de candidats qui lui est ouverte ne renvoie ni CV, ni compte rendu d'entretien, ni coordonnées) créent des sessions et consultent les profils ; MANAGER a un accès en lecture au seul référentiel (questionnaire, types de personnalité) mais jamais aux profils individuels.
+**Rôles** :
+- **ADMIN et RH** : tout — créer des sessions, consulter les profils, les exporter.
+- **PCM (Praticien)** — périmètre resserré en 2.43.0 (arbitrage client) : il **fait passer** le test (désigne la personne, crée la session, transmet le lien) et suit l'**avancement**, **sans accès au reste du dossier de recrutement** (la liste de candidats qui lui est ouverte ne renvoie ni CV, ni compte rendu d'entretien, ni coordonnées) **ni aux RÉSULTATS** : ni type de base, ni phase, ni immeuble, ni scores, ni réponses, ni rapport. Les trois routes de résultats lui répondent **403**, et `POST /submit` lui accuse réception **sans** renvoyer le profil calculé — sans quoi il suffirait de soumettre les réponses pour obtenir le rapport.
+- **MANAGER** : lecture du seul référentiel (questionnaire, types de personnalité), jamais des profils individuels.
+- **Le candidat** garde sa propre restitution en fin de test (écran de passation) : c'est son résultat, la règle ci-dessus porte sur les agents de la structure.
 
 **API PCM** (`backend/src/routes/pcm.js`) :
 | Méthode | Endpoint | Rôles | Description |
@@ -162,12 +168,14 @@ Le dashboard centralise les indicateurs clés :
 | POST | `/api/pcm/sessions` | ADMIN, RH, PCM | Créer une session de test pour un candidat |
 | GET | `/api/pcm/candidats` | ADMIN, RH, PCM | Liste minimale des candidats (identité, poste visé, état du test) |
 | GET | `/api/pcm/sessions/:token` | public (jeton de session) | Accès du candidat en mode autonome |
-| POST | `/api/pcm/submit` | jeton de session, ou ADMIN/RH/MANAGER/PCM | Soumission des réponses (18 minimum sur 20) et calcul du profil |
-| GET | `/api/pcm/profiles` | ADMIN, RH, PCM | Liste de tous les profils |
-| GET | `/api/pcm/profiles/:candidateId` | ADMIN, RH, PCM | Profil déchiffré d'un candidat (consultation journalisée) |
-| GET | `/api/pcm/profiles/:candidateId/answers` | ADMIN, RH, PCM | Réponses brutes enrichies |
+| POST | `/api/pcm/submit` | jeton de session, ou ADMIN/RH/MANAGER/PCM | Soumission des réponses (18 minimum sur 20) et calcul du profil — **un appelant PCM authentifié reçoit un accusé de réception sans le profil** (2.43.0) |
+| GET | `/api/pcm/profiles` | **ADMIN, RH** | Liste de tous les profils |
+| GET | `/api/pcm/profiles/:candidateId` | **ADMIN, RH** | Profil déchiffré d'un candidat (consultation journalisée) |
+| GET | `/api/pcm/profiles/:candidateId/answers` | **ADMIN, RH** | Réponses brutes enrichies |
 
 Il n'existe **aucune route `POST /api/pcm/evaluate`** ni **`DELETE /api/pcm/:candidateId`** (contrairement à ce qu'indiquait cette page) — un profil PCM n'est supprimé qu'à l'anonymisation du candidat, ou du salarié auquel il est lié (purge intégrale des tables `pcm_*` correspondantes).
+
+**Trois lignes en gras dans le tableau ci-dessus (2.43.0)** : ce sont les trois portes d'accès au résultat, et elles sont fermées au rôle PCM. Le contrat `backend/tests/contract/pcm-praticien-contract.test.js` les verrouille (403 sur les trois, aucune requête envoyée en base sur un refus, aucune trace de consultation écrite pour une consultation qui n'a pas eu lieu) — et vérifie en regard que ce que le praticien doit pouvoir faire fonctionne toujours : `POST /sessions`, `GET /candidats` (état du test, jamais son résultat), référentiel des types.
 
 ### 2.3 Gestion d'Équipe
 

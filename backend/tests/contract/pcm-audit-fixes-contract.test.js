@@ -67,12 +67,17 @@ describe('module PCM — surfaces et traçabilité', () => {
   });
 
   // ── (a) D15/R10 ────────────────────────────────────────────
+  // Rôle de l'appelant : RH. Cette garantie a été posée pour le praticien PCM,
+  // qui lisait alors cette route ; il n'y a plus accès (demande client :
+  // les résultats ne se consultent que dans la fiche de la personne, cf.
+  // pcm-praticien-contract). La minimisation, elle, reste due : une liste de
+  // profils de personnalité n'a pas besoin des coordonnées.
   test('GET /profiles ne renvoie JAMAIS l’e-mail des candidats', async () => {
-    const r = await request(app).get('/api/pcm/profiles').set('Authorization', jeton('PCM'));
+    const r = await request(app).get('/api/pcm/profiles').set('Authorization', jeton('RH'));
     expect(r.status).toBe(200);
     expect(r.body).toHaveLength(1);
     expect(r.body[0]).not.toHaveProperty('email');
-    // L'identité reste : sans elle, le praticien ne saurait pas quel profil ouvrir.
+    // L'identité reste : sans elle, on ne saurait pas quel profil ouvrir.
     expect(r.body[0].last_name).toBe('ZEROUAL');
   });
 
@@ -80,7 +85,7 @@ describe('module PCM — surfaces et traçabilité', () => {
     // Le test ci-dessus passerait aussi si le mock omettait simplement la
     // colonne. On vérifie donc la PROJECTION réellement demandée à PostgreSQL :
     // c'est elle qui décide de ce qui quitte la base.
-    await request(app).get('/api/pcm/profiles').set('Authorization', jeton('PCM'));
+    await request(app).get('/api/pcm/profiles').set('Authorization', jeton('RH'));
     const sqlProfils = pool.query.mock.calls
       .map((c) => String(c[0]))
       .find((s) => /FROM pcm_reports pr/i.test(s));

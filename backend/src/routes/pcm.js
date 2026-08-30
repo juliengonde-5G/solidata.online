@@ -3,7 +3,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 // Double authentification (2.43.0). Le rôle PCM (Praticien) a été RETIRÉ du
 // périmètre par arbitrage client : pour lui, cette garde est un no-op. Elle
 // reste posée parce qu'un ADMIN ou un RH qui emprunte ces routes, lui, y est
@@ -14,6 +14,28 @@ const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+
+// ══════════════════════════════════════════════════════════════
+// PÉRIMÈTRE DU RÔLE « PCM » (Praticien) — arbitrage client 2.43.0
+//
+// Le praticien FAIT PASSER le test : il désigne un candidat (GET /candidats,
+// projection minimale), crée la session (POST /sessions), transmet le lien et
+// suit l'AVANCEMENT (aucun test / en attente / en cours / profil disponible).
+// Il ne CONSULTE PLUS les résultats : ni type de base, ni phase, ni immeuble,
+// ni scores, ni réponses, ni rapport.
+//
+// Les résultats se lisent UNIQUEMENT depuis la fiche de la personne — onglet
+// PCM du dossier candidat, onglet Profil PCM de la fiche collaborateur —, deux
+// écrans ADMIN/RH. Le test reste ancré dans le dossier de la personne ; il n'y
+// a plus d'écran autonome qui restitue des profils (la page /pcm est devenue
+// la console de passation).
+//
+// Concrètement, dans ce fichier :
+//   - GET /profiles, GET /profiles/:candidateId et /answers → ADMIN, RH
+//   - POST /sessions, GET /candidats, GET /types, /questionnaire → PCM inclus
+//   - POST /submit ne renvoie pas le profil calculé à un appelant PCM
+//     authentifié (sinon la passation accompagnée rouvrirait la porte).
+// ══════════════════════════════════════════════════════════════
 
 // Journal d'activité (2.43.0 — audit PCM D4/R6). Ce routeur était le SEUL du
 // domaine RH à ne laisser aucune trace : créer une session de test, soumettre
@@ -837,8 +859,13 @@ router.post('/sessions', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM
 //
 // Le praticien PCM doit pouvoir désigner un candidat sans accéder au dossier de
 // recrutement : cette projection ne renvoie QUE l'identité, le poste visé et
-// l'état du test. Ni CV, ni compte rendu d'entretien, ni mise en situation, ni
+// l'ÉTAT du test. Ni CV, ni compte rendu d'entretien, ni mise en situation, ni
 // notes, ni coordonnées — la page Candidats reste réservée à ADMIN/RH/MANAGER.
+//
+// Et aucun RÉSULTAT : `a_un_profil` est un booléen d'avancement (le test a-t-il
+// produit un rapport ?), `session_status` l'état de la session. Ni base_type,
+// ni phase_type, ni risk_alert ne sont projetés — la liste dit où en est la
+// passation, jamais ce qu'elle a donné.
 router.get('/candidats', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
   try {
     const r = await pool.query(
@@ -914,6 +941,9 @@ router.get('/sessions/:token', async (req, res) => {
 // Middleware : autorise soit un utilisateur RH/ADMIN authentifié, soit
 // un access_token de session PCM (lien autonome envoyé au candidat).
 // Bloque la soumission par simple `session_id` sans preuve de légitimité.
+//
+// Le rôle PCM reste admis ICI (il fait passer les tests), mais la réponse de
+// /submit ne lui rend AUCUN résultat : voir la garde en fin de handler.
 async function authenticateSubmit(req, res, next) {
   const { access_token } = req.body || {};
   if (access_token) return next(); // token capabilité vérifié plus bas
@@ -1013,6 +1043,25 @@ router.post('/submit', authenticateSubmit, [
       client.release();
     }
 
+    // Porte de derrière fermée (retrait des résultats au praticien PCM).
+    //
+    // `authenticateSubmit` laisse passer deux appelants très différents :
+    //   - le CANDIDAT, par jeton de session (aucun `req.user`) — c'est sa
+    //     propre restitution, elle est inchangée ;
+    //   - un agent AUTHENTIFIÉ, qui soumet par `session_id`.
+    // Dans le second cas, un praticien recevrait ici le profil complet (base,
+    // phase, scores, rapport) : le correctif posé sur /profiles serait
+    // contournable en soumettant lui-même les réponses. On lui accuse donc
+    // réception SANS résultat. Les réponses, elles, sont bien enregistrées :
+    // le rapport existe, il se lit dans la fiche de la personne.
+    if (req.user && resolveBaseRole(req.user.role) === 'PCM') {
+      return res.json({
+        success: true,
+        message: 'Réponses enregistrées. Le profil est consultable dans la fiche '
+          + 'de la personne, par les profils habilités.',
+      });
+    }
+
     res.json({
       message: 'Profil PCM calculé avec succès',
       profile: {
@@ -1034,16 +1083,17 @@ router.post('/submit', authenticateSubmit, [
   }
 });
 
-// GET /api/pcm/profiles — Tous les profils
-router.get('/profiles', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+// GET /api/pcm/profiles — Tous les profils (ADMIN/RH).
+// Le praticien PCM n'y a plus accès : les résultats se consultent dans la
+// fiche de la personne, pas depuis une liste transverse.
+router.get('/profiles', authenticate, requireMfa, authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
-      // `c.email` RETIRÉ (2.43.0 — audit PCM D15/R10) : cette liste est ouverte
-      // au rôle « Praticien PCM », dont la raison d'être est justement de faire
-      // passer les tests SANS accéder au dossier de recrutement ni aux
-      // coordonnées. La projection de /candidats l'excluait déjà et un test de
-      // contrat l'y verrouille ; /profiles la laissait passer. L'identité
-      // (prénom/nom) reste nécessaire pour désigner le profil à ouvrir.
+      // `c.email` RETIRÉ (2.43.0 — audit PCM D15/R10). Le motif d'origine était
+      // le rôle « Praticien PCM », qui lisait cette liste ; il ne la lit plus
+      // (route resserrée ADMIN/RH). La minimisation, elle, tient toute seule :
+      // une liste de profils de personnalité n'a aucun besoin des coordonnées
+      // pour désigner le profil à ouvrir — l'identité (prénom/nom) suffit.
       `SELECT pr.id, pr.session_id, pr.candidate_id, pr.base_type, pr.phase_type,
        pr.risk_alert, pr.created_at,
        c.first_name, c.last_name
@@ -1059,7 +1109,7 @@ router.get('/profiles', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'
 });
 
 // GET /api/pcm/profiles/:candidateId/answers — Réponses brutes d'un candidat
-router.get('/profiles/:candidateId/answers', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles/:candidateId/answers', authenticate, requireMfa, authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     // Trouver la dernière session complétée pour ce candidat
     const sessionRes = await pool.query(
@@ -1118,7 +1168,7 @@ async function reconstruireRapport(sessionId) {
 }
 
 // GET /api/pcm/profiles/:candidateId — Profil d'un candidat (déchiffré)
-router.get('/profiles/:candidateId', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), async (req, res) => {
+router.get('/profiles/:candidateId', authenticate, requireMfa, authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT pr.*, c.first_name, c.last_name, c.email
