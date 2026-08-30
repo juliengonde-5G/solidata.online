@@ -94,6 +94,7 @@ les PDF et l'écran de passation, et fin de la transmission de cette « alerte �
    calcul reste en base) et ajouter les colonnes de fiabilité (`01-audit-module-pcm.md`, D1/D2).
 3. Étendre la MFA à FINANCE (données comptables) si souhaité — un réglage suffit.
 4. **AIPD** sur le traitement « note de profil + PCM » (évaluation systématique + données
-   sensibles + personnes vulnérables).
+   sensibles + personnes vulnérables) — **le mode d'emploi et le dossier pré-rempli sont
+   désormais fournis** : `06-aipd-mode-emploi.md`.
 5. Faire instruire l'usage des marques « Process Communication Model » / « PCM » (Kahler
    Communications, Inc.) dans un logiciel exploité.
