@@ -1,9 +1,22 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { DataTable, Modal, PageHeader } from '../components';
-import { Shield, ScrollText, BookOpen, Clock, Trash2, Lock, UserCheck, FileClock, Bot } from 'lucide-react';
+import { Shield, ScrollText, BookOpen, Clock, Trash2, Lock, UserCheck, FileClock, Bot, RefreshCw, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
+import { libelleActionRgpd, libelleEntiteRgpd } from '../utils/rgpd-libelles';
+
+/**
+ * Libellés du statut d'un passage de job (`job_runs.status`, via
+ * GET /rgpd/purges → dernier_passage.statut). Ce n'est PAS un code
+ * `rgpd_audit_log.action` (dictionnaire dans utils/rgpd-libelles.js) : c'est
+ * l'état d'exécution technique du job lui-même, propre à cet écran.
+ */
+const STATUT_PASSAGE = {
+  success: { label: 'Réussi', className: 'text-green-700' },
+  error: { label: 'Échec', className: 'text-red-700' },
+  timeout: { label: 'Délai dépassé', className: 'text-amber-700' },
+};
 
 const POLITIQUE_ICONS = {
   conservation: Clock,
@@ -21,6 +34,10 @@ export default function RGPD() {
   const [audit, setAudit] = useState([]);
   const [politique, setPolitique] = useState(null);
   const [politiqueError, setPolitiqueError] = useState(null);
+  const [purges, setPurges] = useState([]);
+  const [purgesError, setPurgesError] = useState(null);
+  const [purgeRunning, setPurgeRunning] = useState({}); // { [cle]: bool }
+  const [purgeResultat, setPurgeResultat] = useState(null); // bandeau de résultat { type, message }
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ nom_traitement: '', finalite: '', base_legale: 'consentement', categories_personnes: '', categories_donnees: '', destinataires: '', duree_conservation: '', mesures_securite: '' });
@@ -42,10 +59,15 @@ export default function RGPD() {
         setPolitiqueError(null);
         const r = await api.get('/rgpd/politique');
         setPolitique(r.data);
+      } else if (tab === 'automatisations') {
+        setPurgesError(null);
+        const r = await api.get('/rgpd/purges');
+        setPurges(listePurges(r.data));
       }
     } catch (err) {
       console.error(err);
       if (tab === 'politique') setPolitiqueError(err.response?.data?.error || 'Erreur de chargement');
+      if (tab === 'automatisations') setPurgesError(err.response?.data?.error || 'Erreur de chargement des automatisations');
     }
     setLoading(false);
   };
@@ -100,9 +122,52 @@ export default function RGPD() {
     } catch (err) { alert(err.response?.data?.error || 'Erreur'); }
   };
 
+  // Déclenchement manuel d'une purge du registre (`GET /rgpd/purges`). Même
+  // fonction serveur que le job planifié équivalent (doctrine anonymization.js
+  // : un seul chemin par purge) — seul le déclencheur ('manual' vs 'auto') et
+  // l'utilisateur journalisé changent. Résultat en BANDEAU, jamais d'alert() :
+  // c'est justement ce que ce chantier corrige sur cet écran.
+  const handleExecuterPurge = async (cle, libelle) => {
+    const ok = await confirm({
+      title: `Lancer la purge « ${libelle} » ?`,
+      message: "Cette action supprime définitivement les données concernées, au-delà du seuil de rétention affiché. Irréversible, journalisée dans le journal d'audit RGPD.",
+      confirmLabel: 'Lancer la purge',
+      confirmVariant: 'danger',
+    });
+    if (!ok) return;
+    setPurgeResultat(null);
+    setPurgeRunning((r) => ({ ...r, [cle]: true }));
+    try {
+      const r = await api.post(`/rgpd/purges/${cle}/executer`);
+      const detail = Object.entries(r.data.supprimes || {})
+        .filter(([, n]) => Number(n) > 0)
+        .map(([table, n]) => `${table} : ${n}`)
+        .join(', ');
+      const total = r.data.total ?? 0;
+      setPurgeResultat({
+        type: 'success',
+        message: total > 0
+          ? `« ${libelle} » — ${total} élément${total > 1 ? 's' : ''} supprimé${total > 1 ? 's' : ''}${detail ? ` (${detail})` : ''}.`
+          : `« ${libelle} » — aucune donnée au-delà du seuil de rétention, rien à supprimer. Action journalisée.`,
+      });
+    } catch (err) {
+      setPurgeResultat({
+        type: 'error',
+        message: `« ${libelle} » — ${err.response?.data?.error || "échec de l'exécution de la purge."}`,
+      });
+    }
+    setPurgeRunning((r) => ({ ...r, [cle]: false }));
+    // Rafraîchit la ligne (nouveau dernier passage) que l'exécution ait réussi ou non.
+    try {
+      const r2 = await api.get('/rgpd/purges');
+      setPurges(listePurges(r2.data));
+    } catch (err) { console.error(err); }
+  };
+
   const TABS = [
     { key: 'registre', label: 'Registre des traitements' },
     { key: 'droits', label: 'Droits des personnes' },
+    { key: 'automatisations', label: 'Automatisations & purges' },
     { key: 'audit', label: 'Journal d\'audit' },
     { key: 'politique', label: 'Règles de gestion des données' },
   ];
@@ -123,11 +188,93 @@ export default function RGPD() {
 
   const auditColumns = [
     { key: 'created_at', label: 'Date', sortable: true, render: (a) => <span className="text-gray-500">{new Date(a.created_at).toLocaleString('fr-FR')}</span> },
-    { key: 'user_name', label: 'Utilisateur', render: (a) => `${a.first_name} ${a.last_name}` },
-    { key: 'action', label: 'Action', render: (a) => <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-medium">{a.action}</span> },
-    { key: 'entity_type', label: 'Type' },
+    { key: 'user_name', label: 'Utilisateur', render: (a) => (a.user_id ? `${a.first_name || ''} ${a.last_name || ''}`.trim() || '—' : <span className="text-gray-400 italic">Automatique (job planifié)</span>) },
+    { key: 'action', label: 'Action', render: (a) => (
+      <span
+        className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs font-medium"
+        title={`Code technique : ${a.action}`}
+      >
+        {libelleActionRgpd(a.action)}
+      </span>
+    ) },
+    { key: 'entity_type', label: 'Type', render: (a) => <span title={a.entity_type || ''}>{a.entity_type ? libelleEntiteRgpd(a.entity_type) : '—'}</span> },
     { key: 'entity_id', label: 'ID' },
     { key: 'details', label: 'Détails', render: (a) => <span className="text-gray-500 text-xs max-w-xs truncate block">{a.details ? JSON.stringify(a.details) : '—'}</span> },
+  ];
+
+  // `GET /rgpd/purges` renvoie un OBJET { generated_at, journal_disponible,
+  // purges: [...] } — et non un tableau nu. Passer la réponse entière à
+  // DataTable faisait planter tout l'écran (page blanche : « sortedData.map is
+  // not a function »), alors même que l'appel répondait 200. On extrait la
+  // liste, en tolérant qu'un serveur renvoie directement un tableau, et on ne
+  // pose JAMAIS autre chose qu'un tableau dans l'état.
+  const listePurges = (reponse) => (Array.isArray(reponse) ? reponse : (reponse?.purges ?? []));
+
+  const purgesColumns = [
+    { key: 'libelle', label: 'Purge', render: (p) => (
+      <div>
+        <span className="font-medium text-gray-900">{p.libelle}</span>
+        {p.description && <p className="text-xs text-gray-500 mt-0.5 max-w-md">{p.description}</p>}
+      </div>
+    ) },
+    // Le serveur renvoie `retention: { valeur, unite, defaut, source, parametrable }`
+    // — la forme plate `retention_jours` est tolérée en repli (un serveur antérieur
+    // au lot, ou une purge sans seuil). `source` dit d'où vient la valeur : l'écran
+    // qui sert à PROUVER la conformité doit distinguer un seuil réglé d'un défaut.
+    { key: 'retention', label: 'Rétention', render: (p) => {
+      const valeur = p.retention?.valeur ?? p.retention_jours;
+      if (valeur == null) return <span className="text-gray-400">—</span>;
+      const unite = p.retention?.unite === 'jours' || !p.retention?.unite ? 'jour' : p.retention.unite;
+      return (
+        <div className="min-w-[7rem]">
+          <span className="whitespace-nowrap">{valeur} {unite}{valeur > 1 && unite === 'jour' ? 's' : ''}</span>
+          {p.retention?.source === 'code' && (
+            <p className="text-xs text-gray-400">valeur par défaut</p>
+          )}
+          {p.retention?.source === 'settings' && (
+            <p className="text-xs text-gray-400">réglée</p>
+          )}
+        </div>
+      );
+    } },
+    { key: 'dernier_passage', label: 'Dernier passage', render: (p) => {
+      const dp = p.dernier_passage;
+      if (!dp || p.jamais_execute) return <span className="text-gray-400 italic">Jamais exécuté</span>;
+      // Champs de `job_runs` tels que le serveur les expose (`status`,
+      // `finished_at`, `items_processed`, `error_message`, `duration_ms`), avec
+      // repli sur les noms francisés — sans quoi la colonne s'affiche vide en
+      // silence, exactement le défaut de contrat corrigé ailleurs dans ce module.
+      const statut = dp.status ?? dp.statut;
+      const date = dp.finished_at ?? dp.started_at ?? dp.date;
+      const items = dp.items_processed ?? dp.items;
+      const duree = dp.duration_ms ?? dp.duree_ms;
+      const erreur = dp.error_message ?? dp.erreur;
+      const statutInfo = STATUT_PASSAGE[statut] || { label: statut || '—', className: 'text-gray-600' };
+      return (
+        <div className="space-y-0.5 min-w-[11rem]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-semibold ${statutInfo.className}`}>{statutInfo.label}</span>
+            {date && <span className="text-xs text-gray-400">{new Date(date).toLocaleString('fr-FR')}</span>}
+          </div>
+          <div className="text-xs text-gray-500">
+            {items != null && <>{items} élément{items > 1 ? 's' : ''} traité{items > 1 ? 's' : ''}</>}
+            {duree != null && <> · {duree} ms</>}
+          </div>
+          {erreur && <p className="text-xs text-red-600">{erreur}</p>}
+        </div>
+      );
+    } },
+    { key: 'lancer', label: '', render: (p) => (
+      <button
+        onClick={() => handleExecuterPurge(p.cle, p.libelle)}
+        disabled={!!purgeRunning[p.cle]}
+        className="btn-danger text-xs whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {purgeRunning[p.cle] ? (
+          <span className="flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> En cours…</span>
+        ) : 'Lancer maintenant'}
+      </button>
+    ) },
   ];
 
   return (
@@ -205,6 +352,52 @@ export default function RGPD() {
                     <pre className="bg-gray-50 rounded-lg p-4 text-xs overflow-auto max-h-96">{JSON.stringify(exportData.data, null, 2)}</pre>
                   </div>
                 )}
+              </div>
+            )}
+
+            {tab === 'automatisations' && (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex gap-3 items-start">
+                  <Clock className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div className="text-sm text-blue-900">
+                    <p className="font-medium">Purges de rétention — jobs planifiés et déclenchement manuel</p>
+                    <p className="text-blue-800/80 mt-0.5">
+                      Chaque purge ci-dessous tourne automatiquement (préfixe <code className="font-mono">AUTO_</code> dans
+                      le journal d'audit) et peut aussi être lancée à la demande depuis cet écran — les deux voies
+                      exécutent exactement le même code, seule la trace diffère (qui a agi, humain ou planifié).
+                      Un déclenchement manuel est toujours journalisé, y compris quand il ne supprime rien : c'est la
+                      preuve qu'une vérification a eu lieu.
+                    </p>
+                  </div>
+                </div>
+
+                {purgeResultat && (
+                  <div className={`rounded-xl border p-4 text-sm flex items-start gap-3 ${
+                    purgeResultat.type === 'success'
+                      ? 'bg-green-50 border-green-200 text-green-800'
+                      : 'bg-red-50 border-red-200 text-red-700'
+                  }`}>
+                    {purgeResultat.type === 'success'
+                      ? <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+                      : <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />}
+                    <span className="flex-1">{purgeResultat.message}</span>
+                    <button onClick={() => setPurgeResultat(null)} aria-label="Fermer" className="shrink-0 opacity-60 hover:opacity-100">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {purgesError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">{purgesError}</div>
+                )}
+
+                <DataTable
+                  columns={purgesColumns}
+                  data={purges}
+                  loading={false}
+                  emptyIcon={Trash2}
+                  emptyMessage="Aucune purge enregistrée"
+                />
               </div>
             )}
 

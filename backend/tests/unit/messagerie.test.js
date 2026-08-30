@@ -319,6 +319,27 @@ describe('purgeMessagerieRetention — rétention paramétrée, journal honnête
     expect((await messagerie.purgeMessagerieRetention()).retention_jours).toBe(365);
   });
 
+  // Déclenchement MANUEL depuis la page RGPD : le service rgpd-purges écrit
+  // lui-même la ligne de journal, sous le code manuel et avec l'utilisateur qui
+  // a cliqué. Sans ce drapeau, la purge écrivait EN PLUS son propre
+  // « AUTO_PURGE_MESSAGERIE » : deux lignes, dont une qui affirmait faussement
+  // qu'un job planifié était passé.
+  it('journaliser:false → aucune ligne AUTO_ (le déclencheur manuel écrit la sienne)', async () => {
+    mockPurge({ setting: '365', messages: 7, conversations: 2 });
+    const r = await messagerie.purgeMessagerieRetention({ journaliser: false });
+    expect(r.messages_supprimes).toBe(7);           // la purge a bien eu lieu
+    const journal = mockQuery.mock.calls.filter((c) => /INSERT INTO rgpd_audit_log/.test(String(c[0])));
+    expect(journal).toHaveLength(0);
+  });
+
+  it('par défaut (job planifié), la ligne AUTO_ est bien écrite', async () => {
+    mockPurge({ setting: '365', messages: 7, conversations: 2 });
+    await messagerie.purgeMessagerieRetention();
+    const journal = mockQuery.mock.calls.filter((c) => /INSERT INTO rgpd_audit_log/.test(String(c[0])));
+    expect(journal).toHaveLength(1);
+    expect(String(journal[0][0])).toContain('AUTO_PURGE_MESSAGERIE');
+  });
+
   it('réglage illisible → défaut, sans exception', async () => {
     mockPurge({ setting: 'beaucoup' });
     expect((await messagerie.purgeMessagerieRetention()).retention_jours).toBe(365);

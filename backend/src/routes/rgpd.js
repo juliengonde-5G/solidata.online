@@ -6,6 +6,11 @@ const { requireMfa } = require('../middleware/mfa');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { anonymizeCandidate, anonymizeEmployee } = require('../services/anonymization');
+// Purges de rétention — SOURCE UNIQUE partagée avec le job planifié. On requiert
+// le service, jamais services/scheduler.js : requérir le scheduler depuis une
+// route déclencherait ses effets de bord (timers, verrou advisory).
+const { PURGES_RGPD, trouverPurge, retentionEffective } = require('../services/rgpd-purges');
+const { logActivity } = require('../middleware/activity-logger');
 
 router.use(authenticate);
 // Double authentification (2.43.0) : pour les rôles soumis (settings
@@ -249,6 +254,11 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
   try {
     const { readInsertionSetting } = require('../utils/insertion-settings');
     const retentionInsertionMois = await readInsertionSetting('insertion.retention_months');
+    // Seuil RÉELLEMENT appliqué par la purge des tests PCM (défaut 90 j en code,
+    // réglable) — lu au même endroit que le job pour que l'écran ne puisse pas
+    // annoncer une durée que le code n'applique pas.
+    const { readSetting, PCM_RETENTION_DEFAUT_JOURS } = require('../services/rgpd-purges');
+    const retentionPcmJours = await readSetting('rgpd.pcm_non_recrute_retention_jours', PCM_RETENTION_DEFAUT_JOURS);
 
     let registreCount = null;
     try {
@@ -268,6 +278,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             valeur: '24 mois',
             source: 'code',
             reference: 'backend/src/routes/rgpd.js (POST /purge-expired), backend/src/services/scheduler.js (purgeExpiredCandidates)',
+          },
+          {
+            titre: 'Tests de personnalité (PCM) des personnes non recrutées',
+            description: "Le test de personnalité d'un candidat dont le statut n'est pas « recruté » (session, réponses et rapport chiffré) est SUPPRIMÉ définitivement passé ce délai, sans attendre l'échéance de 24 mois du dossier de candidature. Le délai court depuis la PASSATION du test (date de fin du questionnaire ; à défaut, date de création de la session, pour qu'un lien de passation abandonné ne reste pas indéfiniment) — et non depuis la dernière activité sur le dossier, qu'une simple relance repousserait. La fiche du candidat, elle, suit sa propre échéance à 24 mois. Le test d'une personne recrutée n'est PAS concerné : il suit le dossier du salarié et disparaît à l'anonymisation de celui-ci.",
+            valeur: `${retentionPcmJours} jours`,
+            source: retentionPcmJours === PCM_RETENTION_DEFAUT_JOURS ? 'code' : 'rgpd.pcm_non_recrute_retention_jours',
+            reference: 'backend/src/services/rgpd-purges.js (purgePcmNonRecrute), job planifié purgePcmNonRecrute',
           },
           {
             titre: "Dossiers d'insertion clos",
@@ -298,11 +315,18 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
         description: 'Mécanismes effectifs de suppression, de purge planifiée et de révocation.',
         regles: [
           {
-            titre: 'Purge automatique quotidienne',
-            description: "4 jobs planifiés tournent chaque jour et couvrent le MÊME périmètre que les actions manuelles de cet écran : anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, suppression des positions GPS obsolètes, suppression des jetons de rafraîchissement expirés.",
-            valeur: 'quotidien',
+            titre: 'Purges automatiques planifiées',
+            description: "7 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, messagerie interne, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
+            valeur: '7 purges, 3×/jour',
             source: 'code',
-            reference: 'backend/src/services/scheduler.js',
+            reference: 'backend/src/services/rgpd-purges.js (registre PURGES_RGPD), backend/src/services/scheduler.js (runAllJobs)',
+          },
+          {
+            titre: 'Déclenchement manuel des purges',
+            description: "Chaque purge planifiée peut être lancée à la demande depuis l'onglet « Automatisations & purges » de cet écran. Le bouton exécute EXACTEMENT le même code que le job : il n'existe qu'une implémentation par purge, pour que les deux voies ne puissent pas diverger. Un déclenchement manuel est toujours journalisé, même s'il n'a rien eu à supprimer — c'est cette trace qui prouve qu'on a vérifié.",
+            valeur: 'à la demande, ADMIN/DPO',
+            source: 'code',
+            reference: 'backend/src/routes/rgpd.js (GET /purges, POST /purges/:cle/executer), backend/src/services/rgpd-purges.js',
           },
           {
             titre: 'Durée de vie des sessions (JWT)',
@@ -503,6 +527,121 @@ router.post('/purge-expired', authorize('ADMIN', 'DPO'), async (req, res) => {
   } catch (err) {
     console.error('[RGPD] Erreur purge :', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ══════════════════════════════════════════
+// AUTOMATISATIONS & PURGES DE RÉTENTION (2.44.0)
+// ──────────────────────────────────────────
+// Les purges de rétention tournaient toutes en tâche de fond, sans vitrine :
+// impossible de savoir depuis l'écran RGPD si elles tournaient encore, ni d'en
+// relancer une à la demande. Ces deux routes exposent le registre partagé
+// (services/rgpd-purges.js) — le MÊME code que le job planifié, jamais une
+// seconde implémentation qui divergerait en silence.
+// ══════════════════════════════════════════
+
+// GET /api/rgpd/purges — liste des purges + dernier passage du job correspondant.
+// Une purge dont le job n'a JAMAIS tourné renvoie `dernier_passage: null` et
+// `jamais_execute: true` : l'écran doit dire « jamais exécuté », pas afficher
+// une date vide qu'on prendrait pour une exécution muette.
+router.get('/purges', authorize('ADMIN', 'DPO'), async (req, res) => {
+  try {
+    const jobNames = PURGES_RGPD.map((p) => p.jobName);
+
+    // job_runs peut être absente (base neuve non migrée) : on dégrade en
+    // « jamais exécuté » plutôt que de renvoyer 500.
+    let derniers = [];
+    let succes = [];
+    let journalDisponible = true;
+    try {
+      const r = await pool.query(
+        `SELECT DISTINCT ON (job_name) job_name, started_at, finished_at, status,
+                error_message, items_processed, duration_ms
+           FROM job_runs WHERE job_name = ANY($1) ORDER BY job_name, started_at DESC`,
+        [jobNames]
+      );
+      derniers = r.rows;
+      const s = await pool.query(
+        `SELECT DISTINCT ON (job_name) job_name, started_at AS last_success_at
+           FROM job_runs WHERE job_name = ANY($1) AND status = 'success'
+          ORDER BY job_name, started_at DESC`,
+        [jobNames]
+      );
+      succes = s.rows;
+    } catch (_) {
+      journalDisponible = false;
+    }
+    const parJob = Object.fromEntries(derniers.map((r) => [r.job_name, r]));
+    const succesParJob = Object.fromEntries(succes.map((r) => [r.job_name, r.last_success_at]));
+
+    const purges = [];
+    for (const p of PURGES_RGPD) {
+      const dernier = parJob[p.jobName] || null;
+      purges.push({
+        cle: p.cle,
+        libelle: p.libelle,
+        description: p.description,
+        job_name: p.jobName,
+        entity_type: p.entiteAudit,
+        action_auto: p.actionAuto,
+        action_manuelle: p.actionManuelle,
+        retention: await retentionEffective(p),
+        jamais_execute: !dernier,
+        dernier_passage: dernier
+          ? {
+              started_at: dernier.started_at,
+              finished_at: dernier.finished_at,
+              status: dernier.status,
+              error_message: dernier.error_message,
+              items_processed: dernier.items_processed,
+              duration_ms: dernier.duration_ms,
+            }
+          : null,
+        dernier_succes_at: succesParJob[p.jobName] || null,
+      });
+    }
+
+    res.json({ generated_at: new Date().toISOString(), journal_disponible: journalDisponible, purges });
+  } catch (err) {
+    console.error('[RGPD] Erreur liste des purges :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/rgpd/purges/:cle/executer — déclenchement MANUEL d'une purge.
+// Liste blanche par clé (404 sur une clé inconnue : on n'exécute jamais une
+// fonction désignée par l'appelant). La purge journalise elle-même son action
+// manuelle dans rgpd_audit_log — TOUJOURS, même à zéro ligne supprimée : c'est
+// cette trace qui prouve qu'un humain a vérifié. On double la trace dans le
+// journal d'activité générique (`user_activity_log`), qui est une table
+// DISTINCTE : sans cet appel, l'action serait invisible depuis /activity-log.
+router.post('/purges/:cle/executer', authorize('ADMIN', 'DPO'), async (req, res) => {
+  const purge = trouverPurge(req.params.cle);
+  if (!purge) {
+    return res.status(404).json({ error: 'Purge inconnue', cle: req.params.cle });
+  }
+  try {
+    const resultat = await purge.fn({ trigger: 'manual', userId: req.user.id });
+    logActivity({
+      userId: req.user.id,
+      username: req.user.username,
+      action: 'purge',
+      entityType: 'rgpd',
+      entityId: null,
+      details: { purge: purge.cle, libelle: purge.libelle, total: resultat.total, supprimes: resultat.supprimes },
+      ip: req.ip,
+    });
+    res.json({
+      message: `Purge « ${purge.libelle} » exécutée`,
+      cle: purge.cle,
+      libelle: purge.libelle,
+      action_journalisee: purge.actionManuelle,
+      executed_at: new Date().toISOString(),
+      resultat,
+    });
+  } catch (err) {
+    console.error(`[RGPD] Erreur exécution manuelle de la purge ${purge.cle} :`, err);
+    res.status(500).json({ error: 'Erreur serveur', cle: purge.cle });
   }
 });
 

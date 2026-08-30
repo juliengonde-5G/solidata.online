@@ -442,7 +442,17 @@ async function lireRetentionJours() {
  * (pattern `badgeusePurgeRetention`) : un journal qui se remplit de « 0 » chaque
  * jour noie les vraies purges.
  */
-async function purgeMessagerieRetention() {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.journaliser=true] — écrire la ligne
+ *   `AUTO_PURGE_MESSAGERIE` dans le journal RGPD. Mis à `false` par le service
+ *   `rgpd-purges` quand la purge est déclenchée À LA MAIN : celui-ci écrit alors
+ *   sa propre ligne `PURGE_MESSAGERIE` avec l'utilisateur qui a cliqué. Sans ce
+ *   drapeau, un déclenchement manuel produisait DEUX lignes, dont une estampillée
+ *   « AUTO_ » — le journal aurait raconté une purge planifiée qui n'a pas eu lieu.
+ *   Défaut `true` : le job planifié est inchangé.
+ */
+async function purgeMessagerieRetention({ journaliser = true } = {}) {
   const retentionJours = await lireRetentionJours();
   let messagesSupprimes = 0;
   let conversationsSupprimees = 0;
@@ -475,7 +485,7 @@ async function purgeMessagerieRetention() {
     conversationsSupprimees = conv.rowCount || 0;
 
     const total = messagesSupprimes + conversationsSupprimees;
-    if (total > 0) {
+    if (total > 0 && journaliser) {
       await pool.query(
         `INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details)
          VALUES (NULL, 'AUTO_PURGE_MESSAGERIE', 'messagerie_messages', 0, $1)`,

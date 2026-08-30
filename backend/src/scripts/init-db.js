@@ -4228,6 +4228,25 @@ async function initDatabase() {
       );
     `);
 
+    // 2.44.0 — PURGE DES TESTS PCM DES PERSONNES NON RECRUTÉES À 90 JOURS
+    // (demande client). Mise à jour IDEMPOTENTE de la fiche ci-dessus plutôt
+    // qu'une entrée séparée : c'est le même traitement, seule sa durée de
+    // conservation change. Le registre doit dire la règle réellement appliquée
+    // par le code (services/rgpd-purges.js, job purgePcmNonRecrute), sinon il
+    // décrirait une conservation de 24 mois que le logiciel n'applique plus.
+    //
+    // Garde `NOT ILIKE` et non `NOT LIKE` : le texte ajouté contient « 90 jours »
+    // en minuscules mais la casse d'un texte retouché à la main par le DPO ne
+    // doit pas décider de la ré-application — un LIKE sensible à la casse avait
+    // déjà causé une non-idempotence sur la fiche insertion (2.43.0).
+    await client.query(`
+      UPDATE rgpd_registre SET
+        duree_conservation = duree_conservation || ' ; À COMPTER DE 2.44.0 — candidat NON RECRUTÉ : le test lui-même (session, réponses, rapport) est supprimé 90 jours après sa PASSATION (date de fin du questionnaire ; à défaut date de création de la session), sans attendre l''échéance de 24 mois du dossier de candidature, qui reste celle de la fiche candidat. Délai paramétrable (settings « rgpd.pcm_non_recrute_retention_jours »).',
+        mesures_securite = mesures_securite || ' ; purge automatique planifiée des tests des personnes non recrutées à 90 jours de la passation (job purgePcmNonRecrute, suppression en cascade des réponses et du rapport chiffré), déclenchable aussi à la demande par un ADMIN/DPO depuis l''écran RGPD, chaque passage journalisé (rgpd_audit_log, actions AUTO_PURGE_PCM_90J et PURGE_PCM_NON_RECRUTE) et horodaté au journal des jobs'
+      WHERE nom_traitement = 'Recrutement — évaluation de personnalité (PCM)'
+        AND COALESCE(duree_conservation, '') NOT ILIKE '%90 jours%';
+    `);
+
     // (m — phase B) Alertes Pass IAE : élargit le CHECK alert_type de
     // insertion_interview_alerts (pass_iae_7m / pass_iae_2m — job scheduler
     // checkPassIaeExpiring). Même pattern DROP-scan + ADD gardé ; le marqueur

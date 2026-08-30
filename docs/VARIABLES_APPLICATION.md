@@ -277,6 +277,22 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 |-----------------|-------------|--------------------|
 | `securite.mfa_roles` | `backend/src/middleware/mfa.js` | `["ADMIN","RH","DPO"]` (tableau JSON de rôles de BASE — un rôle personnalisé est soumis si son rôle de base l'est ; le rôle `PCM` a été retiré du périmètre par arbitrage client en 2.43.0) |
 
+### Purges de rétention RGPD (2.44.0)
+
+Les sept purges sont décrites dans le registre `PURGES_RGPD` de
+`backend/src/services/rgpd-purges.js` — source unique du job planifié **et** du bouton
+« Lancer maintenant » de l'écran RGPD. Chaque seuil se règle sans redéploiement ; l'écran
+indique s'il vient d'un réglage ou du défaut en code.
+
+| Clé `settings` | Purge concernée | Valeur par défaut |
+|-----------------|-----------------|--------------------|
+| `rgpd.pcm_non_recrute_retention_jours` | Tests PCM des candidats non recrutés — délai compté depuis la **passation** du test (repli : création de la session si le test n'a jamais été passé) | `90` (jours) |
+
+Les autres purges (candidatures 24 mois, dossiers d'insertion clos, positions GPS, arrêts de
+tournée, messagerie, jetons de rafraîchissement) conservent les clés de réglage qui leur étaient
+déjà propres — le lot 2.44.0 les a déplacées dans le service partagé **sans changer leur
+comportement**.
+
 ### Note de profil initial CIP — génération automatique (2.43.0)
 
 | Clé `settings` | Emplacement | Valeur par défaut |
