@@ -175,9 +175,25 @@ export default function NoteProfilInitial({ employeeId, employee = {}, canGenera
 
         {!loading && c && (
           <>
+            {/* Note AMPUTÉE : la réponse du modèle a été coupée et seules les
+                rubriques complètes ont été conservées. Le dire est impératif —
+                une note incomplète présentée comme entière laisserait croire
+                qu'il n'y avait rien de plus à lire. */}
+            {c._tronque && !c._raw && (
+              <div className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg p-2">
+                <strong>Note incomplète.</strong> La réponse du modèle a été coupée avant la fin : les
+                rubriques entières sont affichées, celles qui étaient en cours de rédaction ont été
+                retirées plutôt que devinées. Relancez « Régénérer » pour obtenir la note complète.
+              </div>
+            )}
+
             {c._raw && (
               <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                Le modèle n'a pas renvoyé une note structurée — texte brut ci-dessous.
+                <strong>Note non exploitable.</strong>{' '}
+                {c._tronque
+                  ? "La réponse du modèle a été coupée trop tôt pour qu'aucune rubrique ne soit complète."
+                  : "Le modèle n'a pas renvoyé la note au format attendu."}{' '}
+                Relancez « Régénérer ». Le texte reçu est reproduit ci-dessous, sans mise en forme.
                 <pre className="mt-2 whitespace-pre-wrap font-sans text-gray-700">{c._raw}</pre>
               </div>
             )}

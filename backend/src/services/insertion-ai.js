@@ -41,18 +41,74 @@ function extractText(response) {
     .trim();
 }
 
+// RÉPARATION D'UN JSON TRONQUÉ (coupé par max_tokens, ou par une réponse
+// interrompue). Un JSON coupé en plein milieu d'une chaîne est INVALIDE dans
+// son entier : sans cette réparation, une note dont 90 % des champs étaient
+// complets était intégralement jetée et remplacée par du JSON brut à l'écran.
+//
+// Méthode : on repart de la DERNIÈRE virgule de premier niveau utile et on
+// remonte jusqu'à ce que le préfixe, refermé par les accolades et crochets
+// restés ouverts, se parse. On coupe donc AVANT l'élément incomplet — on ne
+// complète JAMAIS une phrase à moitié écrite (doctrine « jamais de valeur
+// inventée » : ce qui manque est retiré, puis SIGNALÉ par `_tronque`).
+function reparerJsonTronque(texte) {
+  const virgules = [];
+  const pile = [];
+  let dansChaine = false;
+  let echappe = false;
+  for (let i = 0; i < texte.length; i++) {
+    const c = texte[i];
+    if (dansChaine) {
+      if (echappe) { echappe = false; continue; }
+      if (c === '\\') { echappe = true; continue; }
+      if (c === '"') dansChaine = false;
+      continue;
+    }
+    if (c === '"') { dansChaine = true; continue; }
+    else if (c === '{' || c === '[') pile.push(c);
+    else if (c === '}' || c === ']') pile.pop();
+    else if (c === ',') virgules.push({ i, ouverts: pile.slice() });
+  }
+  // Borné : au-delà de 300 tentatives, ce n'est plus une troncature mais un
+  // JSON malformé — inutile de balayer tout le document.
+  const debut = Math.max(0, virgules.length - 300);
+  for (let k = virgules.length - 1; k >= debut; k--) {
+    const { i, ouverts } = virgules[k];
+    const fermetures = ouverts.slice().reverse().map((o) => (o === '{' ? '}' : ']')).join('');
+    try {
+      const valeur = JSON.parse(texte.slice(0, i) + fermetures);
+      if (valeur && typeof valeur === 'object') return valeur;
+    } catch { /* on remonte d'un élément */ }
+  }
+  return null;
+}
+
 // Parse tolérant du JSON renvoyé par le modèle : retire les fences markdown
-// (```json … ```), tente le parse direct puis, en repli, du 1er { au dernier }.
-// Renvoie null si rien d'exploitable (ex. JSON tronqué par max_tokens).
-function parseJsonLoose(text) {
-  if (!text) return null;
+// (```json … ```), tente le parse direct, puis du 1er { au dernier }, puis
+// RÉPARE une réponse tronquée. Renvoie { valeur, repare } — `repare` vaut true
+// quand le contenu a dû être amputé de sa fin, ce que l'appelant DOIT dire à
+// l'utilisateur plutôt que de présenter une note incomplète comme entière.
+function analyserJsonModele(text) {
+  if (!text) return { valeur: null, repare: false };
   const cleaned = text.trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '');
-  try { return JSON.parse(cleaned); } catch { /* essaie l'extraction par accolades */ }
+  try { return { valeur: JSON.parse(cleaned), repare: false }; } catch { /* suite */ }
   const m = cleaned.match(/\{[\s\S]*\}/);
-  if (m) { try { return JSON.parse(m[0]); } catch { /* tronqué / invalide */ } }
-  return null;
+  if (m) { try { return { valeur: JSON.parse(m[0]), repare: false }; } catch { /* suite */ } }
+  // Dernier recours : le modèle a été coupé en pleine écriture.
+  const i = cleaned.indexOf('{');
+  if (i >= 0) {
+    const valeur = reparerJsonTronque(cleaned.slice(i));
+    if (valeur) return { valeur, repare: true };
+  }
+  return { valeur: null, repare: false };
+}
+
+// Renvoie null si rien d'exploitable. Conservé pour les appelants qui n'ont pas
+// besoin de savoir si la réponse a été réparée.
+function parseJsonLoose(text) {
+  return analyserJsonModele(text).valeur;
 }
 
 const SYSTEM_INSERTION = `Tu es l'IA d'accompagnement insertion de Solidata, une SIAE (Structure d'Insertion par l'Activité Économique) spécialisée dans le textile à Rouen.
@@ -495,7 +551,7 @@ Réponds STRICTEMENT en JSON avec les clés :
     // raisonnement, refus, ou format inattendu).
     return { synthese_direction: `Le modèle IA n'a renvoyé aucun contenu texte (blocs=[${blocs}], stop=${response.stop_reason}). Réessayez ; si cela persiste, vérifiez CLAUDE_MODEL et le quota Anthropic (logs serveur [AUDIT-IA]).` };
   }
-  const parsed = parseJsonLoose(text);
+  const { valeur: parsed, repare } = analyserJsonModele(text);
   // JAMAIS silencieux : si le JSON attendu n'est pas exploitable (parse KO,
   // objet vide, clés inattendues, ou réponse tronquée max_tokens), on renvoie
   // le texte brut sous `_raw` (l'UI l'affiche en bloc, pas dans « Synthèse »).
@@ -503,7 +559,7 @@ Réponds STRICTEMENT en JSON avec les clés :
     || (Array.isArray(parsed.points_forts) && parsed.points_forts.length)
     || (Array.isArray(parsed.recommandations_structure) && parsed.recommandations_structure.length));
   if (hasContent) {
-    if (response.stop_reason === 'max_tokens') parsed._tronque = true;
+    if (repare || response.stop_reason === 'max_tokens') parsed._tronque = true;
     return parsed;
   }
   console.warn(`[INSERTION][AUDIT-IA] JSON non exploitable (stop=${response.stop_reason}) — repli texte brut`);
@@ -717,7 +773,11 @@ async function analyserProfilInitial(employeeId, { generatedBy = null } = {}) {
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 3500,
+    // 8000 et non 3500 : la note comporte huit rubriques dont cinq listes
+    // rédigées (verbatims, signaux, conseils, vigilances, questions). Sur un
+    // dossier fourni, 3500 jetons coupaient la réponse en pleine phrase — le
+    // JSON devenait invalide et la note s'affichait en texte brut.
+    max_tokens: 8000,
     system: SYSTEM_NOTE_PROFIL,
     messages: [{
       role: 'user',
@@ -745,7 +805,7 @@ Réponds STRICTEMENT en JSON avec les clés :
   if (!text) {
     contenu = { synthese: `Le modèle IA n'a renvoyé aucun contenu texte (blocs=[${blocs}], stop=${response.stop_reason}). Relancez la génération ; si cela persiste, vérifiez CLAUDE_MODEL et le quota Anthropic.` };
   } else {
-    const parsed = parseJsonLoose(text);
+    const { valeur: parsed, repare } = analyserJsonModele(text);
     // JAMAIS silencieux (doctrine auditGlobalReport) : un JSON inexploitable
     // renvoie le texte brut sous `_raw`, jamais une note faussement structurée.
     const hasContent = parsed && (parsed.synthese
@@ -754,7 +814,11 @@ Réponds STRICTEMENT en JSON avec les clés :
       || parsed.structure_personnalite);
     if (hasContent) {
       contenu = parsed;
-      if (response.stop_reason === 'max_tokens') contenu._tronque = true;
+      // `repare` : la réponse a été coupée et on n'a gardé que les rubriques
+      // complètes. L'écran DOIT le dire — une note amputée présentée comme
+      // entière ferait croire au CIP qu'il n'y avait rien de plus à lire.
+      if (repare || response.stop_reason === 'max_tokens') contenu._tronque = true;
+      if (repare) console.warn(`[INSERTION][NOTE-PROFIL] réponse tronquée (stop=${response.stop_reason}) — rubriques complètes conservées`);
     } else {
       console.warn(`[INSERTION][NOTE-PROFIL] JSON non exploitable (stop=${response.stop_reason}) — repli texte brut`);
       contenu = { _raw: text, _tronque: response.stop_reason === 'max_tokens' };
@@ -823,4 +887,8 @@ module.exports = {
   auditGlobalReport,
   getEmployeeInsertionData,
   analyserProfilInitial,
+  // Exportés pour les tests : la réparation d'une réponse tronquée est la
+  // garde qui empêche une note complète à 90 % de s'afficher en JSON brut.
+  analyserJsonModele,
+  reparerJsonTronque,
 };

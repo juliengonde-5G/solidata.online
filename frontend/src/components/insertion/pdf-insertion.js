@@ -592,6 +592,15 @@ export function exportNoteProfilPDF({ employee = {}, note = null } = {}) {
     + '<div class="sub" style="text-align:right">Générée le ' + frDate(note && note.generated_at) + '<br/>' + genPar + '</div></div>'
     + '<div class="section"><div class="card" style="border-color:#F59E0B;background:#FFFBEB">'
     + '<strong>' + esc(NOTE_PROFIL_MENTION) + '</strong></div></div>'
+    // Une note AMPUTÉE part au dossier du salarié comme les autres : le PDF
+    // doit porter la mention, sinon le lecteur d'un dossier archivé prendrait
+    // une rubrique manquante pour une absence d'élément à signaler.
+    + (c._tronque
+      ? '<div class="section"><div class="card" style="border-color:#F59E0B;background:#FFFBEB">'
+        + '<strong>Note incomplète</strong> — la réponse du modèle a été coupée avant la fin. '
+        + 'Les rubriques entières figurent ci-dessous ; celles qui étaient en cours de rédaction ont '
+        + 'été retirées plutôt que devinées. Une régénération produit la note complète.</div></div>'
+      : '')
     + '<div class="section"><div class="section-title">Synthèse</div><div class="card">'
     + esc(c.synthese || (c._raw ? c._raw : 'Aucune synthèse disponible.')) + '</div></div>'
     // La parole de la personne vient AVANT toute lecture qu'on fait d'elle.
