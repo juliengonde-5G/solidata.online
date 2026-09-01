@@ -185,7 +185,11 @@ describe('analyserProfilInitial — ce qui part vers le modèle', () => {
     expect(system).toMatch(/non évalué/);
     expect(system).toMatch(/médecine du\s+travail/);
     expect(system).toMatch(/HYPOTHÈSE/);
-    expect(mockCreate.mock.calls[0][0].max_tokens).toBe(3500);
+    // Budget de sortie : un PLANCHER, pas une valeur figée. Le 01/09/2026, 3500
+    // jetons coupaient la réponse en pleine phrase sur un dossier fourni — le
+    // JSON devenait invalide et la note s'affichait en texte brut à la CIP.
+    // Ce test interdit de redescendre sous le seuil ; le monter reste libre.
+    expect(mockCreate.mock.calls[0][0].max_tokens).toBeGreaterThanOrEqual(8000);
   });
 });
 
