@@ -34,6 +34,7 @@ DOMAIN="solidata.online"
 # ACME de Let's Encrypt — y mettre l'IP SSH ferait échouer un contrôle sain.
 SERVER_IP="51.159.144.100"
 EMAIL="admin@solidata.online"
+REPO_URL="https://github.com/juliengonde-5G/solidata.online.git"
 COMPOSE_FILE="docker-compose.prod.yml"
 BACKUP_DIR="/opt/solidata.online-backups"
 
@@ -337,9 +338,34 @@ case "${ACTION}" in
     log "Étape 1/7 — Sauvegarde base de données..."
     bash deploy/scripts/backup.sh
 
-    # Pull dernières modifications
+    # Pull dernières modifications.
+    # GIT_TERMINAL_PROMPT=0 : sans lui, un identifiant manquant fait ATTENDRE git
+    # sur une invite « Username for … ». Un déploiement lancé sans terminal
+    # (cron, session détachée) resterait suspendu là indéfiniment — sauvegarde
+    # faite, rien de déployé, et personne pour s'en apercevoir. Mieux vaut
+    # échouer tout de suite, en disant pourquoi.
     log "Étape 2/7 — Récupération du code..."
-    git pull origin main
+    if ! GIT_TERMINAL_PROMPT=0 git pull origin main; then
+        warn ""
+        warn "RIEN N'A ÉTÉ DÉPLOYÉ : l'application tourne toujours dans sa version"
+        warn "précédente, aucune image n'a été reconstruite, le site n'a pas été"
+        warn "fermé et la sauvegarde de l'étape 1 est conservée."
+        warn ""
+        warn "Les deux causes habituelles :"
+        warn "  1. IDENTIFIANTS — l'URL du dépôt porte un nom d'utilisateur"
+        warn "     (https://<nom>@github.com/…) ou un jeton périmé, ce qui force une"
+        warn "     récupération authentifiée. Le dépôt étant PUBLIC, une URL sans"
+        warn "     identifiant se récupère sans rien saisir :"
+        warn "       git remote set-url origin ${REPO_URL}"
+        warn "       GIT_TERMINAL_PROMPT=0 git ls-remote origin main   # doit afficher un SHA"
+        warn "  2. MODIFICATIONS LOCALES — un fichier suivi a été édité sur le serveur"
+        warn "     et le pull refuse de l'écraser :"
+        warn "       git status --short     # voir lesquels"
+        warn "       git stash              # les mettre de côté"
+        warn ""
+        warn "Puis relancer : bash deploy/scripts/deploy.sh update"
+        error "Récupération du code impossible depuis GitHub."
+    fi
 
     # Rebuild séquentiel sans cache (économise le disque sur DEV1-S)
     log "Étape 3/7 — Reconstruction des images (sans cache)..."
