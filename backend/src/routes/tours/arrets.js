@@ -320,6 +320,111 @@ async function poserPauseDejeuner(client, tourId, estimation, centre) {
   return r.rows[0];
 }
 
+
+
+/**
+ * OÙ la pause doit se placer, en positions de programme. Fonction PURE : c'est
+ * la règle, isolée du SQL pour être vérifiable sans base.
+ *
+ * @param {number} front  première position DEVANT le chauffeur (juste après le
+ *   dernier élément traité) — la pause ne peut jamais remonter au-delà.
+ * @param {number[]} restants  positions des points encore à faire, triées.
+ * @param {number} apresNPoints  après combien de points restants la pause tombe
+ *   (0 = tout de suite).
+ * @returns {number} position cible
+ */
+function positionCiblePause(front, restants, apresNPoints) {
+  const n = Number(apresNPoints);
+  let cible;
+  if (!Number.isFinite(n) || n <= 0) {
+    cible = front;                                   // la pause est due maintenant
+  } else if (n >= restants.length) {
+    // Plus de points après elle : la pause vient après le dernier.
+    cible = (restants.length ? restants[restants.length - 1] : front - 1) + 1;
+  } else {
+    cible = restants[n - 1] + 1;                     // juste après le N-ième restant
+  }
+  // Une étape placée dans le passé du chauffeur est invisible du mobile, qui
+  // affiche toujours la première étape devant lui (défaut corrigé en 2.37.1).
+  return Math.max(cible, front);
+}
+
+/**
+ * DÉPLACE la pause déjeuner à la place que la replanification lui donne.
+ *
+ * La position d'origine est posée au démarrage, sur une chronologie théorique.
+ * Une journée qui prend du retard la laisse loin devant : le 02/09/2026, à
+ * midi, la pause de la tournée #681 était en 15e étape alors que le camion en
+ * était à sa 3e borne. Elle se replace donc à chaque avancement.
+ *
+ * TROIS RÈGLES, dans cet ordre :
+ *   1. une pause déjà PRISE (`done`) ou abandonnée (`skipped`) n'est jamais
+ *      touchée — elle a eu lieu, ou l'équipage est rentré ;
+ *   2. la pause ne recule JAMAIS derrière le chauffeur : une étape placée dans
+ *      son passé est invisible du mobile, qui affiche toujours la première
+ *      étape devant lui (défaut corrigé en 2.37.1, jamais réintroduit) ;
+ *   3. rien à déplacer → aucune écriture. Appelée après chaque borne, cette
+ *      fonction doit être silencieuse quand la place est déjà la bonne.
+ *
+ * @param {number|null} apresNPointsRestants  nombre de points ENCORE À FAIRE
+ *   après lesquels la pause tombe (0 = tout de suite, `null` = le moteur n'en
+ *   prévoit plus : on laisse la pause où elle est plutôt que de la supprimer,
+ *   la journée pouvant encore déraper).
+ * @returns {Promise<{deplacee:boolean, motif?:string, de?:number, vers?:number}>}
+ */
+async function deplacerPauseDejeuner(client, tourId, apresNPointsRestants) {
+  const pause = await arretEnAttente(client, tourId, 'pause_dejeuner');
+  if (!pause) return { deplacee: false, motif: 'aucune_pause_en_attente' };
+  if (apresNPointsRestants == null) return { deplacee: false, motif: 'aucune_pause_prevue' };
+
+  // La première position disponible DEVANT le chauffeur.
+  const rDerniere = await client.query(
+    `SELECT COALESCE(MAX(position), 0) AS derniere FROM (
+       SELECT position FROM tour_cav
+        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident')
+       UNION ALL
+       SELECT position FROM tour_association_point
+        WHERE tour_id = $1 AND status IN ('collected', 'skipped', 'incident')
+       UNION ALL
+       SELECT position FROM tour_arret_technique
+        WHERE tour_id = $1 AND status IN ('done', 'skipped')
+     ) x`,
+    [tourId]
+  );
+  const front = (parseInt(rDerniere.rows[0].derniere, 10) || 0) + 1;
+
+  // Les points encore à faire, dans l'ordre : la cible est juste après le
+  // N-ième d'entre eux. On lit les POSITIONS réelles plutôt que de compter, le
+  // programme mêlant bornes et arrêts sur une même échelle.
+  const rRestants = await client.query(
+    `SELECT position FROM (
+       SELECT position FROM tour_cav WHERE tour_id = $1 AND status = 'pending'
+       UNION ALL
+       SELECT position FROM tour_association_point WHERE tour_id = $1 AND status = 'pending'
+     ) x ORDER BY position`,
+    [tourId]
+  );
+  const restants = rRestants.rows.map((r) => parseInt(r.position, 10));
+
+  const cible = positionCiblePause(front, restants, apresNPointsRestants);
+
+  if (cible === pause.position) return { deplacee: false, motif: 'deja_a_sa_place' };
+
+  // Sortie de file (position sentinelle), fermeture du trou, réinsertion — le
+  // même geste que `avancerRetourCentre`. L'inverse décalerait l'arrêt
+  // lui-même et le rendrait introuvable.
+  await client.query('UPDATE tour_arret_technique SET position = -1 WHERE id = $1', [pause.id]);
+  await refermerTrouPositions(client, tourId, pause.position, pause.id);
+
+  // La cible a pu remonter d'un cran avec la fermeture du trou.
+  const cibleFinale = cible > pause.position ? cible - 1 : cible;
+  await decalerPositions(client, tourId, cibleFinale);
+  await client.query(
+    'UPDATE tour_arret_technique SET position = $2 WHERE id = $1', [pause.id, cibleFinale]
+  );
+  return { deplacee: true, de: pause.position, vers: cibleFinale };
+}
+
 /**
  * Pose les TROIS passages au centre de tri d'une journée type (demande client) :
  * le départ du matin, la pause du midi, et le retour de fin de tournée. Le
@@ -525,6 +630,8 @@ async function arretsPourMobile(tourId, db = pool) {
 }
 
 module.exports = {
+  deplacerPauseDejeuner,
+  positionCiblePause,
   MOTIFS,
   MOTIFS_CENTRE,
   LIBELLE_MOTIF,

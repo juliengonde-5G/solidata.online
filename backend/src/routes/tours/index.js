@@ -87,6 +87,9 @@ const reoptimizeRouter = require('./reoptimize');
 const planningRouter = require('./planning');
 const dashboardRouter = require('./dashboard');
 const { ensurePlannedPassages } = require('./planned-passage');
+// Replanification d'une tournée en cours : une seule simulation décide de
+// l'heure prévue des points restants ET de la place de la pause déjeuner.
+const { replanifierEnArrierePlan } = require('./replanification');
 const { applyCompletionSideEffects } = require('./completion-effects');
 // Session chauffeur « 1 URL = 1 véhicule » : le véhicule est lu dans le claim
 // `vehicle_id` du jeton et, en repli, dans le `username` historique
@@ -899,6 +902,15 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
         currentLng: req.body?.current_lng != null ? parseFloat(req.body.current_lng) : null,
         io,
       }).catch((err) => console.warn('[TOURS] ré-optimisation après arrêt :', err.message));
+
+      // ── Replanification sur l'avancement RÉEL, au même instant ──
+      // La borne qui vient d'être traitée change ce qu'il reste à faire, donc
+      // les heures prévues ET le moment où la pause déjeuner tombe. Sans ce
+      // rejeu, le programme continue de raconter la journée imaginée au
+      // démarrage : le 02/09/2026 à midi, la pause de la #681 était encore
+      // annoncée en 15e étape derrière neuf bornes. En arrière-plan, APRÈS la
+      // réponse : l'écran du chauffeur n'attend jamais un recalcul.
+      replanifierEnArrierePlan(tourId, 'collecte');
     }
   } catch (err) {
     console.error('[TOURS] Erreur collect-public:', err);
@@ -1136,6 +1148,13 @@ router.post('/:id/arret/:arretId/arrive-public', async (req, res) => {
       suite,
       ...(attendue === undefined ? {} : { pesee_attendue: attendue }),
     });
+
+    // Un passage au centre est le moment où la journée bascule le plus : un
+    // vidage imprévu coûte facilement une heure, et c'est exactement ce qui
+    // décale la pause. On rejoue donc le programme ici aussi, en arrière-plan.
+    // La pause qui vient d'être PRISE n'est pas replacée (elle est « done ») :
+    // la replanification ne touche qu'une pause encore en attente.
+    replanifierEnArrierePlan(tourId, `arret_${arret.motif}`);
   } catch (err) {
     console.error('[TOURS] Erreur arrive-public:', err);
     res.status(500).json({ error: 'Erreur serveur' });

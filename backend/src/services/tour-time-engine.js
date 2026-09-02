@@ -130,6 +130,20 @@ function resolveReturnThresholdKg({ returnEveryKg, vehicleFillReturnPct, capacit
   return candidates.length ? Math.min(...candidates) : Infinity;
 }
 
+/**
+ * Position de départ d'une simulation reprise en cours de journée : là où se
+ * trouve réellement l'équipage. Renvoie `null` — donc « le centre de tri » —
+ * dès qu'une coordonnée manque : simuler depuis un point inventé serait pire
+ * que de repartir du centre, qui est au moins un lieu connu.
+ */
+function normalizeStartPosition(p) {
+  if (!p) return null;
+  const lat = num(p.lat, null);
+  const lng = num(p.lng, null);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng, name: p.name || 'Position actuelle' };
+}
+
 /** Normalise les options + applique les défauts. */
 function resolveOptions(opts = {}) {
   const center = opts.center || {};
@@ -152,6 +166,23 @@ function resolveOptions(opts = {}) {
     capacityKg: Math.max(0, num(opts.capacityKg, DEFAULTS.capacityKg)),
     maxConsecutiveRejects: Math.max(1, num(opts.maxConsecutiveRejects, DEFAULTS.maxConsecutiveRejects)),
     attenteCompteTravail: coerceBool(opts.attenteCompteTravail, DEFAULTS.attenteCompteTravail),
+    // ── REPRISE EN COURS DE JOURNÉE (2.47.0) ──
+    // Le moteur simulait toujours une journée VIERGE, partie du centre à
+    // l'heure théorique. Rejouer une tournée déjà entamée avec ces hypothèses
+    // place la pause déjeuner d'après une journée qui n'a pas eu lieu : c'est
+    // ainsi qu'une pause s'est retrouvée en 15e étape alors qu'il était midi et
+    // que le camion en était à sa 3e borne (constat client du 02/09/2026).
+    // Ces trois options laissent l'appelant amorcer la simulation sur le RÉEL.
+    //
+    // `priorWorkMinutes` n'entre PAS dans l'élapsé : l'horloge repart de
+    // `startHour` (= l'heure qu'il est), le travail déjà fait ne se rejoue pas.
+    // Il ne pèse que là où il a un sens — le déclencheur « après N heures de
+    // travail » de la pause, et le dépassement du budget de la journée.
+    priorWorkMinutes: Math.max(0, num(opts.priorWorkMinutes, 0)),
+    lunchAlreadyTaken: coerceBool(opts.lunchAlreadyTaken, false),
+    // Point de départ de la simulation. `null` = le centre de tri, comportement
+    // historique inchangé pour tous les appelants existants.
+    startPosition: normalizeStartPosition(opts.startPosition),
     center: {
       lat: num(center.lat, null),
       lng: num(center.lng, null),
@@ -293,7 +324,14 @@ function normalizePoint(p, index) {
 // ──────────────────────────────────────────────────────────────
 
 function initialState(o) {
+  // D'où l'on part : la position réelle de l'équipage si elle est fournie,
+  // le centre de tri sinon (cas de la planification, inchangé).
+  const depart = o.startPosition || o.center;
   return {
+    // Travail déjà accompli AVANT cette simulation (reprise en cours de
+    // journée). Hors élapsé, hors distance : il ne compte que pour savoir si la
+    // pause est due et si le budget de la journée est déjà entamé.
+    priorWorkMinutes: o.priorWorkMinutes,
     workMinutes: 0,      // conduite + collecte + déchargements (PAUSE EXCLUE)
     pauseMinutes: 0,     // pause déjeuner effectivement prise
     distanceKm: 0,
@@ -308,17 +346,17 @@ function initialState(o) {
     waitMinutes: 0,
     waitOffWorkMinutes: 0,
     violations: [],      // signalements horaires (le moteur ne décide de rien)
-    lunchTaken: false,
+    lunchTaken: o.lunchAlreadyTaken,
     unloadStops: 0,      // retours de vidage INTERMÉDIAIRES (hors retour final)
-    position: { lat: o.center.lat, lng: o.center.lng, name: o.center.name },
-    timeline: [{ type: 'depart', name: o.center.name, arrivee_min: 0, depart_min: 0 }],
+    position: { lat: depart.lat, lng: depart.lng, name: depart.name },
+    timeline: [{ type: 'depart', name: depart.name, arrivee_min: 0, depart_min: 0 }],
     points: [],          // points effectivement desservis (objets normalisés)
   };
 }
 
 function cloneState(s) {
   return {
-    ...s,
+    ...s,   // `priorWorkMinutes` est un scalaire : la copie superficielle suffit
     position: { ...s.position },
     timeline: s.timeline.slice(),
     points: s.points.slice(),
@@ -351,7 +389,10 @@ function clockMin(s, o) {
 function lunchDue(s, o) {
   if (s.lunchTaken) return false;
   if (o.lunchBreakMinutes <= 0) return false;
-  if (s.workMinutes >= o.lunchAfterMinutes) return true;
+  // Travail de la journée ENTIÈRE, pas seulement de la portion simulée : un
+  // équipage qui a déjà quatre heures derrière lui a droit à sa pause tout de
+  // suite, même si la simulation vient de commencer.
+  if (s.priorWorkMinutes + s.workMinutes >= o.lunchAfterMinutes) return true;
   return clockMin(s, o) >= o.lunchStartHour * 60;
 }
 
@@ -525,7 +566,11 @@ async function finalReturnCost(s, o, resolveLeg) {
 // ──────────────────────────────────────────────────────────────
 
 function buildEstimation(s, o, warnings) {
-  const work = Math.round(s.workMinutes);
+  // Le budget de la journée se juge sur la journée ENTIÈRE : sur une reprise en
+  // cours de route, le travail déjà fait est derrière l'équipage mais il a bien
+  // été fait. `priorWorkMinutes` vaut 0 pour tous les appels de planification,
+  // qui retrouvent donc exactement le chiffre d'avant.
+  const work = Math.round(s.priorWorkMinutes + s.workMinutes);
   const budget = Math.round(o.maxWorkMinutes);
   const depassement = Math.max(0, work - budget);
   const startMinutes = o.startHour * 60;
@@ -560,6 +605,10 @@ function buildEstimation(s, o, warnings) {
     taux_remplissage_vehicule_pct: capacite > 0 ? Math.round((s.peakLoadKg / capacite) * 100) : 0,
     nb_points: s.points.length,
     nb_retours_vidage: s.unloadStops,
+    // Travail restant à faire, distinct du travail de la journée : sur une
+    // reprise, confondre les deux ferait croire que tout est encore devant.
+    duree_travail_restant_min: Math.round(s.workMinutes),
+    duree_travail_deja_faite_min: Math.round(s.priorWorkMinutes),
     pause_dejeuner_incluse: s.lunchTaken,
     pause_dejeuner_min: Math.round(s.pauseMinutes),
     // Attente devant un rendez-vous, quelle que soit son imputation : elle est

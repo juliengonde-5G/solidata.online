@@ -672,9 +672,33 @@ describe('computeAndStorePlannedPassages — horaires prévisionnels', () => {
     const at = (i) => new Date(updates[i].params[0]).getTime();
     // Écart normal entre deux points consécutifs du matin : 20 min
     expect(at(1) - at(0)).toBe(20 * 60 * 1000);
-    // Entre le 12e et le 13e point : retour au centre + 30 min de pause + reprise
-    const ecartPause = (at(12) - at(11)) / 60000;
-    expect(ecartPause).toBeGreaterThanOrEqual(50);
+
+    // Le trou de la pause : retour au centre + 30 min + reprise. On le CHERCHE
+    // au lieu de l'épingler à un index — sa place dépend de l'heure de départ,
+    // et la figer avait masqué le défaut de fuseau corrigé le 02/09/2026.
+    const ecarts = [];
+    for (let i = 1; i < 14; i++) ecarts.push({ i, min: (at(i) - at(i - 1)) / 60000 });
+    const pause = ecarts.find((e) => e.min >= 50);
+    expect(pause).toBeDefined();
+
+    // ET ELLE TOMBE À MIDI, HEURE DE PARIS. `started_at` vaut 08:00 UTC, soit
+    // 10:00 à Rouen en septembre : c'est cette horloge-là qui doit piloter la
+    // pause. Tant que le moteur lisait `getHours()` — l'heure du CONTENEUR, en
+    // UTC — la pause de midi se déclenchait deux heures trop tard.
+    //
+    // On mesure la REPRISE (le premier point après la pause) plutôt que le
+    // dernier point d'avant : c'est le marqueur net. Avec l'heure du conteneur
+    // elle tombait à 14:51 ; à l'heure de Rouen elle tombe à 12:49.
+    const minutesParis = (ms) => {
+      const [h, m] = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).format(new Date(ms)).split(':').map(Number);
+      return h * 60 + m;
+    };
+    const reprise = minutesParis(at(pause.i));
+    expect(reprise).toBeGreaterThanOrEqual(12 * 60);
+    expect(reprise).toBeLessThan(14 * 60);
+
     // Les horaires restent strictement croissants
     for (let i = 1; i < 14; i++) expect(at(i)).toBeGreaterThan(at(i - 1));
   });
