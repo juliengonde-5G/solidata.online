@@ -1892,6 +1892,11 @@ router.get('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // et référentiel des lieux d'arrêt. Monté AVANT les routeurs à paramètre pour
 // que « /lieux-techniques » ne soit pas capté par une route « /:id ».
 router.use('/', require('./live-edit'));
+// Reprise d'une tournée TERMINÉE (ADMIN) : pesées oubliées et volumes déclarés.
+// Monté juste après le pilotage en direct, dont il est le pendant pour les
+// journées closes — et avant le routeur CRUD, dont le `/:id` capterait sinon
+// `/:id/reprise`.
+router.use('/', require('./reprise'));
 
 // Mount démo formation (accès formateur + réinitialisation). Monté AVANT les
 // routeurs à paramètre pour que « /demo/... » ne soit jamais capté par une

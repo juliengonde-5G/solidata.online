@@ -45,21 +45,17 @@ const { lirePoidsKg, recalculerTotalTournee } = require('../routes/tours/poids')
 // Répartition du poids : les MÊMES fonctions que la clôture de tournée.
 // Elles sont exportées « pour le script de rattrapage et les tests : la règle
 // de répartition doit rester UNE seule, jamais réécrite ailleurs ».
+const { estAssociation } = require('../routes/tours/completion-effects');
+// Reconstruction du tonnage dérivé et recensement de l'écart de stock : la
+// MÊME mécanique que l'écran d'administration (`routes/tours/reprise.js`).
+// Deux implémentations d'une règle de répartition finiraient par diverger —
+// c'est exactement ce qui avait produit le défaut de poids d'août 2026.
 const {
-  estAssociation, pointsCollectes, ecrireTonnage,
-} = require('../routes/tours/completion-effects');
+  SQL_INSTANT_PARIS, reconstruireTonnage, lireEcartStock,
+} = require('../routes/tours/reprise-service');
 
 // ── Valeurs par défaut : la reprise demandée le 30/08/2026 ────────────────
 const DEFAUTS = { tour: 676, poids: 1140, le: '2026-08-28 16:00' };
-
-/**
- * L'instant demandé, exprimé en heure de PARIS et converti par PostgreSQL
- * lui-même. `NOW()` traverse exactement la même conversion quand il atterrit
- * dans la colonne `timestamp` de `tour_weights` : la pesée reprise se range
- * donc dans le même repère que celles écrites par les écrans, sans qu'aucun
- * fuseau soit deviné côté Node.
- */
-const SQL_INSTANT_PARIS = "(($1)::timestamp AT TIME ZONE 'Europe/Paris')";
 
 function parseArgs(argv) {
   const args = { apply: false, intermediaire: false, tare: null, ...DEFAUTS };
@@ -95,20 +91,6 @@ function validerArgs(args) {
     return { error: 'Horodatage attendu au format « AAAA-MM-JJ HH:MM » (--le), en heure de Paris.' };
   }
   return { valeurs: { poids: poids.valeur, tare: tare.valeur } };
-}
-
-/** Kilos réellement entrés en stock pour cette tournée (jamais réécrits ici). */
-async function lireEntreeStock(tourId) {
-  try {
-    const r = await pool.query(
-      "SELECT COALESCE(SUM(poids_kg), 0)::float AS kg FROM stock_movements WHERE tour_id = $1 AND type = 'entree'",
-      [tourId]
-    );
-    return r.rows[0]?.kg ?? 0;
-  } catch (err) {
-    console.warn(`  (entrée de stock illisible : ${err.message})`);
-    return null;
-  }
 }
 
 async function main() {
@@ -196,8 +178,6 @@ async function main() {
     + `${args.intermediaire ? ', pesée intermédiaire' : ''} le ${args.le} (heure de Paris)`);
   console.log(`Total pesé après reprise : ${totalApres} kg`);
 
-  const stockAvant = await lireEntreeStock(args.tour);
-
   if (!args.apply) {
     console.log('\n(simulation — relancer avec --apply pour écrire)');
     await pool.end();
@@ -232,56 +212,40 @@ async function main() {
   }
 
   // ── Tonnage dérivé ───────────────────────────────────────────────────────
-  // Il n'est reconstruit que pour une tournée CLÔTURÉE : sur une tournée encore
-  // ouverte, aucun tonnage n'a été écrit, et c'est sa clôture qui s'en chargera
-  // — avec le poids complet, puisqu'il vient d'être corrigé.
-  if (tour.status !== 'completed') {
-    console.log('\nTonnage : rien à reconstruire, la tournée n\'est pas clôturée.');
-    console.log('  Sa clôture répartira le poids complet, correction comprise.');
-  } else {
-    const c2 = await pool.connect();
-    try {
-      await c2.query('BEGIN');
-      const points = await pointsCollectes(tour, args.tour, c2);
-      if (points.length === 0) {
-        console.log('\nTonnage : aucun point collecté sur cette tournée — rien à répartir.');
-        await c2.query('ROLLBACK');
-      } else {
-        // Donnée DÉRIVÉE : on efface la répartition de cette tournée avant de
-        // la réécrire, pour ne jamais additionner deux répartitions du même
-        // poids. Le périmètre est borné à la date ET aux points de la tournée.
-        if (estAssociation(tour)) {
-          await c2.query('DELETE FROM tonnage_history_association WHERE tour_id = $1', [args.tour]);
-        } else {
-          await c2.query(
-            `DELETE FROM tonnage_history
-              WHERE date = $1 AND source = 'mobile' AND cav_id = ANY($2::int[])`,
-            [tour.date, points.map((p) => p.point_id)]
-          );
-        }
-        const lignes = await ecrireTonnage(tour, args.tour, points, c2);
-        await c2.query('COMMIT');
-        console.log(`\n✔ Tonnage reconstruit : ${lignes} ligne(s) sur ${points.length} point(s) collecté(s).`);
-      }
-    } catch (err) {
-      await c2.query('ROLLBACK').catch(() => {});
-      console.error(`\n✗ Tonnage NON reconstruit : ${err.message}`);
-      console.error('  La pesée, elle, est bien enregistrée. Relancer le script corrigera le tonnage.');
-    } finally {
-      c2.release();
+  // La reconstruction (effacement de la répartition de CETTE tournée puis
+  // réécriture par les fonctions de la clôture) vit dans le module partagé :
+  // l'écran d'administration applique exactement la même, au caractère près.
+  const c2 = await pool.connect();
+  try {
+    await c2.query('BEGIN');
+    const bilan = await reconstruireTonnage(tour, args.tour, c2);
+    await c2.query('COMMIT');
+    if (!bilan.reconstruit) {
+      console.log('\nTonnage : rien à reconstruire, la tournée n\'est pas clôturée.');
+      console.log('  Sa clôture répartira le poids complet, correction comprise.');
+    } else if (bilan.points === 0) {
+      console.log('\nTonnage : aucun point collecté sur cette tournée — rien à répartir.');
+    } else {
+      console.log(`\n✔ Tonnage reconstruit : ${bilan.lignes} ligne(s) sur ${bilan.points} point(s) collecté(s).`);
     }
+  } catch (err) {
+    await c2.query('ROLLBACK').catch(() => {});
+    console.error(`\n✗ Tonnage NON reconstruit : ${err.message}`);
+    console.error('  La pesée, elle, est bien enregistrée. Relancer le script corrigera le tonnage.');
+  } finally {
+    c2.release();
   }
 
   // ── Stock : recensé, jamais réécrit ──────────────────────────────────────
   console.log('\n══ Entrée de stock ══');
-  if (stockAvant == null) {
-    console.log('  Écart non calculable (table de stock illisible).');
+  const stock = await lireEcartStock(args.tour, tour.total_weight_kg);
+  if (!stock.disponible) {
+    console.log(`  Écart non calculable (${stock.motif}).`);
   } else {
-    const manquant = Math.round((Number(tour.total_weight_kg) - stockAvant) * 100) / 100;
-    console.log(`  Entré en stock à la clôture : ${stockAvant} kg`);
-    console.log(`  Poids pesé après reprise    : ${tour.total_weight_kg} kg`);
-    if (manquant > 0) {
-      console.log(`  → ${manquant} kg à régulariser par une écriture DATÉE depuis le module Stock.`);
+    console.log(`  Entré en stock à la clôture : ${stock.entre_kg} kg`);
+    console.log(`  Poids pesé après reprise    : ${stock.pese_kg} kg`);
+    if (stock.ecart_kg > 0) {
+      console.log(`  → ${stock.ecart_kg} kg à régulariser par une écriture DATÉE depuis le module Stock.`);
       console.log('    Le script n\'y touche pas : une écriture de stock ne se réécrit pas en silence.');
     } else {
       console.log('  → Aucun écart de stock à régulariser.');

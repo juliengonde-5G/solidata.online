@@ -13,6 +13,8 @@ import api from '../services/api';
 import { libelleTypeIncident, libelleStatutIncident } from '../utils/incidents';
 import { lienCarteGps } from '../utils/tours';
 import { printRapportTournee } from '../components/tours/pdf-tournee';
+import TourRepriseAdmin from '../components/tours/TourRepriseAdmin';
+import { useAuth } from '../contexts/AuthContext';
 
 // Types d'arrêt GPS. Les valeurs stockées sont techniques (`cav`, `centre`) :
 // elles ne doivent jamais atteindre l'écran telles quelles.
@@ -1016,7 +1018,7 @@ export default function Tours() {
         {selectedTour && (
           <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex justify-end z-50" onClick={() => setSelectedTour(null)}>
             <div className="bg-white w-full sm:w-[680px] h-full overflow-y-auto shadow-elevated p-4 sm:p-6 animate-slide-in-right" onClick={e => e.stopPropagation()}>
-              <TourDetailPanel tour={selectedTour} onClose={() => setSelectedTour(null)} />
+              <TourDetailPanel tour={selectedTour} onClose={() => setSelectedTour(null)} onRefresh={() => loadTourDetail(selectedTour.id)} />
             </div>
           </div>
         )}
@@ -1200,7 +1202,13 @@ function TempsVidagePanel() {
   );
 }
 
-function TourDetailPanel({ tour, onClose }) {
+function TourDetailPanel({ tour, onClose, onRefresh }) {
+  const { user } = useAuth();
+  // La reprise d'une journée close est réservée à l'administrateur : elle
+  // touche des chiffres dont dérivent le tonnage, le stock et l'apprentissage.
+  // Le rôle de base est consulté pour qu'un rôle personnalisé dupliqué d'ADMIN
+  // en hérite, comme partout ailleurs dans l'application.
+  const estAdmin = (user?.base_role || user?.role) === 'ADMIN';
   const summary = tour.summary || {};
   // Les indicateurs mesurés vivent dans `summary.kpis` (GET /tours/:id/live-summary).
   // Ils étaient lus à la racine de `summary` : introuvables, ils retombaient
@@ -1562,6 +1570,13 @@ function TourDetailPanel({ tour, onClose }) {
           Le poids n'est pas relevé borne par borne sur une tournée de conteneurs :
           il est pesé au centre de tri, ci-dessous.
         </p>
+      )}
+
+      {/* Reprise d'une tournée TERMINÉE (ADMIN) : pesée oubliée, volume déclaré
+          de travers. Absente des tournées en cours, qui se corrigent depuis
+          « Collecte en direct » tant que la journée n'est pas close. */}
+      {estAdmin && tour.status === 'completed' && (
+        <TourRepriseAdmin tourId={tour.id} tourDate={tour.date} onChanged={onRefresh} />
       )}
 
       {/* Pesées centre de tri */}

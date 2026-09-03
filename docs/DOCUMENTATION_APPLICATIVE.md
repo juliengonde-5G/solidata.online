@@ -262,6 +262,32 @@ Il n'existe **aucune route `POST /api/pcm/evaluate`** ni **`DELETE /api/pcm/:can
 - Suivi temps réel (statut : planifiée → en cours → terminée)
 - Historique complet avec poids collecté
 
+#### 2.4.1 bis Reprise d'une tournée terminée (ADMIN)
+**Route** : `/tours` → fiche de tournée, panneau « Reprise de la tournée » | **Rôle** : ADMIN seul
+**API** : `backend/src/routes/tours/reprise.js`
+
+Une journée close se corrige parfois : pesée oubliée au pont-bascule, palier de
+remplissage coché de travers, nombre de sacs annoncé au jugé. L'écran
+« Collecte en direct » refuse (409) dès la clôture — à raison : le poids y a
+déjà été réparti en tonnage par point et transformé en entrée de stock. La
+reprise est donc un acte distinct, réservé à l'administrateur.
+
+- **Pesées** : ajout, correction, suppression, **horodatées par l'opérateur**
+  en heure de Paris (l'heure du ticket, pas celle de la saisie). Une même pesée
+  (tournée, poids, instant) est refusée en 409 : une reprise ne double jamais
+  les kilos qu'elle rattrape.
+- **Volume déclaré** : par **palier** pour une borne (« un fond », « à moitié »…,
+  le vocabulaire du chauffeur — jamais deux nombres qui pourraient se
+  contredire), par **nombre de sacs** pour une association.
+- **Ce qui est reconstruit** : le poids total de la tournée et le tonnage par
+  point, par les mêmes fonctions que la clôture. Le tonnage n'est recalculé que
+  lorsque la clé de répartition a bougé (les sacs) — un palier de borne n'entre
+  pas dans le partage du poids, et l'écran le dit.
+- **Ce qui ne l'est pas** : l'**entrée de stock**. L'écart est chiffré et
+  affiché ; il se régularise par une écriture datée depuis le module Stock.
+- Tournées **en cours**, **annulées** et de **démonstration** refusées, chacune
+  pour sa raison. Chaque correction est journalisée (`rgpd_audit_log`).
+
 #### 2.4.2 Propositions IA
 **Route** : `/collection-proposals` | **Rôles** : ADMIN, MANAGER
 **API** : `backend/src/routes/collection-proposals.js`

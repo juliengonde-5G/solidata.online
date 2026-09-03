@@ -102,6 +102,14 @@ export const RGPD_ACTION_LABELS = {
   TOURNEE_PESEE_MODIFIEE: 'Pesée modifiée depuis le bureau',
   TOURNEE_PESEE_SUPPRIMEE: 'Pesée supprimée depuis le bureau',
   TOURNEE_POINT_COLLECTE_BUREAU: 'Point marqué collecté depuis le bureau',
+  // Reprise d'une tournée TERMINÉE (ADMIN). Codes distincts de ceux du bureau
+  // ci-dessus : corriger une journée close n'est pas la même chose que saisir
+  // une journée en cours — le tonnage y est reconstruit et un écart de stock
+  // reste à régulariser à la main. Le journal doit pouvoir les distinguer.
+  TOURNEE_REPRISE_PESEE_AJOUTEE: 'Reprise — pesée ajoutée sur une tournée terminée',
+  TOURNEE_REPRISE_PESEE_MODIFIEE: 'Reprise — pesée corrigée sur une tournée terminée',
+  TOURNEE_REPRISE_PESEE_SUPPRIMEE: 'Reprise — pesée supprimée sur une tournée terminée',
+  TOURNEE_REPRISE_VOLUME_MODIFIE: 'Reprise — volume déclaré corrigé sur une tournée terminée',
   TOURNEE_RETOUR_CENTRE_BUREAU: 'Retour au centre de tri posé depuis le bureau',
 
   // ── Scripts d'exploitation (backend/src/scripts/*.js — exécution manuelle en conteneur) ──
