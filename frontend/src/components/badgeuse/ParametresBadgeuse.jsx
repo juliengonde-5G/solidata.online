@@ -58,6 +58,14 @@ function fromApi(data = {}) {
     supervision_silence_minutes: d.supervision_silence_minutes ?? 15,
     supervision_alerte_emails: d.supervision_alerte_emails || '',
     media_upload_max_mo: d.media_upload_max_mo ?? 50,
+    // Plage d'activation de l'écran (AFF-08). Ces deux réglages EXISTAIENT
+    // côté serveur et descendaient déjà au poste, mais aucun écran ne les
+    // affichait : les changer supposait d'ouvrir un terminal sur le
+    // Raspberry. Repli sur les défauts documentés, jamais sur une chaîne vide
+    // (un champ heure vide serait refusé par le serveur au premier
+    // enregistrement d'un autre réglage).
+    dpms_allumage: d.dpms_allumage || '05:30',
+    dpms_extinction: d.dpms_extinction || '21:30',
   };
 }
 
@@ -112,6 +120,8 @@ export default function ParametresBadgeuse({ canWrite }) {
         media_upload_max_mo: Number.isFinite(parseInt(form.media_upload_max_mo, 10))
           ? Math.min(500, Math.max(1, parseInt(form.media_upload_max_mo, 10)))
           : (raw?.parametres?.media_upload_max_mo ?? 50),
+        dpms_allumage: form.dpms_allumage,
+        dpms_extinction: form.dpms_extinction,
       };
       const res = await api.put('/badgeuse/parametres', payload);
       setRaw(res.data || raw);
@@ -262,6 +272,26 @@ export default function ParametresBadgeuse({ canWrite }) {
                 className="input-modern py-2 text-sm w-full disabled:bg-slate-50 disabled:text-slate-400" />
               <p className="text-[11px] text-slate-400 mt-1">
                 Vide : l'alerte part aux administrateurs de SOLIDATA. Au plus un e-mail par poste toutes les 6 heures.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-medium text-slate-600 mb-1">Horaires d'activation de l'écran</label>
+              <div className="flex items-center gap-2 max-w-md">
+                <input type="time" value={form.dpms_allumage} onChange={(e) => set('dpms_allumage', e.target.value)}
+                  disabled={disabled} aria-label="Heure d'allumage de l'écran"
+                  className="input-modern py-2 text-sm flex-1 disabled:bg-slate-50 disabled:text-slate-400" />
+                <span className="text-slate-400 text-sm">à</span>
+                <input type="time" value={form.dpms_extinction} onChange={(e) => set('dpms_extinction', e.target.value)}
+                  disabled={disabled} aria-label="Heure d'extinction de l'écran"
+                  className="input-modern py-2 text-sm flex-1 disabled:bg-slate-50 disabled:text-slate-400" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Heure de Paris. <strong>Pendant cette plage, l'écran reste allumé en permanence</strong> : l'économiseur et la mise
+                en veille sont désactivés sur le poste — un écran de pointage qui noircit en pleine journée est indiscernable
+                d'une panne pour l'atelier. En dehors, l'écran est éteint. Une plage à cheval sur minuit (équipes de nuit,
+                ex. 21:00 → 06:00) est acceptée.
+                {' '}Le poste applique le changement à sa prochaine synchronisation de configuration, puis à son
+                passage de contrôle suivant (toutes les 5 minutes) : comptez une dizaine de minutes, pas un redémarrage.
               </p>
             </div>
             <div>

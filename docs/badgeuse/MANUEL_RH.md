@@ -198,17 +198,47 @@ Bouton **« Nouveau contenu »**. La fenêtre demande :
 - **Visible du** / **Visible au** : fenêtre de dates de diffusion (laisser vide pour un contenu permanent) ;
 - **Contenu actif** (case à cocher) : décoche = le contenu reste enregistré mais ne diffuse pas.
 
-**Point de vigilance — le type « Image ».** Le formulaire propose bien un type « Image » dans la liste, mais **il n'existe aucun champ pour joindre une image** (ni fichier, ni lien) dans la fenêtre actuelle, et l'aperçu 16:9 n'affiche jamais d'image, quel que soit le type choisi — il n'affiche que le titre et le corps du texte. En pratique, choisir « Image » aujourd'hui produit le même rendu visuel qu'un « Message ». Ne comptez pas dessus pour diffuser un visuel ; utilisez le type « Message » pour du texte, et signalez ce manque au référent technique si un besoin réel d'image se présente.
+- **Afficher uniquement les jours de Vente au Kilo** (case à cocher) : voir 4.3 ci-dessous.
+
+**Point de vigilance — le type « Image ».** Ce type historique attend le nom d'un fichier **déjà déployé sur le poste** : il ne sert plus à grand-chose. Pour diffuser un visuel, utilisez les deux boutons dédiés, à côté de « Nouveau contenu » :
+
+- **« Téléverser un média »** : une image ou une vidéo prise sur votre ordinateur. Elle est stockée dans SOLIDATA et recopiée sur le poste, qui la diffuse même sans réseau.
+- **« Partager un lien »** : vous collez une adresse `https://…`, c'est le **serveur** qui télécharge le visuel (le poste, lui, ne va jamais sur Internet).
+
+### 4.3 Un contenu réservé aux jours de Vente au Kilo
+
+La fenêtre de création (et celle des deux boutons ci-dessus) propose la case **« Afficher uniquement les jours de Vente au Kilo »**. Cochée, l'affiche ne passe à l'écran que les jours où une vente est effectivement en cours.
+
+**Vous n'avez aucune date à saisir, ni à tenir à jour :** les dates sont celles du module Vente au Kilo. Sous la case, l'écran vous dit ce qu'il en est aujourd'hui — « une vente est en cours », ou « prochaine : VAK octobre, du 9 au 10 octobre ». C'est ce qui vous permet de vérifier que votre affiche passera bien, sans attendre le jour J pour le découvrir.
+
+Dans la liste des contenus, la colonne « Fenêtre » affiche alors le repère orange **« Jours de VAK »** au lieu d'une plage de dates.
 
 Cliquer sur **« Enregistrer »**.
 
-### 4.3 Prévisualiser
+### 4.4 Prévisualiser
 
-Le panneau de droite, **« Aperçu écran (16:9) »**, affiche un rendu approximatif du contenu sélectionné dans la liste (clic sur une ligne, ou icône œil **« Prévisualiser »** sur la ligne). C'est un rendu indicatif — la mise en page exacte sur le poste physique peut légèrement différer.
+Le panneau de droite, **« Aperçu écran (16:9) »**, affiche le contenu sélectionné dans la liste (clic sur une ligne, ou icône œil **« Prévisualiser »**). Les images et les vidéos y apparaissent **telles qu'elles seront diffusées** : c'est le vrai fichier qui est affiché, pas une vignette symbolique. Pour les écrans calculés par le serveur (anniversaires, actualités, tournées, Vente au Kilo), l'aperçu montre un **exemple**, signalé comme tel — la vraie donnée du jour se voit dans l'onglet « Écran en direct ».
 
-### 4.4 Modifier ou supprimer
+### 4.5 Modifier ou supprimer
 
 Sur chaque ligne du tableau : icône crayon **« Modifier »** (ouvre la même fenêtre pré-remplie), icône corbeille **« Supprimer »** (demande confirmation dans la boîte **« Supprimer le contenu »** — action définitive).
+
+Pour une image ou une vidéo, **le titre, la durée, l'ordre, la fenêtre de validité et la case « jours de VAK » se modifient** ; seul le fichier lui-même ne se remplace pas (téléversez alors un nouveau média). Le titre est celui qui s'affiche sous le visuel sur le poste : il vaut la peine d'être relu, il reprend par défaut le nom du fichier.
+
+### 4.6 Voir ce que le poste affiche en ce moment — onglet « Écran en direct »
+
+**Chemin :** Temps & Présence → onglet **Écran en direct**.
+
+Cet onglet rejoue **la playlist réellement servie au poste** : les mêmes écrans, dans le même ordre, avec les mêmes durées, et avec les **vraies données du jour** (les anniversaires réellement annoncés, les tournées en cours, le poids vendu de la VAK…). C'est le moyen de vérifier depuis un bureau ce que voit l'atelier, sans se déplacer devant l'écran.
+
+À côté du visuel, la **séquence diffusée** liste tous les écrans : cliquer sur l'un d'eux l'affiche et met la rotation en pause (boutons ‹ ⏸ › sous l'aperçu). L'en-tête indique le poste concerné, s'il donne signe de vie, et si une Vente au Kilo est en cours.
+
+**Deux limites, dites franchement :**
+
+- ce n'est **pas une caméra** braquée sur l'écran du poste. Après chaque badgeage, le poste affiche pendant quelques secondes le prénom et l'initiale d'un salarié : retransmettre cette image reviendrait à créer un second fichier de données personnelles. Ce message-là n'apparaît donc jamais ici ;
+- la rotation affichée est celle de **votre navigateur**. Le poste ne dit pas à quelle seconde il en est : vous voyez les mêmes écrans, pas forcément au même instant.
+
+Si le poste est resté muet plus longtemps que le seuil de supervision, un avertissement le signale : la playlist affichée est bien celle qui lui est destinée, mais rien ne garantit qu'il l'affiche (poste éteint, réseau coupé).
 
 ---
 
@@ -242,7 +272,9 @@ En haut de l'écran, un bandeau indique l'état de la grille :
 | Anti-rebond (s) | 8 | Un badge présenté deux fois en moins de 8 s ne compte qu'une fois |
 | Délai de signalement d'une régularisation (jours ouvrés) | 5 | Au-delà, avertissement non bloquant (§2.6) |
 
-Un second bloc, **« Supervision des postes (exploitation) »**, contient deux réglages qui ne sont **pas** des règles RH à arbitrer (ce sont des réglages techniques) : le seuil de silence avant qu'un poste soit déclaré « hors ligne » (15 min par défaut) et les destinataires de l'alerte e-mail correspondante.
+Un second bloc, **« Postes et écran d'information (exploitation) »**, contient des réglages qui ne sont **pas** des règles RH à arbitrer (ce sont des réglages techniques) : le seuil de silence avant qu'un poste soit déclaré « hors ligne » (15 min par défaut), les destinataires de l'alerte e-mail correspondante, la taille maximale d'un média, et les **horaires d'activation de l'écran**.
+
+**Horaires d'activation de l'écran.** Deux heures, en heure de Paris : l'écran s'allume à la première, s'éteint à la seconde. **Pendant cette plage, l'écran ne s'endort jamais tout seul** — l'économiseur et la mise en veille sont désactivés sur le poste, car un écran noir en pleine journée est indiscernable d'une panne pour l'atelier. Une plage à cheval sur minuit (équipes de nuit : 21:00 → 06:00) est acceptée. Le poste applique le changement à sa prochaine synchronisation puis à son passage de contrôle suivant : comptez une dizaine de minutes, jamais un redémarrage. Ces horaires ne comptent pas comme une règle de gestion RH : les modifier ne fait pas disparaître le bandeau « règles par défaut ».
 
 Un dernier bloc, en case à cocher, contrôle l'**affichage du cumul hebdomadaire sur l'écran du poste**. La recommandation RH, rappelée juridiquement à l'écran, est de le laisser **désactivé** : *« Confidentialité au point de passage — la consultation du cumul se fait dans l'espace personnel SOLIDATA, pas sur un écran partagé. »*
 

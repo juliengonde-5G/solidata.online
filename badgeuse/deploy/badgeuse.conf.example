@@ -91,8 +91,17 @@ target = pi5
 ;dir = /opt/badgeuse/ui
 
 [dpms]
-; Plage d'ouverture de l'écran (AFF-08). En dehors, l'écran est éteint par le
-; minuteur badgeuse-dpms.timer. Format HH:MM, heure locale du poste.
-; Laisser vide pour un écran allumé en permanence.
+; Plage d'activation de l'écran (AFF-08). En dehors, l'écran est éteint par le
+; minuteur badgeuse-dpms.timer ; DEDANS, l'économiseur et la mise en veille du
+; serveur graphique sont neutralisés à chaque passage (toutes les 5 min) — un
+; écran de pointage qui noircit en pleine journée est indiscernable d'une panne.
+; Format HH:MM, heure de Paris. Laisser vide pour un écran allumé en permanence.
+;
+; CES VALEURS SONT UN REPLI. La plage fait foi CÔTÉ SERVEUR (SOLIDATA →
+; Temps & Présence → Paramètres → « Horaires d'activation de l'écran ») : dès
+; que l'agent a reçu une configuration, il la dépose dans
+; <data_dir>/dpms.conf, que le minuteur lit EN PRIORITÉ sur cette section.
+; Modifier les lignes ci-dessous ne sert donc que tant qu'aucun serveur n'a
+; parlé (première mise en service, poste isolé).
 allumage = 05:30
 extinction = 21:30

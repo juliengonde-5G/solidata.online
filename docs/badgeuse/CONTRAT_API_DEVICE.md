@@ -112,6 +112,14 @@ Seuls les badges `statut='actif'` sont servis.
 exigence juridique §3.5). La plage d'acceptation est appliquée par le **serveur** (statut
 `orphelin` hors plage) — le poste enregistre tout ; elle est transmise à titre informatif.
 
+`dpms` est la **plage d'activation de l'écran** (AFF-08), éditable dans le back-office
+(Paramètres → « Horaires d'activation de l'écran », format `HH:MM` validé à la saisie).
+À réception, l'agent l'écrit dans `<data_dir>/dpms.conf` ; le minuteur `badgeuse-dpms.timer`
+lit ce fichier **en priorité** sur la section `[dpms]` de la configuration d'installation.
+Hors plage l'écran est éteint ; **dans** la plage, l'économiseur et la mise en veille du
+serveur graphique sont neutralisés à chaque passage du minuteur (toutes les 5 min) —
+un kiosque ne reçoit aucune frappe, il s'endormirait donc en pleine journée.
+
 ### 2.4 `GET /devices/:code/playlist` — contenus de veille (ETag)
 
 ```json
@@ -131,6 +139,15 @@ amendements v1.3, v1.5 et v1.6 — voir §3bis, §3quater et §3quinquies). Seul
 dans leur fenêtre de validité, ciblant le site du poste, sont servis. La dernière playlist
 reçue est rejouée hors ligne (AFF-07). Aucune donnée personnelle dans ces contenus
 (NOTE_JURIDIQUE §3.2 : finalité communication interne dissociée).
+
+**Contenus réservés aux jours de Vente au Kilo.** Un contenu peut porter le drapeau
+`vak_uniquement` : il n'est alors servi que les jours où une vente est en cours, d'après le
+module VAK (table `vaks`) — jamais d'après des dates recopiées dans la fiche du contenu, qui
+seraient une seconde source de vérité vouée à se périmer. Le filtrage est **entièrement côté
+serveur** : la forme des éléments envoyés au poste est inchangée, et un poste déployé n'a rien
+à savoir de cette règle. **En cas de doute, le contenu est OMIS** : si la source des ventes est
+inaccessible, annoncer à des visiteurs une vente qui n'a peut-être pas lieu coûte plus cher
+qu'un écran manquant.
 
 ### 2.5 `POST /devices/:code/heartbeat`
 

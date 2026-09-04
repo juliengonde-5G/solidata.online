@@ -45,13 +45,51 @@ if [ "${XDG_SESSION_TYPE:-}" = "x11" ]; then
   # parce qu'une configuration Xorg du systeme peut reactiver l'economiseur
   # apres coup, et parce qu'un ecran de pointage qui noircit en pleine journee
   # est indiscernable d'une panne pour l'atelier. xset fait partie de
-  # x11-xserver-utils, installe par la voie X11.
+  # x11-xserver-utils, installe par la voie X11. Le minuteur badgeuse-dpms
+  # repasse la meme commande toutes les 5 minutes pendant la plage
+  # d'activation : cette ligne-ci ne vaut que pour le demarrage.
   if command -v xset >/dev/null 2>&1; then
     xset s off -dpms s noblank 2>/dev/null \
       && dire "economiseur et mise en veille X desactives (ecran toujours allume)" \
       || dire "avertissement : xset n'a pas pu desactiver l'economiseur"
   else
-    dire "avertissement : openbox absent — la fenetre risque de ne pas occuper tout l'ecran"
+    dire "avertissement : xset absent — l'economiseur X n'a pas pu etre desactive"
+  fi
+
+  # POINTEUR DE SOURIS : invisible, en permanence. La page du kiosque pose deja
+  # « cursor: none » (ui/style.css), mais cette regle ne vaut QUE sur la fenetre
+  # du navigateur : la fleche reste visible sur le fond d'ecran X — avant que
+  # chromium n'ait mappe sa fenetre, sur les bords si elle ne couvre pas tout,
+  # et pendant chaque redemarrage du navigateur. Le poste n'a pas de souris en
+  # exploitation, mais il en recoit une a chaque intervention, et le pointeur
+  # abandonne au milieu de l'ecran y reste ensuite pour toujours.
+  #
+  # On pose donc un curseur VIDE sur la fenetre racine (xsetroot, deja
+  # installe avec x11-xserver-utils : aucun paquet supplementaire). Le fichier
+  # XBM est ecrit dans un repertoire temporaire — le rootfs du poste peut etre
+  # monte en lecture seule (overlayfs).
+  if command -v xsetroot >/dev/null 2>&1; then
+    CURSEUR_VIDE="${TMPDIR:-/tmp}/badgeuse-curseur-vide.xbm"
+    cat > "$CURSEUR_VIDE" <<'FINXBM'
+#define vide_width 1
+#define vide_height 1
+static unsigned char vide_bits[] = { 0x00 };
+FINXBM
+    if xsetroot -cursor "$CURSEUR_VIDE" "$CURSEUR_VIDE" 2>/dev/null; then
+      dire "pointeur de souris masque sur la fenetre racine (xsetroot)"
+    else
+      dire "avertissement : xsetroot n'a pas pu masquer le pointeur"
+    fi
+  fi
+
+  # CEINTURE de la ceinture : unclutter retire aussi le pointeur au-dessus des
+  # fenetres, y compris pendant les quelques instants ou la page n'est pas
+  # encore peinte. Facultatif — son absence n'est pas une erreur, le curseur
+  # vide ci-dessus et la regle CSS suffisent au cas nominal.
+  if command -v unclutter >/dev/null 2>&1; then
+    unclutter -idle 0 -root >/dev/null 2>&1 &
+    MASQUE_POINTEUR=$!
+    dire "unclutter demarre (pointeur masque des l'immobilite)"
   fi
   # Repli de ceinture : on force la geometrie a la taille reelle de l'ecran,
   # utile si le gestionnaire tarde ou manque. xdpyinfo fait partie de
@@ -76,6 +114,7 @@ CODE=$?
 # Le gestionnaire de fenetres ne survit pas au navigateur : sans cela, un
 # openbox orphelin resterait a chaque redemarrage du kiosque.
 [ -n "${GESTIONNAIRE:-}" ] && kill "$GESTIONNAIRE" 2>/dev/null
+[ -n "${MASQUE_POINTEUR:-}" ] && kill "$MASQUE_POINTEUR" 2>/dev/null
 
 dire "chromium termine (code ${CODE})"
 exit "$CODE"

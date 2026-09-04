@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Layout from '../components/Layout';
 import { PageHeader } from '../components';
-import { Clock, ListChecks, FileSpreadsheet, AlertTriangle, IdCard, MonitorPlay, Radio, Sliders, MessageSquare } from 'lucide-react';
+import { Clock, ListChecks, FileSpreadsheet, AlertTriangle, IdCard, MonitorPlay, Radio, Sliders, MessageSquare, Tv } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import JournalPointages from '../components/badgeuse/JournalPointages';
 import FeuillesTemps from '../components/badgeuse/FeuillesTemps';
@@ -10,6 +10,7 @@ import GestionBadges from '../components/badgeuse/GestionBadges';
 import PlaylistAffichage from '../components/badgeuse/PlaylistAffichage';
 import ReseauxSociaux from '../components/badgeuse/ReseauxSociaux';
 import SupervisionPostes from '../components/badgeuse/SupervisionPostes';
+import EcranDirect from '../components/badgeuse/EcranDirect';
 import ParametresBadgeuse from '../components/badgeuse/ParametresBadgeuse';
 import MessagesBadgeage from '../components/badgeuse/MessagesBadgeage';
 
@@ -38,6 +39,9 @@ export default function TempsPresence() {
     { id: 'anomalies', label: 'Anomalies', icon: AlertTriangle },
     { id: 'badges', label: 'Badges', icon: IdCard },
     { id: 'affichage', label: 'Affichage', icon: MonitorPlay },
+    // Onglet distinct de « Affichage » (qui reste l'écran de RÉGLAGE) : ici on
+    // ne configure rien, on regarde ce qui passe réellement sur le poste.
+    { id: 'direct', label: 'Écran en direct', icon: Tv },
     { id: 'supervision', label: 'Supervision', icon: Radio },
     { id: 'parametres', label: 'Paramètres', icon: Sliders },
   ];
@@ -88,6 +92,7 @@ export default function TempsPresence() {
             <ReseauxSociaux canWrite={isAdmin} />
           </div>
         )}
+        {tab === 'direct' && <EcranDirect />}
         {tab === 'supervision' && <SupervisionPostes isAdmin={isAdmin} />}
         {tab === 'parametres' && (
           <div className="space-y-4">

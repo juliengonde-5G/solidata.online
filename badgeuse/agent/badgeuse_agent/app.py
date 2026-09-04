@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 from . import __version__
 from .clock import DriftMonitor
 from .config import Config
+from .ecran import ecrire_plage as ecrire_plage_ecran
 from .debounce import DEFAULT_WINDOW_SEC, Debouncer
 from .hmac_uid import hmac_uid, short
 from .moments import bloc_affichage, clamp_overlay
@@ -87,6 +88,16 @@ class Agent:
         self._debouncer.set_window(
             _positive(config.get("anti_rebond_sec"), DEFAULT_WINDOW_SEC)
         )
+        # PLAGE D'ACTIVATION DE L'ÉCRAN : le serveur l'envoie depuis toujours,
+        # mais elle n'atteignait pas le minuteur d'extinction, qui ne lit qu'un
+        # fichier local — régler les horaires dans SOLIDATA n'avait donc AUCUN
+        # effet sur le poste. L'agent dépose ici ce que le serveur décide ;
+        # deploy/dpms.sh lit ce fichier en priorité (voir ecran.py).
+        # Best effort : un échec d'écriture ne doit pas gêner le badgeage.
+        try:
+            ecrire_plage_ecran(self._config.data_dir, config)
+        except Exception:  # noqa: BLE001 - l'écran n'est jamais vital
+            LOGGER.exception("plage d'ecran : application impossible")
 
     @property
     def _overlay_sec(self) -> int:
