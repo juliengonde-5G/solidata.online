@@ -55,6 +55,14 @@ const BADGEUSE_SETTING_DEFAULTS = {
   'badgeuse.heartbeat_interval_sec': 60,
   'badgeuse.sync_badges_interval_sec': 300,
   'badgeuse.sync_playlist_interval_sec': 900,
+  // ── PLAGE D'ACTIVATION DE L'ÉCRAN (AFF-08) ──
+  // Hors de cette plage, le poste éteint son écran (badgeuse-dpms.timer, toutes
+  // les 5 min) ; DANS la plage, il neutralise en outre l'économiseur et la mise
+  // en veille du serveur graphique — un écran de pointage qui noircit en pleine
+  // journée est indiscernable d'une panne pour l'atelier.
+  // Ces heures FONT FOI CÔTÉ SERVEUR (ADR-0002) : le poste les reçoit par
+  // GET /config et les écrit dans son fichier local, que le minuteur lit en
+  // priorité sur la section [dpms] de sa configuration d'installation.
   'badgeuse.dpms_extinction': '21:30',
   'badgeuse.dpms_allumage': '05:30',
   // ── Supervision des postes (BO-09 — EXPLOITATION, pas une règle RH) ──
@@ -291,10 +299,21 @@ const GABARIT_KEYS = [
   'badgeuse.msg_premier_jour', 'badgeuse.msg_anniversaire', 'badgeuse.msg_anniversaire_entreprise',
 ];
 
-/** Clés de bornes horaires des moments (format HH:MM strict). */
+/**
+ * Clés de bornes horaires (format HH:MM strict) : bornes des moments de
+ * badgeage, ET plage d'activation de l'écran (`dpms_*`).
+ *
+ * Les deux clés `dpms_*` existaient depuis la v1 et descendaient déjà au poste
+ * par GET /config, mais elles n'étaient VALIDÉES NULLE PART : elles n'avaient
+ * aucun écran de saisie. Maintenant qu'elles s'éditent dans Paramètres, une
+ * heure illisible arrêterait le minuteur du poste en silence (dpms.sh laisse
+ * l'écran allumé et le dit dans son journal — que personne ne lit depuis le
+ * back-office). Le refus se fait donc À LA SAISIE.
+ */
 const PLAGE_KEYS = [
   'badgeuse.moment_matin_fin', 'badgeuse.moment_pause_debut', 'badgeuse.moment_pause_fin',
   'badgeuse.moment_retour_fin', 'badgeuse.moment_soir_debut',
+  'badgeuse.dpms_allumage', 'badgeuse.dpms_extinction',
 ];
 
 /**

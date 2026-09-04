@@ -7640,6 +7640,17 @@ async function initDatabase() {
     await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS source_url VARCHAR(500);');
     await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS config JSONB;');
 
+    //     `vak_uniquement` : le contenu n'est servi au poste QUE les jours de
+    //     Vente au Kilo. La demande d'exploitation était de « rajouter des
+    //     contenus média pour la VAK », et la fenêtre `visible_du/au` ne pouvait
+    //     pas y répondre : les dates de VAK vivent dans le module VAK
+    //     (table `vaks`), changent d'un mois à l'autre, et recopier ces dates à
+    //     la main sur chaque média serait une seconde source de vérité — celle
+    //     qui se périme. Le drapeau lie le contenu à la SOURCE (`vaks`), la
+    //     playlist interroge cette source à chaque construction.
+    //     Défaut `false` : un contenu existant reste diffusé tous les jours.
+    await client.query('ALTER TABLE badgeuse_contenus ADD COLUMN IF NOT EXISTS vak_uniquement BOOLEAN NOT NULL DEFAULT false;');
+
     //     Élargissement de la CHECK `type` aux 7 nouveaux types. DO-scan de
     //     pg_constraint (même parade que `milestone_type` du module Insertion
     //     et que `users.role`) : CREATE TABLE IF NOT EXISTS ne re-contraint

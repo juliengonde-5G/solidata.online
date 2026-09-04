@@ -10,10 +10,10 @@ import { useState, useEffect } from 'react';
 import { Link2, ShieldAlert } from 'lucide-react';
 import api from '../../services/api';
 import { Modal, useToast } from '../../components';
-import { apiErr } from './badgeuseShared';
+import { apiErr, ChampVakUniquement } from './badgeuseShared';
 
 function emptyForm() {
-  return { url: '', titre: '', duree_sec: 12, ordre: 0, visible_du: '', visible_au: '', actif: true };
+  return { url: '', titre: '', duree_sec: 12, ordre: 0, visible_du: '', visible_au: '', actif: true, vak_uniquement: false };
 }
 
 export default function PartagerLienModal({ open, onClose, onShared }) {
@@ -40,6 +40,7 @@ export default function PartagerLienModal({ open, onClose, onShared }) {
         visible_du: form.visible_du || null,
         visible_au: form.visible_au || null,
         actif: form.actif,
+        vak_uniquement: !!form.vak_uniquement,
       });
       toast.success('Lien partagé — le serveur a récupéré le contenu.');
       onShared();
@@ -99,6 +100,8 @@ export default function PartagerLienModal({ open, onClose, onShared }) {
             <input type="date" value={form.visible_au} onChange={(e) => setForm({ ...form, visible_au: e.target.value })} className="input-modern py-2 text-sm w-full" min={form.visible_du || undefined} />
           </div>
         </div>
+
+        <ChampVakUniquement value={form.vak_uniquement} onChange={(v) => setForm({ ...form, vak_uniquement: v })} />
 
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={form.actif} onChange={(e) => setForm({ ...form, actif: e.target.checked })} className="rounded border-slate-300" /> Contenu actif

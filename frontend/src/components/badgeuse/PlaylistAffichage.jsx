@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MonitorPlay, Plus, Pencil, Trash2, ShieldAlert, Eye, UploadCloud, Link2 } from 'lucide-react';
+import { MonitorPlay, Plus, Pencil, Trash2, ShieldAlert, Eye, UploadCloud, Link2, Scale } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState, EmptyState, Modal, ConfirmDialog, useToast } from '../../components';
 import {
   apiErr, fmtDateParis, TYPE_CONTENU_LABELS, TYPE_CONTENU_HINTS, TYPE_CONTENU_CONFIG_FIELDS,
-  TYPES_LEGACY, TYPES_GENERATEURS, isGenerateurType, isMediaServeurType,
+  TYPES_LEGACY, TYPES_GENERATEURS, isGenerateurType, isMediaServeurType, ChampVakUniquement,
 } from './badgeuseShared';
 import PrevisualisationContenu from './PrevisualisationContenu';
 import UploadMediaModal from './UploadMediaModal';
@@ -34,7 +34,7 @@ function parseConfig(v, type) {
 function emptyForm() {
   return {
     type: 'message', titre: '', corps: '', media_url: '', duree_sec: 10, ordre: 0,
-    visible_du: '', visible_au: '', actif: true, config: {},
+    visible_du: '', visible_au: '', actif: true, config: {}, vak_uniquement: false,
   };
 }
 
@@ -57,6 +57,7 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
         visible_au: editing.visible_au ? String(editing.visible_au).slice(0, 10) : '',
         actif: editing.actif !== false,
         config: parseConfig(editing.config, editing.type),
+        vak_uniquement: !!editing.vak_uniquement,
       });
     } else {
       setForm(emptyForm());
@@ -75,7 +76,7 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!generateur && !verrouTypeMedia && !form.titre.trim()) { setError('Le titre est requis.'); return; }
+    if (!generateur && !form.titre.trim()) { setError('Le titre est requis.'); return; }
     const duree = parseInt(form.duree_sec, 10);
     if (!Number.isFinite(duree) || duree < 5 || duree > 60) { setError('La durée doit être comprise entre 5 et 60 secondes.'); return; }
     setSaving(true); setError(null);
@@ -88,6 +89,7 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
         visible_du: form.visible_du || null, visible_au: form.visible_au || null,
         actif: form.actif,
         config: generateur ? form.config : null,
+        vak_uniquement: !!form.vak_uniquement,
       };
       if (editing) await api.put(`/badgeuse/contenus/${editing.id}`, payload);
       else await api.post('/badgeuse/contenus', payload);
@@ -130,18 +132,23 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
           <p className="text-[11px] text-slate-400 -mt-1">{TYPE_CONTENU_HINTS[form.type]}</p>
         )}
 
-        {verrouTypeMedia ? (
+        {/* Média téléversé ou lien rapatrié : le FICHIER est figé (le remplacer
+            reviendrait à changer de contenu), mais son titre, lui, se modifie —
+            c'est le seul texte que l'écran affiche sous le visuel, et il porte
+            souvent le nom brut du fichier au moment du téléversement.
+            L'encadré promettait déjà « seuls le titre, la durée… sont
+            modifiables ici » : le champ, lui, n'était pas rendu. */}
+        {verrouTypeMedia && (
           <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2">
             {editing.type === 'lien' && editing.source_url ? <>Lien source : <span className="font-mono break-all">{editing.source_url}</span></> : null}
-            {editing.fichier ? <>Fichier : {editing.fichier}</> : null}
-            <p className="mt-1">Seuls le titre, la durée, l'ordre, la fenêtre de validité et l'état actif sont modifiables ici.</p>
-          </div>
-        ) : (
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Titre {generateur && '(facultatif)'}</label>
-            <input value={form.titre} onChange={(e) => setForm({ ...form, titre: e.target.value })} className="input-modern py-2 text-sm w-full" maxLength={200} required={!generateur} />
+            {editing.fichier ? <div>Fichier : {editing.fichier}</div> : null}
+            <p className="mt-1">Le fichier ne se remplace pas ici (téléversez un nouveau média) — le titre, la durée, l'ordre, la fenêtre de validité et l'état actif se modifient.</p>
           </div>
         )}
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Titre {generateur && '(facultatif)'}</label>
+          <input value={form.titre} onChange={(e) => setForm({ ...form, titre: e.target.value })} className="input-modern py-2 text-sm w-full" maxLength={200} required={!generateur} />
+        </div>
 
         {!generateur && !verrouTypeMedia && (
           <div>
@@ -194,6 +201,8 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
             <input type="date" value={form.visible_au} onChange={(e) => setForm({ ...form, visible_au: e.target.value })} className="input-modern py-2 text-sm w-full" min={form.visible_du || undefined} />
           </div>
         </div>
+        <ChampVakUniquement value={form.vak_uniquement} onChange={(v) => setForm({ ...form, vak_uniquement: v })} />
+
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={form.actif} onChange={(e) => setForm({ ...form, actif: e.target.checked })} className="rounded border-slate-300" /> Contenu actif
         </label>
@@ -293,7 +302,13 @@ export default function PlaylistAffichage({ canWrite }) {
                       <td className="py-2 px-2 font-medium text-slate-700 max-w-[220px] truncate" title={c.titre}>{c.titre || '—'}</td>
                       <td className="py-2 px-2 text-right text-slate-500">{c.duree_sec || 10} s</td>
                       <td className="py-2 px-2 text-slate-500 whitespace-nowrap text-xs">
-                        {c.visible_du || c.visible_au ? `${c.visible_du ? fmtDateParis(c.visible_du) : '…'} → ${c.visible_au ? fmtDateParis(c.visible_au) : '…'}` : 'permanent'}
+                        {c.vak_uniquement ? (
+                          <span className="inline-flex items-center gap-1 text-orange-700 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5" title="Diffusé uniquement les jours de Vente au Kilo (dates du module VAK)">
+                            <Scale className="w-3 h-3" aria-hidden="true" /> Jours de VAK
+                          </span>
+                        ) : (c.visible_du || c.visible_au
+                          ? `${c.visible_du ? fmtDateParis(c.visible_du) : '…'} → ${c.visible_au ? fmtDateParis(c.visible_au) : '…'}`
+                          : 'permanent')}
                       </td>
                       <td className="py-2 px-2 text-center">{c.actif !== false ? <span className="text-emerald-600">Oui</span> : <span className="text-slate-400">Non</span>}</td>
                       <td className="py-2 px-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>

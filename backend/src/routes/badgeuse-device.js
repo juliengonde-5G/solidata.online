@@ -1270,112 +1270,146 @@ async function buildSocial(limite) {
 // GET /v1/devices/:code/playlist — contenus de veille (ETag)
 // Aucune donnée personnelle (finalité communication interne dissociée).
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, async (req, res) => {
-  try {
-    const r = await pool.query(
-      `SELECT id, type, titre, corps, media_url, duree_sec, ordre,
-              fichier, media_type, media_sha256, config
-       FROM badgeuse_contenus
-       WHERE actif = true
-         AND (site_id IS NULL OR site_id = $1)
-         AND (visible_du IS NULL OR visible_du <= CURRENT_DATE)
-         AND (visible_au IS NULL OR visible_au >= CURRENT_DATE)
-       ORDER BY ordre, id`,
-      [req.device.site_id]
-    );
+/**
+ * Construit la playlist réellement servie à un poste — SOURCE UNIQUE.
+ *
+ * Extraite de la route pour que le back-office puisse afficher l'écran « en
+ * direct » AVEC LA MÊME donnée que le poste (routes/badgeuse.js). Deux
+ * implémentations parallèles auraient produit exactement ce qu'un écran de
+ * contrôle ne doit pas produire : un aperçu qui diverge de la réalité.
+ *
+ * @param {number|null} siteId site du poste (les contenus sans site sont communs)
+ * @returns {Promise<Array<object>>} éléments prêts à jouer, dans l'ordre
+ */
+async function construirePlaylist(siteId) {
+  const r = await pool.query(
+    `SELECT id, type, titre, corps, media_url, duree_sec, ordre,
+            fichier, media_type, media_sha256, config, vak_uniquement
+     FROM badgeuse_contenus
+     WHERE actif = true
+       AND (site_id IS NULL OR site_id = $1)
+       AND (visible_du IS NULL OR visible_du <= CURRENT_DATE)
+       AND (visible_au IS NULL OR visible_au >= CURRENT_DATE)
+     ORDER BY ordre, id`,
+    [siteId]
+  );
 
-    const params = await readBadgeuseParams();
-    const jourParis = engine.parisDateStr(new Date());
-    const elements = [];
+  const params = await readBadgeuseParams();
+  const jourParis = engine.parisDateStr(new Date());
+  const elements = [];
 
-    for (const x of r.rows) {
-      const base = {
-        id: x.id,
-        type: x.type,
-        titre: x.titre,
-        corps: x.corps,
-        media_url: x.media_url,
-        duree_sec: x.duree_sec,
-        ordre: x.ordre,
-      };
+  // Y a-t-il une VAK aujourd'hui ? Question posée UNE FOIS, et seulement si un
+  // contenu en dépend. EN CAS DE DOUTE, C'EST NON : une table VAK inaccessible
+  // ne doit pas faire annoncer aux visiteurs une vente qui n'a peut-être pas
+  // lieu — l'erreur qui trompe le public est plus coûteuse que l'écran manquant.
+  let vakAujourdhui = null;
+  if (r.rows.some((x) => x.vak_uniquement)) {
+    try {
+      vakAujourdhui = await vakDuJour();
+    } catch (err) {
+      console.error(`[BADGEUSE-DEVICE] Jour de VAK indéterminable, contenus VAK omis : ${err.message}`);
+      vakAujourdhui = null;
+    }
+  }
 
-      // Éléments TEXTE historiques : forme strictement inchangée (le poste
-      // déployé les consomme déjà — aucune régression tolérée).
-      if (!TYPES_GENERES.includes(x.type)) {
-        if (x.type === 'media' || x.type === 'lien') {
-          // Média téléversé ou lien rapatrié : le poste télécharge le binaire
-          // par /media/:id, vérifie le sha256, et sert depuis son cache local.
-          if (!x.fichier) continue; // fichier absent ⇒ élément muet, on l'omet
-          elements.push({
-            ...base,
-            type: 'media',
-            media_id: `c${x.id}`,
-            media_type: x.media_type || 'image',
-            media_sha256: x.media_sha256 || null,
-          });
-          continue;
-        }
-        elements.push(base);
+  for (const x of r.rows) {
+    // Contenu réservé aux jours de VAK : les dates viennent du module VAK
+    // (table `vaks`), jamais d'une recopie dans la fiche du contenu.
+    if (x.vak_uniquement && !vakAujourdhui) continue;
+
+    const base = {
+      id: x.id,
+      type: x.type,
+      titre: x.titre,
+      corps: x.corps,
+      media_url: x.media_url,
+      duree_sec: x.duree_sec,
+      ordre: x.ordre,
+    };
+
+    // Éléments TEXTE historiques : forme strictement inchangée (le poste
+    // déployé les consomme déjà — aucune régression tolérée).
+    if (!TYPES_GENERES.includes(x.type)) {
+      if (x.type === 'media' || x.type === 'lien') {
+        // Média téléversé ou lien rapatrié : le poste télécharge le binaire
+        // par /media/:id, vérifie le sha256, et sert depuis son cache local.
+        if (!x.fichier) continue; // fichier absent ⇒ élément muet, on l'omet
+        elements.push({
+          ...base,
+          type: 'media',
+          media_id: `c${x.id}`,
+          media_type: x.media_type || 'image',
+          media_sha256: x.media_sha256 || null,
+        });
         continue;
       }
-
-      // ── Générateurs : contenu construit ici, élément OMIS si vide ──
-      const config = contenuConfig(x.config);
-      try {
-        if (x.type === 'annonces') {
-          if (params.festif_actif === false) continue;
-          const annonces = await buildAnnonces(jourParis);
-          if (annonces.length === 0) continue;
-          elements.push({ ...base, annonces });
-        } else if (x.type === 'actus') {
-          const actus = await buildActus(nbConfig(config, 'nb_actus', 3, 10));
-          if (actus.length === 0) continue;
-          elements.push({ ...base, actus });
-        } else if (x.type === 'tournees') {
-          const tournees = await buildTournees(jourParis);
-          if (tournees.length === 0) continue;
-          elements.push({ ...base, tournees });
-        } else if (x.type === 'tournees_carte') {
-          // Écran DISTINCT de « tournees » (qui reste la liste des
-          // progressions) : ce sont deux écrans, pas deux versions du même —
-          // même arbitrage que `presse` à côté d'`actus`. Un exploitant qui
-          // a configuré la liste ne doit pas la voir se transformer en carte.
-          const carteTournees = await buildTourneesCarte(jourParis);
-          if (!carteTournees) continue;
-          elements.push({ ...base, carte: carteTournees });
-        } else if (x.type === 'social') {
-          const posts = await buildSocial(nbConfig(config, 'nb_posts', 5, 20));
-          if (posts.length === 0) continue;
-          elements.push({ ...base, posts });
-        } else if (x.type === 'vak_live') {
-          const vak = await buildVakLive();
-          if (!vak) continue;
-          elements.push({ ...base, vak });
-        } else if (x.type === 'meteo') {
-          const meteo = await buildMeteo(req.device.site_id, params);
-          // REPLI DE NON-RÉGRESSION : avant que `meteo` ne soit un générateur,
-          // l'exploitant pouvait écrire sa météo à la main dans « corps ».
-          // Sans prévision disponible, cet écran-là doit continuer d'exister.
-          if (!meteo) { if (x.corps) elements.push(base); continue; }
-          elements.push({ ...base, meteo });
-        } else if (x.type === 'presse') {
-          // UN ÉLÉMENT PAR ARTICLE. Tous portent l'`id` du contenu source :
-          // ni le poste ni l'interface ne s'en servent comme clé (la playlist
-          // est une séquence), et c'est ce qui permet de retrouver le réglage
-          // d'origine d'un écran.
-          const articles = await buildPresse(nbConfig(config, 'nb_articles', 3, 8));
-          if (articles.length === 0) continue;
-          for (const a of articles) {
-            elements.push({ ...base, ...(a.media || {}), article: a.article });
-          }
-        }
-      } catch (err) {
-        // Un générateur en panne (table absente, requête lente) ne doit PAS
-        // vider la playlist : il s'efface, les autres passent.
-        console.error(`[BADGEUSE-DEVICE] Générateur « ${x.type} » ignoré : ${err.message}`);
-      }
+      elements.push(base);
+      continue;
     }
 
+    // ── Générateurs : contenu construit ici, élément OMIS si vide ──
+    const config = contenuConfig(x.config);
+    try {
+      if (x.type === 'annonces') {
+        if (params.festif_actif === false) continue;
+        const annonces = await buildAnnonces(jourParis);
+        if (annonces.length === 0) continue;
+        elements.push({ ...base, annonces });
+      } else if (x.type === 'actus') {
+        const actus = await buildActus(nbConfig(config, 'nb_actus', 3, 10));
+        if (actus.length === 0) continue;
+        elements.push({ ...base, actus });
+      } else if (x.type === 'tournees') {
+        const tournees = await buildTournees(jourParis);
+        if (tournees.length === 0) continue;
+        elements.push({ ...base, tournees });
+      } else if (x.type === 'tournees_carte') {
+        // Écran DISTINCT de « tournees » (qui reste la liste des
+        // progressions) : ce sont deux écrans, pas deux versions du même —
+        // même arbitrage que `presse` à côté d'`actus`. Un exploitant qui
+        // a configuré la liste ne doit pas la voir se transformer en carte.
+        const carteTournees = await buildTourneesCarte(jourParis);
+        if (!carteTournees) continue;
+        elements.push({ ...base, carte: carteTournees });
+      } else if (x.type === 'social') {
+        const posts = await buildSocial(nbConfig(config, 'nb_posts', 5, 20));
+        if (posts.length === 0) continue;
+        elements.push({ ...base, posts });
+      } else if (x.type === 'vak_live') {
+        const vak = await buildVakLive();
+        if (!vak) continue;
+        elements.push({ ...base, vak });
+      } else if (x.type === 'meteo') {
+        const meteo = await buildMeteo(siteId, params);
+        // REPLI DE NON-RÉGRESSION : avant que `meteo` ne soit un générateur,
+        // l'exploitant pouvait écrire sa météo à la main dans « corps ».
+        // Sans prévision disponible, cet écran-là doit continuer d'exister.
+        if (!meteo) { if (x.corps) elements.push(base); continue; }
+        elements.push({ ...base, meteo });
+      } else if (x.type === 'presse') {
+        // UN ÉLÉMENT PAR ARTICLE. Tous portent l'`id` du contenu source :
+        // ni le poste ni l'interface ne s'en servent comme clé (la playlist
+        // est une séquence), et c'est ce qui permet de retrouver le réglage
+        // d'origine d'un écran.
+        const articles = await buildPresse(nbConfig(config, 'nb_articles', 3, 8));
+        if (articles.length === 0) continue;
+        for (const a of articles) {
+          elements.push({ ...base, ...(a.media || {}), article: a.article });
+        }
+      }
+    } catch (err) {
+      // Un générateur en panne (table absente, requête lente) ne doit PAS
+      // vider la playlist : il s'efface, les autres passent.
+      console.error(`[BADGEUSE-DEVICE] Générateur « ${x.type} » ignoré : ${err.message}`);
+    }
+  }
+
+  return elements;
+}
+
+router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, async (req, res) => {
+  try {
+    const elements = await construirePlaylist(req.device.site_id);
     sendWithEtag(req, res, computeEtag(elements), { elements });
   } catch (err) {
     console.error('[BADGEUSE-DEVICE] Erreur playlist :', err.message);
@@ -1399,29 +1433,45 @@ router.get('/v1/devices/:code/playlist', deviceLimiter, authenticateDevice, asyn
 // contenu, jamais d'un en-tête stocké — et `nosniff` interdit au navigateur du
 // kiosque de réinterpréter le fichier.
 // ═══════════════════════════════════════════════════════════════════════════
+/**
+ * Résout une référence de média PRÉFIXÉE (`c12`, `s3`, `p7`) en fichier
+ * réellement lisible sur le disque.
+ *
+ * Partagée avec le back-office (routes/badgeuse.js sert le même média à
+ * l'écran d'aperçu, sous authentification utilisateur) : la garde de chemin et
+ * la liste blanche d'extensions ne doivent exister QU'UNE FOIS — une seconde
+ * copie serait la porte par laquelle un `..` finit par passer.
+ *
+ * @param {string} ref référence préfixée reçue de la playlist
+ * @returns {Promise<{abs: string, mime: string}|null>} null = absent ou refusé
+ */
+async function resoudreMediaRef(ref) {
+  const m = /^([csp])(\d{1,12})$/.exec(String(ref || ''));
+  if (!m) return null;
+  const REQUETES = {
+    c: 'SELECT fichier FROM badgeuse_contenus WHERE id = $1',
+    s: 'SELECT media_fichier AS fichier FROM badgeuse_social_posts WHERE id = $1',
+    p: 'SELECT media_fichier AS fichier FROM badgeuse_presse_articles WHERE id = $1',
+  };
+  const r = await pool.query(REQUETES[m[1]], [parseInt(m[2], 10)]);
+  const relatif = r.rows[0] ? r.rows[0].fichier : null;
+  if (!relatif) return null;
+
+  const abs = media.resolveMediaPath(relatif);
+  const mime = media.mimeForFile(relatif);
+  // Chemin hors racine, ou extension hors liste blanche → traité comme absent :
+  // l'appelant n'a pas à distinguer « absent » de « refusé ».
+  if (!abs || !mime) return null;
+  if (!fs.existsSync(abs)) return null;
+  return { abs, mime };
+}
+
 router.get('/v1/devices/:code/media/:id', deviceLimiter, authenticateDevice, async (req, res) => {
   const introuvable = () => res.status(404).json({ error: 'not_found' });
   try {
-    const brut = String(req.params.id || '');
-    const m = /^([csp])(\d{1,12})$/.exec(brut);
-    if (!m) return introuvable();
-    const id = parseInt(m[2], 10);
-
-    const REQUETES = {
-      c: 'SELECT fichier FROM badgeuse_contenus WHERE id = $1',
-      s: 'SELECT media_fichier AS fichier FROM badgeuse_social_posts WHERE id = $1',
-      p: 'SELECT media_fichier AS fichier FROM badgeuse_presse_articles WHERE id = $1',
-    };
-    const r = await pool.query(REQUETES[m[1]], [id]);
-    const relatif = r.rows[0] ? r.rows[0].fichier : null;
-    if (!relatif) return introuvable();
-
-    const abs = media.resolveMediaPath(relatif);
-    const mime = media.mimeForFile(relatif);
-    // Chemin hors racine, ou extension hors liste blanche → 404 (et non 415) :
-    // le poste n'a pas à distinguer « absent » de « refusé ».
-    if (!abs || !mime) return introuvable();
-    if (!fs.existsSync(abs)) return introuvable();
+    const trouve = await resoudreMediaRef(req.params.id);
+    if (!trouve) return introuvable();
+    const { abs, mime } = trouve;
 
     res.setHeader('Content-Type', mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -1505,3 +1555,13 @@ router.post('/v1/devices/:code/heartbeat',
   });
 
 module.exports = router;
+
+// Fonctions partagées avec le back-office (routes/badgeuse.js). Elles sont
+// attachées au routeur plutôt que déménagées dans un service : la playlist et
+// ses onze générateurs vivent ici, et les déplacer pour les exposer aurait
+// bougé 600 lignes éprouvées sans rien réparer. Ce qui compte est qu'il n'en
+// existe QU'UNE version — l'écran de contrôle du back-office lit exactement ce
+// que le poste reçoit.
+module.exports.construirePlaylist = construirePlaylist;
+module.exports.resoudreMediaRef = resoudreMediaRef;
+module.exports.vakDuJour = vakDuJour;

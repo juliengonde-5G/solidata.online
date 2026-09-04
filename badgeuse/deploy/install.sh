@@ -221,6 +221,11 @@ else
     apt-get install -y --no-install-recommends \
       xserver-xorg-core xserver-xorg-legacy xserver-xorg-video-fbdev \
       xinit openbox x11-xserver-utils
+    # unclutter masque le pointeur de souris AU-DESSUS des fenetres. Facultatif
+    # (kiosk-client.sh pose deja un curseur racine vide avec xsetroot, et la
+    # page du kiosque pose « cursor: none ») : son absence n'empeche rien, elle
+    # est seulement dite.
+    installer_paquet unclutter || avert "unclutter absent — pointeur masque par xsetroot et CSS uniquement"
     # Le wrapper n'autorise par defaut que les « utilisateurs console », au sens
     # d'une session interactive ouverte sur le VT courant — ce que le kiosque
     # n'est pas (service systemd, utilisateur sans shell). Sur ce poste dedie la

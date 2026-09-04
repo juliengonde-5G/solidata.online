@@ -10,7 +10,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { UploadCloud, Image as ImageIcon, Video } from 'lucide-react';
 import api from '../../services/api';
 import { Modal, useToast } from '../../components';
-import { uploadErr } from './badgeuseShared';
+import { uploadErr, ChampVakUniquement } from './badgeuseShared';
 
 // Plafond de REPLI, utilisé seulement tant que le serveur n'a pas répondu.
 // Le chiffre qui fait foi vient de `GET /badgeuse/contenus/upload-limites` :
@@ -22,7 +22,7 @@ const MAX_MO_REPLI = 50;
 const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm';
 
 function emptyForm() {
-  return { titre: '', duree_sec: 12, ordre: 0, visible_du: '', visible_au: '', actif: true };
+  return { titre: '', duree_sec: 12, ordre: 0, visible_du: '', visible_au: '', actif: true, vak_uniquement: false };
 }
 
 export default function UploadMediaModal({ open, onClose, onUploaded }) {
@@ -81,6 +81,9 @@ export default function UploadMediaModal({ open, onClose, onUploaded }) {
       if (form.visible_du) fd.append('visible_du', form.visible_du);
       if (form.visible_au) fd.append('visible_au', form.visible_au);
       fd.append('actif', String(!!form.actif));
+      // Multipart : tout part en chaîne. Le serveur ne retient que `'true'`
+      // (une chaîne `'false'` serait vraie pour un test de vérité naïf).
+      fd.append('vak_uniquement', String(!!form.vak_uniquement));
       await api.post('/badgeuse/contenus/upload', fd, {
         timeout: 300000, // upload volumineux — nginx autorise 300 s sur /api
         onUploadProgress: (evt) => {
@@ -150,6 +153,9 @@ export default function UploadMediaModal({ open, onClose, onUploaded }) {
             <input type="date" value={form.visible_au} onChange={(e) => setForm({ ...form, visible_au: e.target.value })} className="input-modern py-2 text-sm w-full" min={form.visible_du || undefined} disabled={uploading} />
           </div>
         </div>
+
+        <ChampVakUniquement value={form.vak_uniquement} disabled={uploading}
+          onChange={(v) => setForm({ ...form, vak_uniquement: v })} />
 
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={form.actif} onChange={(e) => setForm({ ...form, actif: e.target.checked })} className="rounded border-slate-300" disabled={uploading} /> Contenu actif

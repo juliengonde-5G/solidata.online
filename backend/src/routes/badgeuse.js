@@ -51,6 +51,12 @@ const {
   canonicalPointage, genesisHash, chainHash,
   generateAppairageCode, formatAppairageCode, hashAppairageCode,
 } = require('../utils/badgeuse-crypto');
+// Fonctions PARTAGÉES avec l'API device : la playlist réellement servie au
+// poste et la résolution d'un média. L'écran de contrôle du back-office
+// (« Écran en direct ») lit la MÊME source que le poste — un aperçu qui
+// diverge de l'écran réel ne serait pas un contrôle, ce serait une deuxième
+// version de la vérité.
+const deviceApi = require('./badgeuse-device');
 
 router.use(authenticate);
 router.use(autoLogActivity('badgeuse'));
@@ -1576,6 +1582,9 @@ const contenuValidators = [
   body('visible_au').optional({ nullable: true }).matches(/^\d{4}-\d{2}-\d{2}$/),
   body('site_id').optional({ nullable: true }).isInt(),
   body('actif').optional().isBoolean(),
+  // Contenu réservé aux jours de Vente au Kilo : le drapeau lie l'élément au
+  // module VAK (table `vaks`), qui reste la SEULE source des dates.
+  body('vak_uniquement').optional().isBoolean(),
 ];
 
 router.get('/contenus', READ, async (req, res) => {
@@ -1597,8 +1606,8 @@ router.post('/contenus', WRITE, contenuValidators, validate, async (req, res) =>
     const b = req.body || {};
     const r = await pool.query(
       `INSERT INTO badgeuse_contenus
-         (site_id, type, titre, corps, media_url, ordre, duree_sec, visible_du, visible_au, actif, config, cree_par)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+         (site_id, type, titre, corps, media_url, ordre, duree_sec, visible_du, visible_au, actif, config, vak_uniquement, cree_par)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         b.site_id == null ? null : parseInt(b.site_id, 10), b.type || 'message',
         b.titre || null, b.corps || null, b.media_url || null,
@@ -1607,6 +1616,7 @@ router.post('/contenus', WRITE, contenuValidators, validate, async (req, res) =>
         b.visible_du || null, b.visible_au || null,
         b.actif === undefined ? true : !!b.actif,
         b.config == null ? null : JSON.stringify(b.config),
+        b.vak_uniquement === undefined ? false : !!b.vak_uniquement,
         req.user.id,
       ]
     );
@@ -1674,8 +1684,8 @@ router.post('/contenus/upload', WRITE, uploadMediaSingle, async (req, res) => {
     const r = await pool.query(
       `INSERT INTO badgeuse_contenus
          (site_id, type, titre, ordre, duree_sec, visible_du, visible_au, actif,
-          fichier, media_type, media_sha256, cree_par)
-       VALUES ($1,'media',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          fichier, media_type, media_sha256, vak_uniquement, cree_par)
+       VALUES ($1,'media',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [
         b.site_id == null || b.site_id === '' ? null : parseInt(b.site_id, 10),
         b.titre || req.file.originalname || 'Média',
@@ -1683,7 +1693,12 @@ router.post('/contenus/upload', WRITE, uploadMediaSingle, async (req, res) => {
         b.duree_sec == null || b.duree_sec === '' ? 10 : Math.min(60, Math.max(5, parseInt(b.duree_sec, 10) || 10)),
         b.visible_du || null, b.visible_au || null,
         b.actif === undefined ? true : !(b.actif === 'false' || b.actif === false),
-        relatif, mediaType, sha256, req.user.id,
+        relatif, mediaType, sha256,
+        // Multipart : tout arrive en CHAÎNE. `'false'` est une chaîne non vide,
+        // donc vraie — le piège classique qui aurait fait d'un média ordinaire
+        // un média « jours de VAK ». Seule une valeur explicitement vraie compte.
+        b.vak_uniquement === true || b.vak_uniquement === 'true' || b.vak_uniquement === '1',
+        req.user.id,
       ]
     );
     res.status(201).json(r.rows[0]);
@@ -1725,8 +1740,8 @@ router.post('/contenus/lien', WRITE, [
     const r = await pool.query(
       `INSERT INTO badgeuse_contenus
          (site_id, type, titre, ordre, duree_sec, visible_du, visible_au, actif,
-          fichier, media_type, media_sha256, source_url, cree_par)
-       VALUES ($1,'lien',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+          fichier, media_type, media_sha256, source_url, vak_uniquement, cree_par)
+       VALUES ($1,'lien',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         b.site_id == null ? null : parseInt(b.site_id, 10),
         b.titre || 'Contenu partagé',
@@ -1735,7 +1750,9 @@ router.post('/contenus/lien', WRITE, [
         b.visible_du || null, b.visible_au || null,
         b.actif === undefined ? true : !!b.actif,
         telecharge.fichier, telecharge.media_type, telecharge.media_sha256,
-        String(b.url).slice(0, 500), req.user.id,
+        String(b.url).slice(0, 500),
+        b.vak_uniquement === undefined ? false : !!b.vak_uniquement,
+        req.user.id,
       ]
     );
     res.status(201).json({ ...r.rows[0], octets: telecharge.bytes });
@@ -1763,6 +1780,7 @@ router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], 
          duree_sec = COALESCE($8, duree_sec), visible_du = COALESCE($9, visible_du),
          visible_au = COALESCE($10, visible_au), actif = COALESCE($11, actif),
          config = COALESCE($12::jsonb, config),
+         vak_uniquement = COALESCE($13, vak_uniquement),
          updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [
@@ -1775,6 +1793,7 @@ router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], 
         b.visible_du || null, b.visible_au || null,
         b.actif === undefined ? null : !!b.actif,
         b.config == null ? null : JSON.stringify(b.config),
+        b.vak_uniquement === undefined ? null : !!b.vak_uniquement,
       ]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Contenu introuvable' });
@@ -1799,6 +1818,156 @@ router.delete('/contenus/:id', WRITE, [param('id').isInt()], validate, async (re
     res.json({ deleted: true, id: r.rows[0].id, fichier_supprime: fichierSupprime });
   } catch (err) {
     console.error('[BADGEUSE] Erreur suppression contenu :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENDA DES VENTES AU KILO — pour les contenus « jours de VAK »
+//
+// Un contenu marqué « jours de VAK » ne s'affiche que lorsqu'une vente est en
+// cours (module VAK, table `vaks`). L'écran de saisie doit donc pouvoir dire à
+// l'exploitant QUAND son média passera : sans cette réponse, il coche une case
+// dont il ne peut pas vérifier l'effet, et croit son écran cassé les jours
+// ordinaires. Aucune donnée personnelle (libellé, dates, lieu d'un événement).
+// ═══════════════════════════════════════════════════════════════════════════
+router.get('/contenus/vak-agenda', READ, async (req, res) => {
+  try {
+    const jour = engine.parisDateStr(new Date());
+    const r = await pool.query(
+      `SELECT id, libelle, date_debut, date_fin,
+              ($1::date BETWEEN date_debut AND date_fin) AS en_cours
+       FROM vaks
+       WHERE date_fin >= $1::date
+       ORDER BY date_debut
+       LIMIT 6`,
+      [jour]
+    );
+    // C'EST POSTGRESQL QUI COMPARE LES DATES, pas nous. Le pilote rend une
+    // colonne DATE sous forme d'objet Date : la comparer à « 2026-09-04 »
+    // après un String() donne « Wed Sep 04 » — une comparaison qui échoue
+    // toujours, en silence. Défaut trouvé en jouant la route sur une vraie
+    // base : la vente du jour n'était jamais reconnue.
+    const encours = r.rows.find((v) => v.en_cours === true) || null;
+    res.json({
+      jour,
+      // `null` explicite : « pas de VAK aujourd'hui » est une réponse, pas une
+      // absence de données.
+      vak_du_jour: encours,
+      prochaines: r.rows.filter((v) => v !== encours),
+    });
+  } catch (err) {
+    // Module VAK indisponible : on le DIT au lieu de laisser croire qu'aucune
+    // vente n'est programmée (`disponible:false` ≠ agenda vide).
+    console.error('[BADGEUSE] Agenda VAK indisponible :', err.message);
+    res.json({ disponible: false, motif: 'Agenda des ventes au kilo indisponible', prochaines: [] });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /apercu-media/:ref — le média d'un écran, servi au BACK-OFFICE
+//
+// Jusqu'ici, seule l'API device (authentifiée par clé de poste) servait ces
+// fichiers : l'aperçu du back-office affichait donc une vignette générique et
+// un nom de fichier, c'est-à-dire tout sauf ce que le poste montre réellement.
+// La référence est PRÉFIXÉE comme côté poste (`c12` contenu, `s3` post social,
+// `p7` vignette de presse) et la résolution passe par la MÊME fonction —
+// gardes de chemin et liste blanche d'extensions comprises.
+//
+// Accès : READ (ADMIN/RH/MANAGER), comme la playlist qu'il illustre. Aucune
+// donnée personnelle par construction (l'écran de veille n'en porte pas).
+// ═══════════════════════════════════════════════════════════════════════════
+router.get('/apercu-media/:ref', READ, [
+  param('ref').matches(/^[csp]\d{1,12}$/).withMessage('référence de média invalide'),
+], validate, async (req, res) => {
+  try {
+    const trouve = await deviceApi.resoudreMediaRef(req.params.ref);
+    if (!trouve) return res.status(404).json({ error: 'Média introuvable' });
+
+    res.setHeader('Content-Type', trouve.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // `private` : un média d'affichage n'a rien de secret, mais il ne doit pas
+    // se retrouver dans un cache partagé au nom d'un utilisateur.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    const flux = fs.createReadStream(trouve.abs);
+    flux.on('error', (err) => {
+      console.error('[BADGEUSE] Lecture du média impossible :', err.message);
+      if (!res.headersSent) res.status(404).json({ error: 'Média introuvable' });
+      else res.end();
+    });
+    flux.pipe(res);
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur aperçu média :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /ecran-direct — ce que le poste affiche EN CE MOMENT
+//
+// CE QUE C'EST : la playlist RÉELLE du poste, construite par la fonction que
+// sert l'API device — mêmes annonces, mêmes actualités, mêmes tournées, mêmes
+// chiffres de VAK, mêmes médias, même ordre, mêmes durées. Le back-office la
+// rejoue à l'écran : on voit ce que voit l'atelier, sans se déplacer.
+//
+// CE QUE CE N'EST PAS, ET POURQUOI : une capture de la dalle du Raspberry. Le
+// poste affiche, pendant 8 secondes après chaque badgeage, le prénom et
+// l'initiale d'un salarié (ADR-0004 §1). Filmer cet écran reviendrait à créer
+// un second traitement de données personnelles, cette fois stocké sur le
+// serveur et rejouable — exactement ce que la note juridique interdit au
+// dispositif. La restitution part donc de la SOURCE, pas de la dalle, et
+// l'overlay de badgeage n'y figure jamais.
+//
+// La désynchronisation résiduelle est ASSUMÉE et dite à l'écran : le poste ne
+// rapporte pas l'élément qu'il joue (le canal WebSocket local ne remonte rien
+// vers l'agent), la rotation du back-office est donc la sienne.
+// ═══════════════════════════════════════════════════════════════════════════
+router.get('/ecran-direct', READ, [
+  q('device_id').optional().isInt(),
+], validate, async (req, res) => {
+  try {
+    const demande = req.query.device_id ? parseInt(req.query.device_id, 10) : null;
+    const rd = await pool.query(
+      `SELECT d.id, d.code, d.libelle, d.site_id, d.actif, d.dernier_heartbeat,
+              d.heartbeat_info, s.code AS site_code, s.libelle AS site_libelle
+       FROM badgeuse_devices d
+       LEFT JOIN badgeuse_sites s ON s.id = d.site_id
+       ${demande ? 'WHERE d.id = $1' : 'WHERE d.actif = true'}
+       ORDER BY d.code
+       LIMIT 1`,
+      demande ? [demande] : []
+    );
+    const poste = rd.rows[0] || null;
+    if (demande && !poste) return res.status(404).json({ error: 'Poste introuvable' });
+
+    const params = await readBadgeuseParams();
+    const silenceMinutes = Math.max(1, Number(params.supervision_silence_minutes) || 15);
+    const enLigne = !!(poste && poste.dernier_heartbeat)
+      && (Date.now() - new Date(poste.dernier_heartbeat).getTime()) < silenceMinutes * 60 * 1000;
+
+    // AUCUN POSTE APPAIRÉ : la playlist commune (site_id NULL) reste ce qui
+    // partira au premier poste installé. On la rend, en le DISANT — un écran
+    // vide laisserait croire que la playlist elle-même est vide.
+    const elements = await deviceApi.construirePlaylist(poste ? poste.site_id : null);
+
+    let vak = null;
+    try { vak = await deviceApi.vakDuJour(); } catch (_) { vak = null; }
+
+    res.json({
+      poste: poste ? {
+        id: poste.id, code: poste.code, libelle: poste.libelle,
+        site_code: poste.site_code, site_libelle: poste.site_libelle,
+        actif: poste.actif, dernier_heartbeat: poste.dernier_heartbeat,
+        online: enLigne,
+        alerte: (poste.heartbeat_info && poste.heartbeat_info.alerte) || null,
+      } : null,
+      silence_minutes: silenceMinutes,
+      elements,
+      vak_du_jour: vak,
+      genere_le: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur écran en direct :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

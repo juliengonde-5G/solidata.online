@@ -306,6 +306,74 @@ verifier_contient "dpms lit l'heure en Europe/Paris" \
 verifier_contient "install.sh aligne le fuseau du systeme" \
   "set-timezone Europe/Paris" "$(cat "$RACINE/install.sh")"
 
+# --------------------------------------- 7. plage d'activation de l'ecran
+#
+# Ce que ces cas verrouillent : les horaires regles dans SOLIDATA doivent
+# ATTEINDRE le poste. Ils descendaient deja par GET /config mais personne ne
+# les lisait — dpms.sh ne connaissait que le fichier d'installation.
+
+titre "Plage d'activation de l'ecran (source serveur puis locale)"
+DPMS_SH="$(cat "$RACINE/dpms.sh")"
+
+# a) La plage decidee par le serveur (deposee par l'agent) est lue EN PRIORITE.
+verifier_contient "dpms lit d'abord la plage deposee par l'agent" \
+  "dpms.conf" "$DPMS_SH"
+verifier_contient "dpms retombe sur la conf du poste si le serveur n'a rien dit" \
+  "lire_cle dpms" "$DPMS_SH"
+
+# b) Priorite REELLE, exercee sur des fichiers : le serveur gagne, et son
+#    absence laisse repondre la configuration d'installation.
+PLAGE_TRAVAIL="$TRAVAIL/plage"
+mkdir -p "$PLAGE_TRAVAIL/data"
+cat > "$PLAGE_TRAVAIL/badgeuse.conf" <<FIN
+[system]
+data_dir = $PLAGE_TRAVAIL/data
+
+[dpms]
+allumage = 06:00
+extinction = 20:00
+FIN
+# Les fonctions REELLES de dpms.sh sont exercees (le script se laisse sourcer
+# pour les tests) : une copie dans le harnais aurait pu diverger — et c'est
+# exactement ce qui est arrive a la premiere ecriture de ce cas.
+plage_reelle() {
+  BADGEUSE_DPMS_SOURCE_SEULEMENT=1 BADGEUSE_CONFIG="$PLAGE_TRAVAIL/badgeuse.conf" \
+    bash -c '. "$1"; lire_plage "$2"' _ "$RACINE/dpms.sh" "$2"
+}
+verifier "sans fichier serveur : la conf du poste repond" "06:00" "$(plage_reelle x allumage)"
+cat > "$PLAGE_TRAVAIL/data/dpms.conf" <<'FIN'
+; Genere par badgeuse-agent
+[dpms]
+allumage = 04:45
+extinction = 22:15
+FIN
+verifier "avec fichier serveur : le serveur fait foi" "04:45" "$(plage_reelle x allumage)"
+verifier "extinction serveur lue aussi" "22:15" "$(plage_reelle x extinction)"
+
+# c) PENDANT la plage, l'ecran ne doit pas s'endormir tout seul. Un kiosque ne
+#    recoit aucune frappe : sans cette neutralisation repetee, l'economiseur X
+#    noircit l'ecran en pleine journee et l'atelier croit le poste en panne.
+verifier_contient "dpms neutralise l'economiseur pendant la plage" \
+  "desactiver_veille" "$DPMS_SH"
+verifier_contient "dpms coupe economiseur ET mise en veille" \
+  "s off -dpms s noblank" "$DPMS_SH"
+# L'ORDRE compte : « -dpms » desactive l'extension, « dpms force off » ne fait
+# alors plus rien — il faut la rallumer avant d'eteindre.
+verifier_contient "dpms rallume l'extension avant d'eteindre" \
+  "+dpms" "$DPMS_SH"
+
+titre "Pointeur de souris masque en permanence"
+KIOSK_SH="$(cat "$RACINE/kiosk-client.sh")"
+# La regle CSS ne couvre QUE la fenetre du navigateur : la fleche reste visible
+# sur le fond d'ecran X tant qu'un curseur vide n'y est pas pose.
+verifier_contient "curseur racine vide pose par xsetroot" \
+  "xsetroot -cursor" "$KIOSK_SH"
+verifier_contient "la page du kiosque masque aussi le pointeur" \
+  "cursor: none" "$(cat "$RACINE/../ui/style.css")"
+# unclutter est FACULTATIF : son absence ne doit jamais faire echouer le lancement.
+verifier_contient "unclutter reste facultatif" \
+  "command -v unclutter" "$KIOSK_SH"
+
 # ------------------------------------------------------------------ bilan
 
 printf '\n----------------------------------------\n'

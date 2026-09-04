@@ -7,7 +7,9 @@
  *
  * Contrat d'API de référence : docs/badgeuse/MODELE_DONNEES.md §3.
  */
-import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, HelpCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, HelpCircle, Scale } from 'lucide-react';
+import api from '../../services/api';
 
 // ── Dictionnaires FR (miroir des CHECK backend, MODELE_DONNEES.md §1) ────────
 export const SENS_LABELS = { entree: 'Entrée', sortie: 'Sortie', inconnu: 'Inconnu' };
@@ -414,4 +416,67 @@ export function isDeviceOnline(device) {
   const d = new Date(device.dernier_heartbeat);
   if (Number.isNaN(d.getTime())) return false;
   return (Date.now() - d.getTime()) / 1000 < 15 * 60;
+}
+
+// ── Contenus réservés aux jours de Vente au Kilo ─────────────────────────────
+//
+// Le besoin : « des contenus média pour la VAK, affichés seulement les jours de
+// VAK ». La fenêtre `visible_du`/`visible_au` ne pouvait pas y répondre — les
+// dates vivent dans le module VAK, changent chaque mois, et les recopier ici
+// créerait une seconde source de vérité, c'est-à-dire celle qui se périme.
+// La case lie le contenu à la table `vaks` ; le serveur l'interroge à chaque
+// construction de playlist.
+//
+// L'agenda est affiché À CÔTÉ de la case, et ce n'est pas décoratif : sans lui
+// l'exploitant coche une option dont il ne peut pas vérifier l'effet, et croit
+// son média perdu les jours ordinaires.
+
+/** Formate une plage de VAK : « du 12 au 14 septembre » (ou un seul jour). */
+export function plageVak(vak) {
+  if (!vak) return '';
+  const d = fmtDateParis(vak.date_debut);
+  const f = fmtDateParis(vak.date_fin);
+  return d === f ? `le ${d}` : `du ${d} au ${f}`;
+}
+
+export function ChampVakUniquement({ value, onChange, disabled }) {
+  const [agenda, setAgenda] = useState(null);
+
+  useEffect(() => {
+    let vivant = true;
+    api.get('/badgeuse/contenus/vak-agenda')
+      .then((r) => { if (vivant) setAgenda(r.data || null); })
+      // Agenda indisponible : la case reste utilisable (le filtrage est fait
+      // par le serveur, pas par cet écran) — seule l'aide contextuelle manque.
+      .catch(() => { if (vivant) setAgenda({ disponible: false }); });
+    return () => { vivant = false; };
+  }, []);
+
+  const prochaine = agenda?.prochaines?.[0] || null;
+
+  return (
+    <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-3">
+      <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+        <input type="checkbox" checked={!!value} disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)} className="rounded border-slate-300 mt-0.5" />
+        <span className="inline-flex items-center gap-1.5">
+          <Scale className="w-4 h-4 text-orange-500" aria-hidden="true" />
+          Afficher uniquement les jours de Vente au Kilo
+        </span>
+      </label>
+      <p className="text-[11px] text-slate-500 mt-1.5 ml-6">
+        Les dates viennent du module Vente au Kilo — rien à saisir ici, rien à tenir à jour.
+        {agenda?.disponible === false && ' (Agenda des ventes momentanément indisponible.)'}
+        {agenda?.vak_du_jour && (
+          <> Une vente est <strong>en cours aujourd’hui</strong> ({agenda.vak_du_jour.libelle || 'VAK'}, {plageVak(agenda.vak_du_jour)}) : ce contenu passerait à l’écran.</>
+        )}
+        {!agenda?.vak_du_jour && prochaine && (
+          <> Aucune vente aujourd’hui — prochaine : <strong>{prochaine.libelle || 'VAK'}</strong>, {plageVak(prochaine)}.</>
+        )}
+        {!agenda?.vak_du_jour && !prochaine && agenda?.disponible !== false && (
+          <> Aucune vente programmée pour l’instant : un contenu coché ici ne passera qu’une fois une VAK planifiée.</>
+        )}
+      </p>
+    </div>
+  );
 }
