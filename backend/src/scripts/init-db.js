@@ -2,8 +2,27 @@ require('dotenv').config();
 const pool = require('../config/database');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { avecVerrouMigration, avecReprisesSurConcurrence } = require('../utils/migration-lock');
 
+/**
+ * Initialisation du schéma — SOUS VERROU, et rejouée si un accès concurrent
+ * l'interrompt.
+ *
+ * Le déploiement du 4 septembre 2026 s'est arrêté sur « deadlock detected » :
+ * `deploy.sh` lance ce script cinq secondes après avoir relancé les
+ * conteneurs, alors que le backend qui redémarre applique lui aussi ses
+ * migrations (index.js `initOnStartup`). Deux séries de DDL sur les mêmes
+ * tables, dans des ordres différents : PostgreSQL en tue une. Voir
+ * utils/migration-lock.js pour le raisonnement complet.
+ */
 async function initDatabase() {
+  return avecVerrouMigration(
+    () => avecReprisesSurConcurrence(executerInitialisation, { libelle: 'init-db' }),
+    { libelle: 'init-db' }
+  );
+}
+
+async function executerInitialisation() {
   const client = await pool.connect();
   try {
     console.log('[INIT-DB] Démarrage de l\'initialisation...');

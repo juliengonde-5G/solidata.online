@@ -8,6 +8,7 @@ const path = require('path');
 const { Server } = require('socket.io');
 const pool = require('./config/database');
 const logger = require('./config/logger');
+const { avecVerrouMigration } = require('./utils/migration-lock');
 const tourService = require('./services/TourService');
 
 const cookieParser = require('cookie-parser');
@@ -570,115 +571,124 @@ async function initOnStartup() {
       await initDatabase();
     } else {
       logger.info(`${tables.rows[0].count} tables trouvées`);
-      // Toujours appliquer les migrations de colonnes (idempotent)
-      try {
-        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_duration_min INTEGER; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN ai_explanation TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        await pool.query(`DO $$ BEGIN ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        logger.info('Migrations de colonnes vérifiées');
-      } catch (e) { logger.warn('Migration warning', { error: e.message }); }
 
-      // Migration module Exutoires (idempotent)
-      try {
-        const { migrateExutoires } = require('./scripts/migrate-exutoires');
-        await migrateExutoires();
-        logger.info('Migration Exutoires vérifiée');
-      } catch (e) { logger.warn('Migration Exutoires warning', { error: e.message }); }
+      // MIGRATIONS DE DÉMARRAGE — SOUS LE MÊME VERROU QUE `init-db.js`.
+      // Sans cela, elles tournent EN MÊME TEMPS que le script de migration
+      // lancé par deploy.sh cinq secondes après le redémarrage des
+      // conteneurs : deux séries de DDL sur les mêmes tables, dans des
+      // ordres différents, et PostgreSQL en tue une (« deadlock detected »,
+      // déploiement du 4 septembre 2026 — voir utils/migration-lock.js).
+      await avecVerrouMigration(async () => {
+        // Toujours appliquer les migrations de colonnes (idempotent)
+        try {
+          await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_distance_km DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN estimated_duration_min INTEGER; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN nb_cav INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN ai_explanation TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          await pool.query(`DO $$ BEGIN ALTER TABLE tour_cav ADD COLUMN predicted_fill_rate DOUBLE PRECISION; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          logger.info('Migrations de colonnes vérifiées');
+        } catch (e) { logger.warn('Migration warning', { error: e.message }); }
 
-      // Migration module Finance (idempotent)
-      try {
-        const { migrateFinance } = require('./scripts/migrate-finance');
-        await migrateFinance();
-        logger.info('Migration Finance vérifiée');
-      } catch (e) { logger.warn('Migration Finance warning', { error: e.message }); }
+        // Migration module Exutoires (idempotent)
+        try {
+          const { migrateExutoires } = require('./scripts/migrate-exutoires');
+          await migrateExutoires();
+          logger.info('Migration Exutoires vérifiée');
+        } catch (e) { logger.warn('Migration Exutoires warning', { error: e.message }); }
 
-      // Migration module Capteurs CAV LoRaWAN (idempotent)
-      try {
-        const { migrateCavSensors } = require('./scripts/migrate-cav-sensors');
-        await migrateCavSensors();
-        logger.info('Migration CAV Sensors vérifiée');
-      } catch (e) { logger.warn('Migration CAV Sensors warning', { error: e.message }); }
+        // Migration module Finance (idempotent)
+        try {
+          const { migrateFinance } = require('./scripts/migrate-finance');
+          await migrateFinance();
+          logger.info('Migration Finance vérifiée');
+        } catch (e) { logger.warn('Migration Finance warning', { error: e.message }); }
 
-      // Migration module Collecte Association (idempotent — création tables si absentes)
-      try {
-        await pool.query('CREATE EXTENSION IF NOT EXISTS postgis');
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS association_points (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            address VARCHAR(500),
-            complement_adresse VARCHAR(255),
-            code_postal VARCHAR(10),
-            ville VARCHAR(100),
-            latitude DOUBLE PRECISION,
-            longitude DOUBLE PRECISION,
-            geom GEOMETRY(Point, 4326),
-            contact_phone VARCHAR(50),
-            contact_info TEXT,
-            avg_fill_rate DOUBLE PRECISION DEFAULT 0,
-            status VARCHAR(30) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'temporairement_indisponible')),
-            unavailable_reason TEXT,
-            unavailable_since DATE,
-            route_count INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-          )
-        `);
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_association_points_geom ON association_points USING GIST(geom)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_association_points_status ON association_points(status)');
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS tour_association_point (
-            id SERIAL PRIMARY KEY,
-            tour_id INTEGER REFERENCES tours(id) ON DELETE CASCADE,
-            association_point_id INTEGER REFERENCES association_points(id),
-            position INTEGER NOT NULL,
-            status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'collected', 'skipped', 'incident')),
-            fill_level INTEGER CHECK (fill_level BETWEEN 0 AND 5),
-            collected_at TIMESTAMP,
-            notes TEXT
-          )
-        `);
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_tour ON tour_association_point(tour_id)');
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS standard_route_association (
-            id SERIAL PRIMARY KEY,
-            route_id INTEGER REFERENCES standard_routes(id) ON DELETE CASCADE,
-            association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
-            position INTEGER NOT NULL,
-            UNIQUE(route_id, association_point_id)
-          )
-        `);
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS tonnage_history_association (
-            id SERIAL PRIMARY KEY,
-            association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
-            date DATE NOT NULL,
-            weight_kg DOUBLE PRECISION NOT NULL,
-            tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
-            route_name VARCHAR(100),
-            source VARCHAR(20) DEFAULT 'manual',
-            created_at TIMESTAMP DEFAULT NOW()
-          )
-        `);
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_tonnage_assoc_point ON tonnage_history_association(association_point_id)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_tonnage_assoc_date ON tonnage_history_association(date DESC)');
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS association_learning_feedback (
-            id SERIAL PRIMARY KEY,
-            tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
-            association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
-            predicted_fill_rate DOUBLE PRECISION NOT NULL,
-            observed_fill_level INTEGER CHECK (observed_fill_level BETWEEN 0 AND 5),
-            predicted_weight_kg DOUBLE PRECISION,
-            created_at TIMESTAMP DEFAULT NOW()
-          )
-        `);
-        await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN collection_type VARCHAR(20) DEFAULT 'pav'; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        await pool.query(`DO $$ BEGIN ALTER TABLE stock_movements ADD COLUMN origine_type VARCHAR(20) DEFAULT 'pav'; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
-        logger.info('Migration Collecte Association vérifiée');
-      } catch (e) { logger.warn('Migration Association warning', { error: e.message }); }
+        // Migration module Capteurs CAV LoRaWAN (idempotent)
+        try {
+          const { migrateCavSensors } = require('./scripts/migrate-cav-sensors');
+          await migrateCavSensors();
+          logger.info('Migration CAV Sensors vérifiée');
+        } catch (e) { logger.warn('Migration CAV Sensors warning', { error: e.message }); }
+
+        // Migration module Collecte Association (idempotent — création tables si absentes)
+        try {
+          await pool.query('CREATE EXTENSION IF NOT EXISTS postgis');
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS association_points (
+              id SERIAL PRIMARY KEY,
+              name VARCHAR(255) NOT NULL,
+              address VARCHAR(500),
+              complement_adresse VARCHAR(255),
+              code_postal VARCHAR(10),
+              ville VARCHAR(100),
+              latitude DOUBLE PRECISION,
+              longitude DOUBLE PRECISION,
+              geom GEOMETRY(Point, 4326),
+              contact_phone VARCHAR(50),
+              contact_info TEXT,
+              avg_fill_rate DOUBLE PRECISION DEFAULT 0,
+              status VARCHAR(30) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'temporairement_indisponible')),
+              unavailable_reason TEXT,
+              unavailable_since DATE,
+              route_count INTEGER DEFAULT 0,
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW()
+            )
+          `);
+          await pool.query('CREATE INDEX IF NOT EXISTS idx_association_points_geom ON association_points USING GIST(geom)');
+          await pool.query('CREATE INDEX IF NOT EXISTS idx_association_points_status ON association_points(status)');
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS tour_association_point (
+              id SERIAL PRIMARY KEY,
+              tour_id INTEGER REFERENCES tours(id) ON DELETE CASCADE,
+              association_point_id INTEGER REFERENCES association_points(id),
+              position INTEGER NOT NULL,
+              status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'collected', 'skipped', 'incident')),
+              fill_level INTEGER CHECK (fill_level BETWEEN 0 AND 5),
+              collected_at TIMESTAMP,
+              notes TEXT
+            )
+          `);
+          await pool.query('CREATE INDEX IF NOT EXISTS idx_tour_assoc_tour ON tour_association_point(tour_id)');
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS standard_route_association (
+              id SERIAL PRIMARY KEY,
+              route_id INTEGER REFERENCES standard_routes(id) ON DELETE CASCADE,
+              association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
+              position INTEGER NOT NULL,
+              UNIQUE(route_id, association_point_id)
+            )
+          `);
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS tonnage_history_association (
+              id SERIAL PRIMARY KEY,
+              association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
+              date DATE NOT NULL,
+              weight_kg DOUBLE PRECISION NOT NULL,
+              tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+              route_name VARCHAR(100),
+              source VARCHAR(20) DEFAULT 'manual',
+              created_at TIMESTAMP DEFAULT NOW()
+            )
+          `);
+          await pool.query('CREATE INDEX IF NOT EXISTS idx_tonnage_assoc_point ON tonnage_history_association(association_point_id)');
+          await pool.query('CREATE INDEX IF NOT EXISTS idx_tonnage_assoc_date ON tonnage_history_association(date DESC)');
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS association_learning_feedback (
+              id SERIAL PRIMARY KEY,
+              tour_id INTEGER REFERENCES tours(id) ON DELETE SET NULL,
+              association_point_id INTEGER REFERENCES association_points(id) ON DELETE CASCADE,
+              predicted_fill_rate DOUBLE PRECISION NOT NULL,
+              observed_fill_level INTEGER CHECK (observed_fill_level BETWEEN 0 AND 5),
+              predicted_weight_kg DOUBLE PRECISION,
+              created_at TIMESTAMP DEFAULT NOW()
+            )
+          `);
+          await pool.query(`DO $$ BEGIN ALTER TABLE tours ADD COLUMN collection_type VARCHAR(20) DEFAULT 'pav'; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          await pool.query(`DO $$ BEGIN ALTER TABLE stock_movements ADD COLUMN origine_type VARCHAR(20) DEFAULT 'pav'; EXCEPTION WHEN duplicate_column THEN NULL; END $$`);
+          logger.info('Migration Collecte Association vérifiée');
+        } catch (e) { logger.warn('Migration Association warning', { error: e.message }); }
+      }, { libelle: 'migrations de démarrage' });
     }
 
     // Seed CAV si la table est vide
