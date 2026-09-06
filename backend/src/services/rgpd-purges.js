@@ -58,6 +58,14 @@ const PCM_RETENTION_DEFAUT_JOURS = 90;
 const PCM_REPONSES_RETENTION_DEFAUT_JOURS = 30;
 /** Rétention de gps_positions, en jours. Plafond de tout ce qui en dérive. */
 const GPS_RETENTION_JOURS = 90;
+/**
+ * Bordereaux de collecte en déchèterie (2.50.0, arbitrage client Q3 : 3 ans).
+ * Le document porte deux signatures manuscrites, dont celle d'un TIERS (l'agent
+ * de la déchèterie) : sa conservation est bornée par l'usage qu'on peut en
+ * faire, c'est-à-dire la durée pendant laquelle la Métropole peut demander à le
+ * revoir.
+ */
+const BORDEREAUX_DECHETERIE_RETENTION_DEFAUT_JOURS = 1095;
 /** Candidatures non recrutées (art. 5 RGPD, référentiel CNIL recrutement). */
 const CANDIDATS_RETENTION_MOIS = 24;
 /** Dossiers d'insertion clos — repli si `insertion.retention_months` est absent. */
@@ -106,7 +114,8 @@ async function journaliserSynthese({ action, entiteAudit, userId = null, details
       // 'PURGE_PCM_NON_RECRUTE', 'AUTO_PURGE_GPS_90D', 'PURGE_GPS',
       // 'AUTO_PURGE_ARRETS_GPS', 'PURGE_ARRETS_GPS', 'PURGE_MESSAGERIE',
       // 'PURGE_REFRESH_TOKENS', 'PURGE_EXPIRED', 'PURGE_INSERTION',
-      // 'AUTO_PURGE_PCM_REPONSES', 'PURGE_PCM_REPONSES'.
+      // 'AUTO_PURGE_PCM_REPONSES', 'PURGE_PCM_REPONSES',
+      // 'AUTO_PURGE_BORDEREAUX_DECHETERIE', 'PURGE_BORDEREAUX_DECHETERIE'.
       [userId, action, entiteAudit, JSON.stringify(details)]
     );
     return true;
@@ -598,6 +607,73 @@ async function purgeArretsGps({ trigger = 'auto', userId = null } = {}) {
 }
 
 // ══════════════════════════════════════════
+// 5 bis. BORDEREAUX DE COLLECTE EN DÉCHÈTERIE (2.50.0)
+// ══════════════════════════════════════════
+
+/**
+ * Supprime les bordereaux de collecte en déchèterie passé le délai de rétention
+ * (défaut 1095 jours, réglable par `rgpd.bordereaux_decheterie_retention_jours`).
+ *
+ * DELETE et non anonymisation : ce qu'on conserverait après avoir retiré les
+ * deux signatures et le PDF, ce serait un poids indicatif sur une date — aucun
+ * usage, et une surface d'exposition qui reste. La ligne part entière.
+ *
+ * Le délai court depuis `created_at`, c'est-à-dire depuis le passage du camion :
+ * la validation par le gestionnaire est un événement de gestion interne, elle
+ * ne prolonge pas la durée de vie de la signature d'un tiers.
+ *
+ * Même patron que purgeArretsGps : table absente (base non migrée) → on le DIT,
+ * on ne fait pas échouer le tour de jobs.
+ */
+async function purgeBordereauxDecheterie({ trigger = 'auto', userId = null } = {}) {
+  const manuel = trigger === 'manual';
+  const retentionJours = await readSetting(
+    'rgpd.bordereaux_decheterie_retention_jours', BORDEREAUX_DECHETERIE_RETENTION_DEFAUT_JOURS);
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM tour_decheterie_bordereaux WHERE created_at < NOW() - ($1 || ' days')::interval",
+      [String(retentionJours)]
+    );
+    const supprimes = result.rowCount || 0;
+    if (supprimes > 0) {
+      console.log(`[RGPD-PURGES] Bordereaux déchèterie : ${supprimes} bordereau(x) supprimé(s) (> ${retentionJours} jours)`);
+    }
+    let journalise = false;
+    if (manuel || supprimes > 0) {
+      journalise = await journaliserSynthese({
+        action: manuel ? 'PURGE_BORDEREAUX_DECHETERIE' : 'AUTO_PURGE_BORDEREAUX_DECHETERIE',
+        entiteAudit: 'tour_decheterie_bordereaux',
+        userId: manuel ? userId : null,
+        details: {
+          trigger, rows_deleted: supprimes, retention_days: retentionJours,
+          supprimes: { tour_decheterie_bordereaux: supprimes },
+        },
+      });
+    }
+    return resume('bordereaux_decheterie', { tour_decheterie_bordereaux: supprimes },
+      retentionJours, journalise, { ok: true, bordereaux_supprimes: supprimes });
+  } catch (err) {
+    const absente = err && err.code === '42P01';
+    if (absente) {
+      console.warn('[RGPD-PURGES] Table tour_decheterie_bordereaux absente (base non migrée) — purge des bordereaux ignorée.');
+    } else {
+      console.error('[RGPD-PURGES] Erreur purgeBordereauxDecheterie :', err.message);
+    }
+    const motif = absente ? 'table tour_decheterie_bordereaux absente' : err.message;
+    let journalise = false;
+    if (manuel) {
+      journalise = await journaliserSynthese({
+        action: 'PURGE_BORDEREAUX_DECHETERIE', entiteAudit: 'tour_decheterie_bordereaux', userId,
+        details: { trigger, rows_deleted: 0, retention_days: retentionJours, echec: motif },
+      });
+    }
+    return resume('bordereaux_decheterie', { tour_decheterie_bordereaux: 0 },
+      retentionJours, journalise, { ok: false, motif, bordereaux_supprimes: 0 });
+  }
+}
+
+// ══════════════════════════════════════════
 // 6. MESSAGERIE INTERNE (délègue à services/messagerie.js — propriétaire)
 // ══════════════════════════════════════════
 
@@ -779,6 +855,19 @@ const PURGES_RGPD = [
     retentionUnite: 'jours',
   },
   {
+    cle: 'bordereaux_decheterie',
+    libelle: 'Bordereaux de collecte en déchèterie',
+    description: "Supprime les bordereaux Métropole (PDF et les DEUX signatures manuscrites qu'il porte, dont celle d'un agent de déchèterie tiers) passé le délai de conservation. Le délai court depuis le passage du camion, pas depuis la validation par le gestionnaire : une formalité interne ne prolonge pas la durée de vie de la signature d'un tiers.",
+    fn: purgeBordereauxDecheterie,
+    actionAuto: 'AUTO_PURGE_BORDEREAUX_DECHETERIE',
+    actionManuelle: 'PURGE_BORDEREAUX_DECHETERIE',
+    jobName: 'purgeBordereauxDecheterie',
+    entiteAudit: 'tour_decheterie_bordereaux',
+    retentionSetting: 'rgpd.bordereaux_decheterie_retention_jours',
+    retentionDefaut: BORDEREAUX_DECHETERIE_RETENTION_DEFAUT_JOURS,
+    retentionUnite: 'jours',
+  },
+  {
     cle: 'messagerie',
     libelle: 'Messagerie interne',
     description: "Supprime les messages plus vieux que la rétention, recale les accusés de lecture devenus orphelins et supprime les conversations vides et sans activité depuis le même délai.",
@@ -841,6 +930,7 @@ module.exports = {
   purgeInsertionDossiers,
   purgeOldGpsPositions,
   purgeArretsGps,
+  purgeBordereauxDecheterie,
   purgeMessagerie,
   purgeExpiredRefreshTokens,
   // Exposés pour les tests et pour la politique affichée à l'écran.
@@ -848,6 +938,7 @@ module.exports = {
   PCM_RETENTION_DEFAUT_JOURS,
   PCM_REPONSES_RETENTION_DEFAUT_JOURS,
   GPS_RETENTION_JOURS,
+  BORDEREAUX_DECHETERIE_RETENTION_DEFAUT_JOURS,
   CANDIDATS_RETENTION_MOIS,
   INSERTION_RETENTION_DEFAUT_MOIS,
 };

@@ -144,6 +144,10 @@ const JOB_SCHEDULE = {
   // ici pour qu'un arrêt de ce job se voie — sans lui, la purge de la source
   // ci-dessus ne protégerait plus rien.
   purgeArretsGps:                 { label: 'Purge RGPD arrêts de tournée',      cadence: '3×/jour',            maxAgeHours: DAILY },
+  // 2.50.0 — bordereaux de collecte en déchèterie (3 ans). Déclaré pour la même
+  // raison que les purges voisines : une purge qui cesse de tourner sans se
+  // signaler, ce sont des signatures manuscrites conservées sans le savoir.
+  purgeBordereauxDecheterie:      { label: 'Purge RGPD bordereaux déchèterie',  cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredRefreshTokens:      { label: 'Purge refresh tokens expirés',      cadence: '3×/jour',            maxAgeHours: DAILY },
   refreshMaterializedViews:       { label: 'Refresh vues matérialisées',        cadence: '3×/jour',            maxAgeHours: DAILY },
   scanBoutiqueCSVFolders:         { label: 'Scan CSV caisse boutiques',         cadence: '3×/jour + 20h',      maxAgeHours: DAILY },

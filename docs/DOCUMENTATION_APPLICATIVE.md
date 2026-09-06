@@ -321,6 +321,86 @@ reprise est donc un acte distinct, réservé à l'administrateur.
 - Mise à jour toutes les 10 secondes via WebSocket
 - Vitesse, direction, dernière position connue
 
+#### 2.4.6 Collecte en déchèterie — bordereau Métropole (2.50.0)
+**Route** : fiche de tournée (`/tours`) + Gestion des CAV (`/cav-admin` ou équivalent) | **Rôles** : validation ADMIN/MANAGER, marquage ADMIN/MANAGER, dépôt côté chauffeur (jeton véhicule)
+**API** : `backend/src/routes/tours/bordereaux.js`, `backend/src/routes/cav.js`, `backend/src/services/bordereau-decheterie.js`, `backend/src/utils/bordereau-decheterie-pdf.js`
+
+Quand une déchèterie de la Métropole Rouen Normandie est collectée, celle-ci exige un
+bordereau papier signé par son agent ET par le chauffeur de l'ESS. Le module reproduit ce
+document en le générant côté serveur, à partir de ce que le chauffeur saisit sur le terrain.
+
+**1. Marquage d'un point comme déchèterie** (Gestion des CAV, ADMIN/MANAGER)
+- Case « Déchèterie de la Métropole » sur la fiche du CAV, avec un sélecteur listant les 7
+  cases du formulaire papier (Cléon, Boos, Caudebec-lès-Elbeuf, Déville-lès-Rouen,
+  Petit-Quevilly, Le Trait, Saint-Étienne-du-Rouvray) ou « Hors liste » — une déchèterie
+  hors liste n'en reste pas moins une déchèterie : son nom est écrit en clair dans les
+  Remarque(s) du bordereau plutôt que de cocher une case au hasard.
+- Les 14 déchèteries connues du réseau Métropole (sur 15 — Saint-Étienne-du-Rouvray n'a pas
+  encore de CAV) sont marquées automatiquement au premier démarrage qui trouve le
+  référentiel CAV ; un démarquage manuel ultérieur n'est jamais annulé par un redémarrage.
+- Un badge « Déchèterie » apparaît dans la liste des CAV ; un filtre « Déchèteries
+  seulement » permet de les isoler.
+
+**2. Parcours chauffeur** (application mobile, hors ligne d'abord)
+- L'identification du point et la saisie du niveau de remplissage sont **inchangées**.
+- Sur un point marqué déchèterie, la confirmation de collecte enchaîne automatiquement sur
+  l'écran « Bordereau déchèterie », en trois étapes :
+  1. **Poids indicatif** en kg (compteur à gros boutons, raccourcis 50/100/200 kg,
+     saisie clavier possible). Ce poids est **indicatif** : il n'est jamais versé dans les
+     pesées de la tournée, jamais dans le tonnage, jamais dans l'apprentissage du moteur
+     prédictif — c'est une estimation demandée par la Métropole pour SON formulaire.
+  2. **Signature de l'agent de la déchèterie**, sur un pad tactile maison. Si l'agent n'est
+     pas disponible, le chauffeur coche « L'agent n'est pas disponible » : le bordereau
+     porte alors la mention « Signature de l'agent non recueillie : agent indisponible » à
+     la place du paraphe.
+  3. **Signature du chauffeur**, obligatoire.
+- **Hors ligne** : le bordereau (poids + les deux signatures, encodées en PNG) est mis en
+  file sur l'appareil et envoyé dès que le réseau revient — c'est la seule exception de
+  l'application à la règle « aucune image en file d'attente », car une signature d'agent ne
+  peut structurellement pas être recueillie une seconde fois plus tard.
+- Un rejeu de la file (reconnexion, redémarrage de l'app) ne crée jamais deux bordereaux
+  pour le même passage.
+
+**3. Génération du document**
+- Le PDF est composé côté serveur à la création du bordereau (le chauffeur repart avec la
+  certitude que le document existe), en reproduction fidèle du formulaire papier (A4
+  paysage) : case de la déchèterie cochée (ou commune écrite en clair si hors liste), case
+  « Solidarité Textile » figée, champ TLC rempli avec le poids indicatif, les deux
+  signatures (ou la mention de leur absence motivée), pied de page discret (numéro de
+  bordereau, tournée, véhicule, point, date de génération, statut).
+- Chaque bordereau porte un numéro séquentiel par année (`BD-AAAA-NNNN`).
+- Statut à la création : **à valider**.
+
+**4. Notification du gestionnaire**
+- Dès le dépôt du bordereau, ADMIN et MANAGER reçoivent une notification (messagerie
+  interne « SOLIDATA » + notification push) : « Collecte en déchèterie <lieu> — bordereau à
+  valider », avec un lien direct vers la fiche de la tournée.
+
+**5. Validation** (fiche de tournée, section « Bordereaux déchèterie », ADMIN/MANAGER)
+- Le bouton « Valider » ajoute au PDF, dans Remarque(s), la mention « Validé par Solidarité
+  textiles sur Solidata le JJ/MM/AAAA », et fige définitivement le poids et les deux
+  signatures — c'est une pièce signée par un tiers, elle ne se corrige pas après coup.
+- Une seconde validation est refusée.
+
+**6. Consultation et historique**
+- La fiche de tournée liste tous les bordereaux qu'elle a produits (numéro, point, date,
+  poids, statut, mention d'absence de signature éventuelle) avec des boutons « Voir »
+  (aperçu PDF intégré) et « Télécharger ».
+- La fiche du CAV (Gestion des CAV) affiche le même historique en lecture seule — le
+  document se retrouve par le lieu autant que par la journée où il a été produit.
+- Chaque ouverture du PDF est journalisée (le document porte deux signatures manuscrites,
+  dont celle d'un tiers).
+
+**7. RGPD**
+- Les signatures sont des données personnelles (dont celle de l'agent de la déchèterie,
+  tiers extérieur à la structure) : elles sont stockées en base, jamais dans un dossier
+  accessible par URL.
+- Conservation 3 ans (`rgpd.bordereaux_decheterie_retention_jours`, purge automatique
+  intégrée au registre des purges RGPD).
+- À l'anonymisation d'un salarié, la signature du chauffeur est retirée de ses bordereaux
+  (le document reste, régénéré avec la mention « Signature retirée (anonymisation du
+  salarié) ») ; la signature de l'agent, appartenant à un tiers, n'est pas concernée.
+
 ### 2.5 Tri & Production
 
 #### 2.5.1 Production
