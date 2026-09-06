@@ -118,7 +118,10 @@ export default function BordereauxDecheterie({ endpoint, peutValider, onValide, 
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      // Révocation DIFFÉRÉE : révoquer dans le même tour de boucle laisse
+      // certains navigateurs commencer le téléchargement sur une URL morte
+      // (fichier vide) — revue de sécurité 06/09/2026, C-10.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err) {
       toast.error(messageErreurBlob(err));
     } finally {

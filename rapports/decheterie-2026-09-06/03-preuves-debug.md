@@ -229,3 +229,10 @@ trois états (à valider / validé / anonymisé).
 Aucune modification de code applicatif n'a été nécessaire — le seul
 changement livré par cet agent est l'ajout de 3 tests de contrat manquants
 (73 lignes, `backend/tests/contract/bordereau-decheterie-contract.test.js`).
+
+
+---
+
+## Rejeu après les correctifs de la revue de sécurité (coordinateur, 06/09/2026)
+
+Le script de preuve a été rejoué sur la même base PostgreSQL 16.13 + PostGIS après les correctifs C-01 → C-14 : **68 vérifications vertes / 0 rouge** (+2 : « nouveau `client_id` sur un passage déjà déposé → 200 `deja_enregistre` » et « toujours UNE seule ligne pour ce passage »). Le script a été adapté à la règle « un bordereau par passage » : les refus 400 et le bordereau récent de la purge s'exercent désormais sur des passages NEUFS (une déchèterie hors liste, puis une troisième déchèterie ajoutée à la tournée). Jest backend après correctifs : 209 suites / 4 090 tests verts ; Vitest mobile 292 ; builds web et mobile verts.

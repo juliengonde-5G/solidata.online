@@ -8267,6 +8267,8 @@ async function executerInitialisation() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_tdb_tour ON tour_decheterie_bordereaux(tour_id);');
     await client.query('CREATE INDEX IF NOT EXISTS idx_tdb_cav ON tour_decheterie_bordereaux(cav_id);');
+    // Chemin d'anonymisation (retrait de la signature du chauffeur) — revue C-11.
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tdb_driver ON tour_decheterie_bordereaux(driver_employee_id);');
     // Index partiel : la seule liste qu'on interroge « à chaud » est celle des
     // bordereaux qui attendent un gestionnaire.
     await client.query(`CREATE INDEX IF NOT EXISTS idx_tdb_a_valider

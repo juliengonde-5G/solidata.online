@@ -130,12 +130,25 @@ routerChauffeur.post('/:id/cav/:cavId/bordereau-decheterie-public', async (req, 
     if (!clientId.ok) {
       return res.status(400).json({ error: 'Identifiant de dépôt requis (client_id)', code: 'CLIENT_ID_INVALIDE' });
     }
+    //    Borné à CETTE tournée (C-06) : un client_id deviné ne peut pas faire
+    //    remonter le bordereau d'un autre véhicule.
     const deja = await pool.query(
-      'SELECT id, numero, statut FROM tour_decheterie_bordereaux WHERE client_id = $1',
-      [clientId.valeur]
+      'SELECT id, numero, statut FROM tour_decheterie_bordereaux WHERE client_id = $1 AND tour_id = $2',
+      [clientId.valeur, tourId]
     );
     if (deja.rows.length > 0) {
       return res.json({ deja_enregistre: true, bordereau: deja.rows[0] });
+    }
+    //    UN bordereau par passage (tournée × point) — revue C-05 : un écran
+    //    rechargé produit un nouveau client_id, il ne doit pas produire un
+    //    second document signé. On rend l'existant, jamais un refus : le
+    //    travail a été fait.
+    const dejaPassage = await pool.query(
+      'SELECT id, numero, statut FROM tour_decheterie_bordereaux WHERE tour_id = $1 AND cav_id = $2 ORDER BY id LIMIT 1',
+      [tourId, cavId]
+    );
+    if (dejaPassage.rows.length > 0) {
+      return res.json({ deja_enregistre: true, bordereau: dejaPassage.rows[0] });
     }
 
     // 3. Le point doit être DE CETTE TOURNÉE et marqué déchèterie.
@@ -214,8 +227,8 @@ routerChauffeur.post('/:id/cav/:cavId/bordereau-decheterie-public', async (req, 
 
     // 7. APRÈS la réponse : le chauffeur n'attend jamais un canal de
     //    notification. Aucune de ces trois écritures n'est bloquante.
-    const corps = `Tournée #${tourId} — ${decheterieLibelle} : bordereau ${cree.bordereau.numero} `
-      + `à valider (${poids.valeur} kg indicatifs)`;
+    const detail = `bordereau ${cree.bordereau.numero} à valider (${poids.valeur} kg indicatifs)`;
+    const corps = `Tournée #${tourId} — ${decheterieLibelle} : ${detail}`;
     sendPushToRoles(['ADMIN', 'MANAGER'], {
       title: 'Collecte en déchèterie',
       body: corps,
@@ -223,7 +236,7 @@ routerChauffeur.post('/:id/cav/:cavId/bordereau-decheterie-public', async (req, 
       data: { url: `/tours?tour=${tourId}`, tourId },
     }).catch(() => {});
     notifierGestionnaires({
-      texte: `Collecte en déchèterie ${decheterieLibelle} — ${corps.slice(corps.indexOf('bordereau'))}`,
+      texte: `Collecte en déchèterie ${decheterieLibelle} — tournée #${tourId} : ${detail}`,
       source: 'bordereau_decheterie',
       lien: `/tours?tour=${tourId}`,
     });

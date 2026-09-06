@@ -419,12 +419,21 @@ async function anonymizeEmployee(client, id) {
   // à un tiers dont le droit à l'effacement ne s'exerce pas par cette porte.
   // C'est le même arbitrage que la messagerie ci-dessus — on neutralise le lien
   // à la personne, on ne détruit pas la pièce des autres.
+  //
+  // SAVEPOINT : ce retrait s'exécute DANS la transaction ouverte par la route
+  // RGPD. Sans point de sauvegarde, une erreur SQL ici avorterait toute la
+  // transaction (25P02) et le `catch` ne ferait que déplacer l'échec — la
+  // promesse « on ne fait pas échouer toute l'anonymisation » serait fausse
+  // (revue de sécurité 06/09/2026, C-07).
+  await client.query('SAVEPOINT bordereaux_decheterie');
   try {
     const { retirerSignatureChauffeur } = require('./bordereau-decheterie');
     await retirerSignatureChauffeur(client, id);
+    await client.query('RELEASE SAVEPOINT bordereaux_decheterie');
   } catch (err) {
     // Module ou table absents (base non migrée) : on le dit, on ne fait pas
     // échouer toute l'anonymisation pour autant.
+    await client.query('ROLLBACK TO SAVEPOINT bordereaux_decheterie').catch(() => {});
     console.warn('[ANONYMISATION] Signatures de bordereaux non retirées :', err.message);
   }
 }

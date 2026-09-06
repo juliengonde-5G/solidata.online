@@ -350,6 +350,23 @@ export default function DecheterieBordereau() {
             Faites signer l’agent sur l’écran, maintenant : une fois reparti,
             cette signature ne peut plus être recueillie.
           </p>
+          {/* Information préalable de la personne signataire (RGPD art. 12-14) :
+              l'agent est un TIERS, sa signature est conservée 3 ans et versée
+              au bordereau remis à la Métropole. À lui montrer AVANT de signer. */}
+          <div
+            role="note"
+            aria-label="Information pour l’agent avant de signer"
+            className="text-[13px] mb-3 p-3 rounded-xl"
+            style={{ background: 'var(--color-surface)', border: '1px solid #E2E8F0' }}
+          >
+            <p className="font-bold mb-1">À montrer à l’agent avant qu’il signe :</p>
+            <p>
+              « Votre signature est mise sur le bordereau de collecte demandé par la
+              Métropole Rouen Normandie. Solidarité Textiles la garde 3 ans avec ce
+              bordereau, puis l’efface. Elle ne sert à rien d’autre. Pour la voir ou
+              la faire retirer : rgpd@solidarite-textiles.fr. »
+            </p>
+          </div>
 
           <SignaturePad
             id="signature-agent"

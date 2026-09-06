@@ -23,6 +23,8 @@
 
 'use strict';
 
+const { analyserPng } = require('../utils/png-signature');
+
 const {
   DECHETERIES_METROPOLE,
   MOTIFS_SIGNATURE_ABSENTE,
@@ -132,6 +134,12 @@ function decoderSignature(dataUrl) {
   }
   if (buf.length > SIGNATURE_MAX_OCTETS) return { ok: false, motif: 'taille' };
   if (!estPngValide(buf)) return { ok: false, motif: 'format' };
+  // Analyse STRICTE (chunks, CRC, dimensions bornées, IDAT décompressé à la
+  // taille exacte) : c'est elle, et non les 4 octets magiques, qui empêche un
+  // PNG forgé de tuer le processus ou de saturer la mémoire dans pdfkit
+  // (revue de sécurité 06/09/2026, C-01/C-02).
+  const analyse = analyserPng(buf);
+  if (!analyse.ok) return { ok: false, motif: analyse.motif };
   return { ok: true, buffer: buf };
 }
 

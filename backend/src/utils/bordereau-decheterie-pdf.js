@@ -21,6 +21,7 @@
 'use strict';
 
 const PDFDocument = require('pdfkit');
+const { analyserPng } = require('./png-signature');
 const fs = require('fs');
 const path = require('path');
 
@@ -360,7 +361,10 @@ function dessiner(doc, data) {
 }
 
 function placerSignature(doc, png, x, y, w, h, libelleAbsence) {
-  if (estPngValide(png)) {
+  // Double garde : un PNG stocké avant le durcissement de l'entrée, ou altéré
+  // en base, ne doit JAMAIS atteindre le décodeur de pdfkit (dont l'erreur
+  // zlib est levée hors de tout try/catch et tue le processus).
+  if (estPngValide(png) && analyserPng(png).ok) {
     try {
       doc.image(png, x, y, { fit: [w, h], align: 'center', valign: 'center' });
       return;

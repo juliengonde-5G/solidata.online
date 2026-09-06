@@ -188,6 +188,44 @@ describe('POST bordereau-decheterie-public — validations (4xx définitifs)', (
     expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
+  // Revue de sécurité 06/09/2026 (C-01/C-02) : un PNG dont seuls les octets
+  // magiques sont bons pouvait tuer le processus (IDAT corrompu) ou saturer la
+  // mémoire (IHDR forgé). Les deux sont désormais refusés AVANT pdfkit.
+  it('400 SIGNATURE_INVALIDE : PNG à IHDR forgé 20 000 × 20 000 (bombe d\'allocation) refusé, motif « dimensions »', async () => {
+    amorcerDepot();
+    const zlib = require('zlib');
+    const { crc32 } = require('../../src/utils/png-signature');
+    const chunk = (type, data) => {
+      const corps = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+      const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+      const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(corps, 0, corps.length));
+      return Buffer.concat([len, corps, crc]);
+    };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(20000, 0); ihdr.writeUInt32BE(20000, 4); ihdr[8] = 8; ihdr[9] = 6;
+    const forge = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.alloc(10))), chunk('IEND', Buffer.alloc(0)),
+    ]);
+    const res = await request(app).post(URL_DEPOT)
+      .set('Authorization', `Bearer ${driverToken}`)
+      .send(corpsValide({ signature_chauffeur: `data:image/png;base64,${forge.toString('base64')}` }));
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('SIGNATURE_INVALIDE');
+    expect(res.body.motif).toBe('dimensions');
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
+  it('400 SIGNATURE_INVALIDE : magic bytes PNG suivis d\'octets corrompus (IDAT illisible) refusé, le processus survit', async () => {
+    amorcerDepot();
+    const corrompu = Buffer.concat([PNG_BUF.subarray(0, 8), Buffer.from('pas un png du tout, juste des octets')]);
+    const res = await request(app).post(URL_DEPOT)
+      .set('Authorization', `Bearer ${driverToken}`)
+      .send(corpsValide({ signature_agent: `data:image/png;base64,${corrompu.toString('base64')}` }));
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('SIGNATURE_INVALIDE');
+    expect(mockClientQuery).not.toHaveBeenCalled();
+  });
+
   it('400 SIGNATURE_INVALIDE : une signature au-delà de 200 Ko est refusée', async () => {
     amorcerDepot();
     // PNG valide en en-tête, mais gonflé bien au-delà de la borne serveur.
