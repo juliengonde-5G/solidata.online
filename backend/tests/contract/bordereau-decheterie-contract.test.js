@@ -579,3 +579,76 @@ describe('Marquage déchèterie du référentiel CAV', () => {
     expect(String(upd[0])).not.toMatch(/is_decheterie/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GARDE ANTI-RÉCIDIVE — payload mobile décoré par `decorerDecheterie`
+// ───────────────────────────────────────────────────────────────────────────
+// TROUVÉ PAR CONTRE-ÉPREUVE (agent de debug, 06/09/2026) : retirer l'appel à
+// `decorerDecheterie` de `GET /api/tours/:id/public` (routes/tours/index.js)
+// ne faisait tomber AUCUN test de ce fichier — la moitié « dépôt du bordereau »
+// était couverte, la moitié « le chauffeur SAIT qu'il doit en déposer un »
+// (contrat §2.2) ne l'était pas. Un chauffeur sur un serveur régressé aurait
+// vu un point déchèterie strictement identique à une borne ordinaire.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('GET /api/tours/:id/public — décoration déchèterie du payload mobile (§2.2)', () => {
+  const { resetPhotoFraicheurCache } = require('../../src/utils/cav-photo');
+
+  function mockPublicPayload({ cavRow, decoInfo }) {
+    mockQuery.mockImplementation((sql, params) => {
+      const t = String(sql);
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(t)) return Promise.resolve({ rows: [] });
+      // Garde de périmètre véhicule (middleware MOBILE_DRIVER_PATH).
+      if (/SELECT vehicle_id FROM tours WHERE id/.test(t)) return Promise.resolve({ rows: [{ vehicle_id: 5 }] });
+      // Fraîcheur photo (settings) — AVANT decorerDecheterie dans decoratePhotoState.
+      if (/FROM settings WHERE key/.test(t)) return Promise.resolve({ rows: [] });
+      // Tournée + véhicule.
+      if (/FROM tours t JOIN vehicles v/.test(t)) {
+        return Promise.resolve({ rows: [{ id: 90, vehicle_id: 5, collection_type: 'cav', status: 'in_progress' }] });
+      }
+      // decorerDecheterie : distinguée de la requête de points par `c.is_decheterie`.
+      if (/c\.is_decheterie/.test(t)) return Promise.resolve({ rows: decoInfo ? [decoInfo] : [] });
+      // Points de la tournée (tc.* + colonnes CAV) : ne doit PAS matcher la ligne ci-dessus.
+      if (/FROM tour_cav tc JOIN cav c/.test(t)) return Promise.resolve({ rows: cavRow ? [cavRow] : [] });
+      if (/FROM tour_arret_technique ta/.test(t)) return Promise.resolve({ rows: [] });
+      if (/FROM lieux_techniques/.test(t)) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [] });
+    });
+  }
+
+  beforeEach(() => { resetPhotoFraicheurCache(); });
+
+  it('point marqué déchèterie (code connu) : is_decheterie, decheterie_libelle, bordereau_deja_depose=false', async () => {
+    mockPublicPayload({
+      cavRow: { id: 700, tour_id: 90, cav_id: 7, position: 1, status: 'pending', cav_name: 'LE PETIT-QUEVILLY - Déchetterie' },
+      decoInfo: { cav_id: 7, is_decheterie: true, decheterie_code: 'petit_quevilly', bordereau_deja_depose: false },
+    });
+    const res = await request(app).get('/api/tours/90/public').set('Authorization', `Bearer ${driverToken}`);
+    expect(res.status).toBe(200);
+    const point = res.body.cavs[0];
+    expect(point.is_decheterie).toBe(true);
+    expect(point.decheterie_libelle).toBe('Petit-Quevilly');
+    expect(point.bordereau_deja_depose).toBe(false);
+  });
+
+  it('un bordereau déjà déposé pour ce passage : bordereau_deja_depose=true', async () => {
+    mockPublicPayload({
+      cavRow: { id: 700, tour_id: 90, cav_id: 7, position: 1, status: 'collected', cav_name: 'LE PETIT-QUEVILLY - Déchetterie' },
+      decoInfo: { cav_id: 7, is_decheterie: true, decheterie_code: 'petit_quevilly', bordereau_deja_depose: true },
+    });
+    const res = await request(app).get('/api/tours/90/public').set('Authorization', `Bearer ${driverToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.cavs[0].bordereau_deja_depose).toBe(true);
+  });
+
+  it('point ORDINAIRE (non déchèterie) : is_decheterie=false, decheterie_libelle=null', async () => {
+    mockPublicPayload({
+      cavRow: { id: 701, tour_id: 90, cav_id: 8, position: 1, status: 'pending', cav_name: 'Borne de rue' },
+      decoInfo: { cav_id: 8, is_decheterie: false, decheterie_code: null, bordereau_deja_depose: false },
+    });
+    const res = await request(app).get('/api/tours/90/public').set('Authorization', `Bearer ${driverToken}`);
+    expect(res.status).toBe(200);
+    const point = res.body.cavs[0];
+    expect(point.is_decheterie).toBe(false);
+    expect(point.decheterie_libelle).toBeNull();
+  });
+});
