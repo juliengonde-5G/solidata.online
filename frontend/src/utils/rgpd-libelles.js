@@ -40,6 +40,7 @@ export const RGPD_ACTION_LABELS = {
   PURGE_INSERTION: 'Purge manuelle — dossiers d’insertion clos',
   PURGE_GPS: 'Purge manuelle — positions GPS anciennes',
   PURGE_ARRETS_GPS: 'Purge manuelle — arrêts GPS de collecte',
+  PURGE_BORDEREAUX_DECHETERIE: 'Purge manuelle — bordereaux de collecte en déchèterie (signatures)',
   PURGE_MESSAGERIE: 'Purge manuelle — messagerie interne',
   PURGE_REFRESH_TOKENS: 'Purge manuelle — jetons de connexion expirés',
 
@@ -50,6 +51,7 @@ export const RGPD_ACTION_LABELS = {
   AUTO_PURGE_INSERTION: 'Purge automatique — dossiers d’insertion clos',
   AUTO_PURGE_GPS_90D: 'Purge automatique — positions GPS anciennes',
   AUTO_PURGE_ARRETS_GPS: 'Purge automatique — arrêts GPS de collecte',
+  AUTO_PURGE_BORDEREAUX_DECHETERIE: 'Purge automatique — bordereaux de collecte en déchèterie (signatures)',
   AUTO_PURGE_MESSAGERIE: 'Purge automatique — messagerie interne',
   AUTO_PURGE_REFRESH_TOKENS: 'Purge automatique — jetons de connexion expirés',
   AUTO_PURGE_BADGEUSE: 'Purge automatique — module Temps & Présence (badgeuse)',
@@ -111,6 +113,12 @@ export const RGPD_ACTION_LABELS = {
   TOURNEE_REPRISE_PESEE_SUPPRIMEE: 'Reprise — pesée supprimée sur une tournée terminée',
   TOURNEE_REPRISE_VOLUME_MODIFIE: 'Reprise — volume déclaré corrigé sur une tournée terminée',
   TOURNEE_RETOUR_CENTRE_BUREAU: 'Retour au centre de tri posé depuis le bureau',
+  // Bordereau de collecte en déchèterie (2.50.0). Le document porte DEUX
+  // signatures manuscrites, dont celle d'un agent de la Métropole : chaque
+  // ouverture du PDF laisse une trace, d'où un code de CONSULTATION distinct de
+  // celui du compte rendu de tournée.
+  BORDEREAU_DECHETERIE_CONSULTE: 'Consultation d’un bordereau de collecte en déchèterie',
+  BORDEREAU_DECHETERIE_VALIDE: 'Validation d’un bordereau de collecte en déchèterie',
 
   // ── Scripts d'exploitation (backend/src/scripts/*.js — exécution manuelle en conteneur) ──
   COLLECTES_REPRISE_IMPORT: 'Import de reprise — historique des collectes',
@@ -133,6 +141,7 @@ export const RGPD_ENTITY_LABELS = {
   pcm_answers: 'Réponses au questionnaire PCM',
   gps_positions: 'Positions GPS',
   tour_gps_stops: 'Arrêts GPS de collecte',
+  tour_decheterie_bordereaux: 'Bordereaux de collecte en déchèterie',
   messagerie_messages: 'Messages (messagerie interne)',
   refresh_tokens: 'Jetons de connexion',
   insertion: 'Dossiers d’insertion',

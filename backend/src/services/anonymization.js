@@ -405,6 +405,28 @@ async function anonymizeEmployee(client, id) {
   // incompréhensible pour ses autres participants (des réponses sans question).
   // Ce qui disparaît, c'est le contenu et le lien à la personne.
   await anonymiserMessagerie(client, id);
+
+  // ── Bordereaux de collecte en déchèterie (2.50.0) ───────────────────────
+  //
+  // Le bordereau porte la signature MANUSCRITE du chauffeur : c'est une donnée
+  // biométrique au sens usuel du terme, et la plus reconnaissable qu'un salarié
+  // laisse dans l'application. Elle est retirée et le PDF stocké est régénéré —
+  // sans quoi le document continuerait de porter le tracé, statut « anonymisé »
+  // ou non.
+  //
+  // La LIGNE, elle, est conservée : le bordereau est une pièce contractuelle
+  // remise à la Métropole, et la signature de l'AGENT de déchèterie appartient
+  // à un tiers dont le droit à l'effacement ne s'exerce pas par cette porte.
+  // C'est le même arbitrage que la messagerie ci-dessus — on neutralise le lien
+  // à la personne, on ne détruit pas la pièce des autres.
+  try {
+    const { retirerSignatureChauffeur } = require('./bordereau-decheterie');
+    await retirerSignatureChauffeur(client, id);
+  } catch (err) {
+    // Module ou table absents (base non migrée) : on le dit, on ne fait pas
+    // échouer toute l'anonymisation pour autant.
+    console.warn('[ANONYMISATION] Signatures de bordereaux non retirées :', err.message);
+  }
 }
 
 /**

@@ -30,12 +30,15 @@
 export const SIGNATURE_MIN_POINTS = 12;
 
 /**
- * Borne de poids d'une signature, en octets DÉCODÉS. Alignée sur la borne
- * serveur (contrat §2.1) : dépasser ici, c'est se faire refuser là-bas après
- * avoir occupé la file. Un canevas de 600 × 220 en PNG monochrome pèse en
- * pratique quelques dizaines de Ko — la marge est large et volontaire.
+ * Borne de poids d'une signature, en octets DÉCODÉS. Valeur alignée AU MÊME
+ * NOMBRE que la borne serveur (`SIGNATURE_MAX_OCTETS` de
+ * backend/src/services/bordereau-decheterie.js, 200 Kio) : dépasser ici, c'est
+ * se faire refuser là-bas après avoir occupé la file ; refuser ici plus tôt que
+ * là-bas ferait perdre un document que le serveur aurait accepté. Un canevas de
+ * 600 × 220 en PNG monochrome pèse en pratique quelques dizaines de Ko — la
+ * marge est large et volontaire.
  */
-export const SIGNATURE_MAX_OCTETS = 200000;
+export const SIGNATURE_MAX_OCTETS = 200 * 1024;
 
 const PREFIXE_PNG = 'data:image/png;base64,';
 

@@ -18,6 +18,7 @@ import TourMap from './pages/TourMap';
 import IdentifyCav from './pages/IdentifyCav';
 import FillLevel from './pages/FillLevel';
 import AssociationStop from './pages/AssociationStop';
+import DecheterieBordereau from './pages/DecheterieBordereau';
 import Incident from './pages/Incident';
 import ReturnCentre from './pages/ReturnCentre';
 import WeighIn from './pages/WeighIn';
@@ -60,6 +61,8 @@ function App() {
             <Route path="/qr-unavailable" element={<Navigate to="/identify-cav" replace />} />
             <Route path="/fill-level" element={<FillLevel />} />
             <Route path="/association-stop" element={<AssociationStop />} />
+            {/* Bordereau Métropole après la collecte d'une déchèterie (2.50.0) */}
+            <Route path="/decheterie-bordereau" element={<DecheterieBordereau />} />
             <Route path="/incident" element={<Incident />} />
             <Route path="/return-centre" element={<ReturnCentre />} />
             <Route path="/weigh-in" element={<WeighIn />} />

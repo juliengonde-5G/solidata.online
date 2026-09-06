@@ -16,6 +16,7 @@ import { computePhotoRequirement } from '../services/cavPhoto';
 import { libellePoint } from '../services/pointLabel';
 import { texteRdv } from '../services/pointHoraires';
 import InfosPointAssociation from '../components/InfosPointAssociation';
+import { bordereauRequis } from '../services/decheterie';
 
 // 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
 // (plein) avec une anomalie 'debordement' automatiquement posée.
@@ -257,6 +258,28 @@ export default function FillLevel() {
 
       await getPendingCount();
       vibrateSuccess();
+
+      // POINT DÉCHÈTERIE (chantier 2.50.0) — la collecte ci-dessus est
+      // INCHANGÉE : même file, même envoi, mêmes règles. Ce qui change, c'est
+      // la suite. La Métropole exige un bordereau signé par SON agent, et cet
+      // agent est devant le chauffeur MAINTENANT : afficher l'écran de
+      // confirmation habituel puis renvoyer à la carte laisserait repartir le
+      // camion sans le document, et il ne serait plus jamais possible de
+      // l'obtenir. On enchaîne donc sur le bordereau au lieu de conclure.
+      //
+      // Les deux repères du passage sont posés explicitement : le point a pu
+      // être résolu sans passage par l'écran d'identification (repli
+      // « premier point non collecté »), auquel cas `selected_cav_id` serait
+      // absent et l'écran suivant sans contexte. Le nettoyage de ces clés est
+      // fait par le bordereau (son propre `terminer`), pas ici.
+      if (bordereauRequis(point)) {
+        localStorage.setItem('selected_cav_id', String(cavId));
+        localStorage.setItem('selected_cav_name', displayName);
+        setLoading(false);
+        navigate('/decheterie-bordereau');
+        return;
+      }
+
       setConfirm({ cavName: displayName, pendingId, status, cavId, photoInfo });
     } catch (err) {
       vibrateError();

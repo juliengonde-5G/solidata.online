@@ -35,6 +35,10 @@ const ACTION_LABELS = {
   // Le détail (quelle purge, combien de lignes) vit dans le journal RGPD ;
   // cette entrée-ci dit simplement QUI a lancé QUOI, dans le journal générique.
   purge: 'Purge RGPD lancée',
+  // 2.50.0 — consultation d'une pièce sensible (bordereau de collecte en
+  // déchèterie : deux signatures manuscrites). Le journal RGPD en porte le
+  // détail ; cette entrée-ci dit simplement QUI a ouvert QUOI.
+  view: 'Consultation',
 };
 const ACTION_COLORS = {
   login: 'bg-blue-100 text-blue-700', logout: 'bg-purple-100 text-purple-700',
@@ -48,10 +52,12 @@ const ACTION_COLORS = {
   api_key_delete: 'bg-amber-200 text-amber-900',
   service_api_call: 'bg-slate-100 text-slate-700',
   purge: 'bg-rose-100 text-rose-700',
+  view: 'bg-sky-100 text-sky-700',
 };
 const ENTITY_LABELS = {
   // Collecte & logistique
   vehicle: 'Véhicule', cav: 'CAV', tour: 'Tournée', expedition: 'Expédition',
+  bordereau_decheterie: 'Bordereau de collecte en déchèterie',
   client_exutoire: 'Client exutoire', commande_exutoire: 'Commande exutoire',
   commandes_exutoires: 'Commandes exutoires',
   // Tri, production, stock

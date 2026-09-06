@@ -8205,6 +8205,97 @@ async function executerInitialisation() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_tour_gps_stops_cav ON tour_gps_stops(cav_id) WHERE cav_id IS NOT NULL;');
     console.log('[INIT-DB] Arrêts GPS de tournée — tour_gps_stops ✓');
 
+    // ══════════════════════════════════════════
+    // 2.50.0 — Collecte en DÉCHÈTERIE : bordereau Métropole Rouen Normandie
+    // ──────────────────────────────────────────
+    // Quand le point collecté est une déchèterie de la Métropole, celle-ci
+    // exige un bordereau papier signé par son agent ET par le chauffeur. Rien
+    // ne disait à SOLIDATA qu'un point était une déchèterie (deux CAV portaient
+    // « Dechetterie » dans leur NOM, sans aucun marquage) : d'où le drapeau.
+    //
+    // `decheterie_code` = l'une des 7 cases du formulaire, ou NULL pour une
+    // déchèterie hors liste — auquel cas le document écrit la commune EN CLAIR
+    // dans Remarque(s) plutôt que de cocher une case au hasard.
+    // `decheterie_pavid` = la référence Métropole (« Dech F12 »), information
+    // de rapprochement, jamais une clé.
+    await client.query(`
+      ALTER TABLE cav
+        ADD COLUMN IF NOT EXISTS is_decheterie BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS decheterie_code VARCHAR(40),
+        ADD COLUMN IF NOT EXISTS decheterie_pavid VARCHAR(20);
+    `);
+
+    // DOCTRINE DE STOCKAGE — signatures et PDF en BASE (BYTEA), jamais sous
+    // /uploads : ce dossier est servi statiquement par index.js, une signature
+    // manuscrite y serait accessible par URL. Le PDF pèse ~15 Ko, une signature
+    // est bornée à 200 Ko décodés côté serveur.
+    //
+    // `cav_id`, `vehicle_id` et `driver_employee_id` sont en ON DELETE SET NULL
+    // et doublés de SNAPSHOTS (`cav_nom`, `decheterie_libelle`,
+    // `decheterie_code`) : le bordereau est une pièce remise à un tiers, il doit
+    // rester lisible même quand le point disparaît du référentiel ou change de
+    // case. `tour_id` reste en CASCADE : purger une tournée purge ses pièces.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tour_decheterie_bordereaux (
+        id SERIAL PRIMARY KEY,
+        numero VARCHAR(20) UNIQUE NOT NULL,
+        tour_id INTEGER NOT NULL REFERENCES tours(id) ON DELETE CASCADE,
+        tour_cav_id INTEGER REFERENCES tour_cav(id) ON DELETE SET NULL,
+        cav_id INTEGER REFERENCES cav(id) ON DELETE SET NULL,
+        vehicle_id INTEGER REFERENCES vehicles(id) ON DELETE SET NULL,
+        driver_employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+        client_id VARCHAR(64) UNIQUE,
+        date_enlevement DATE NOT NULL,
+        decheterie_code VARCHAR(40),
+        decheterie_libelle VARCHAR(255) NOT NULL,
+        cav_nom VARCHAR(255),
+        poids_indicatif_kg NUMERIC(8,1) NOT NULL
+          CHECK (poids_indicatif_kg >= 0 AND poids_indicatif_kg <= 60000),
+        signature_agent BYTEA,
+        signature_agent_absente_motif VARCHAR(40),
+        signature_chauffeur BYTEA,
+        signature_chauffeur_absente_motif VARCHAR(40),
+        remarques TEXT,
+        statut VARCHAR(20) NOT NULL DEFAULT 'a_valider'
+          CHECK (statut IN ('a_valider', 'valide')),
+        pdf BYTEA NOT NULL,
+        pdf_genere_le TIMESTAMP NOT NULL DEFAULT NOW(),
+        valide_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        valide_le TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tdb_tour ON tour_decheterie_bordereaux(tour_id);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_tdb_cav ON tour_decheterie_bordereaux(cav_id);');
+    // Index partiel : la seule liste qu'on interroge « à chaud » est celle des
+    // bordereaux qui attendent un gestionnaire.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_tdb_a_valider
+      ON tour_decheterie_bordereaux(created_at) WHERE statut = 'a_valider';`);
+    console.log('[INIT-DB] Bordereaux de collecte en déchèterie — tour_decheterie_bordereaux ✓');
+
+    // Registre RGPD art. 30 — le bordereau porte DEUX signatures manuscrites,
+    // dont celle d'un TIERS (l'agent de la déchèterie, qui n'est pas salarié de
+    // la structure). Idempotent via WHERE NOT EXISTS, même patron que le
+    // traitement QHSE ci-dessus.
+    await client.query(`
+      INSERT INTO rgpd_registre
+        (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+      SELECT
+        'Collecte en déchèterie — bordereaux Métropole (signatures manuscrites)',
+        'Établissement du bordereau de collecte des ESS sur les zones de réemploi exigé par la Métropole Rouen Normandie : date d''enlèvement, déchèterie concernée, poids indicatif de TLC collecté, signatures de l''agent de déchèterie et du chauffeur, validation par la structure.',
+        'Exécution d''une obligation contractuelle / convention avec la Métropole Rouen Normandie (art. 6-1-b RGPD)',
+        'Chauffeurs-collecteurs de la structure ; agents de déchèterie de la Métropole (tiers)',
+        'Signature manuscrite (image), identité du chauffeur par le rattachement à la tournée, poids indicatif déclaré, date et lieu de l''enlèvement',
+        'Direction et responsables d''exploitation (ADMIN/MANAGER) ; Métropole Rouen Normandie destinataire du bordereau signé',
+        'Paramétrable — rgpd.bordereaux_decheterie_retention_jours (défaut 1095 jours, soit 3 ans)',
+        'Stockage en base (jamais dans un dossier servi publiquement), accès et téléchargement réservés ADMIN/MANAGER, chaque consultation du document journalisée, retrait de la signature du chauffeur à l''anonymisation du salarié, purge de rétention automatique'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM rgpd_registre
+         WHERE nom_traitement = 'Collecte en déchèterie — bordereaux Métropole (signatures manuscrites)'
+      );
+    `);
+    console.log('[INIT-DB] Registre RGPD — bordereaux déchèterie ✓');
+
     // ── §1.4 — Récurrence commandes exutoires + Pennylane (colonnes) ───────
     // Ces trois tables ne sont PAS créées par ce fichier :
     //   `commandes_exutoires` / `clients_exutoires` → scripts/migrate-exutoires.js
@@ -8542,6 +8633,93 @@ async function executerInitialisation() {
       } else {
         console.warn(`[INIT-DB] Auto-seed du plan de chaîne V7 ignoré : ${e.message}`);
       }
+    }
+
+    // ══════════════════════════════════════════
+    // 2.50.0 — Marquage des déchèteries de la Métropole (seed à VERROU)
+    // ──────────────────────────────────────────
+    // Doctrine 2.26.4, la même que les modèles de tournées et le plan V7 : on
+    // marque UNE fois, puis un verrou (`collecte.decheteries_metropole_seed`)
+    // interdit toute réapparition — un démarquage manuel dans Gestion des CAV
+    // ne doit jamais être annulé par un redémarrage.
+    //
+    // GARDE ANTI-ERREUR D'IDENTIFIANT (arbitrage Q1) : le référentiel client
+    // porte l'identifiant SOLIDATA du CAV, relevé en PRODUCTION. Sur une autre
+    // base, l'identifiant 338 ne désigne pas la même chose. On ne marque donc
+    // un CAV par son identifiant QUE si sa COMMUNE correspond ; sinon on tente
+    // un repli par nom (« déchetterie ») + commune, et si l'un ou l'autre est
+    // ambigu on ne marque RIEN et on le DIT. Marquer un conteneur de rue comme
+    // déchèterie ferait réclamer au chauffeur deux signatures qu'il ne peut pas
+    // obtenir.
+    try {
+      const { normaliserCommune } = require('../services/bordereau-decheterie');
+      const CLE_VERROU = 'collecte.decheteries_metropole_seed';
+      const verrou = await client.query('SELECT value FROM settings WHERE key = $1', [CLE_VERROU]);
+      if (verrou.rows.length > 0) {
+        console.log('[INIT-DB] Déchèteries Métropole : déjà marquées (verrou posé) — ignoré ✓');
+      } else {
+        const referentiel = require('../data/decheteries-metropole.json');
+        const entrees = Array.isArray(referentiel.decheteries) ? referentiel.decheteries : [];
+        // Le référentiel CAV tient en quelques centaines de lignes : on le lit
+        // une fois et on rapproche en mémoire, plutôt que de dépendre d'une
+        // extension `unaccent` qui n'est pas garantie sur toutes les bases.
+        const tousCav = await client.query('SELECT id, name, commune FROM cav');
+        const parId = new Map(tousCav.rows.map((c) => [Number(c.id), c]));
+        const estNomDecheterie = (nom) => /chetterie|cheterie/.test(normaliserCommune(nom));
+
+        let marques = 0;
+        const ignores = [];
+        for (const e of entrees) {
+          const communeAttendue = normaliserCommune(e.commune);
+          let cible = null;
+
+          // 1. Par identifiant, SI la commune correspond.
+          if (e.id_solidata != null) {
+            const c = parId.get(Number(e.id_solidata));
+            if (c && normaliserCommune(c.commune) === communeAttendue) cible = c;
+          }
+
+          // 2. Repli : un CAV dont le NOM dit « déchetterie » dans cette commune.
+          //    Refusé si plusieurs candidats — on ne tranche pas au hasard.
+          if (!cible) {
+            const candidats = tousCav.rows.filter((c) =>
+              normaliserCommune(c.commune) === communeAttendue && estNomDecheterie(c.name));
+            if (candidats.length === 1) cible = candidats[0];
+            else if (candidats.length > 1) {
+              ignores.push(`${e.commune} (${candidats.length} points « déchetterie » — ambigu)`);
+              continue;
+            }
+          }
+
+          if (!cible) { ignores.push(`${e.commune} (aucun CAV correspondant)`); continue; }
+
+          await client.query(
+            `UPDATE cav SET is_decheterie = true, decheterie_code = $1, decheterie_pavid = $2, updated_at = NOW()
+              WHERE id = $3`,
+            [e.code_bordereau || null, e.pavid || null, cible.id]
+          );
+          marques += 1;
+        }
+
+        if (ignores.length > 0) {
+          console.log(`[INIT-DB]   Déchèteries non marquées (${ignores.length}) : ${ignores.join(' ; ')}`);
+        }
+        if (marques > 0) {
+          await client.query(
+            `INSERT INTO settings (key, value, category) VALUES ($1, $2, 'collecte')
+             ON CONFLICT (key) DO NOTHING`,
+            [CLE_VERROU, new Date().toISOString()]
+          );
+          console.log(`[INIT-DB] Déchèteries Métropole : ${marques} point(s) marqué(s), verrou posé ✓`);
+        } else {
+          // Aucun marquage (référentiel CAV absent d'une base neuve) : PAS de
+          // verrou — la tentative sera refaite au prochain démarrage.
+          console.log('[INIT-DB] Déchèteries Métropole : rien à marquer — verrou NON posé (nouvelle tentative au prochain démarrage)');
+        }
+      }
+    } catch (e) {
+      // Jamais bloquant : le marquage reste possible à la main dans Gestion des CAV.
+      console.warn(`[INIT-DB] Marquage des déchèteries ignoré : ${e.message}`);
     }
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
