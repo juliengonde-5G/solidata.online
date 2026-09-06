@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Route, Plus, Truck, Sparkles, Navigation, MapPin, ArrowRight, AlertTriangle,
-  Clock, ShoppingBag, Boxes, ClipboardCheck,
+  Clock, ShoppingBag, Boxes, ClipboardCheck, Recycle,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader, Section, EmptyState, ErrorState } from '../components';
 import CavPicker from '../components/tours/CavPicker';
 import EstimationPanel from '../components/tours/EstimationPanel';
+import BordereauxDecheterie from '../components/tours/BordereauxDecheterie';
 import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 import { libelleTypeIncident, libelleStatutIncident } from '../utils/incidents';
@@ -145,6 +146,13 @@ export default function Tours() {
   const [employees, setEmployees] = useState([]);
   const [selectedTour, setSelectedTour] = useState(null);
   const [statusUpdating, setStatusUpdating] = useState({}); // { [tourId]: true } pendant le PUT statut
+
+  // Lien profond `/tours?tour=<id>` (depuis la notification « bordereau
+  // déchèterie à valider ») : ouvre directement la fiche de la tournée visée.
+  // Un id inconnu ou supprimé ne casse rien — juste un mot discret, jamais
+  // une page blanche.
+  const [searchParams] = useSearchParams();
+  const [deepLinkNotice, setDeepLinkNotice] = useState(null);
 
   // Wizard form — cav_ids porte la sélection ORDONNÉE du mode manuel.
   const [wizForm, setWizForm] = useState({
@@ -438,6 +446,30 @@ export default function Tours() {
     } catch (err) { console.error(err); }
   };
 
+  // Ouverture au chargement de la page uniquement — volontairement sans
+  // dépendance sur `searchParams` pour ne pas rouvrir le panneau après que
+  // l'utilisateur l'a fermé.
+  useEffect(() => {
+    const tourId = searchParams.get('tour');
+    if (!tourId) return undefined;
+    let vivant = true;
+    (async () => {
+      try {
+        const [base, summary] = await Promise.all([
+          api.get(`/tours/${tourId}`),
+          api.get(`/tours/${tourId}/live-summary`).catch(() => ({ data: null })),
+        ]);
+        if (vivant) setSelectedTour({ ...base.data, summary: summary.data });
+      } catch (err) {
+        if (vivant) {
+          setDeepLinkNotice("Le lien ne correspond à aucune tournée accessible (elle a peut-être été supprimée).");
+        }
+      }
+    })();
+    return () => { vivant = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des tournées..." /></Layout>;
   if (error) return <Layout><div className="p-6"><ErrorState title="Impossible de charger les tournées" onRetry={loadTours} variant="card" /></div></Layout>;
 
@@ -506,6 +538,12 @@ export default function Tours() {
             </button>
           }
         />
+
+        {deepLinkNotice && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-xs text-slate-500">
+            {deepLinkNotice}
+          </div>
+        )}
 
         {/* Banner IA — proposition tournées demain */}
         {plannedCount === 0 && tours.length > 0 && (
@@ -1204,6 +1242,7 @@ function TempsVidagePanel() {
 
 function TourDetailPanel({ tour, onClose, onRefresh }) {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   // La reprise d'une journée close est réservée à l'administrateur : elle
   // touche des chiffres dont dérivent le tonnage, le stock et l'apprentissage.
   // Le rôle de base est consulté pour qu'un rôle personnalisé dupliqué d'ADMIN
@@ -1254,6 +1293,14 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
   const [questionnairesOuverts, setQuestionnairesOuverts] = useState(false);
   const rapportCache = useRef(null);
 
+  // Bordereaux de collecte en déchèterie — même patron paresseux (repliable,
+  // le composant partagé charge à l'ouverture). Le lien profond `/tours?tour=<id>`
+  // (notification « bordereau à valider ») déplie directement la section.
+  const [bordereauxOuverts, setBordereauxOuverts] = useState(
+    () => String(searchParams.get('tour')) === String(tour.id)
+  );
+  const peutValiderBordereau = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+
   // Le panneau n'est pas démonté d'une tournée à l'autre : sans cette remise à
   // zéro, la fiche de la tournée suivante afficherait le rapport de la
   // précédente.
@@ -1262,6 +1309,8 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
     setRapport(null);
     setRapportErreur(null);
     setQuestionnairesOuverts(false);
+    setBordereauxOuverts(String(searchParams.get('tour')) === String(tour.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tour.id]);
 
   const chargerRapport = useCallback(async () => {
@@ -1598,6 +1647,39 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
           </div>
         </div>
       )}
+
+      {/* Bordereaux déchèterie — collecte sur un point marqué déchèterie de la
+          Métropole (bordereau papier remplacé par un PDF signé par l'agent de
+          la déchèterie ET le chauffeur). Repliable, chargé à l'ouverture par
+          le composant partagé (même patron que les Questionnaires ci-dessous). */}
+      <div className="mb-4 rounded-lg border border-slate-200">
+        <button
+          type="button"
+          onClick={() => setBordereauxOuverts((o) => !o)}
+          className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <Recycle className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Bordereaux déchèterie
+            </span>
+          </span>
+          <span className="text-[11px] font-semibold text-teal-700 flex-shrink-0">
+            {bordereauxOuverts ? 'Masquer' : 'Afficher'}
+          </span>
+        </button>
+
+        {bordereauxOuverts && (
+          <div className="px-3 pb-3">
+            <BordereauxDecheterie
+              endpoint={`/tours/${tour.id}/bordereaux`}
+              peutValider={peutValiderBordereau}
+              onValide={onRefresh}
+              titre="cette tournée"
+            />
+          </div>
+        )}
+      </div>
 
       {/* Questionnaires de collecte — ce que l'équipage a déclaré en ouvrant
           et en fermant sa journée. Les deux existaient en base sans qu'aucun

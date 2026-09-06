@@ -3,6 +3,7 @@ import { Package } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, Modal, PageHeader } from '../components';
 import SensorSection from '../components/SensorSection';
+import BordereauxDecheterie from '../components/tours/BordereauxDecheterie';
 import useConfirm from '../hooks/useConfirm';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
@@ -84,7 +85,8 @@ function LocationPicker({ position, onPick }) {
 }
 
 const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude: '', nb_containers: 1,
-  communaute_communes: '', surface: '', ref_refashion: '', entite_detentrice: '', code_postal: '' };
+  communaute_communes: '', surface: '', ref_refashion: '', entite_detentrice: '', code_postal: '',
+  is_decheterie: false, decheterie_code: '' };
 
 // ─── Historique & incidents par CAV ────────────────────────────────────────
 // Libellés partagés (utils/incidents.js) : c'était la TROISIÈME copie de cette
@@ -276,8 +278,13 @@ export default function AdminCAV() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRattach, setFilterRattach] = useState(''); // '', 'linked', 'unlinked'
+  const [filterDecheterieOnly, setFilterDecheterieOnly] = useState(false);
   const [communesRef, setCommunesRef] = useState([]);
   const [communesError, setCommunesError] = useState(null);
+  // Référentiel des 7 cases du formulaire Métropole (chargé une fois — repli
+  // liste vide + message si l'appel échoue, jamais un code inventé).
+  const [decheteriesRef, setDecheteriesRef] = useState([]);
+  const [decheteriesRefError, setDecheteriesRefError] = useState(null);
   const [savingRattach, setSavingRattach] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editCav, setEditCav] = useState(null);
@@ -314,11 +321,26 @@ export default function AdminCAV() {
       .catch((e) => setCommunesError(e.response?.data?.error || 'Référentiel communes indisponible'));
   }, []);
 
+  // Référentiel des 7 cases du formulaire déchèterie Métropole.
+  useEffect(() => {
+    api.get('/tours/bordereaux/referentiel-decheteries')
+      .then((r) => setDecheteriesRef(r.data?.decheteries || []))
+      .catch((e) => setDecheteriesRefError(
+        e.response?.data?.error || "Référentiel des déchèteries indisponible — la case restera à choisir plus tard."
+      ));
+  }, []);
+
   const communeByInsee = useMemo(() => {
     const m = {};
     for (const c of communesRef) m[c.code_insee] = c;
     return m;
   }, [communesRef]);
+
+  const decheterieLibelleByCode = useMemo(() => {
+    const m = {};
+    for (const d of decheteriesRef) m[d.code] = d.libelle;
+    return m;
+  }, [decheteriesRef]);
 
   const showAlert = (msg, type = 'success') => {
     setAlert({ msg, type });
@@ -346,6 +368,8 @@ export default function AdminCAV() {
       ref_refashion: cav.ref_refashion || '',
       entite_detentrice: cav.entite_detentrice || '',
       code_postal: cav.code_postal || '',
+      is_decheterie: !!cav.is_decheterie,
+      decheterie_code: cav.decheterie_code || '',
     });
     setMapPos(cav.latitude && cav.longitude ? [cav.latitude, cav.longitude] : null);
     setShowModal(true);
@@ -402,6 +426,8 @@ export default function AdminCAV() {
         ref_refashion: form.ref_refashion?.trim() || null,
         entite_detentrice: form.entite_detentrice?.trim() || null,
         code_postal: form.code_postal?.trim() || null,
+        is_decheterie: !!form.is_decheterie,
+        decheterie_code: form.is_decheterie ? (form.decheterie_code || null) : null,
       };
 
       if (editCav) {
@@ -549,8 +575,9 @@ export default function AdminCAV() {
   const rattachCount = cavList.filter(c => c.code_insee_commune).length;
   const rattachRate = cavList.length ? Math.round((rattachCount / cavList.length) * 100) : 0;
   const displayedCav = cavList.filter(c => {
-    if (filterRattach === 'linked') return !!c.code_insee_commune;
-    if (filterRattach === 'unlinked') return !c.code_insee_commune;
+    if (filterRattach === 'linked' && !c.code_insee_commune) return false;
+    if (filterRattach === 'unlinked' && c.code_insee_commune) return false;
+    if (filterDecheterieOnly && !c.is_decheterie) return false;
     return true;
   });
 
@@ -620,6 +647,15 @@ export default function AdminCAV() {
             <option value="linked">Rattachés commune</option>
             <option value="unlinked">Non rattachés</option>
           </select>
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 select-none cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={filterDecheterieOnly}
+              onChange={(e) => setFilterDecheterieOnly(e.target.checked)}
+              className="rounded"
+            />
+            Déchèteries seulement
+          </label>
           <span className={`text-xs px-2.5 py-1 rounded-full border ${
             rattachRate >= 100 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
           }`} title="Part de CAV rattachés à une commune du référentiel INSEE">
@@ -655,7 +691,17 @@ export default function AdminCAV() {
                         onClick={() => openDetail(cav)}
                       >
                         <td className="px-4 py-3">
-                          <div className="font-medium text-slate-800">{cav.commune || '—'}</div>
+                          <div className="font-medium text-slate-800 flex items-center gap-1.5">
+                            {cav.commune || '—'}
+                            {cav.is_decheterie && (
+                              <span
+                                className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 whitespace-nowrap"
+                                title="Déchèterie de la Métropole (bordereau de collecte)"
+                              >
+                                Déchèterie
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-gray-400 truncate max-w-[200px]">{cav.address || '—'}</div>
                         </td>
                         <td className="px-4 py-3 text-xs">
@@ -807,6 +853,19 @@ export default function AdminCAV() {
                     <div className="flex gap-2">
                       <span className="text-gray-400 w-24 shrink-0">Raison</span>
                       <span className="text-red-600">{detailCav.unavailable_reason}</span>
+                    </div>
+                  )}
+                  {detailCav.is_decheterie && (
+                    <div className="flex gap-2">
+                      <span className="text-gray-400 w-24 shrink-0">Déchèterie</span>
+                      <span className="text-gray-700">
+                        {detailCav.decheterie_code
+                          ? (decheterieLibelleByCode[detailCav.decheterie_code] || detailCav.decheterie_code)
+                          : 'Hors liste (commune écrite en clair sur le bordereau)'}
+                        {detailCav.decheterie_pavid && (
+                          <span className="text-gray-400"> (réf. Métropole {detailCav.decheterie_pavid})</span>
+                        )}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1016,6 +1075,22 @@ export default function AdminCAV() {
 
               {/* Historique de collecte & incidents */}
               <HistoriqueSection key={`histo-${detailCav.id}`} cavId={detailCav.id} />
+
+              {/* Bordereaux de collecte en déchèterie — lecture seule ici :
+                  la validation (ADMIN/MANAGER) se fait depuis la fiche de la
+                  tournée qui a produit le bordereau. */}
+              <div className="card-modern overflow-hidden">
+                <div className="px-4 py-2 bg-gray-50 border-b">
+                  <h3 className="text-xs font-medium text-gray-500 uppercase">Bordereaux de collecte</h3>
+                </div>
+                <div className="p-4">
+                  <BordereauxDecheterie
+                    endpoint={`/cav/${detailCav.id}/bordereaux`}
+                    peutValider={false}
+                    titre="ce point"
+                  />
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1089,6 +1164,42 @@ export default function AdminCAV() {
                       <input value={form.entite_detentrice} onChange={e => setForm(f => ({ ...f, entite_detentrice: e.target.value }))}
                         className="input-modern" placeholder="Solidarité Textiles" />
                     </div>
+                  </div>
+
+                  {/* Déchèterie de la Métropole — bordereau de collecte à
+                      faire signer (chantier 2.50.0). */}
+                  <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!form.is_decheterie}
+                        onChange={(e) => setForm(f => ({
+                          ...f,
+                          is_decheterie: e.target.checked,
+                          decheterie_code: e.target.checked ? f.decheterie_code : '',
+                        }))}
+                        className="rounded"
+                      />
+                      Déchèterie de la Métropole (bordereau de collecte à faire signer)
+                    </label>
+                    {form.is_decheterie && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Case du formulaire Métropole</label>
+                        <select
+                          value={form.decheterie_code || ''}
+                          onChange={(e) => setForm(f => ({ ...f, decheterie_code: e.target.value }))}
+                          className="select-modern w-full"
+                        >
+                          <option value="">Hors liste (commune écrite en clair sur le bordereau)</option>
+                          {decheteriesRef.map((d) => (
+                            <option key={d.code} value={d.code}>{d.libelle}</option>
+                          ))}
+                        </select>
+                        {decheteriesRefError && (
+                          <p className="text-xs text-amber-600 mt-1">{decheteriesRefError}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Map picker */}
