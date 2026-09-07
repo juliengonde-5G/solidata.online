@@ -290,7 +290,7 @@ function App() {
               <Route path="/enquetes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><Enquetes /></ProtectedRoute>} />
 
               {/* Temps & Présence (badgeuse) — 33e module, pointage par badge RFID (Le Houlme) */}
-              <Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><TempsPresence /></ProtectedRoute>} />
+              <Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER', 'COMMUNICATION']}><TempsPresence /></ProtectedRoute>} />
 
               {/* QHSE (item 58 — accidents, habilitations, EPI) */}
               <Route path="/qhse" element={<Navigate to="/qhse/accidents" replace />} />

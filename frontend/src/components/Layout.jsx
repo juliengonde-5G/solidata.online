@@ -404,11 +404,14 @@ const NAV_TREE = [
     // exports, appairage des postes) sont resserrées côté page/API. L'id
     // 'badgeuse' est la clé d'habilitation (backend/src/routes/permissions.js
     // MODULE_CATALOG) ; la visibilité fine se règle dans /admin/permissions.
+    // COMMUNICATION entre ici pour la SEULE diffusion de contenus : la page ne
+    // lui montre que « Affichage » et « Écran en direct », et l'API lui ferme
+    // le reste du module (routes/badgeuse.js, AFFICHAGE_READ/AFFICHAGE_WRITE).
     id: 'badgeuse',
     label: 'Temps & Présence',
     icon: Fingerprint,
     children: [
-      { label: 'Temps & Présence', path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'MANAGER'] },
+      { label: 'Temps & Présence', path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'MANAGER', 'COMMUNICATION'] },
     ],
   },
   {
@@ -486,6 +489,11 @@ export default function Layout({ children }) {
   //    latérale : un seul propriétaire, donc un seul badge, et une seule
   //    connexion temps réel pour le compteur.
   const messagerieActive = canAccessModule('messagerie');
+  // L'assistant est une surface d'ACCÈS AUX DONNÉES (stock, planning, heures) :
+  // il n'est pas ouvert aux profils dont le périmètre est délibérément borné.
+  // Le refus qui fait foi est côté serveur (routes/chat.js,
+  // ROLES_SANS_ASSISTANT) ; ceci évite d'afficher un onglet qui répondrait 403.
+  const assistantActif = (user?.base_role || user?.role) !== 'COMMUNICATION';
   const { total: messagesNonLus } = useNonLusBadge({ actif: messagerieActive });
   const notifications = useNotificationsNonLues(alerts);
 
@@ -501,12 +509,13 @@ export default function Layout({ children }) {
             messagesNonLus,
             notificationsNonLues: notifications.nonLues,
             messagerieActive,
+            assistantActif,
           })
       );
       if (conversationId) setDockConversation(conversationId);
       setDockOuvert(true);
     },
-    [messagesNonLus, notifications.nonLues, messagerieActive]
+    [messagesNonLus, notifications.nonLues, messagerieActive, assistantActif]
   );
 
   useEffect(() => {
@@ -572,6 +581,7 @@ export default function Layout({ children }) {
           onOuvrirDock={ouvrirDock}
           dockOuvert={dockOuvert}
           avecMessagerie={messagerieActive}
+          avecAssistant={assistantActif}
         />
 
         <main className="flex-1 overflow-y-auto min-h-0">
@@ -590,7 +600,7 @@ export default function Layout({ children }) {
           contrôlé côté serveur ; ceci n'est que la cohérence de l'écran. */}
       <DockUnifie
         ouvert={dockOuvert}
-        onglet={dockOnglet || ongletParDefaut({ messagesNonLus, notificationsNonLues: notifications.nonLues, messagerieActive })}
+        onglet={dockOnglet || ongletParDefaut({ messagesNonLus, notificationsNonLues: notifications.nonLues, messagerieActive, assistantActif })}
         onChangerOnglet={setDockOnglet}
         onFermer={() => setDockOuvert(false)}
         onOuvrir={ouvrirDock}
@@ -598,6 +608,7 @@ export default function Layout({ children }) {
         messagesNonLus={messagesNonLus}
         notifications={notifications}
         messagerieActive={messagerieActive}
+        assistantActif={assistantActif}
         conversationDemandee={dockConversation}
         onConversationOuverte={() => setDockConversation(null)}
       />

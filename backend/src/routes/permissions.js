@@ -26,9 +26,12 @@ const BUILTIN_ROLES = {
   // profils, SANS accès au dossier de recrutement (CV, entretiens) ni au
   // reste des RH (contrats, salaires, parcours d'insertion).
   PCM: 'Praticien PCM',
+  // Chargé de communication : tableau de bord, fil d'actualité et diffusion des
+  // contenus sur l'écran du poste de pointage. Aucune donnée de personnel.
+  COMMUNICATION: 'Chargé de communication',
 };
 // Rôles pouvant servir de base à un rôle personnalisé (jamais ADMIN → pas d'escalade).
-const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE', 'PCM'];
+const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE', 'PCM', 'COMMUNICATION'];
 
 // Génère une clé de rôle sûre et sans collision avec les rôles intégrés.
 function slugRoleKey(label) {

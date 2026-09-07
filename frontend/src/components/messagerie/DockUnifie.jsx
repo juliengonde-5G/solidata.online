@@ -42,10 +42,14 @@ const TOAST_DUREE_MS = 6000;
  * Onglet ouvert par défaut : ce qui attend l'utilisateur d'abord, l'assistant
  * ensuite (lui n'attend rien, il répond).
  */
-export function ongletParDefaut({ messagesNonLus = 0, notificationsNonLues = 0, messagerieActive = true } = {}) {
+export function ongletParDefaut({
+  messagesNonLus = 0, notificationsNonLues = 0, messagerieActive = true, assistantActif = true,
+} = {}) {
   if (messagerieActive && messagesNonLus > 0) return ONGLET_MESSAGES;
   if (notificationsNonLues > 0) return ONGLET_NOTIFICATIONS;
-  return ONGLET_ASSISTANT;
+  // Sans assistant, le repli est le seul onglet toujours présent : le renvoyer
+  // quand même ouvrirait le panneau sur un onglet qui n'existe pas.
+  return assistantActif ? ONGLET_ASSISTANT : ONGLET_NOTIFICATIONS;
 }
 
 export default function DockUnifie({
@@ -58,6 +62,9 @@ export default function DockUnifie({
   messagesNonLus = 0,
   notifications,
   messagerieActive = true,
+  // Faux pour les profils auxquels l'assistant n'est pas ouvert (le serveur
+  // refuse de son côté : ceci n'est que la cohérence de l'écran).
+  assistantActif = true,
   conversationDemandee = null,
   onConversationOuverte,
 }) {
@@ -137,7 +144,9 @@ export default function DockUnifie({
   // « Notificat… ». Trois mots pleins valent mieux que trois icônes et un mot
   // coupé.
   const listeOnglets = [
-    { id: ONGLET_ASSISTANT, label: 'Assistant IA', badge: 0, point: reponseAssistant },
+    ...(assistantActif
+      ? [{ id: ONGLET_ASSISTANT, label: 'Assistant IA', badge: 0, point: reponseAssistant }]
+      : []),
     ...(messagerieActive
       ? [{ id: ONGLET_MESSAGES, label: 'Messages', badge: messagesNonLus, point: false }]
       : []),
@@ -213,9 +222,11 @@ export default function DockUnifie({
         </div>
 
         <div className="relative flex-1 min-h-0 min-w-0">
-          <div className={classePanneau(ONGLET_ASSISTANT)} role="tabpanel" aria-label="Assistant IA">
-            <SolidataBot actif={ouvert && onglet === ONGLET_ASSISTANT} onReponse={onNouvelleReponse} />
-          </div>
+          {assistantActif && (
+            <div className={classePanneau(ONGLET_ASSISTANT)} role="tabpanel" aria-label="Assistant IA">
+              <SolidataBot actif={ouvert && onglet === ONGLET_ASSISTANT} onReponse={onNouvelleReponse} />
+            </div>
+          )}
 
           {messagerieActive && messagerieMontee && (
             <div className={classePanneau(ONGLET_MESSAGES)} role="tabpanel" aria-label="Messages">

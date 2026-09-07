@@ -180,6 +180,11 @@ Dans la fenêtre **« Rattacher le pointage orphelin »** : choisir le **salari�
 
 **Chemin :** Temps & Présence → onglet **Affichage**.
 
+**Qui peut publier :** ADMIN, RH, et le **chargé de communication** (rôle `COMMUNICATION`, ajouté en
+2.50.0). Ce dernier ne voit du module QUE les onglets « Affichage » et « Écran en direct » : ni
+journal, ni feuilles de temps, ni badges, ni paramètres — le serveur lui ferme ces routes, l'écran
+ne fait que refléter ce périmètre. Un MANAGER, lui, consulte la playlist sans la modifier.
+
 ### 4.1 Règle absolue — à ne jamais enfreindre
 
 Un bandeau d'avertissement est affiché en permanence sur cet écran : *« Aucune donnée personnelle dans ces contenus — l'écran de veille est une finalité de communication interne dissociée du pointage (photo, nom complet, statut de contrat ou de parcours interdits). »*

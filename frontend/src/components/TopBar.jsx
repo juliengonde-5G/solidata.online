@@ -16,13 +16,24 @@ export default function TopBar({
   onOuvrirDock,
   dockOuvert = false,
   avecMessagerie = true,
+  avecAssistant = true,
 }) {
   // Le libellé ne promet que ce que le panneau contient : quand le module
   // « messagerie » est masqué pour le rôle, l'onglet Messages disparaît — le
-  // bouton ne doit pas continuer d'annoncer des messages.
-  const intitule = avecMessagerie
-    ? 'Assistant IA, messages et notifications'
-    : 'Assistant IA et notifications';
+  // bouton ne doit pas continuer d'annoncer des messages. Même règle pour
+  // l'assistant, fermé aux profils au périmètre borné : le bouton annonçait
+  // « Assistant & messages » devant un panneau qui n'en contenait pas.
+  const contenus = [
+    avecAssistant ? 'Assistant IA' : null,
+    avecMessagerie ? 'messages' : null,
+    'notifications',
+  ].filter(Boolean);
+  const intitule = contenus.length > 1
+    ? `${contenus.slice(0, -1).join(', ')} et ${contenus[contenus.length - 1]}`
+    : contenus[0];
+  const intituleCourt = avecAssistant
+    ? (avecMessagerie ? 'Assistant & messages' : 'Assistant IA')
+    : (avecMessagerie ? 'Messages' : 'Notifications');
 
   return (
     <header className="h-14 bg-white border-b border-slate-200 flex items-center gap-3 px-3 sm:px-4 flex-shrink-0 z-20 shadow-topbar">
@@ -47,7 +58,7 @@ export default function TopBar({
           <span className="chatbot-avatar">
             <Sparkles className="w-3.5 h-3.5" />
           </span>
-          <span className="hidden md:inline">{avecMessagerie ? 'Assistant & messages' : 'Assistant IA'}</span>
+          <span className="hidden md:inline">{intituleCourt}</span>
           {badgeCommunication > 0 ? (
             <span className="min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full grid place-items-center">
               {badgeCommunication > 99 ? '99+' : badgeCommunication}

@@ -799,6 +799,12 @@ async function repondreBot({ conversationId, texte, req }) {
     } else if (err && err.code === 'RATE_LIMIT') {
       botErreur = 'RATE_LIMIT';
       reply = 'Trop de questions d\'affilée — patientez une minute avant de réessayer.';
+    } else if (err && err.code === 'ASSISTANT_HORS_PERIMETRE') {
+      // Un refus n'est pas une panne : on le DIT dans le fil plutôt que de
+      // laisser une conversation sans réponse, que l'utilisateur relancerait.
+      botErreur = 'ASSISTANT_HORS_PERIMETRE';
+      reply = "L'assistant n'est pas ouvert à votre profil. Pour toute question, "
+        + 'écrivez à un administrateur depuis la messagerie.';
     } else {
       console.error('[MESSAGERIE] Réponse du bot indisponible :', err.message);
       return { reponse_bot: null, bot_erreur: err.message || 'échec de l\'assistant' };

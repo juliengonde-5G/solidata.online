@@ -28,7 +28,11 @@ export default function NewsFeed() {
   const [form, setForm] = useState({ category: 'metier', title: '', summary: '', content: '', source_url: '', source_name: '', tags: [], is_pinned: false });
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const isAdmin = user?.role === 'ADMIN' || user?.role === 'RH';
+  // Qui peut publier : les mêmes rôles que l'API (routes/newsfeed.js). Lu sur
+  // `base_role` en priorité — un rôle personnalisé hérite de son rôle de base,
+  // et la comparaison sur `role` seul lui cachait le bouton alors que le
+  // serveur acceptait son écriture.
+  const isAdmin = ['ADMIN', 'RH', 'COMMUNICATION'].includes(user?.base_role || user?.role);
 
   useEffect(() => { loadArticles(); }, [filter]);
 

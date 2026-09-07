@@ -254,6 +254,11 @@ const EXTENDED_TOOLS = [
 // s'applique à eux sans une ligne de plus.
 const EXTENDED_TOOL_ROLES = Object.fromEntries(EXTENDED_TOOLS.map((e) => [e.name, e._roles]));
 
+// Rôles auxquels l'assistant n'est pas ouvert (voir `traiterMessageBot`).
+// COMMUNICATION : son périmètre est le tableau de bord, le fil d'actualité et
+// l'écran du poste — le bot servirait stock, planning et heures par-dessus.
+const ROLES_SANS_ASSISTANT = new Set(['COMMUNICATION']);
+
 // ── LE CHAUFFEUR : une liste blanche, pas un rôle ──────────────────────────
 //
 // Un jeton chauffeur porte le rôle `COLLABORATEUR` EN DUR : le filtrage par
@@ -733,6 +738,24 @@ async function chatWithClaude(userMessage, sessionId, userCtx) {
 async function traiterMessageBot({
   userId, role, message, sessionId, username = null, journaliser = true, jeton = null,
 }) {
+  // ── RÔLES SANS ASSISTANT ──────────────────────────────────────────────
+  // Le bot n'est pas un écran de plus, c'est une SURFACE D'ACCÈS AUX DONNÉES :
+  // il sert à tout rôle de bureau les outils de base (stock, planning,
+  // collecte, heures, CAV). Pour un profil dont le périmètre est délibérément
+  // borné à trois écrans, le laisser ouvert rendrait par la conversation ce
+  // que l'application refuse en face — exactement le défaut fermé en 2.44.0
+  // sur `requireMfa`.
+  //
+  // Le refus est posé ICI, dans la fonction partagée par le widget et la
+  // conversation « SolidataBot » de la messagerie : le poser sur /api/chat
+  // seul laisserait la seconde voie grande ouverte. Et il est posé AVANT toute
+  // requête : un refus après lecture serait un refus d'affichage, pas d'accès.
+  if (ROLES_SANS_ASSISTANT.has(resolveBaseRole(role))) {
+    const err = new Error("L'assistant n'est pas ouvert à ce profil");
+    err.code = 'ASSISTANT_HORS_PERIMETRE';
+    throw err;
+  }
+
   const texte = typeof message === 'string' ? message.trim() : '';
   if (!texte) {
     const err = new Error('Message requis');
@@ -851,6 +874,12 @@ router.post('/', async (req, res) => {
     }
     if (err.code === 'IA_NON_CONFIGUREE') {
       return res.status(503).json({ error: 'Service IA non configuré. Contacte un admin. 🔧' });
+    }
+    if (err.code === 'ASSISTANT_HORS_PERIMETRE') {
+      return res.status(403).json({
+        error: "L'assistant n'est pas ouvert à votre profil.",
+        code: 'ASSISTANT_HORS_PERIMETRE',
+      });
     }
     console.error('[SolidataBot] Chat error:', err.message);
     if (err.status === 429) {

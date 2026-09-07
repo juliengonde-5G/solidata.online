@@ -65,6 +65,20 @@ const READ = authorize('ADMIN', 'RH', 'MANAGER');
 const WRITE = authorize('ADMIN', 'RH');
 const CORRECTION = authorize('ADMIN', 'RH', 'MANAGER');
 const ADMIN_ONLY = authorize('ADMIN');
+// Surface « affichage » : la playlist de l'écran d'information, sa
+// restitution, et l'état de la passerelle réseaux sociaux qui l'alimente.
+//
+// Elle est séparée de READ/WRITE À DESSEIN. Le chargé de communication
+// (COMMUNICATION) doit pouvoir DIFFUSER — donc écrire une playlist, ce que
+// READ n'autorise pas et que WRITE n'accorde qu'à ADMIN/RH — sans recevoir
+// pour autant le journal des pointages, les feuilles de temps, les badges,
+// les exports de paie ni les règles de gestion RH, que READ ouvre en bloc.
+// Élargir READ ou WRITE aurait donné tout le module d'un coup ; masquer les
+// onglets dans /admin/permissions n'aurait rien fermé côté API, cette matrice
+// ne filtrant que la barre latérale. D'où deux constantes de plus, appliquées
+// aux SEULES routes de l'affichage.
+const AFFICHAGE_READ = authorize('ADMIN', 'RH', 'MANAGER', 'COMMUNICATION');
+const AFFICHAGE_WRITE = authorize('ADMIN', 'RH', 'COMMUNICATION');
 
 // Seuil de silence d'un poste (BO-09) : il n'est plus codé en dur (QA-11), il
 // vient de `badgeuse.supervision_silence_minutes` (défaut 15 min). Le MÊME
@@ -1587,7 +1601,7 @@ const contenuValidators = [
   body('vak_uniquement').optional().isBoolean(),
 ];
 
-router.get('/contenus', READ, async (req, res) => {
+router.get('/contenus', AFFICHAGE_READ, async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT c.*, s.code AS site_code FROM badgeuse_contenus c
@@ -1601,7 +1615,7 @@ router.get('/contenus', READ, async (req, res) => {
   }
 });
 
-router.post('/contenus', WRITE, contenuValidators, validate, async (req, res) => {
+router.post('/contenus', AFFICHAGE_WRITE, contenuValidators, validate, async (req, res) => {
   try {
     const b = req.body || {};
     const r = await pool.query(
@@ -1638,7 +1652,7 @@ router.post('/contenus', WRITE, contenuValidators, validate, async (req, res) =>
  * annoncé comme valide et l'envoi mourait en cours de route. Une seule source
  * de vérité, lue par l'écran, rend cette dérive impossible.
  */
-router.get('/contenus/upload-limites', WRITE, async (req, res) => {
+router.get('/contenus/upload-limites', AFFICHAGE_WRITE, async (req, res) => {
   try {
     res.json({
       max_mo: await mediaUploadMaxMo(),
@@ -1660,7 +1674,7 @@ router.get('/contenus/upload-limites', WRITE, async (req, res) => {
  * passer par la mémoire) : il permet au poste de vérifier son cache sans
  * retélécharger.
  */
-router.post('/contenus/upload', WRITE, uploadMediaSingle, async (req, res) => {
+router.post('/contenus/upload', AFFICHAGE_WRITE, uploadMediaSingle, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu (champ « fichier » attendu)' });
   const relatif = path.basename(req.file.path);
   try {
@@ -1722,7 +1736,7 @@ router.post('/contenus/upload', WRITE, uploadMediaSingle, async (req, res) => {
  * plafonnés, délai borné) — voir l'en-tête de ce fichier pour le risque
  * résiduel documenté (DNS rebinding).
  */
-router.post('/contenus/lien', WRITE, [
+router.post('/contenus/lien', AFFICHAGE_WRITE, [
   body('url').isString().isLength({ min: 8, max: 2000 }).withMessage('url requise'),
   body('titre').optional({ nullable: true }).isString().isLength({ max: 200 }),
   body('duree_sec').optional().isInt({ min: 5, max: 60 }),
@@ -1769,7 +1783,7 @@ router.post('/contenus/lien', WRITE, [
   }
 });
 
-router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], validate, async (req, res) => {
+router.put('/contenus/:id', AFFICHAGE_WRITE, [param('id').isInt(), ...contenuValidators], validate, async (req, res) => {
   try {
     const b = req.body || {};
     const r = await pool.query(
@@ -1804,7 +1818,7 @@ router.put('/contenus/:id', WRITE, [param('id').isInt(), ...contenuValidators], 
   }
 });
 
-router.delete('/contenus/:id', WRITE, [param('id').isInt()], validate, async (req, res) => {
+router.delete('/contenus/:id', AFFICHAGE_WRITE, [param('id').isInt()], validate, async (req, res) => {
   try {
     // `fichier` est rendu par le DELETE : supprimer la ligne sans supprimer le
     // binaire laisserait un média orphelin que plus rien ne référence (et que
@@ -1831,7 +1845,7 @@ router.delete('/contenus/:id', WRITE, [param('id').isInt()], validate, async (re
 // dont il ne peut pas vérifier l'effet, et croit son écran cassé les jours
 // ordinaires. Aucune donnée personnelle (libellé, dates, lieu d'un événement).
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/contenus/vak-agenda', READ, async (req, res) => {
+router.get('/contenus/vak-agenda', AFFICHAGE_READ, async (req, res) => {
   try {
     const jour = engine.parisDateStr(new Date());
     const r = await pool.query(
@@ -1877,7 +1891,7 @@ router.get('/contenus/vak-agenda', READ, async (req, res) => {
 // Accès : READ (ADMIN/RH/MANAGER), comme la playlist qu'il illustre. Aucune
 // donnée personnelle par construction (l'écran de veille n'en porte pas).
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/apercu-media/:ref', READ, [
+router.get('/apercu-media/:ref', AFFICHAGE_READ, [
   param('ref').matches(/^[csp]\d{1,12}$/).withMessage('référence de média invalide'),
 ], validate, async (req, res) => {
   try {
@@ -1922,7 +1936,7 @@ router.get('/apercu-media/:ref', READ, [
 // rapporte pas l'élément qu'il joue (le canal WebSocket local ne remonte rien
 // vers l'agent), la rotation du back-office est donc la sienne.
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/ecran-direct', READ, [
+router.get('/ecran-direct', AFFICHAGE_READ, [
   q('device_id').optional().isInt(),
 ], validate, async (req, res) => {
   try {
@@ -2109,7 +2123,7 @@ async function socialStatus(res) {
   });
 }
 
-router.get('/social/status', READ, async (req, res) => {
+router.get('/social/status', AFFICHAGE_READ, async (req, res) => {
   try {
     await socialStatus(res);
   } catch (err) {

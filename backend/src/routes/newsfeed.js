@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/news — Creer un article (ADMIN/RH)
-router.post('/', authorize('ADMIN', 'RH'), [
+router.post('/', authorize('ADMIN', 'RH', 'COMMUNICATION'), [
   body('category').isIn(['metier', 'local']).withMessage('Catégorie invalide (metier ou local)'),
   body('title').notEmpty().withMessage('Titre requis'),
 ], validate, async (req, res) => {
@@ -85,7 +85,7 @@ router.post('/', authorize('ADMIN', 'RH'), [
 });
 
 // PUT /api/news/:id
-router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+router.put('/:id', authorize('ADMIN', 'RH', 'COMMUNICATION'), async (req, res) => {
   try {
     const { title, summary, content, source_url, source_name, tags, is_pinned, category } = req.body;
     const result = await pool.query(
@@ -107,7 +107,7 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
 });
 
 // DELETE /api/news/:id
-router.delete('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
+router.delete('/:id', authorize('ADMIN', 'RH', 'COMMUNICATION'), async (req, res) => {
   try {
     await pool.query('DELETE FROM news_articles WHERE id = $1', [req.params.id]);
     res.json({ ok: true });

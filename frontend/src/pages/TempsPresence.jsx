@@ -22,9 +22,16 @@ import MessagesBadgeage from '../components/badgeuse/MessagesBadgeage';
 export default function TempsPresence() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
-  const canWriteRh = ['ADMIN', 'RH'].includes(base);   // corrections RH, validation, exports, badges, playlist, paramètres
+  const canWriteRh = ['ADMIN', 'RH'].includes(base);   // corrections RH, validation, exports, badges, paramètres
   const canCorrect = ['ADMIN', 'RH', 'MANAGER'].includes(base); // corrections (encadrant inclus, NOTE_RH §5.1)
   const isAdmin = base === 'ADMIN';                    // appairage/régénération de postes
+  // Chargé de communication : il DIFFUSE des contenus sur l'écran du poste et
+  // ne voit rien d'autre du module — ni pointages, ni feuilles de temps, ni
+  // badges, ni paramètres. Le serveur applique le même périmètre
+  // (routes/badgeuse.js, AFFICHAGE_READ/AFFICHAGE_WRITE) : ce filtrage-ci
+  // évite d'afficher des onglets qui répondraient 403, il ne le remplace pas.
+  const isComm = base === 'COMMUNICATION';
+  const canWriteAffichage = canWriteRh || isComm;
 
   const [tab, setTab] = useState('journal');
   // Passerelle Anomalies → Journal : ouvre la modale de correction pré-remplie.
@@ -33,7 +40,7 @@ export default function TempsPresence() {
   // de badgeage (écran d'information v2, CDC_AFFICHAGE_V2.md §4).
   const [parametresSousTab, setParametresSousTab] = useState('regles');
 
-  const TABS = [
+  const TOUS_ONGLETS = [
     { id: 'journal', label: 'Journal', icon: ListChecks },
     { id: 'feuilles', label: 'Feuilles de temps', icon: FileSpreadsheet },
     { id: 'anomalies', label: 'Anomalies', icon: AlertTriangle },
@@ -45,13 +52,24 @@ export default function TempsPresence() {
     { id: 'supervision', label: 'Supervision', icon: Radio },
     { id: 'parametres', label: 'Paramètres', icon: Sliders },
   ];
+  const ONGLETS_COMMUNICATION = ['affichage', 'direct'];
+  const TABS = isComm
+    ? TOUS_ONGLETS.filter((t) => ONGLETS_COMMUNICATION.includes(t.id))
+    : TOUS_ONGLETS;
+  // L'onglet ouvert par défaut est « Journal » : sur un rôle qui ne l'a pas,
+  // il déclencherait un 403 dès l'arrivée sur la page. On retombe donc sur le
+  // premier onglet du périmètre plutôt que de corriger après coup — un effet
+  // de bord ferait clignoter l'écran interdit avant de le remplacer.
+  const ongletActif = TABS.some((t) => t.id === tab) ? tab : TABS[0].id;
 
   return (
     <Layout>
       <div className="p-4 sm:p-6 max-w-7xl mx-auto">
         <PageHeader
           title="Temps & Présence"
-          subtitle="Pointage par badge RFID, feuilles de temps, corrections et exports paie / heures IAE"
+          subtitle={isComm
+            ? "Contenus diffusés sur l'écran du poste de pointage"
+            : 'Pointage par badge RFID, feuilles de temps, corrections et exports paie / heures IAE'}
           icon={Clock}
         />
 
@@ -59,7 +77,7 @@ export default function TempsPresence() {
           <div className="flex gap-1 min-w-max">
             {TABS.map((t) => {
               const Icon = t.icon;
-              const active = tab === t.id;
+              const active = ongletActif === t.id;
               return (
                 <button key={t.id} onClick={() => setTab(t.id)}
                   className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition ${active ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
@@ -71,7 +89,7 @@ export default function TempsPresence() {
           </div>
         </div>
 
-        {tab === 'journal' && (
+        {ongletActif === 'journal' && (
           <JournalPointages
             canCorrect={canCorrect}
             canWriteRh={canWriteRh}
@@ -79,22 +97,22 @@ export default function TempsPresence() {
             onConsumeExternalPrefill={() => setJournalPrefill(null)}
           />
         )}
-        {tab === 'feuilles' && <FeuillesTemps canValidateEncadrant={canCorrect} canValidateRh={canWriteRh} canExport={canWriteRh} isAdmin={isAdmin} />}
-        {tab === 'anomalies' && (
+        {ongletActif === 'feuilles' && <FeuillesTemps canValidateEncadrant={canCorrect} canValidateRh={canWriteRh} canExport={canWriteRh} isAdmin={isAdmin} />}
+        {ongletActif === 'anomalies' && (
           <AnomaliesBadgeuse
             onCorrigerAnomalie={(prefill) => { if (prefill) setJournalPrefill(prefill); setTab('journal'); }}
           />
         )}
-        {tab === 'badges' && <GestionBadges canWrite={canWriteRh} />}
-        {tab === 'affichage' && (
+        {ongletActif === 'badges' && <GestionBadges canWrite={canWriteRh} />}
+        {ongletActif === 'affichage' && (
           <div className="space-y-5">
-            <PlaylistAffichage canWrite={canWriteRh} />
+            <PlaylistAffichage canWrite={canWriteAffichage} />
             <ReseauxSociaux canWrite={isAdmin} />
           </div>
         )}
-        {tab === 'direct' && <EcranDirect />}
-        {tab === 'supervision' && <SupervisionPostes isAdmin={isAdmin} />}
-        {tab === 'parametres' && (
+        {ongletActif === 'direct' && <EcranDirect />}
+        {ongletActif === 'supervision' && <SupervisionPostes isAdmin={isAdmin} />}
+        {ongletActif === 'parametres' && (
           <div className="space-y-4">
             <div className="flex gap-1 border-b border-slate-100">
               {[
