@@ -357,8 +357,10 @@ if [ -r "$DPMS_INSTALLE" ]; then
     ligne "scripts du poste" "a jour (neutralisation de la veille presente)"
   else
     ligne "scripts du poste" "ANCIENS — la neutralisation de la veille est absente"
-    retenir "POSTE NON MIS A JOUR : ${DPMS_INSTALLE} ne contient pas la neutralisation de la veille. Deployer le serveur ne met PAS a jour le Raspberry Pi. Sur le poste :
-    cd /opt/badgeuse && sudo git pull && sudo bash deploy/install.sh --target pi5"
+    retenir "POSTE NON MIS A JOUR : ${DPMS_INSTALLE} ne contient pas la neutralisation de la veille. Deployer le serveur ne met PAS a jour le Raspberry Pi. /opt/badgeuse est une COPIE posee par install.sh, pas un depot git : on repart du depot, puis on relance l'installation (idempotente) :
+    cd <clone du depot solidata.online> && git pull
+    sudo bash badgeuse/deploy/install.sh --target pi5
+    Procedure complete (rootfs en lecture seule, verifications) : docs/badgeuse/EXPLOITATION.md section 1.1"
   fi
 fi
 
