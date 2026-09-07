@@ -189,13 +189,20 @@ ligne_lancement() {
     cat <<FIN
 # Genere par install.sh — voie X11.
 #
-# « -s off -dpms » sur le serveur X : sans elles, X applique SES PROPRES
-# defauts — economiseur au bout de 10 min sans frappe, puis mise en veille du
-# moniteur. Or un kiosque ne recoit JAMAIS de frappe : l'ecran noircissait donc
-# tout seul en journee, independamment de la plage d'ouverture geree par
-# badgeuse-dpms.timer. Ce sont deux mecanismes distincts ; celui-ci n'etait pas
-# gere du tout tant que la voie nominale etait Wayland (cage n'a pas
-# d'economiseur), et il est apparu en meme temps que la bascule X11.
+# « -s off » sur le serveur X : sans elle, X applique SON PROPRE defaut —
+# economiseur au bout de 10 min sans frappe. Or un kiosque ne recoit JAMAIS de
+# frappe : l'ecran noircissait tout seul en journee, independamment de la plage
+# d'ouverture geree par badgeuse-dpms.timer. Ce sont deux mecanismes distincts ;
+# celui-ci n'etait pas gere du tout tant que la voie nominale etait Wayland
+# (cage n'a pas d'economiseur), et il est apparu en meme temps que la bascule X11.
+#
+# « -dpms » A ETE RETIRE, et ce n'est pas un oubli. Sur la ligne de commande du
+# SERVEUR X, « -dpms » ACTIVE la gestion d'energie du moniteur — l'inverse
+# exact de « xset -dpms », qui la desactive. La ligne recopiait la syntaxe de
+# xset et faisait donc precisement ce qu'elle croyait empecher : elle allumait
+# la mise en veille sur une machine qui ne recoit jamais de frappe. Le seul
+# levier non ambigu est cote client : « xset -dpms », pose par kiosk-client.sh
+# au demarrage puis REPOSE toutes les 5 minutes par badgeuse-dpms.timer.
 [Service]
 # X11 exige de LEVER deux durcissements de l'unite de base, sans quoi le
 # serveur ne peut pas demarrer — constate en exploitation : xinit rendait 1 en
@@ -215,7 +222,7 @@ Environment=XDG_SESSION_TYPE=x11
 Environment=NAVIGATEUR_BIN=${navigateur}
 Environment=KIOSK_URL=${url}
 ExecStart=
-ExecStart=/usr/bin/xinit ${client} -- :0 vt1 -nolisten tcp -s off -dpms
+ExecStart=/usr/bin/xinit ${client} -- :0 vt1 -nolisten tcp -s off
 FIN
   else
     cat <<FIN

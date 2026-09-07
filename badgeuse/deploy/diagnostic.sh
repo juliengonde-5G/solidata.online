@@ -342,6 +342,84 @@ if [ -r "$CONF" ]; then
   ligne "heure locale du poste" "$(date '+%H:%M')"
 fi
 
+# ── 5 bis. Veille de l'ecran ─────────────────────────────────────────────────
+# « L'ecran se met en veille tout seul en pleine journee » est une panne a part
+# entiere : elle ne noircit pas le poste au demarrage, elle l'eteint APRES coup,
+# et rien a l'ecran ne la distingue d'une machine morte. Deux mecanismes
+# peuvent l'expliquer, et ils ne vivent pas au meme endroit — on regarde les
+# deux plutot que d'en supposer un.
+titre "5 bis. Veille de l'ecran"
+
+DPMS_INSTALLE=/opt/badgeuse/deploy/dpms.sh
+[ -r "$DPMS_INSTALLE" ] || DPMS_INSTALLE="$(dirname "${BASH_SOURCE[0]}")/dpms.sh"
+if [ -r "$DPMS_INSTALLE" ]; then
+  if grep -q 'neutraliser_console' "$DPMS_INSTALLE" 2>/dev/null; then
+    ligne "scripts du poste" "a jour (neutralisation de la veille presente)"
+  else
+    ligne "scripts du poste" "ANCIENS — la neutralisation de la veille est absente"
+    retenir "POSTE NON MIS A JOUR : ${DPMS_INSTALLE} ne contient pas la neutralisation de la veille. Deployer le serveur ne met PAS a jour le Raspberry Pi. Sur le poste :
+    cd /opt/badgeuse && sudo git pull && sudo bash deploy/install.sh --target pi5"
+  fi
+fi
+
+COMPOSITEUR_VU=inconnu
+pgrep -u "${KIOSK_USER:-badgeuse}" -x cage >/dev/null 2>&1 && COMPOSITEUR_VU="cage (Wayland)"
+pgrep -u "${KIOSK_USER:-badgeuse}" -x Xorg >/dev/null 2>&1 && COMPOSITEUR_VU="Xorg (X11)"
+[ -r /etc/badgeuse/compositeur ] \
+  && COMPOSITEUR_VU="$COMPOSITEUR_VU (force: $(tr -d '[:space:]' < /etc/badgeuse/compositeur))"
+ligne "compositeur en cours" "$COMPOSITEUR_VU"
+
+# Etat REEL de l'economiseur et du DPMS, lu sur le serveur X s'il y en a un.
+# On essaie les memes pistes d'autorisation que dpms.sh — dont l'ABSENCE
+# d'autorisation, cas nominal de « xinit -- :0 » qui n'ecrit aucun jeton.
+ETAT_XSET=""
+if command -v xset >/dev/null 2>&1; then
+  MAISON_KIOSQUE="$(getent passwd "${KIOSK_USER:-badgeuse}" 2>/dev/null | cut -d: -f6)"
+  MAISON_KIOSQUE="${MAISON_KIOSQUE:-/home/badgeuse}"
+  for AUTH in "$MAISON_KIOSQUE/.Xauthority" "$MAISON_KIOSQUE"/.serverauth.* -; do
+    if [ "$AUTH" = "-" ]; then
+      ETAT_XSET="$(DISPLAY=:0 xset q 2>/dev/null)"
+    else
+      [ -r "$AUTH" ] || continue
+      ETAT_XSET="$(DISPLAY=:0 XAUTHORITY="$AUTH" xset q 2>/dev/null)"
+    fi
+    if [ -n "$ETAT_XSET" ]; then
+      ligne "serveur X joignable" "oui (autorisation : ${AUTH})"
+      break
+    fi
+  done
+fi
+if [ -n "$ETAT_XSET" ]; then
+  ECRAN_SAVER="$(printf '%s' "$ETAT_XSET" | grep -A1 'Screen Saver' | tail -1 | tr -s ' ')"
+  ECRAN_DPMS="$(printf '%s' "$ETAT_XSET" | grep -i 'DPMS is' | tr -s ' ' | sed 's/^ *//')"
+  ligne "economiseur X" "${ECRAN_SAVER:-inconnu}"
+  ligne "DPMS X" "${ECRAN_DPMS:-inconnu}"
+  if printf '%s' "$ETAT_XSET" | grep -qi 'DPMS is Enabled'; then
+    retenir "MISE EN VEILLE ACTIVE : le serveur X a DPMS *Enabled* — le moniteur s'eteindra tout seul apres quelques minutes sans frappe, et un kiosque n'en recoit jamais. Remettre la neutralisation tout de suite :
+    sudo systemctl start badgeuse-dpms.service
+    puis verifier qu'elle tient : sudo journalctl -u badgeuse-dpms -n 5 --no-pager"
+  fi
+elif [ "${COMPOSITEUR_VU#cage}" != "$COMPOSITEUR_VU" ]; then
+  ligne "serveur X joignable" "non — session Wayland (cage), aucun economiseur X"
+else
+  ligne "serveur X joignable" "NON — ni autorisation ni serveur"
+fi
+
+# Noircissement de la console par le noyau : il ne depend d'aucun compositeur.
+if [ -r /sys/module/kernel/parameters/consoleblank ]; then
+  CONSOLEBLANK="$(cat /sys/module/kernel/parameters/consoleblank 2>/dev/null)"
+  ligne "console : delai de noircissement" "${CONSOLEBLANK:-?} s (0 = jamais)"
+  if [ -n "$CONSOLEBLANK" ] && [ "$CONSOLEBLANK" != "0" ]; then
+    retenir "CONSOLE : le noyau noircit le terminal apres ${CONSOLEBLANK} s. Sous cage (Wayland) c'est la seule veille en jeu, et rien d'autre ne la coupe. Le minuteur la neutralise a chaque passage ; s'il ne tourne pas :
+    sudo systemctl enable --now badgeuse-dpms.timer"
+  fi
+fi
+
+ligne "minuteur badgeuse-dpms" "$(systemctl is-active badgeuse-dpms.timer 2>/dev/null || echo inactif)"
+echo "    5 dernieres executions du minuteur :"
+journalctl -u badgeuse-dpms -n 5 --no-pager 2>/dev/null | sed 's/^/      /' \
+  || echo "      (journal indisponible)"
+
 # ── 6. Journaux ──────────────────────────────────────────────────────────────
 titre "6. Journaux — kiosque (20 dernieres lignes)"
 journalctl -u badgeuse-kiosk -n 20 --no-pager 2>/dev/null | sed 's/^/    /' \

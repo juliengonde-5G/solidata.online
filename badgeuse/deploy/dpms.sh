@@ -16,13 +16,19 @@
 # decidee par defaut : on ne coupe pas un afficheur sur une supposition).
 #
 # PENDANT LA PLAGE, L'ECRAN NE DOIT PAS S'ENDORMIR TOUT SEUL. Un kiosque ne
-# recoit jamais de frappe : l'economiseur et la mise en veille du serveur
-# graphique se declenchent donc en pleine journee, et un ecran noir est
-# indiscernable d'une panne pour l'atelier. kiosk-client.sh les neutralise
-# DEJA au demarrage du navigateur, mais une seule fois : une configuration
-# Xorg, une reprise de session ou un redemarrage du serveur X les remet en
-# place sans que rien ne le signale. On les neutralise donc a CHAQUE passage,
-# toutes les 5 minutes, tant qu'on est dans la plage.
+# recoit jamais de frappe : les mecanismes de veille se declenchent donc en
+# pleine journee, et un ecran noir est indiscernable d'une panne pour
+# l'atelier. Il y en a DEUX, et ils ne se neutralisent pas au meme endroit :
+#   - l'economiseur et le DPMS du serveur X (voie X11 seulement) ;
+#   - le noircissement de la CONSOLE par le noyau, qui ne depend d'aucun
+#     compositeur — et qui est le seul en jeu sous cage (Wayland), ou il
+#     n'existe pas d'economiseur a couper.
+# kiosk-client.sh neutralise le premier au demarrage du navigateur, mais une
+# seule fois : une configuration Xorg, une reprise de session ou un
+# redemarrage du serveur X le remet en place sans que rien ne le signale. On
+# neutralise donc les DEUX a chaque passage, toutes les 5 minutes, tant qu'on
+# est dans la plage — et quand aucun des deux n'est atteignable, on le DIT au
+# journal au lieu de se taire.
 #
 # Trois voies d'extinction, dans cet ordre :
 #   1. wlr-randr, dans la session cage du kiosque (Wayland) ;
@@ -70,26 +76,109 @@ lire_plage() {
   lire_cle dpms "$cle"
 }
 
+# Autorisation retenue pour parler au serveur X du kiosque, resolue une seule
+# fois par execution. « - » signifie « aucune autorisation » : c'est le cas
+# NOMINAL ici, et c'est ce que la premiere version ne savait pas faire. Le
+# kiosque demarre par « xinit <client> -- :0 vt1 » sans option -auth, et xinit
+# — contrairement au script startx — n'ecrit AUCUN fichier d'autorisation. Il
+# n'existe donc pas de ~badgeuse/.Xauthority sur ce poste : le serveur tourne
+# sans authentification et root le joint par sa socket locale. En exigeant ce
+# fichier, la fonction RENONCAIT avant meme d'essayer — la neutralisation de la
+# veille livree en 2.49.0 ne partait jamais, en silence.
+XAUTH_RETENU=""
+XAUTH_RESOLU=0
+
+xset_brut() {
+  # xset_brut <autorisation|-> <arguments xset>
+  local auth="$1"; shift
+  if [ "$auth" = "-" ]; then
+    # « env -u » et non « XAUTHORITY= » : une valeur VIDE n'est pas l'absence
+    # de valeur, et la bibliotheque X retomberait sur ~/.Xauthority. Sans cette
+    # suppression, la piste « sans autorisation » heriterait de celle qui vient
+    # d'echouer et ne serait donc jamais essayee pour de vrai.
+    env -u XAUTHORITY DISPLAY="${DISPLAY_KIOSQUE:-:0}" xset "$@" >/dev/null 2>&1
+  else
+    DISPLAY="${DISPLAY_KIOSQUE:-:0}" XAUTHORITY="$auth" xset "$@" >/dev/null 2>&1
+  fi
+}
+
+resoudre_xauth() {
+  # Cherche par quel moyen on atteint REELLEMENT l'affichage du kiosque, en
+  # essayant chaque piste par une commande inoffensive (« xset q ») plutot
+  # qu'en supposant. Rend 1 quand aucune ne repond : il n'y a pas de serveur X
+  # (voie Wayland/cage), et l'appelant doit le DIRE, pas se taire.
+  if [ "$XAUTH_RESOLU" -eq 1 ]; then
+    [ -n "$XAUTH_RETENU" ]
+    return
+  fi
+  XAUTH_RESOLU=1
+  local maison candidats candidat
+  maison="$(getent passwd "$KIOSK_USER" 2>/dev/null | cut -d: -f6)"
+  maison="${maison:-/home/$KIOSK_USER}"
+  candidats=""
+  if [ -n "${XAUTHORITY:-}" ]; then candidats="$candidats $XAUTHORITY"; fi
+  candidats="$candidats $maison/.Xauthority"
+  # startx et certains gestionnaires deposent le jeton a cote du repertoire
+  # personnel plutot que dedans.
+  for candidat in "$maison"/.serverauth.*; do
+    if [ -r "$candidat" ]; then candidats="$candidats $candidat"; fi
+  done
+  # En DERNIER, l'absence d'autorisation — jamais en premier : quand un fichier
+  # existe, c'est lui qui fait foi.
+  candidats="$candidats -"
+  for candidat in $candidats; do
+    if [ "$candidat" != "-" ] && [ ! -r "$candidat" ]; then continue; fi
+    if xset_brut "$candidat" q; then
+      XAUTH_RETENU="$candidat"
+      return 0
+    fi
+  done
+  XAUTH_RETENU=""
+  return 1
+}
+
 xset_kiosque() {
   # xset_kiosque <arguments xset> : parle au serveur X du kiosque, s'il y en a
   # un. Ce script tourne en root (minuteur systemd) alors que X appartient a
-  # l'utilisateur du kiosque : sans son fichier d'autorisation, xset se voit
-  # refuser l'acces a l'affichage. Rend 1 sans bruit quand il n'y a pas de X
-  # (voie Wayland/cage : il n'y a alors pas d'economiseur a neutraliser).
+  # l'utilisateur du kiosque.
   command -v xset >/dev/null 2>&1 || return 1
-  local maison xauth
-  maison="$(getent passwd "$KIOSK_USER" 2>/dev/null | cut -d: -f6)"
-  xauth="${maison:-/home/$KIOSK_USER}/.Xauthority"
-  [ -r "$xauth" ] || return 1
-  DISPLAY="${DISPLAY_KIOSQUE:-:0}" XAUTHORITY="$xauth" xset "$@" >/dev/null 2>&1
+  resoudre_xauth || return 1
+  xset_brut "$XAUTH_RETENU" "$@"
+}
+
+neutraliser_console() {
+  # Noircissement de la CONSOLE (framebuffer du noyau), independant du
+  # compositeur : par defaut le noyau eteint le terminal virtuel apres 10 min
+  # sans frappe. Sous X11 c'est sans effet — le serveur tient le VT —, mais
+  # sous cage (Wayland) il n'existe AUCUN economiseur a neutraliser cote
+  # compositeur, et c'est alors la cause la plus commune d'un kiosque qui
+  # noircit tout seul en pleine journee. On le desactive a chaque passage, sur
+  # le systeme deja demarre : pas de fichier de demarrage modifie, pas de
+  # redemarrage exige, geste reversible.
+  command -v setterm >/dev/null 2>&1 || return 1
+  local console="${CONSOLE_KIOSQUE:-/dev/tty1}"
+  [ -w "$console" ] || return 1
+  TERM=linux setterm --blank 0 --powerdown 0 >"$console" 2>/dev/null
 }
 
 desactiver_veille() {
   # Pendant la plage d'activation : plus d'economiseur, plus de mise en veille.
   # « s off » coupe l'economiseur, « -dpms » desactive la mise en veille du
   # moniteur, « s noblank » interdit le noircissement de la console.
+  local fait=0
   if xset_kiosque s off -dpms s noblank; then
-    log "veille et economiseur desactives (plage d'activation)"
+    log "veille et economiseur X desactives (autorisation : ${XAUTH_RETENU})"
+    fait=1
+  fi
+  if neutraliser_console; then
+    log "noircissement de la console neutralise (${CONSOLE_KIOSQUE:-/dev/tty1})"
+    fait=1
+  fi
+  if [ "$fait" -eq 0 ]; then
+    # NOMMER L'ECHEC. Silencieux, il se confond avec « tout va bien » : c'est
+    # exactement ce qui a laisse un ecran s'endormir sans que rien ne
+    # l'explique. Le diagnostic sait quoi regarder (section « veille »).
+    log "AVERTISSEMENT : aucune veille neutralisee — serveur X injoignable ET console non modifiable ; voir « sudo bash /opt/badgeuse/deploy/diagnostic.sh », section 5 bis"
   fi
 }
 

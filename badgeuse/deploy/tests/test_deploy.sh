@@ -179,12 +179,20 @@ verifier_contient "x11 : lance le lanceur via xinit" "/usr/bin/xinit /opt/badgeu
 verifier_contient "x11 : navigateur resolu transmis en environnement" "NAVIGATEUR_BIN=/usr/bin/chromium-browser" "$LANCEMENT_X11"
 verifier_contient "x11 : session x11" "XDG_SESSION_TYPE=x11" "$LANCEMENT_X11"
 verifier_contient "x11 : vt1 sans ecoute TCP" "-- :0 vt1 -nolisten tcp" "$LANCEMENT_X11"
-# Un kiosque ne recoit JAMAIS de frappe : sans ces deux options, l'economiseur
-# du serveur X noircit l'ecran au bout de 10 min et le DPMS met le moniteur en
-# veille — en pleine journee, indiscernable d'une panne pour l'atelier.
+# Un kiosque ne recoit JAMAIS de frappe : sans cette option, l'economiseur du
+# serveur X noircit l'ecran au bout de 10 min — en pleine journee,
+# indiscernable d'une panne pour l'atelier.
 verifier_contient "x11 : economiseur X desactive" "-s off" "$LANCEMENT_X11"
-verifier_contient "x11 : mise en veille DPMS desactivee" "-dpms" "$LANCEMENT_X11"
-verifier_absent  "cage : aucune option X (Wayland n'a pas d'economiseur)" "-dpms" "$LANCEMENT_CAGE"
+# « -dpms » NE DOIT PLUS y figurer : sur la ligne de commande du SERVEUR X il
+# ACTIVE la gestion d'energie du moniteur, a l'exact oppose de « xset -dpms »
+# dont il recopiait la syntaxe. La ligne allumait donc la mise en veille
+# qu'elle croyait couper. Le levier non ambigu est cote client (xset), pose au
+# demarrage puis repose toutes les 5 minutes par le minuteur.
+# L'assertion porte sur la LIGNE DE COMMANDE seule : le commentaire du drop-in,
+# lui, doit pouvoir expliquer pourquoi l'option a ete retiree.
+verifier_absent  "x11 : pas de -dpms sur la ligne serveur (il ACTIVE le DPMS)" \
+  "-dpms" "$(printf '%s' "$LANCEMENT_X11" | grep '^ExecStart=/usr/bin/xinit')"
+verifier_absent  "cage : aucune option X (Wayland n'a pas d'economiseur)" "-s off" "$LANCEMENT_CAGE"
 # X11 ne peut PAS demarrer sous les durcissements de l'unite de base :
 # NoNewPrivileges neutralise le setuid d'Xorg.wrap, ProtectHome empeche xinit
 # d'ecrire .Xauthority. Ces levees sont donc load-bearing — et strictement
@@ -361,6 +369,69 @@ verifier_contient "dpms coupe economiseur ET mise en veille" \
 # alors plus rien — il faut la rallumer avant d'eteindre.
 verifier_contient "dpms rallume l'extension avant d'eteindre" \
   "+dpms" "$DPMS_SH"
+
+# d) LA NEUTRALISATION DOIT REELLEMENT PARTIR. C'est le defaut du terrain :
+#    la premiere version exigeait ~badgeuse/.Xauthority et renoncait quand il
+#    manquait — or « xinit -- :0 », le lanceur du poste, n'ecrit AUCUN jeton
+#    d'autorisation. La neutralisation ne partait donc jamais, en silence, et
+#    l'ecran continuait de s'endormir. On exerce les fonctions REELLES avec un
+#    faux xset qui se comporte comme ce serveur-la.
+VEILLE="$TRAVAIL/veille"
+mkdir -p "$VEILLE/bin"
+cat > "$VEILLE/bin/xset" <<'FIN'
+#!/bin/sh
+# Serveur X sans authentification (celui de « xinit -- :0 ») : toute
+# autorisation explicite est refusee, l'absence d'autorisation est acceptee.
+[ -n "${XAUTHORITY:-}" ] && exit 1
+exit 0
+FIN
+cat > "$VEILLE/bin/xset-mort" <<'FIN'
+#!/bin/sh
+exit 1
+FIN
+cat > "$VEILLE/bin/setterm" <<'FIN'
+#!/bin/sh
+echo "setterm $*"
+FIN
+chmod +x "$VEILLE/bin/xset" "$VEILLE/bin/xset-mort" "$VEILLE/bin/setterm"
+: > "$VEILLE/faux.xauth"
+: > "$VEILLE/console"
+
+veille_reelle() {
+  # veille_reelle <XAUTHORITY de depart> <console> : joue desactiver_veille et
+  # rend son journal suivi de l'autorisation retenue.
+  BADGEUSE_DPMS_SOURCE_SEULEMENT=1 PATH="$VEILLE/bin:$PATH" \
+  KIOSK_USER=badgeuse-absent CONSOLE_KIOSQUE="$2" XAUTHORITY="$1" \
+    bash -c '. "$1"; desactiver_veille; printf "RETENU=%s\n" "$XAUTH_RETENU"' \
+      _ "$RACINE/dpms.sh" 2>&1
+}
+
+SORTIE_VEILLE="$(veille_reelle "$VEILLE/faux.xauth" "$VEILLE/console")"
+verifier_contient "veille : une autorisation refusee ne fait pas abandonner" \
+  "RETENU=-" "$SORTIE_VEILLE"
+verifier_contient "veille : l'economiseur X est bien desactive" \
+  "veille et economiseur X desactives" "$SORTIE_VEILLE"
+verifier_contient "veille : le noircissement de la console est neutralise" \
+  "noircissement de la console neutralise" "$SORTIE_VEILLE"
+verifier_contient "veille : setterm coupe blank ET powerdown" \
+  "--blank 0 --powerdown 0" "$(cat "$VEILLE/console")"
+
+# Sans aucun serveur X joignable ET sans console modifiable, l'echec doit etre
+# NOMME. Silencieux, il se confond avec « tout va bien » — et c'est ce silence
+# qui a laisse l'ecran s'endormir sans explication.
+mv "$VEILLE/bin/xset" "$VEILLE/bin/xset-vivant"
+mv "$VEILLE/bin/xset-mort" "$VEILLE/bin/xset"
+SORTIE_MUETTE="$(veille_reelle "" "$VEILLE/inexistant/console")"
+verifier_contient "veille : un echec total est annonce au journal" \
+  "AVERTISSEMENT : aucune veille neutralisee" "$SORTIE_MUETTE"
+mv "$VEILLE/bin/xset" "$VEILLE/bin/xset-mort"
+mv "$VEILLE/bin/xset-vivant" "$VEILLE/bin/xset"
+
+# La piste « sans autorisation » doit vraiment ETRE sans autorisation : une
+# valeur vide n'est pas une absence, la bibliotheque X retomberait sur
+# ~/.Xauthority et la piste ne serait jamais essayee pour de vrai.
+verifier_contient "veille : la piste sans autorisation supprime XAUTHORITY" \
+  "env -u XAUTHORITY" "$DPMS_SH"
 
 titre "Pointeur de souris masque en permanence"
 KIOSK_SH="$(cat "$RACINE/kiosk-client.sh")"
