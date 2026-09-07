@@ -40,6 +40,22 @@
  *                                     à l'écran comme « en attente » jusqu'à
  *                                     son envoi réel, cf. sync.js)
  *
+ * Stores v7 (bordereau déchèterie, chantier 2.50.0) :
+ *   - pendingBordereaux              (file d'envoi : bordereaux de collecte en
+ *                                     déchèterie — poids indicatif + DEUX
+ *                                     signatures manuscrites en PNG.
+ *                                     EXCEPTION ASSUMÉE à la doctrine « aucun
+ *                                     blob en file » qui vaut pour les photos :
+ *                                     une photo se reprend au prochain passage,
+ *                                     la signature d'un agent de déchèterie ne
+ *                                     se recueille JAMAIS plus tard — la perdre
+ *                                     serait irréparable, et le document que la
+ *                                     Métropole exige ne pourrait pas être
+ *                                     produit. Le poids reste borné : deux
+ *                                     signatures ≤ 200 Ko chacune (borne
+ *                                     serveur, cf. services/signature.js),
+ *                                     contre plusieurs Mo pour une photo.)
+ *
  * Chaque entrée "pending*" porte un clientId (uuid) pour permettre une
  * idempotence côté serveur si le backend évolue (cf. contrat recommandé dans
  * DOCUMENTATION_MOBILE.md). Par défaut, on s'appuie sur la politique
@@ -47,7 +63,7 @@
  */
 
 const DB_NAME = 'solidata-mobile';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 export const STORES = {
   tours: 'tours',
@@ -62,6 +78,7 @@ export const STORES = {
   pendingEndOfDay: 'pendingEndOfDay',
   pendingChecklists: 'pendingChecklists',
   pendingMessages: 'pendingMessages',
+  pendingBordereaux: 'pendingBordereaux',
 };
 
 export function openDB() {
@@ -123,6 +140,17 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.pendingMessages)) {
         const s = db.createObjectStore(STORES.pendingMessages, { keyPath: 'id', autoIncrement: true });
         s.createIndex('conversationId', 'conversationId', { unique: false });
+        s.createIndex('clientId', 'clientId', { unique: false });
+      }
+
+      // v7 — bordereaux de collecte en déchèterie (chantier 2.50.0).
+      // Migration ADDITIVE comme toutes les précédentes : un appareil qui
+      // ouvre la base en v7 conserve intégralement ses files v1→v6 (un
+      // chauffeur peut très bien avoir une collecte en attente au moment où
+      // il reçoit la mise à jour).
+      if (!db.objectStoreNames.contains(STORES.pendingBordereaux)) {
+        const s = db.createObjectStore(STORES.pendingBordereaux, { keyPath: 'id', autoIncrement: true });
+        s.createIndex('tourId', 'tourId', { unique: false });
         s.createIndex('clientId', 'clientId', { unique: false });
       }
     };
@@ -392,6 +420,38 @@ export async function addPendingMessage(data) {
 export async function getPendingMessages(conversationId) {
   const all = await getAllItems(STORES.pendingMessages).catch(() => []);
   return all.filter((m) => String(m.conversationId) === String(conversationId));
+}
+
+/**
+ * Ajoute un bordereau de collecte en déchèterie à envoyer
+ * (pages/DecheterieBordereau.jsx → POST
+ * /api/tours/:tourId/cav/:cavId/bordereau-decheterie-public, contrat §2.1).
+ *
+ * `clientId` porte l'IDEMPOTENCE : le serveur reconnaît un rejeu et répond
+ * « déjà enregistré » plutôt que de créer un second bordereau. C'est ce qui
+ * autorise la file à réessayer sans compter deux fois la même collecte.
+ *
+ * Les deux signatures sont des dataURL PNG. `signatureAgent` vaut `null`
+ * quand l'agent n'était pas là — accompagné alors de `agentAbsentMotif` :
+ * l'absence est une information portée par le document, pas un trou.
+ *
+ * @param {object} data - { tourId, cavId, poidsKg, signatureAgent,
+ *   agentAbsentMotif, signatureChauffeur, clientId? }
+ */
+export async function addPendingBordereau(data) {
+  return putItem(STORES.pendingBordereaux, {
+    clientId: data.clientId || newClientId(),
+    tourId: data.tourId,
+    cavId: data.cavId,
+    // `??` et non `||` : un poids indicatif de 0 kg est une DÉCLARATION
+    // (« rien pris »), pas une absence de réponse — même piège que les sacs
+    // d'association plus haut.
+    poidsKg: data.poidsKg ?? null,
+    signatureAgent: data.signatureAgent || null,
+    agentAbsentMotif: data.agentAbsentMotif || null,
+    signatureChauffeur: data.signatureChauffeur || null,
+    createdAt: new Date().toISOString(),
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,8 @@
-import { useEffect } from 'react';
+// `React` est importé explicitement (et non seulement les hooks) : les tests
+// rendent ce composant via react-dom/server sans le plugin JSX automatique
+// (vitest.config.js), donc le JSX y est compilé en React.createElement.
+// Même convention que components/DemoModeBanner.jsx.
+import React, { useEffect } from 'react';
 import { useUsageMode } from '../contexts/UsageModeContext';
 
 /**

@@ -239,6 +239,58 @@ async function decoratePhotoState(points, isAssociation) {
 }
 
 /**
+ * Enrichit les points d'une tournée de ce qui décide, côté chauffeur, s'il doit
+ * remplir un bordereau de déchèterie (chantier 2.50.0) :
+ *   • `is_decheterie`         — le point est marqué déchèterie au référentiel ;
+ *   • `decheterie_libelle`    — le libellé de la case du formulaire Métropole
+ *                               quand le code est connu, `null` hors liste (on
+ *                               ne coche jamais une case au hasard) ;
+ *   • `bordereau_deja_depose` — un bordereau existe déjà pour ce passage, donc
+ *                               le mobile n'en redemande pas un second.
+ *
+ * UNE SEULE requête, et BEST EFFORT à dessein : ces colonnes sont créées par la
+ * migration de ce chantier. Sur une base qui ne l'a pas encore jouée, un point
+ * doit ressortir « pas une déchèterie » — ce qui rend le parcours de collecte
+ * identique à celui d'avant — plutôt que de faire échouer l'écran de tournée
+ * d'un chauffeur pour une colonne manquante.
+ */
+async function decorerDecheterie(points, tourId, isAssociation) {
+  const neutre = (p) => ({ ...p, is_decheterie: false, decheterie_libelle: null, bordereau_deja_depose: false });
+  if (!Array.isArray(points) || points.length === 0) return points;
+  // Un point d'association n'est pas un CAV : l'exigence ne le concerne pas.
+  if (isAssociation) return points.map(neutre);
+
+  try {
+    const { libelleDecheterie } = require('../../services/bordereau-decheterie');
+    const r = await pool.query(
+      `SELECT tc.cav_id, c.is_decheterie, c.decheterie_code,
+              EXISTS (SELECT 1 FROM tour_decheterie_bordereaux b
+                       WHERE b.tour_id = tc.tour_id AND b.cav_id = tc.cav_id) AS bordereau_deja_depose
+         FROM tour_cav tc
+         JOIN cav c ON c.id = tc.cav_id
+        WHERE tc.tour_id = $1`,
+      [tourId]
+    );
+    const parCav = new Map(r.rows.map((row) => [Number(row.cav_id), row]));
+    return points.map((p) => {
+      const info = parCav.get(Number(p.cav_id));
+      if (!info) return neutre(p);
+      const estDecheterie = info.is_decheterie === true;
+      return {
+        ...p,
+        is_decheterie: estDecheterie,
+        decheterie_code: estDecheterie ? (info.decheterie_code || null) : null,
+        decheterie_libelle: estDecheterie ? libelleDecheterie(info.decheterie_code) : null,
+        bordereau_deja_depose: info.bordereau_deja_depose === true,
+      };
+    });
+  } catch (err) {
+    console.warn('[TOURS] Marquage déchèterie des points illisible :', err.message);
+    return points.map(neutre);
+  }
+}
+
+/**
  * Enrichit les points d'une tournée ASSOCIATION de ce que le chauffeur doit voir :
  * les horaires du jour et le rendez-vous éventuel.
  *
@@ -341,6 +393,10 @@ router.get('/vehicle/:vehicleId/today', async (req, res) => {
       points = cavsResult.rows;
     }
     const photoState = await decoratePhotoState(points, tour.collection_type === 'association');
+    // Marquage déchèterie : posé APRÈS l'état photo pour ne rien écraser des
+    // clés déjà décorées (les deux enrichissements sont additifs).
+    photoState.points = await decorerDecheterie(
+      photoState.points, tour.id, tour.collection_type === 'association');
     // Les arrêts de programme (retour au centre : vidage, pause, fin) voyagent
     // À CÔTÉ des points de collecte, dans une clé distincte : un mobile hors
     // ligne resté sur une ancienne version continue de lire `cavs` sans rien
@@ -401,6 +457,8 @@ router.get('/:id/public', async (req, res) => {
       points = cavsResult.rows;
     }
     const photoState = await decoratePhotoState(points, tour.collection_type === 'association');
+    photoState.points = await decorerDecheterie(
+      photoState.points, tour.id, tour.collection_type === 'association');
     res.json({
       ...tour,
       photo_fraicheur_mois: photoState.photo_fraicheur_mois,
@@ -1826,8 +1884,23 @@ router.get('/:id/history-public', async (req, res) => {
   }
 });
 
+// ── Bordereau de collecte en déchèterie (chantier 2.50.0) ──────────────────
+// Monté ICI, AVANT `router.use(authenticate)` : le middleware MOBILE_DRIVER_PATH
+// déclaré en tête de ce fichier authentifie le jeton chauffeur ET applique la
+// garde de périmètre véhicule à TOUT chemin « -public », sous-routeurs compris.
+// Monté après l'authentification générale, la route recevrait un `req.user`
+// mais plus la garde de périmètre — un chauffeur pourrait déposer un bordereau
+// sur la tournée d'un autre véhicule.
+const { routerChauffeur: bordereauxChauffeur, routerBackOffice: bordereauxBackOffice } = require('./bordereaux');
+router.use('/', bordereauxChauffeur);
+
 // All routes below require authentication
 router.use(authenticate);
+
+// Bordereaux déchèterie côté back-office (ADMIN/MANAGER). Monté AVANT tout
+// routeur à paramètre : « /bordereaux/referentiel-decheteries » serait sinon lu
+// comme la tournée n° « bordereaux ».
+router.use('/', bordereauxBackOffice);
 
 // ── Vague 2 (item 62) — Canal manager → chauffeur (côté web) ───────────────
 // Le responsable logistique envoie une consigne à un chauffeur en tournée

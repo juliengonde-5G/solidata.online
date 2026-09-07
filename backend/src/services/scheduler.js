@@ -1424,6 +1424,7 @@ const {
   purgeInsertionDossiers,
   purgeOldGpsPositions,
   purgeArretsGps,
+  purgeBordereauxDecheterie,
   purgeExpiredRefreshTokens,
 } = require('./rgpd-purges');
 
@@ -2045,6 +2046,10 @@ async function runAllJobs() {
     // Immédiatement APRÈS la purge de la trace : les arrêts en sont dérivés,
     // les voir purgés dans le même passage rend la règle lisible au journal.
     await runInstrumented('purgeArretsGps', purgeArretsGps);
+    // 2.50.0 — bordereaux de collecte en déchèterie (3 ans). Rangée avec les
+    // purges de collecte : c'est une pièce produite par une tournée, et elle
+    // porte deux signatures manuscrites dont celle d'un tiers.
+    await runInstrumented('purgeBordereauxDecheterie', purgeBordereauxDecheterie);
     await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
     await runInstrumented('purgeMessagerieRetention', () => messagerie().purgeMessagerieRetention());
     // `notifier: true` — c'est le SEUL chemin réellement automatique : une
@@ -2109,6 +2114,7 @@ module.exports = {
   // tests et l'observabilité ; le déclenchement manuel, lui, passe par le
   // service directement (routes/rgpd.js), jamais par ce module.
   purgeArretsGps,
+  purgeBordereauxDecheterie,
   purgePcmNonRecrute,
   purgeExpiredCandidates,
   purgeInsertionDossiers,

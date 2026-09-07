@@ -18,6 +18,13 @@
  * hors-couverture est bufferisé par TourMap (addGpsPosition) puis rejoué en lot
  * sur POST /tours/gps-batch-public ; les scans QR sur POST /tours/:id/scan-public.
  *
+ * Bordereaux déchèterie (chantier 2.50.0) : MÊME politique — POST
+ * /api/tours/:id/cav/:cavId/bordereau-decheterie-public, file
+ * `pendingBordereaux`, voir sendBordereau/syncPendingBordereaux plus bas. Seule
+ * différence assumée : la charge contient deux signatures PNG (≤ 200 Ko
+ * chacune). C'est la seule file qui transporte un blob, parce que c'est la
+ * seule donnée qu'un chauffeur ne pourra jamais recueillir une seconde fois.
+ *
  * Messagerie interne (lot L3, 26/08/2026) : les messages (réponses rapides ET
  * saisie libre) suivent la MÊME politique — POST
  * /api/messages/conversations/:id/messages, file `pendingMessages`, voir
@@ -29,6 +36,7 @@ import {
 } from './db';
 import api from './api';
 import { authedFetch } from './authedFetch';
+import { construirePayloadBordereau } from './decheterie';
 
 let syncInProgress = false;
 
@@ -73,7 +81,10 @@ export function __resetBackoffForTests() {
  * @returns {Promise<{ scans, weights, gps, incidents, collects, total }>}
  */
 export async function getPendingCount() {
-  const [scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists, messages] = await Promise.all([
+  const [
+    scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists, messages,
+    bordereaux,
+  ] = await Promise.all([
     countItems(STORES.pendingScans).catch(() => 0),
     countItems(STORES.pendingWeights).catch(() => 0),
     countItems(STORES.gpsBuffer).catch(() => 0),
@@ -83,11 +94,17 @@ export async function getPendingCount() {
     countItems(STORES.pendingEndOfDay).catch(() => 0),
     countItems(STORES.pendingChecklists).catch(() => 0),
     countItems(STORES.pendingMessages).catch(() => 0),
+    // Bordereaux déchèterie : comptés comme le reste — un bandeau « 0 en
+    // attente » avec un bordereau signé encore sur l'appareil mentirait au
+    // chauffeur sur la seule pièce qu'il ne pourra jamais refaire.
+    countItems(STORES.pendingBordereaux).catch(() => 0),
   ]);
   const counts = {
     scans, weights, gps, incidents, collects, messageReads, endOfDay, checklists, messages,
+    bordereaux,
   };
-  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay + checklists + messages;
+  counts.total = scans + weights + gps + incidents + collects + messageReads + endOfDay
+    + checklists + messages + bordereaux;
   emit('pending', { counts });
   return counts;
 }
@@ -650,6 +667,67 @@ export async function syncPendingMessages() {
   return { synced, failed, pending: items.length - synced - failed };
 }
 
+/**
+ * Envoie un bordereau de collecte en déchèterie (contrat §2.1).
+ *
+ * Le corps est construit par `construirePayloadBordereau` — SOURCE UNIQUE de
+ * sa forme, partagée avec l'écran : deux constructions parallèles finiraient
+ * par diverger, et c'est le serveur qui refuserait le document au moment où
+ * personne ne peut plus le refaire.
+ *
+ * Le corps de la réponse est attaché à l'erreur (`err.response.data`) pour que
+ * l'appelant puisse afficher le motif exact d'un refus (`POINT_NON_DECHETERIE`,
+ * `POIDS_INVALIDE`, `SIGNATURE_INVALIDE`, `MOTIF_REQUIS`) plutôt qu'un
+ * « erreur » muet.
+ */
+export async function sendBordereau(item) {
+  const res = await authedFetch(
+    `/api/tours/${item.tourId}/cav/${item.cavId}/bordereau-decheterie-public`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(construirePayloadBordereau(item)),
+    },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = { status: res.status, data };
+    throw err;
+  }
+  return data;
+}
+
+export async function syncPendingBordereaux() {
+  const store = STORES.pendingBordereaux;
+  if (!canAttempt(store)) return { synced: 0, failed: 0, pending: -1, skipped: true };
+  const items = await getAllItems(store);
+  let synced = 0; let failed = 0;
+  for (const it of items) {
+    try {
+      await sendBordereau(it);
+      await deleteItem(store, it.id);
+      synced++;
+    } catch (err) {
+      if (isClientError(err)) {
+        // 409 POINT_NON_DECHETERIE, 400 POIDS_INVALIDE/SIGNATURE_INVALIDE/
+        // MOTIF_REQUIS : rejouer ne changerait rien — refus DÉFINITIF, on
+        // purge sans boucler, comme les autres files. Le 401 reste conservé
+        // (isClientError l'exclut) : un problème d'auth n'est pas un
+        // bordereau invalide, et celui-ci ne se refait pas.
+        console.warn('[SYNC] Bordereau déchèterie rejeté, suppression:', err.response?.status, err.response?.data?.code);
+        await deleteItem(store, it.id);
+        failed++;
+      } else {
+        recordFailure(store);
+        break;
+      }
+    }
+  }
+  if (synced > 0 || failed > 0) recordSuccess(store);
+  return { synced, failed, pending: items.length - synced - failed };
+}
+
 export async function syncAll() {
   if (!navigator.onLine) {
     emit('state', { state: 'offline' });
@@ -667,6 +745,10 @@ export async function syncAll() {
       gps: await syncGpsBuffer(),
       incidents: await syncPendingIncidents(),
       collects: await syncPendingCollects(),
+      // Après les collectes : le serveur exige que le point soit dans la
+      // tournée ET marqué déchèterie ; poster le bordereau avant la collecte
+      // qu'il documente n'apporterait rien et brouillerait la chronologie.
+      bordereaux: await syncPendingBordereaux(),
       messageReads: await syncPendingMessageReads(),
       endOfDay: await syncPendingEndOfDay(),
       checklists: await syncPendingChecklists(),

@@ -289,9 +289,9 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 | `securite.mfa_duree_heures` | `backend/src/middleware/mfa.js` | `24` — durée de validité d'un second facteur. Au-delà, la session est renvoyée au code TOTP (403 `MFA_EXPIREE`), même si son jeton de renouvellement court encore. Bornée à [1 ; 168] h : une valeur hors bornes, illisible ou absente retombe sur le défaut en code. Le renouvellement de jeton NE repousse PAS l'horodatage — sans quoi une session simplement restée active ne se périmerait jamais. |
 | `vak.caisses_exclues` | `backend/src/services/sumup.js` | `Caisse Vintiz` — caisses EXCLUES de **toutes** les VAK, sans saisie par événement (alias séparés par des virgules, comme `vaks.compte_caisse`). Se combine à la liste blanche facultative `compte_caisse` : un ticket est compté s'il n'est pas exclu ET s'il passe le périmètre de sa VAK. Un compte **inconnu** n'est jamais exclu (sinon l'écran TV, alimenté par des webhooks sans identifiant de caisse, se viderait). Réglage **vidé** = plus aucune exclusion (décision respectée) ; réglage **absent** = défaut en code. |
 
-### Purges de rétention RGPD (2.44.0, étendues en 2.45.0)
+### Purges de rétention RGPD (2.44.0, étendues en 2.45.0, 2.50.0)
 
-Les huit purges sont décrites dans le registre `PURGES_RGPD` de
+Les neuf purges (2.50.0 : bordereaux de collecte en déchèterie) sont décrites dans le registre `PURGES_RGPD` de
 `backend/src/services/rgpd-purges.js` — source unique du job planifié **et** du bouton
 « Lancer maintenant » de l'écran RGPD. Chaque seuil se règle sans redéploiement ; l'écran
 indique s'il vient d'un réglage ou du défaut en code.
@@ -311,6 +311,22 @@ Les autres purges (candidatures 24 mois, dossiers d'insertion clos, positions GP
 tournée, messagerie, jetons de rafraîchissement) conservent les clés de réglage qui leur étaient
 déjà propres — le lot 2.44.0 les a déplacées dans le service partagé **sans changer leur
 comportement**.
+
+| Clé `settings` | Purge concernée | Valeur par défaut |
+|-----------------|-----------------|--------------------|
+| `rgpd.bordereaux_decheterie_retention_jours` | **Bordereaux de collecte en déchèterie** (`tour_decheterie_bordereaux`) — PDF et les deux signatures manuscrites qu'il porte (dont celle d'un agent de déchèterie, tiers). Le délai court depuis `created_at`, c'est-à-dire depuis le passage du camion — une validation par le gestionnaire est un événement de gestion interne, elle ne prolonge pas la durée de vie de la signature d'un tiers. Suppression (`DELETE`), pas anonymisation : ce qui resterait après retrait des signatures et du PDF n'aurait plus aucun usage. | `1095` (jours, soit 3 ans — arbitrage client 06/09/2026) |
+
+### Bordereau de collecte en déchèterie — seed du référentiel Métropole (2.50.0)
+
+| Clé `settings` | Emplacement | Rôle |
+|-----------------|-------------|------|
+| `collecte.decheteries_metropole_seed` | `backend/src/scripts/init-db.js` | **Verrou** (pas un réglage à éditer) posé une seule fois, la première fois qu'au moins un CAV est marqué déchèterie depuis `backend/src/data/decheteries-metropole.json` (14 déchèteries avec identifiant SOLIDATA, sur 15 — Saint-Étienne-du-Rouvray n'a pas encore de CAV). Un CAV n'est marqué par son identifiant QUE si sa commune correspond (garde anti-erreur d'identifiant) ; repli par nom (« déchetterie ») + commune sinon. Une fois posé, un démarquage manuel dans Gestion des CAV n'est **jamais** annulé par un redémarrage (doctrine 2.26.4). Aucune valeur n'est posée si rien n'a pu être marqué (base neuve sans référentiel CAV) : une nouvelle tentative a lieu au démarrage suivant. |
+
+**Asset optionnel** : `backend/assets/logo-metropole-rouen.png` — logo officiel de la Métropole
+Rouen Normandie pour l'en-tête du bordereau PDF. Non fourni par le dépôt (le scan remis par le
+client est inexploitable) ; en son absence, `utils/bordereau-decheterie-pdf.js` affiche un
+repli texte (« MÉTROPOLE ROUEN NORMANDIE »). À déposer manuellement sur le serveur, aucune
+variable d'environnement associée.
 
 ### Note de profil initial CIP — génération automatique (2.43.0)
 

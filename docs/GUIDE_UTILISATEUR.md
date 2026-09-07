@@ -17,7 +17,7 @@
 2. [Navigation dans l'Application](#2-navigation)
 3. [Recrutement](#3-recrutement) — Kanban, Plan de recrutement, Test PCM
 4. [Gestion d'Équipe](#4-gestion-déquipe) — Collaborateurs, Heures, Insertion, Planning
-5. [Collecte](#5-collecte) — Tournées, Carte CAV, GPS, Propositions IA
+5. [Collecte](#5-collecte) — Tournées, Carte CAV, GPS, Propositions IA, Bordereau déchèterie
 6. [Tri & Production](#6-tri--production) — Sessions, Stocks, Expéditions
 7. [Exutoires & Logistique](#7-exutoires--logistique) — Commandes, Préparation, Pesée, Facturation, Gantt
 8. [Reporting](#8-reporting) — Collecte, RH, Production, Refashion, Métropole
@@ -393,6 +393,50 @@ Le moteur prédictif analyse les données historiques et le remplissage actuel p
 - Priorisation des CAVs les plus pleins
 - Optimisation des trajets (distance minimale)
 - Prise en compte des jours de collecte habituels
+
+### 5.5 Bordereau de collecte en déchèterie
+
+Quand une tournée passe par une **déchèterie de la Métropole Rouen Normandie**, celle-ci exige
+un bordereau papier signé par son agent et par le chauffeur. SOLIDATA produit ce document
+automatiquement dès que le point est **marqué** comme déchèterie.
+
+**Marquer une déchèterie dans Gestion des CAV** :
+1. Menu → Collecte → **Gestion des CAV**
+2. Ouvrez la fiche du point (ou créez-le) et cochez **Déchèterie de la Métropole**
+3. Choisissez la **case du formulaire Métropole** correspondante dans la liste (Cléon, Boos,
+   Caudebec-lès-Elbeuf, Déville-lès-Rouen, Petit-Quevilly, Le Trait,
+   Saint-Étienne-du-Rouvray) — si le point n'y figure pas, laissez « Hors liste » : le
+   bordereau écrira la commune en toutes lettres dans ses remarques
+4. Enregistrez. Un badge **« Déchèterie »** apparaît désormais dans la liste des CAV ; la
+   case « Déchèteries seulement » permet de les retrouver rapidement
+
+*Ce qui se passe ensuite, sans autre action de votre part* : au passage de la tournée, le
+chauffeur saisit sur son téléphone un poids indicatif et recueille deux signatures (l'agent
+de la déchèterie, lui-même). Un bordereau PDF pré-rempli est généré automatiquement et vous
+êtes notifié (messagerie interne + notification) qu'un bordereau attend d'être validé.
+
+**Valider un bordereau depuis l'historique de tournée** :
+1. Menu → Collecte → **Tournées**, ouvrez la tournée concernée
+2. Dépliez la section **« Bordereaux déchèterie »**
+3. Un bandeau ambre signale les bordereaux **« À valider »**
+4. Cliquez sur **« Voir »** pour vérifier le document (poids, signatures, case cochée), puis
+   sur **« Valider »** — la validation ajoute au document la mention « Validé par Solidarité
+   textiles sur Solidata le … » et fige le poids et les signatures : elle est définitive, une
+   confirmation vous est demandée
+
+**Retrouver les bordereaux d'une déchèterie** :
+1. Menu → Collecte → **Gestion des CAV**, ouvrez la fiche du point déchèterie
+2. La section **« Bordereaux de collecte »** liste tous les bordereaux produits sur ce point,
+   toutes tournées confondues (lecture seule — la validation se fait depuis la fiche de la
+   tournée qui a produit le document)
+
+**Télécharger le PDF** :
+- Depuis l'une ou l'autre de ces deux listes, le bouton **« Télécharger »** enregistre le
+  bordereau tel qu'il est actuellement (à valider ou déjà validé) ; **« Voir »** ouvre un
+  aperçu sans quitter la page
+
+> Le poids saisi par le chauffeur sur ce document est **indicatif** : il n'entre jamais dans
+> les pesées de la tournée, le tonnage ou les statistiques de collecte.
 
 ---
 

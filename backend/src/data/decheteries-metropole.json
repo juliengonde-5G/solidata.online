@@ -1,0 +1,156 @@
+{
+  "_source": "Réseau de déchèteries de la Métropole Rouen Normandie (open data) + colonne « ID Solidata » renseignée par le client le 06/09/2026",
+  "_regle": "id_solidata = identifiant du CAV en PRODUCTION ; le seed ne marque un CAV que si sa commune correspond (garde anti-erreur d'identifiant). code_bordereau = case du formulaire Métropole (7 cases), null = déchèterie hors liste (commune écrite en clair dans Remarque(s)).",
+  "decheteries": [
+    {
+      "id_solidata": 278,
+      "pavid": "Dech F1",
+      "nom": "Déchetterie Anneville Ambourville",
+      "adresse": "Route de Bourg-Achard",
+      "commune": "Anneville Ambourville",
+      "latitude": 49.433157,
+      "longitude": 0.892656,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": 203,
+      "pavid": "Dech F2",
+      "nom": "Déchetterie Bois Guillaume",
+      "adresse": "Rue Herbeuse",
+      "commune": "Bois Guillaume",
+      "latitude": 49.474983,
+      "longitude": 1.135337,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": 365,
+      "pavid": "Dech F3",
+      "nom": "Déchetterie Boos",
+      "adresse": "Rue des Canadiens",
+      "commune": "Boos",
+      "latitude": 49.375706,
+      "longitude": 1.181528,
+      "code_bordereau": "boos"
+    },
+    {
+      "id_solidata": 332,
+      "pavid": "Dech F4",
+      "nom": "Déchetterie Caudebec lès elbeuf",
+      "adresse": "Rue de la Chaussée",
+      "commune": "Caudebec lès Elbeuf",
+      "latitude": 49.291429,
+      "longitude": 1.030754,
+      "code_bordereau": "caudebec_les_elbeuf"
+    },
+    {
+      "id_solidata": 207,
+      "pavid": "Dech F5",
+      "nom": "Déchetterie Cléon",
+      "adresse": "Rue Marie-Louise et Raymond Boucher",
+      "commune": "Cléon",
+      "latitude": 49.319089,
+      "longitude": 1.055419,
+      "code_bordereau": "cleon"
+    },
+    {
+      "id_solidata": 358,
+      "pavid": "Dech F6",
+      "nom": "Déchetterie Darnétal",
+      "adresse": "Sente de la Ravine",
+      "commune": "Darnétal",
+      "latitude": 49.44566,
+      "longitude": 1.15798,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": 231,
+      "pavid": "Dech F8",
+      "nom": "Déchetterie Duclair",
+      "adresse": "Impasse du Maupas",
+      "commune": "Duclair",
+      "latitude": 49.49077,
+      "longitude": 0.86669,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": 295,
+      "pavid": "Dech F7",
+      "nom": "Déchetterie Déville lès Rouen",
+      "adresse": "Impasse Barbet",
+      "commune": "Déville lès Rouen",
+      "latitude": 49.458921,
+      "longitude": 1.04677,
+      "code_bordereau": "deville_les_rouen"
+    },
+    {
+      "id_solidata": 420,
+      "pavid": "Dech F9",
+      "nom": "Déchetterie Grand Couronne",
+      "adresse": "Allée de la Côte Mutel",
+      "commune": "Grand Couronne",
+      "latitude": 49.366757,
+      "longitude": 1.015492,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": 338,
+      "pavid": "Dech F11",
+      "nom": "Déchetterie Petit Quevilly",
+      "adresse": "Chemin du Gord",
+      "commune": "Le Petit Quevilly",
+      "latitude": 49.42734,
+      "longitude": 1.038714,
+      "code_bordereau": "petit_quevilly"
+    },
+    {
+      "id_solidata": 281,
+      "pavid": "Dech F16",
+      "nom": "Déchetterie Le Trait",
+      "adresse": "Boulevard Industriel",
+      "commune": "Le Trait",
+      "latitude": 49.48602,
+      "longitude": 0.79341,
+      "code_bordereau": "le_trait"
+    },
+    {
+      "id_solidata": 293,
+      "pavid": "Dech F12",
+      "nom": "Déchetterie Rouen",
+      "adresse": "Quai du Pré aux Loups",
+      "commune": "Rouen",
+      "latitude": 49.43508,
+      "longitude": 1.10341,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": null,
+      "pavid": "Dech F13",
+      "nom": "Déchetterie Saint Etienne du Rouvray",
+      "adresse": "Rue Désiré Granet",
+      "commune": "Saint Etienne du Rouvray",
+      "latitude": 49.369974,
+      "longitude": 1.110441,
+      "code_bordereau": "saint_etienne_du_rouvray"
+    },
+    {
+      "id_solidata": 296,
+      "pavid": "Dech F10",
+      "nom": "Déchetterie Maromme",
+      "adresse": "Côte de la Valette",
+      "commune": "Saint Jean du Cardonnay",
+      "latitude": 49.48752,
+      "longitude": 1.024794,
+      "code_bordereau": null
+    },
+    {
+      "id_solidata": 272,
+      "pavid": "Dech F14",
+      "nom": "Déchetterie Saint Martin de Boscherville",
+      "adresse": "Rue Chaussée Saint Georges",
+      "commune": "Saint Martin de Boscherville",
+      "latitude": 49.44734,
+      "longitude": 0.95783,
+      "code_bordereau": null
+    }
+  ]
+}

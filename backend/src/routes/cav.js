@@ -1032,6 +1032,26 @@ router.get('/:id/sensor-status', async (req, res) => {
 });
 
 // GET /api/cav/:id
+// ── Marquage « déchèterie » (chantier 2.50.0) ───────────────────────────────
+// `is_decheterie` déclenche, côté chauffeur, la demande d'un bordereau signé.
+// `decheterie_code` désigne l'une des 7 cases du formulaire Métropole ; toute
+// autre valeur est REFUSÉE (400) plutôt que rangée telle quelle : un code
+// inconnu ferait cocher la mauvaise case, ou aucune, sans que personne le voie.
+// Un point qui n'est PAS une déchèterie ne garde jamais de code : la seule
+// combinaison stockable est « marqué + code connu » ou « marqué + hors liste ».
+const { estDecheterieConnue } = require('../services/bordereau-decheterie');
+
+function lireMarquageDecheterie(body) {
+  const estDecheterie = body.is_decheterie === true || body.is_decheterie === 'true';
+  if (!estDecheterie) return { ok: true, is_decheterie: false, decheterie_code: null };
+  const brut = body.decheterie_code;
+  if (brut === undefined || brut === null || brut === '') {
+    return { ok: true, is_decheterie: true, decheterie_code: null };
+  }
+  if (!estDecheterieConnue(brut)) return { ok: false };
+  return { ok: true, is_decheterie: true, decheterie_code: brut };
+}
+
 router.get('/:id', async (req, res) => {
   try {
     const cav = await pool.query(
@@ -1071,6 +1091,14 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
       return res.status(400).json({ error: 'Nom, latitude et longitude requis' });
     }
 
+    const decheterie = lireMarquageDecheterie(req.body);
+    if (!decheterie.ok) {
+      return res.status(400).json({
+        error: 'Case du formulaire Métropole inconnue',
+        code: 'DECHETERIE_CODE_INVALIDE',
+      });
+    }
+
     // Générer QR code unique
     const qrData = `SOLIDATA-CAV-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const qrDir = path.join(__dirname, '..', '..', 'uploads', 'qrcodes');
@@ -1082,12 +1110,14 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
     const result = await pool.query(
       `INSERT INTO cav (name, address, commune, latitude, longitude,
        geom, nb_containers, qr_code_data, qr_code_image_path,
-       communaute_communes, surface, ref_refashion, entite_detentrice, code_postal)
+       communaute_communes, surface, ref_refashion, entite_detentrice, code_postal,
+       is_decheterie, decheterie_code)
        VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($5, $4), 4326), $6, $7, $8,
-               $9, $10, $11, $12, $13)
+               $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
       [name, address, commune, latitude, longitude, nb_containers || 1, qrData, `/uploads/qrcodes/${qrFilename}`,
-       communaute_communes || null, surface || null, ref_refashion || null, entite_detentrice || null, code_postal || null]
+       communaute_communes || null, surface || null, ref_refashion || null, entite_detentrice || null, code_postal || null,
+       decheterie.is_decheterie, decheterie.decheterie_code]
     );
 
     res.status(201).json(result.rows[0]);
@@ -1121,6 +1151,21 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
     if (ref_refashion !== undefined) { setClauses.push(`ref_refashion = $${i}`); values.push(ref_refashion); i++; }
     if (entite_detentrice !== undefined) { setClauses.push(`entite_detentrice = $${i}`); values.push(entite_detentrice); i++; }
     if (code_postal !== undefined) { setClauses.push(`code_postal = $${i}`); values.push(code_postal); i++; }
+    // Marquage déchèterie : les deux colonnes bougent ENSEMBLE. Décocher la case
+    // remet le code à NULL — sinon un point redevenu ordinaire garderait la
+    // trace d'une case du formulaire, et le jour où on le remarquerait, il
+    // hériterait d'une déchèterie qui n'est pas la sienne.
+    if (req.body.is_decheterie !== undefined) {
+      const decheterie = lireMarquageDecheterie(req.body);
+      if (!decheterie.ok) {
+        return res.status(400).json({
+          error: 'Case du formulaire Métropole inconnue',
+          code: 'DECHETERIE_CODE_INVALIDE',
+        });
+      }
+      setClauses.push(`is_decheterie = $${i}`); values.push(decheterie.is_decheterie); i++;
+      setClauses.push(`decheterie_code = $${i}`); values.push(decheterie.decheterie_code); i++;
+    }
     if (status !== undefined) {
       setClauses.push(`status = $${i}`); values.push(status); i++;
       if (status === 'unavailable') {
@@ -1163,6 +1208,47 @@ router.get('/:id/history', async (req, res) => {
   }
 });
 
+// GET /api/cav/:id/bordereaux — bordereaux de collecte émis sur CE point.
+// Consultés depuis la fiche du CAV (section « Bordereaux de collecte ») : le
+// document est une pièce de la déchèterie autant que de la tournée, il doit se
+// retrouver par le lieu et pas seulement par la journée où il a été produit.
+// Aucun BYTEA n'est renvoyé ici — le PDF se lit par sa route dédiée, qui, elle,
+// journalise la consultation.
+router.get('/:id/bordereaux', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const cavId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(cavId)) return res.status(400).json({ error: 'Identifiant de CAV invalide' });
+    const { COLONNES_RESUME, projeterResume } = require('../services/bordereau-decheterie');
+    const r = await pool.query(
+      `SELECT ${COLONNES_RESUME},
+              t.date AS tour_date,
+              NULLIF(TRIM(CONCAT(v.registration, ' ', v.name)), '') AS vehicule,
+              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS valide_par_nom
+         FROM tour_decheterie_bordereaux b
+         LEFT JOIN tours t ON t.id = b.tour_id
+         LEFT JOIN vehicles v ON v.id = b.vehicle_id
+         LEFT JOIN users u ON u.id = b.valide_par
+        WHERE b.cav_id = $1
+        ORDER BY b.created_at DESC, b.id DESC
+        LIMIT 200`,
+      [cavId]
+    );
+    res.json({
+      bordereaux: r.rows.map((row) => projeterResume(row, {
+        tour_id: row.tour_id, tour_date: row.tour_date, vehicule: row.vehicule || null,
+      })),
+    });
+  } catch (err) {
+    // Base non migrée : la fiche du point doit continuer de s'afficher.
+    if (err && err.code === '42P01') {
+      console.warn('[CAV] Table tour_decheterie_bordereaux absente (base non migrée).');
+      return res.json({ bordereaux: [] });
+    }
+    console.error('[CAV] Erreur bordereaux du point :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // GET /api/cav/:id/historique — Historique consolidé d'un CAV pour la fiche
 // AdminCAV : passages en tournée (collecté / sauté avec motif, niveau relevé),
 // tonnages attribués et incidents, plus une synthèse chiffrée de la période.
@@ -1173,7 +1259,12 @@ router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) =>
     // Période bornée 1-60 mois, défaut 12.
     const mois = Math.min(60, Math.max(1, parseInt(req.query.mois, 10) || 12));
 
-    const [passages, tonnages, incidents] = await Promise.all([
+    // Le 4e appel est un LEFT-JOIN sur une table livrée par ce chantier : sur une
+    // base non migrée il échouerait et emporterait tout le Promise.all. Il est
+    // donc rattrapé INDIVIDUELLEMENT (`{ rows: [] }`) — la fiche du point ne
+    // doit pas perdre ses passages et ses incidents parce qu'une colonne
+    // manque.
+    const [passages, tonnages, incidents, bordereaux] = await Promise.all([
       pool.query(
         `SELECT t.id AS tour_id, t.date, t.mode, t.status AS tour_status,
                 v.registration, v.name AS vehicle_name,
@@ -1203,6 +1294,21 @@ router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) =>
           LIMIT 100`,
         [cavId, mois]
       ),
+      pool.query(
+        `SELECT b.id, b.numero, b.tour_id, b.date_enlevement, b.poids_indicatif_kg,
+                b.decheterie_code, b.decheterie_libelle, b.statut,
+                (b.signature_agent IS NOT NULL) AS signature_agent_presente,
+                b.signature_agent_absente_motif,
+                b.valide_le, b.created_at
+           FROM tour_decheterie_bordereaux b
+          WHERE b.cav_id = $1 AND b.created_at >= NOW() - make_interval(months => $2)
+          ORDER BY b.created_at DESC
+          LIMIT 100`,
+        [cavId, mois]
+      ).catch((err) => {
+        console.warn('[CAV] Bordereaux déchèterie illisibles pour la fiche :', err.message);
+        return { rows: [] };
+      }),
     ]);
 
     const nbCollectes = passages.rows.filter((p) => p.status === 'collected').length;
@@ -1222,6 +1328,14 @@ router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) =>
       passages: passages.rows,
       tonnages: tonnages.rows,
       incidents: incidents.rows,
+      // Volontairement AU PREMIER NIVEAU et non dans `synthese` : la forme de
+      // `synthese` est verrouillée au caractère près par un test de contrat
+      // (cav-historique-contract) que rien ne justifie d'élargir ici.
+      nb_bordereaux: bordereaux.rows.length,
+      bordereaux: bordereaux.rows.map((b) => ({
+        ...b,
+        poids_indicatif_kg: b.poids_indicatif_kg == null ? null : Number(b.poids_indicatif_kg),
+      })),
     });
   } catch (err) {
     console.error('[CAV] Erreur historique consolidé :', err);

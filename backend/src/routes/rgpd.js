@@ -254,6 +254,11 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
   try {
     const { readInsertionSetting } = require('../utils/insertion-settings');
     const retentionInsertionMois = await readInsertionSetting('insertion.retention_months');
+    const { trouverPurge, retentionEffective } = require('../services/rgpd-purges');
+    const purgeBordereaux = trouverPurge('bordereaux_decheterie');
+    const retentionBordereaux = purgeBordereaux ? await retentionEffective(purgeBordereaux) : { valeur: 1095, source: 'code' };
+    const retentionBordereauxJours = retentionBordereaux.valeur;
+    const retentionBordereauxSource = retentionBordereaux.source === 'code' ? 'code' : 'rgpd.bordereaux_decheterie_retention_jours';
     // Seuil RÉELLEMENT appliqué par la purge des tests PCM (défaut 90 j en code,
     // réglable) — lu au même endroit que le job pour que l'écran ne puisse pas
     // annoncer une durée que le code n'applique pas.
@@ -321,6 +326,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             source: 'code',
             reference: 'backend/src/services/scheduler.js (purgeOldGpsPositions)',
           },
+          {
+            titre: 'Bordereaux de collecte en déchèterie (signatures manuscrites)',
+            description: "Le bordereau Métropole d'un passage en déchèterie porte deux signatures manuscrites (agent de la déchèterie — un tiers — et chauffeur) et un poids indicatif. La ligne et son PDF sont supprimés DÉFINITIVEMENT après ce délai, compté depuis le dépôt. Indépendamment de ce délai, la signature du chauffeur est retirée du bordereau (et le PDF régénéré) dès l'anonymisation de sa fiche ; celle de l'agent, qui appartient à un tiers, est conservée avec la pièce.",
+            valeur: `${retentionBordereauxJours} jours`,
+            source: retentionBordereauxSource,
+            reference: 'backend/src/services/rgpd-purges.js (purgeBordereauxDecheterie), backend/src/services/anonymization.js',
+          },
         ],
       },
       {
@@ -330,8 +342,8 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
         regles: [
           {
             titre: 'Purges automatiques planifiées',
-            description: "8 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, réponses détaillées au questionnaire PCM, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, messagerie interne, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
-            valeur: '8 purges, 3×/jour',
+            description: "9 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, réponses détaillées au questionnaire PCM, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, bordereaux de collecte en déchèterie (signatures manuscrites), messagerie interne, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
+            valeur: '9 purges, 3×/jour',
             source: 'code',
             reference: 'backend/src/services/rgpd-purges.js (registre PURGES_RGPD), backend/src/services/scheduler.js (runAllJobs)',
           },

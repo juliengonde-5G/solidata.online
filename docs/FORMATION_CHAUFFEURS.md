@@ -429,6 +429,134 @@ Pour chaque ligne :
 ---
 ---
 
+# 6 BIS. LA DECHETTERIE : LE BORDEREAU
+
+---
+
+**Si le point est une DECHETTERIE de la Metropole, un ecran de plus s'ouvre
+apres avoir indique le niveau de remplissage.**
+
+**La Metropole demande un papier signe a chaque passage. Sur votre telephone,
+c'est le meme papier, mais vous le signez avec le doigt.**
+
+```
++------------------------------------------+
+|  Bordereau dechetterie                   |
+|                                          |
+|  Etape 1 sur 3 : le poids                |
+|                                          |
+|  Combien de kilos, a peu pres ?         |
+|                                          |
+|  +------+------+------+                 |
+|  | -50  |  +50 | +200 |                 |
+|  +------+------+------+                 |
+|                                          |
+|          185 kg                         |
+|                                          |
+|  +------------------------------------+  |
+|  |             SUIVANT               |  |
+|  +------------------------------------+  |
++------------------------------------------+
+```
+
+### Etape 1 : le poids (a peu pres)
+
+```
+Ce n'est PAS une pesee.
+C'est juste une estimation, pour le papier de la Metropole.
+
+1. Toucher les boutons +50 / +200 / -50
+   OU taper le chiffre au clavier
+
+2. Appuyer sur  SUIVANT
+```
+
+### Etape 2 : la signature de l'agent
+
+```
++------------------------------------------+
+|  Etape 2 sur 3                           |
+|                                          |
+|  Faites signer l'agent de la dechetterie |
+|                                          |
+|  +------------------------------------+  |
+|  |                                    |  |
+|  |     (dessiner ici avec le doigt)   |  |
+|  |                                    |  |
+|  +------------------------------------+  |
+|                                          |
+|  [ Effacer ]                             |
+|                                          |
+|  [ ] L'agent n'est pas disponible        |
+|                                          |
+|  +------------------------------------+  |
+|  |             SUIVANT               |  |
+|  +------------------------------------+  |
++------------------------------------------+
+```
+
+```
+1. Tendez le telephone a l'agent de la dechetterie
+
+2. L'agent signe avec le doigt DANS LE CADRE
+
+3. Trompe ? → toucher  Effacer  et recommencer
+
+4. L'agent n'est pas la ?
+   → toucher la case  "L'agent n'est pas disponible"
+   → pas besoin de signature, vous continuez quand meme
+
+5. Appuyer sur  SUIVANT
+```
+
+### Etape 3 : ma signature
+
+```
++------------------------------------------+
+|  Etape 3 sur 3                           |
+|                                          |
+|  Signez a votre tour                     |
+|                                          |
+|  +------------------------------------+  |
+|  |                                    |  |
+|  |     (dessiner ici avec le doigt)   |  |
+|  |                                    |  |
+|  +------------------------------------+  |
+|                                          |
+|  [ Effacer ]                             |
+|                                          |
+|  +------------------------------------+  |
+|  |            TERMINER               |  |
+|  +------------------------------------+  |
++------------------------------------------+
+```
+
+```
+1. Signez DANS LE CADRE avec le doigt
+
+2. Trompe ? → toucher  Effacer  et recommencer
+
+3. Appuyer sur  TERMINER
+
+4. Retour a la carte → conteneur suivant !
+```
+
+### Pas de reseau ? Pas de probleme.
+
+```
+   Le bordereau est GARDE dans le telephone.
+
+   Il sera ENVOYE tout seul des que le reseau revient.
+
+   Vous n'avez RIEN d'autre a faire.
+
+   ATTENTION : signez quand meme l'agent MAINTENANT.
+   Plus tard, il ne sera plus la pour signer.
+```
+
+---
+---
+
 # 7. PESER LA COLLECTE
 
 ---

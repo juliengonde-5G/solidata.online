@@ -810,6 +810,21 @@ export default function TourMap() {
                 {currentHoraires.texte}
               </p>
             )}
+            {/* Point DÉCHÈTERIE (chantier 2.50.0) : annoncé AVANT l'arrivée,
+                comme la photo. Le chauffeur doit savoir qu'il aura besoin de
+                l'agent — s'il l'apprend une fois l'agent reparti, la signature
+                est définitivement perdue. Deux états STRICTEMENT distincts :
+                bordereau à faire, ou déjà déposé (drapeaux serveur, §2.2). */}
+            {currentCAV.is_decheterie && !currentCAV.bordereau_deja_depose && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-bold text-orange-800 bg-orange-50 border border-orange-200 rounded-lg px-2 py-1">
+                <span aria-hidden="true">📄</span> Déchèterie — bordereau Métropole à faire signer
+              </p>
+            )}
+            {currentCAV.is_decheterie && currentCAV.bordereau_deja_depose && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+                <span aria-hidden="true">✓</span> Bordereau déposé
+              </p>
+            )}
             {/* Photo attendue sur ce point (aucune photo en base ou photo
                 périmée) — annoncé AVANT l'arrivée pour éviter la surprise à la
                 validation. */}

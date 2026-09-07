@@ -451,6 +451,10 @@ solidata.online/
 - Déclaration d'incidents (panne, accident, problème CAV, environnement)
 - Pesée au retour au centre de tri
 - Historique des tonnages collectés
+- **Collecte en déchèterie (2.50.0)** : CAV marqué `is_decheterie` (l'une des 7 cases du
+  formulaire Métropole Rouen Normandie, ou hors liste), écran chauffeur dédié après la
+  collecte (poids indicatif + deux signatures manuscrites), bordereau PDF généré et validé
+  ADMIN/MANAGER (voir §8 « Bordereau de collecte en déchèterie »)
 
 ### Module 6 — Tri & Production
 - **Chaînes de tri** configurables (Qualité + Recyclage Exclusif)
@@ -619,10 +623,10 @@ solidata.online/
 | `schedule` | Planning journalier (travail/formation/repos/congé/VAK) |
 | `work_hours` | Heures travaillées + heures sup |
 
-#### Collecte (10 tables)
+#### Collecte (11 tables)
 | Table | Description |
 |-------|-------------|
-| `cav` | Conteneurs d'Apport Volontaire (géoloc PostGIS, QR code, statut) |
+| `cav` | Conteneurs d'Apport Volontaire (géoloc PostGIS, QR code, statut) ; **2.50.0** : `is_decheterie`, `decheterie_code` (l'une des 7 cases du formulaire Métropole ou `NULL` hors liste), `decheterie_pavid` (référence Métropole informative) |
 | `vehicles` | Véhicules (immatriculation, capacité, kilométrage) |
 | `standard_routes` | Routes-types prédéfinies |
 | `standard_route_cav` | CAV associés à chaque route-type (avec position) |
@@ -633,6 +637,7 @@ solidata.online/
 | `gps_positions` | Positions GPS temps réel (indexé par tournée et date) |
 | `tonnage_history` | Historique tonnages par date/CAV/route |
 | `vehicle_checklists` | Checklists véhicule (extérieur, carburant, km) |
+| `tour_decheterie_bordereaux` | **2.50.0** : un bordereau par passage tournée × point déchèterie — `numero` (`BD-AAAA-NNNN` UNIQUE), `client_id` (idempotence du rejeu mobile, UNIQUE), snapshots `decheterie_code`/`decheterie_libelle`/`cav_nom`, `poids_indicatif_kg` (NUMERIC(8,1), CHECK 0-60000, **indicatif** — jamais versé dans `tour_weights`), `signature_agent`/`signature_chauffeur` (BYTEA PNG, jamais sous `/uploads`), motifs d'absence de signature (liste fermée), `pdf` (BYTEA, régénéré à la validation et à l'anonymisation), `statut` (`a_valider`→`valide`), `valide_par`/`valide_le` |
 
 #### Stock (3 tables)
 | Table | Description |
@@ -847,6 +852,26 @@ Portés par `routes/insertion/routes.js`, montés **avant** `GET /api/insertion/
 | GET | `/api/insertion/notes-profil/:employeeId` | ADMIN, RH | Lecture de la note du parcours courant, déchiffrée — consultation journalisée dans `rgpd_audit_log` |
 | POST | `/api/insertion/ia/note-profil/:employeeId` | ADMIN, RH | Génération ou régénération (appel Anthropic, `services/insertion-ai.js#analyserProfilInitial`) |
 | POST | `/api/insertion/notes-profil/:employeeId/communiquer` | ADMIN, RH | Marque « pris connaissance » (idempotent — ne réécrase pas une date déjà posée) |
+
+### Bordereau de collecte en déchèterie — endpoints (2.50.0)
+
+Portés par `routes/tours/bordereaux.js` (deux routeurs distincts, montés à deux points
+différents de `routes/tours/index.js` — un avant `authenticate` pour la route chauffeur `-public`, un juste après pour le back-office ADMIN/MANAGER) et `routes/cav.js` :
+
+| Méthode | Endpoint | Auth | Description |
+|---------|----------|------|--------------|
+| POST | `/api/tours/:id/cav/:cavId/bordereau-decheterie-public` | jeton chauffeur (garde de périmètre véhicule) | Dépose le bordereau d'un passage en déchèterie : `client_id` (idempotence), `poids_indicatif_kg`, `signature_chauffeur` (dataURL PNG, obligatoire), `signature_agent` (dataURL PNG ou `null`), `agent_absent_motif` (obligatoire si `signature_agent` est `null`). Réponses : `201` création, `200 {deja_enregistre:true}` sur rejeu, `200 {demo:true}` sur tournée de démonstration (aucune écriture, aucune notification), `409 POINT_NON_DECHETERIE`, `400 POIDS_INVALIDE` / `SIGNATURE_INVALIDE` / `MOTIF_REQUIS` / `CLIENT_ID_INVALIDE`. Notifie ADMIN/MANAGER (messagerie + push) après la réponse, jamais bloquant |
+| GET | `/api/tours/bordereaux/referentiel-decheteries` | ADMIN, MANAGER | Les 7 cases du formulaire Métropole, dans l'ordre du document (`{code, libelle}`) |
+| GET | `/api/tours/:id/bordereaux` | ADMIN, MANAGER | Bordereaux d'une tournée (liste `BordereauResume`, jamais de BYTEA) |
+| GET | `/api/cav/:id/bordereaux` | ADMIN, MANAGER | Bordereaux produits sur un point (fiche CAV), même forme, enrichie de `tour_date`/`vehicule` |
+| GET | `/api/tours/bordereaux/:bid/pdf` | ADMIN, MANAGER | Le document PDF courant (`application/pdf`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`). Chaque lecture est journalisée `rgpd_audit_log` (`BORDEREAU_DECHETERIE_CONSULTE`) — le document porte deux signatures manuscrites |
+| POST | `/api/tours/bordereaux/:bid/valider` | ADMIN, MANAGER | Valide le bordereau : statut `valide`, `valide_par`/`valide_le`, PDF régénéré avec la mention de validation. `409 BORDEREAU_DEJA_VALIDE` si déjà validé — poids et signatures ne sont jamais modifiables après coup |
+| GET/PUT/POST | `/api/cav`, `/api/cav/:id` | ADMIN, MANAGER (écriture) | `is_decheterie` (booléen) et `decheterie_code` (l'un des 7 codes ou `null` → sinon `400 DECHETERIE_CODE_INVALIDE`) ; `decheterie_code` est remis à `null` si `is_decheterie` est faux |
+
+Payloads mobiles enrichis (`GET /tours/:id/public`, `GET /tours/vehicle/:id/today`) : chaque
+élément de `cavs[]` gagne `is_decheterie`, `decheterie_libelle` (libellé de la case du
+formulaire si le code est connu, sinon `null`) et `bordereau_deja_depose` (un bordereau existe
+déjà pour ce passage) — toujours `false`/`null` sur un point d'association.
 
 ### Health check
 `GET /api/health` — Retourne l'état de la base, la version PostgreSQL/PostGIS et les modules actifs.
