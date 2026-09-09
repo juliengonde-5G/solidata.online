@@ -15,6 +15,7 @@ import DiagnosticForm from '../components/insertion/DiagnosticForm';
 import EntretienForm from '../components/insertion/EntretienForm';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
+import NotesSuiviPanel from '../components/insertion/NotesSuiviPanel';
 import AlertesBloc from '../components/insertion/AlertesBloc';
 import FriseParcours from '../components/insertion/FriseParcours';
 import PmsmpPanel from '../components/insertion/PmsmpPanel';
@@ -1350,6 +1351,13 @@ export default function InsertionParcours() {
                       <ActionsPanel employeeId={selectedEmployee.id}
                         employeeName={formatEmployeeName(emp.last_name, emp.first_name)} />
                     </div>
+                    {/* Journal d'accompagnement : ce qui se passe ENTRE les
+                        entretiens formels. Réservé ADMIN/RH (textes libres). */}
+                    {adminRh && (
+                      <div className="bg-white rounded-lg border p-4">
+                        <NotesSuiviPanel employeeId={selectedEmployee.id} />
+                      </div>
+                    )}
                   </div>
                 )}
 

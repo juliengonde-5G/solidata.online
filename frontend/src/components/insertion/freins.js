@@ -122,6 +122,27 @@ export const ACTION_PRIORITY_COLORS = {
   basse: 'bg-gray-100 text-gray-600',
 };
 
+// ── Notes / commentaires de suivi (journal d'accompagnement CIP) ──
+// Source unique des libellés : le backend valide ces mêmes clés
+// (NOTE_SUIVI_CATEGORIES dans routes/insertion/routes.js).
+export const NOTE_SUIVI_CATEGORIES = ['suivi', 'echange', 'partenaire', 'evenement', 'alerte', 'autre'];
+export const NOTE_SUIVI_CATEGORY_LABELS = {
+  suivi: 'Suivi de parcours',
+  echange: 'Échange avec le salarié',
+  partenaire: 'Échange avec un partenaire',
+  evenement: 'Fait marquant',
+  alerte: 'Point de vigilance',
+  autre: 'Autre',
+};
+export const NOTE_SUIVI_CATEGORY_COLORS = {
+  suivi: 'bg-slate-100 text-slate-600',
+  echange: 'bg-teal-50 text-teal-700',
+  partenaire: 'bg-indigo-50 text-indigo-700',
+  evenement: 'bg-blue-50 text-blue-700',
+  alerte: 'bg-amber-100 text-amber-800',
+  autre: 'bg-gray-100 text-gray-600',
+};
+
 // ── Objectifs individualisés ──
 export const OBJECTIF_STATUTS = ['a_venir', 'en_cours', 'atteint', 'partiellement_atteint', 'abandonne', 'reporte'];
 export const OBJECTIF_STATUT_LABELS = {
