@@ -1146,6 +1146,264 @@ router.delete('/action-plans/:id', authorize('ADMIN', 'RH'), async (req, res) =>
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// NOTES / COMMENTAIRES DE SUIVI (journal d'accompagnement de la CIP)
+// ══════════════════════════════════════════════════════════════
+//
+// Ce que ça comble : entre deux entretiens formels, l'accompagnement est fait
+// d'échanges, d'appels de partenaires et de faits marquants qui n'avaient
+// jusqu'ici AUCUN endroit où être écrits — ils vivaient dans la mémoire de la
+// CIP, donc ils disparaissaient à son absence ou à son départ.
+//
+// Trois règles portent cette section :
+//  1. ADMIN/RH STRICT — ce sont des textes libres d'accompagnement : ils
+//     portent par nature de la santé (art. 9) ou du contexte judiciaire
+//     (art. 10) sans qu'aucune colonne ne le déclare. Le masquage par champ
+//     (masking.js) ne peut rien contre du texte libre : le seul cloisonnement
+//     honnête est de ne pas ouvrir la surface à un MANAGER (même doctrine que
+//     la note de profil initial, 2.43.0).
+//  2. CHIFFRÉ en base, déchiffré ici seulement, JAMAIS journalisé — le journal
+//     RGPD trace QUI a lu/écrit QUOI, jamais le contenu lui-même.
+//  3. HISTORISÉ — une note modifiée ou supprimée laisse son état antérieur
+//     dans `insertion_notes_suivi_history` (le contenu y reste chiffré).
+
+const NOTE_SUIVI_CATEGORIES = ['suivi', 'echange', 'partenaire', 'evenement', 'alerte', 'autre'];
+const NOTE_SUIVI_MAX = 5000;
+
+// Journal RGPD des notes de suivi. Ne reçoit JAMAIS le contenu : la trace dit
+// qu'une note a été lue ou écrite, pas ce qu'elle raconte.
+async function journaliserNoteSuivi(req, action, employeeId, details) {
+  try {
+    await pool.query(
+      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+      [req.user?.id ?? null, action, 'insertion_notes_suivi', employeeId,
+        JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
+    );
+  } catch (e) {
+    console.error(`[INSERTION] Journalisation ${action} impossible :`, e.message);
+  }
+}
+
+// Snapshot probant AVANT modification ou suppression. Le contenu chiffré est
+// recopié TEL QUEL (cf. commentaire d'init-db) et la ligne porte l'employé pour
+// rester purgeable à l'anonymisation même quand la note a disparu.
+async function snapshotNoteSuivi(db, row, action, userId) {
+  await db.query(
+    `INSERT INTO insertion_notes_suivi_history (note_id, employee_id, snapshot, action, changed_by)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [row.id, row.employee_id, JSON.stringify(row), action, userId || null]
+  );
+}
+
+// Compose une ligne pour l'écran : contenu déchiffré + qui a écrit / modifié.
+// Un contenu illisible (clé de chiffrement changée) est NOMMÉ par
+// `contenu_illisible` plutôt que rendu en blob — jamais de charabia à l'écran.
+function composerNoteSuivi(row) {
+  const clair = decryptField(row.contenu_chiffre);
+  return {
+    id: row.id,
+    employee_id: row.employee_id,
+    parcours_num: row.parcours_num,
+    date_note: row.date_note,
+    categorie: row.categorie,
+    contenu: clair || null,
+    contenu_illisible: !clair,
+    milestone_id: row.milestone_id,
+    milestone_titre: row.milestone_titre || null,
+    objectif_id: row.objectif_id,
+    objectif_titre: row.objectif_titre || null,
+    created_at: row.created_at,
+    created_by: row.created_by,
+    created_by_name: row.created_by_name || null,
+    updated_at: row.updated_at,
+    updated_by_name: row.updated_by_name || null,
+    // Nombre de versions antérieures : l'écran peut dire « modifiée » sans
+    // avoir à charger l'historique.
+    versions_anterieures: Number(row.versions_anterieures || 0),
+  };
+}
+
+const SQL_NOTE_SUIVI = `
+  SELECT n.*, im.titre AS milestone_titre, o.titre AS objectif_titre,
+         NULLIF(TRIM(CONCAT(cu.first_name, ' ', cu.last_name)), '') AS created_by_name,
+         NULLIF(TRIM(CONCAT(uu.first_name, ' ', uu.last_name)), '') AS updated_by_name,
+         (SELECT COUNT(*) FROM insertion_notes_suivi_history h WHERE h.note_id = n.id) AS versions_anterieures
+    FROM insertion_notes_suivi n
+    LEFT JOIN insertion_milestones im ON im.id = n.milestone_id
+    LEFT JOIN insertion_objectifs o ON o.id = n.objectif_id
+    LEFT JOIN users cu ON cu.id = n.created_by
+    LEFT JOIN users uu ON uu.id = n.updated_by`;
+
+// GET /api/insertion/notes-suivi/:employeeId — journal daté, du plus récent au
+// plus ancien. Lecture journalisée (une trace par consultation).
+router.get('/notes-suivi/:employeeId', authorize('ADMIN', 'RH'), [
+  param('employeeId').isInt().withMessage('ID employé invalide'),
+], validate, async (req, res) => {
+  const empId = parseInt(req.params.employeeId, 10);
+  try {
+    const r = await pool.query(
+      `${SQL_NOTE_SUIVI} WHERE n.employee_id = $1 ORDER BY n.date_note DESC, n.id DESC`,
+      [empId]
+    );
+    const notes = r.rows.map(composerNoteSuivi);
+    if (notes.length > 0) {
+      await journaliserNoteSuivi(req, 'INSERTION_NOTE_SUIVI_LECTURE', empId, { nb_notes: notes.length });
+    }
+    res.json(notes);
+  } catch (err) {
+    // Base non migrée : liste vide plutôt qu'une erreur — l'écran s'ouvre.
+    if (err.code === '42P01') return res.json([]);
+    console.error('[INSERTION] Erreur notes-suivi GET :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /api/insertion/notes-suivi/:id/historique — versions antérieures d'une
+// note (état AVANT chaque modification). Le contenu y est déchiffré à la
+// lecture, comme la note elle-même.
+router.get('/notes-suivi/:id/historique', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT h.id, h.note_id, h.action, h.changed_at, h.snapshot,
+              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS changed_by_name
+         FROM insertion_notes_suivi_history h
+         LEFT JOIN users u ON u.id = h.changed_by
+        WHERE h.note_id = $1 ORDER BY h.changed_at DESC`,
+      [req.params.id]
+    );
+    res.json(r.rows.map((h) => {
+      const clair = decryptField(h.snapshot?.contenu_chiffre);
+      return {
+        id: h.id,
+        action: h.action,
+        changed_at: h.changed_at,
+        changed_by_name: h.changed_by_name,
+        date_note: h.snapshot?.date_note ?? null,
+        categorie: h.snapshot?.categorie ?? null,
+        contenu: clair || null,
+        contenu_illisible: !clair,
+      };
+    }));
+  } catch (err) {
+    if (err.code === '42P01') return res.json([]);
+    console.error('[INSERTION] Erreur notes-suivi historique :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /api/insertion/notes-suivi — nouvelle note
+router.post('/notes-suivi', authorize('ADMIN', 'RH'), [
+  body('employee_id').isInt().withMessage('ID employé requis'),
+  body('contenu').isString().trim().isLength({ min: 1, max: NOTE_SUIVI_MAX })
+    .withMessage(`Contenu requis (${NOTE_SUIVI_MAX} caractères maximum)`),
+  body('categorie').optional({ nullable: true }).isIn(NOTE_SUIVI_CATEGORIES).withMessage('Catégorie invalide'),
+  body('date_note').optional({ nullable: true }).isISO8601().withMessage('Date invalide'),
+  body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
+  body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
+], validate, async (req, res) => {
+  const { employee_id, contenu, categorie, date_note, milestone_id, objectif_id } = req.body;
+  try {
+    // La note appartient au parcours EN COURS : une note écrite aujourd'hui ne
+    // doit pas se ranger dans un parcours antérieur clos.
+    const pn = await currentParcoursNum(pool, employee_id);
+    const ins = await pool.query(
+      `INSERT INTO insertion_notes_suivi
+         (employee_id, parcours_num, date_note, categorie, contenu_chiffre, milestone_id, objectif_id, created_by)
+       VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), $4, $5, $6, $7, $8) RETURNING id`,
+      [employee_id, pn, date_note || null, categorie || 'suivi', encryptField(contenu.trim()),
+        milestone_id || null, objectif_id || null, req.user.id]
+    );
+    const r = await pool.query(`${SQL_NOTE_SUIVI} WHERE n.id = $1`, [ins.rows[0].id]);
+    await journaliserNoteSuivi(req, 'INSERTION_NOTE_SUIVI_CREATION', employee_id, {
+      note_id: ins.rows[0].id, categorie: categorie || 'suivi',
+    });
+    res.status(201).json(composerNoteSuivi(r.rows[0]));
+  } catch (err) {
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié, entretien ou objectif inexistant).' });
+    if (err.code === '42P01') return res.status(503).json({ error: 'Journal de suivi indisponible : base non migrée.' });
+    console.error('[INSERTION] Erreur notes-suivi POST :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /api/insertion/notes-suivi/:id — correction d'une note (historisée)
+router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+  body('contenu').optional().isString().trim().isLength({ min: 1, max: NOTE_SUIVI_MAX })
+    .withMessage(`Contenu requis (${NOTE_SUIVI_MAX} caractères maximum)`),
+  body('categorie').optional({ nullable: true }).isIn(NOTE_SUIVI_CATEGORIES).withMessage('Catégorie invalide'),
+  body('date_note').optional({ nullable: true }).isISO8601().withMessage('Date invalide'),
+  body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
+  body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const avant = await client.query('SELECT * FROM insertion_notes_suivi WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (avant.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Note non trouvée' }); }
+    // Le snapshot est pris DANS la transaction : une trace écrite hors
+    // transaction survivrait à un échec de la modification qu'elle documente.
+    await snapshotNoteSuivi(client, avant.rows[0], 'update', req.user.id);
+
+    const sets = [];
+    const vals = [];
+    if ('contenu' in req.body) { vals.push(encryptField(String(req.body.contenu).trim())); sets.push(`contenu_chiffre = $${vals.length}`); }
+    for (const f of ['categorie', 'date_note', 'milestone_id', 'objectif_id']) {
+      if (!(f in req.body)) continue;
+      vals.push(req.body[f] === '' ? null : req.body[f]);
+      sets.push(`${f} = $${vals.length}`);
+    }
+    if (sets.length === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Aucun champ à modifier' }); }
+    vals.push(req.user.id);
+    sets.push(`updated_by = $${vals.length}`);
+    vals.push(req.params.id);
+    await client.query(`UPDATE insertion_notes_suivi SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${vals.length}`, vals);
+    await client.query('COMMIT');
+
+    const r = await pool.query(`${SQL_NOTE_SUIVI} WHERE n.id = $1`, [req.params.id]);
+    await journaliserNoteSuivi(req, 'INSERTION_NOTE_SUIVI_MODIFICATION', avant.rows[0].employee_id, {
+      note_id: avant.rows[0].id, champs: Object.keys(req.body),
+    });
+    res.json(composerNoteSuivi(r.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (entretien ou objectif inexistant).' });
+    console.error('[INSERTION] Erreur notes-suivi PUT :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/insertion/notes-suivi/:id — la note disparaît de l'écran, son
+// dernier état reste dans l'historique (une note supprimée par mégarde doit
+// pouvoir être retrouvée).
+router.delete('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
+  param('id').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const avant = await client.query('SELECT * FROM insertion_notes_suivi WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (avant.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Note non trouvée' }); }
+    await snapshotNoteSuivi(client, avant.rows[0], 'delete', req.user.id);
+    await client.query('DELETE FROM insertion_notes_suivi WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+    await journaliserNoteSuivi(req, 'INSERTION_NOTE_SUIVI_SUPPRESSION', avant.rows[0].employee_id, {
+      note_id: avant.rows[0].id,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[INSERTION] Erreur notes-suivi DELETE :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/insertion/timeline/:employeeId — Timeline du parcours
 router.get('/timeline/:employeeId', async (req, res) => {
   try {

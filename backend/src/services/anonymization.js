@@ -268,6 +268,21 @@ async function anonymizeEmployee(client, id) {
     await client.query('DELETE FROM insertion_notes_profil WHERE employee_id = $1', [id]);
   }
 
+  // Notes / commentaires de suivi de la CIP (2.47.0) et leur historique.
+  // Purge INTÉGRALE, même doctrine que la note de profil : ce sont des textes
+  // libres d'accompagnement (santé, situation sociale, contexte judiciaire) —
+  // les nullifier laisserait des lignes datées dont la seule information
+  // restante serait « il s'est passé quelque chose ce jour-là ».
+  // L'historique est purgé AVANT les notes : il porte sa propre FK employé et
+  // survit délibérément à la suppression d'une note, donc rien ne l'emporterait
+  // en cascade.
+  if (await tableExists(client, 'insertion_notes_suivi_history')) {
+    await client.query('DELETE FROM insertion_notes_suivi_history WHERE employee_id = $1', [id]);
+  }
+  if (await tableExists(client, 'insertion_notes_suivi')) {
+    await client.query('DELETE FROM insertion_notes_suivi WHERE employee_id = $1', [id]);
+  }
+
   // Profil de personnalité PCM (2.43.0 — audit du module PCM, défaut D5,
   // reco R7). Défaut constaté : le PCM d'un candidat RECRUTÉ n'était jamais
   // purgé. La purge planifiée des candidats exclut explicitement les recrutés

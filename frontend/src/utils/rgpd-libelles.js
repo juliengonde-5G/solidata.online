@@ -74,6 +74,10 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_NOTE_PROFIL_LECTURE: 'Lecture de la note de profil initial (CIP)',
   INSERTION_NOTE_PROFIL_GENERATION: 'Génération de la note de profil initial (CIP)',
   INSERTION_NOTE_PROFIL_COMMUNIQUEE: 'Prise de connaissance de la note de profil initial',
+  INSERTION_NOTE_SUIVI_LECTURE: 'Consultation du journal de suivi (notes CIP)',
+  INSERTION_NOTE_SUIVI_CREATION: 'Ajout d\'une note de suivi (CIP)',
+  INSERTION_NOTE_SUIVI_MODIFICATION: 'Modification d\'une note de suivi (CIP)',
+  INSERTION_NOTE_SUIVI_SUPPRESSION: 'Suppression d\'une note de suivi (CIP)',
 
   // ── Export insertion (routes/exports.js) ──────────────────────────────────
   EXPORT_INSERTION_FREINS: 'Export des freins périphériques (23 colonnes)',

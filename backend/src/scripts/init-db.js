@@ -4585,6 +4585,64 @@ async function executerInitialisation() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_notes_profil_emp ON insertion_notes_profil(employee_id, parcours_num);');
 
+    // ── Notes / commentaires de suivi de la CIP (2.47.0) ─────────────────────
+    // Journal libre de l'accompagnement : ce qui se passe entre deux entretiens
+    // formels — un échange dans l'atelier, un appel d'un partenaire, un fait
+    // marquant. Ce sont ces notes qui portent la mémoire du parcours ; sans
+    // elles, seuls les jalons datés en gardaient trace.
+    //
+    // CONTENU CHIFFRÉ (field-crypto, même doctrine que la note de profil et que
+    // les détails santé/judiciaire du diagnostic) : une note d'accompagnement
+    // porte par nature de la santé (art. 9) ou du contexte judiciaire (art. 10)
+    // sans qu'aucune colonne ne l'annonce. Un `SELECT *` accidentel n'expose
+    // donc que du chiffré ; la lecture est réservée ADMIN/RH et journalisée.
+    //
+    // `date_note` est la date de l'ÉVÉNEMENT, distincte de `created_at` qui est
+    // la date de SAISIE : une CIP note souvent le lendemain ce qui s'est passé
+    // la veille, et confondre les deux fausserait la chronologie du parcours.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_notes_suivi (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        parcours_num SMALLINT NOT NULL DEFAULT 1,
+        date_note DATE NOT NULL DEFAULT CURRENT_DATE,
+        categorie VARCHAR(30) NOT NULL DEFAULT 'suivi'
+          CHECK (categorie IN ('suivi', 'echange', 'partenaire', 'evenement', 'alerte', 'autre')),
+        contenu_chiffre TEXT NOT NULL,
+        milestone_id INTEGER REFERENCES insertion_milestones(id) ON DELETE SET NULL,
+        objectif_id INTEGER REFERENCES insertion_objectifs(id) ON DELETE SET NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_by INTEGER REFERENCES users(id),
+        updated_at TIMESTAMP
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_notes_suivi_emp ON insertion_notes_suivi(employee_id, date_note DESC, id DESC);');
+
+    // Historisation des notes : une note MODIFIÉE ou SUPPRIMÉE laisse son état
+    // antérieur. C'est ce qui fait d'un journal d'accompagnement une pièce du
+    // dossier plutôt qu'un bloc-notes — on peut dire ce qui était écrit, quand,
+    // et par qui cela a été changé.
+    //  - `note_id` est un entier SANS clé étrangère : l'historique doit
+    //    SURVIVRE à la suppression de la note (une FK CASCADE effacerait
+    //    précisément la trace qu'on veut garder) ;
+    //  - `employee_id` porte en revanche la FK CASCADE : l'historique reste
+    //    rattaché à une personne, donc purgeable à l'anonymisation ;
+    //  - le `snapshot` conserve le contenu CHIFFRÉ tel quel — y déposer le
+    //    clair annulerait le chiffrement de la table qu'il historise.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS insertion_notes_suivi_history (
+        id SERIAL PRIMARY KEY,
+        note_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        snapshot JSONB NOT NULL,
+        action VARCHAR(20) NOT NULL CHECK (action IN ('update', 'delete')),
+        changed_by INTEGER REFERENCES users(id),
+        changed_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_notes_suivi_hist ON insertion_notes_suivi_history(note_id, changed_at DESC);');
+
     console.log('[INIT-DB] Module Parcours Insertion ✓');
 
     // ══════════════════════════════════════════

@@ -9,6 +9,7 @@ import { formatEmployeeName, formatLastName } from '../utils/names';
 import AlertesBloc from '../components/insertion/AlertesBloc';
 import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
 import ActionsPanel from '../components/insertion/ActionsPanel';
+import NotesSuiviPanel from '../components/insertion/NotesSuiviPanel';
 import FriseParcours from '../components/insertion/FriseParcours';
 import CompetencesETI from '../components/insertion/CompetencesETI';
 import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
@@ -1100,6 +1101,14 @@ function InsertionReadOnlyTab({ employee }) {
       <div className="border-t pt-3">
         <ActionsPanel employeeId={employee.id} readOnly compact />
       </div>
+      {/* Journal de suivi en lecture — monté seulement pour ADMIN/RH : la
+          surface est refusée (403) aux autres rôles, afficher une section vide
+          laisserait croire qu'il n'y a rien à lire. */}
+      {adminRh && (
+        <div className="border-t pt-3">
+          <NotesSuiviPanel employeeId={employee.id} readOnly />
+        </div>
+      )}
       <div className="border-t pt-3">
         <CompetencesETI employeeId={employee.id} employee={employee} canEdit={false} />
       </div>

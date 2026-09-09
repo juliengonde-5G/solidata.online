@@ -147,7 +147,7 @@ async function getEmployeeInsertionData(employeeId) {
     return { rows: [] };
   });
 
-  const [employee, diagnostic, milestones, actionPlans, objectifs, pcmReport, candidate] = await Promise.all([
+  const [employee, diagnostic, milestones, actionPlans, objectifs, pcmReport, candidate, notesSuivi] = await Promise.all([
     pool.query(`
       SELECT e.*, e.position as position_name, t.name as team_name
       FROM employees e
@@ -178,6 +178,13 @@ async function getEmployeeInsertionData(employeeId) {
       JOIN employees e ON e.candidate_id = c.id
       WHERE e.id = $1
     `, [employeeId], 'candidat'),
+    // Journal d'accompagnement de la CIP (2.47.0) : ce qui s'est passé ENTRE
+    // les entretiens formels. Borné aux 30 notes les plus récentes — au-delà,
+    // on noierait le reste du dossier dans une chronique, et c'est la période
+    // récente qui éclaire la situation présente.
+    soft(`SELECT id, date_note, categorie, contenu_chiffre
+            FROM insertion_notes_suivi WHERE employee_id = $1
+           ORDER BY date_note DESC, id DESC LIMIT 30`, [employeeId], 'notes de suivi'),
   ]);
 
   if (!employee.rows[0]) throw new Error('Salarié non trouvé');
@@ -205,6 +212,14 @@ async function getEmployeeInsertionData(employeeId) {
     }
   }
 
+  // Notes de suivi : déchiffrées ici (comme les champs sensibles du
+  // diagnostic), pseudonymisées plus bas par l'appelant avant tout envoi au
+  // modèle. Une note illisible (clé changée) est ÉCARTÉE plutôt que transmise
+  // en blob — un charabia dans le contexte ferait raisonner l'IA sur du bruit.
+  const notes = (notesSuivi.rows || [])
+    .map((n) => ({ id: n.id, date_note: n.date_note, categorie: n.categorie, contenu: decryptField(n.contenu_chiffre) }))
+    .filter((n) => n.contenu);
+
   return {
     employee: employee.rows[0],
     diagnostic: diag,
@@ -213,7 +228,21 @@ async function getEmployeeInsertionData(employeeId) {
     objectifs: objectifs.rows,
     pcm: pcmData,
     candidate: candidate.rows[0] || null,
+    notesSuivi: notes,
   };
+}
+
+// Notes de suivi mises en forme pour un payload IA : datées, catégorisées,
+// PSEUDONYMISÉES (scrubText retire les patronymes des textes libres, comme pour
+// les bilans d'entretien). Bornées à `max` par pertinence — c'est le journal
+// récent qui éclaire la situation présente — et en TEXTE COURT : une note de
+// deux pages écraserait le reste du dossier dans le contexte du modèle.
+function notesPourIA(notes, pseudo, max = 15) {
+  return (notes || []).slice(0, max).map((n) => ({
+    date: n.date_note,
+    categorie: n.categorie,
+    note: pseudo.scrubText(String(n.contenu).slice(0, 800)),
+  }));
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -302,6 +331,11 @@ async function analyseProfilComplet(employeeId) {
       echeance: a.echeance,
     })),
     entretien_recrutement: pseudo.scrubText(data.candidate?.interview_comment || null),
+    // Journal d'accompagnement de la CIP : ce qui s'est passé entre les
+    // entretiens formels. C'est souvent là que se lit un décrochage qui
+    // n'apparaît dans aucun score — ces notes entrent donc dans le
+    // raisonnement au même titre que les jalons.
+    notes_suivi: notesPourIA(data.notesSuivi, pseudo, 15),
   };
 
   const response = await anthropic.messages.create({
@@ -311,6 +345,8 @@ async function analyseProfilComplet(employeeId) {
     messages: [{
       role: 'user',
       content: `Analyse approfondie du profil d'insertion de ce salarié. Croise le type PCM avec les freins périphériques pour des recommandations personnalisées.
+
+Les « notes_suivi » sont le journal d'accompagnement tenu par la CIP entre les entretiens formels : traite-les comme des OBSERVATIONS DATÉES, jamais comme des conclusions. Quand elles contredisent un score du diagnostic, dis-le explicitement plutôt que de trancher, et cite la date de la note sur laquelle tu t'appuies.
 
 ${JSON.stringify(profil, null, 2)}
 
@@ -369,6 +405,10 @@ async function preparerEntretien(employeeId, milestoneType) {
       titre: pseudo.scrubText(o.titre), statut: o.statut, echeance: o.echeance,
     })),
     actions_en_cours: data.actionPlans.filter(a => a.status === 'en_cours').map(a => pseudo.scrubText(a.action_label)),
+    // Les 8 dernières notes de suivi : de quoi rattacher l'entretien à ce qui
+    // s'est réellement passé depuis le précédent, sans réécrire tout le
+    // parcours dans un guide d'entretien.
+    notes_suivi_recentes: notesPourIA(data.notesSuivi, pseudo, 8),
   };
 
   const response = await anthropic.messages.create({
@@ -378,6 +418,8 @@ async function preparerEntretien(employeeId, milestoneType) {
     messages: [{
       role: 'user',
       content: `Prépare un guide d'entretien "${milestoneType}" pour le CIP. Adapte les questions et le ton au profil PCM.
+
+Les « notes_suivi_recentes » sont le journal d'accompagnement depuis le dernier entretien : appuie-toi dessus pour les questions d'ouverture, sans jamais présenter une note comme un constat acquis — c'est à l'entretien de le vérifier avec la personne.
 
 ${JSON.stringify(context, null, 2)}
 
