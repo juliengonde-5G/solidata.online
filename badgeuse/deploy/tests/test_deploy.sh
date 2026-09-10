@@ -433,6 +433,26 @@ mv "$VEILLE/bin/xset-vivant" "$VEILLE/bin/xset"
 verifier_contient "veille : la piste sans autorisation supprime XAUTHORITY" \
   "env -u XAUTHORITY" "$DPMS_SH"
 
+titre "Ecran : la sortie HDMI est rallumee meme quand xset repond"
+# LE DEFAUT CORRIGE (poste de secours, 10/09/2026) : « vcgencmd display_power 0 »
+# coupe l'ALIMENTATION de la sortie HDMI ; xset ne gere que le DPMS du moniteur.
+# Les trois voies etaient essayees en CASCADE — la premiere qui repond gagne —
+# donc une coupure firmware posee pendant que X etait injoignable n'etait PLUS
+# JAMAIS defaite : X peignait l'interface (capture nette) devant une dalle
+# eteinte. Les deux leviers sont EN SERIE : on alimente toujours avant le DPMS.
+HDMI="$TRAVAIL/hdmi"
+mkdir -p "$HDMI/bin"
+printf '#!/bin/sh\nexit 0\n' > "$HDMI/bin/xset"          # serveur X qui repond
+printf '#!/bin/sh\necho "vcgencmd $*" >> "%s/trace"\nexit 0\n' "$HDMI" > "$HDMI/bin/vcgencmd"
+chmod +x "$HDMI/bin/xset" "$HDMI/bin/vcgencmd"
+rm -f "$HDMI/trace"
+SORTIE_HDMI="$(BADGEUSE_DPMS_SOURCE_SEULEMENT=1 PATH="$HDMI/bin:$PATH" \
+  KIOSK_USER=badgeuse-absent bash -c '. "$1"; ecran on' _ "$RACINE/dpms.sh" 2>&1)"
+verifier_contient "ecran on : la sortie HDMI est alimentee" \
+  "vcgencmd display_power 1" "$(cat "$HDMI/trace" 2>/dev/null)"
+verifier_contient "ecran on : le DPMS est traite ensuite par xset" \
+  "ecran on (xset)" "$SORTIE_HDMI"
+
 titre "Lanceur du kiosque : un affichage injoignable est NOMME, pas contourne"
 CLIENT="$TRAVAIL/client"
 mkdir -p "$CLIENT/bin"
