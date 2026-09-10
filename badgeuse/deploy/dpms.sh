@@ -193,6 +193,24 @@ ecran() {
   local etat="$1" uid runtime
   uid="$(id -u "$KIOSK_USER" 2>/dev/null || echo '')"
 
+  # LES DEUX LEVIERS SONT EN SERIE, PAS ALTERNATIFS. « vcgencmd display_power »
+  # coupe l'ALIMENTATION de la sortie HDMI au niveau du firmware ; xset/wlr-randr
+  # agissent sur l'etat DPMS du moniteur. Rallumer l'un ne rallume pas l'autre.
+  #
+  # Le defaut que cela corrige : ces trois voies etaient essayees en CASCADE,
+  # la premiere qui repond gagnant. Des lors qu'un « display_power 0 » avait ete
+  # pose pendant que le serveur X etait injoignable (hors plage, pendant un
+  # redemarrage du kiosque), il n'etait PLUS JAMAIS defait — « ecran on »
+  # s'arretait a xset, qui repond, et la sortie HDMI restait coupee. Resultat
+  # constate le 10/09/2026 sur le poste de secours : X peint l'interface
+  # parfaitement (capture d'ecran nette), et la dalle reste noire toute la
+  # journee. On alimente donc TOUJOURS la sortie avant de traiter le DPMS.
+  if [ "$etat" = on ] && command -v vcgencmd >/dev/null 2>&1; then
+    if vcgencmd display_power 1 >/dev/null 2>&1; then
+      log "sortie HDMI alimentee (vcgencmd display_power 1)"
+    fi
+  fi
+
   if command -v wlr-randr >/dev/null 2>&1 && [ -n "$uid" ]; then
     runtime="/run/badgeuse"
     [ -d "$runtime" ] || runtime="/run/user/$uid"
