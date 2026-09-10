@@ -263,6 +263,14 @@ SORTIE_CAGE="$(journalctl -u badgeuse-kiosk --no-pager 2>/dev/null | grep -Ei 'c
 if [ -n "$SORTIE_CAGE" ]; then
   echo "    sortie compositeur/libseat (8 dernieres) :"
   printf '%s\n' "$SORTIE_CAGE" | sed 's/^/      /'
+elif pgrep -u "${KIOSK_USER:-badgeuse}" -x Xorg >/dev/null 2>&1 \
+     || [ "$(tr -d '[:space:]' < /etc/badgeuse/compositeur 2>/dev/null)" = "x11" ]; then
+  # SOUS X11, CETTE LIGNE N'A PAS DE SENS : cage n'est pas lance, il ne peut
+  # donc rien dire. « AUCUNE — blocage avant toute initialisation » se lisait
+  # comme une panne sur un poste qui fonctionnait parfaitement (constate le
+  # 10/09/2026). Une section de diagnostic qui alarme a tort coute autant
+  # qu'une section qui se tait a tort.
+  ligne "sortie compositeur" "sans objet — voie X11 (cage n'est pas lance)"
 else
   ligne "sortie compositeur" "AUCUNE — blocage avant toute initialisation"
 fi
