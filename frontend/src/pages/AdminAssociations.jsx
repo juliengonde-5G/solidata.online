@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, PageHeader, MapSizeFix, FormField } from '../components';
+import { LoadingSpinner, Modal, PageHeader, MapSizeFix, FormField, CoordonneesGps, RappelExtranetRefashion } from '../components';
 import HorairesHebdo, { JOURS, JOUR_LABELS, JOUR_ABBR, formatPlagesJour } from '../components/associations/HorairesHebdo';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
@@ -29,7 +29,7 @@ function LocationPicker({ position, onPick }) {
 
 const EMPTY_FORM = {
   name: '', address: '', complement_adresse: '', code_postal: '', ville: '',
-  latitude: '', longitude: '', contact_phone: '', contact_info: '',
+  latitude: '', longitude: '', contact_phone: '', contact_email: '', contact_info: '',
   // Accessibilité (RG-A1/RG-C1) — `horaires_accessibilite` null = non renseigné (cf. HorairesHebdo.jsx)
   horaires_accessibilite: null, horaires_notes: '', duree_collecte_min: '',
 };
@@ -61,6 +61,8 @@ export default function AdminAssociations() {
   const [geocoding, setGeocoding] = useState(false);
   const [detailItem, setDetailItem] = useState(null);
   const [horairesErreurs, setHorairesErreurs] = useState(null); // erreurs 400 HORAIRES_INVALIDES, jamais avalées
+  // Point à reporter sur l'extranet Refashion ; `null` = rien en attente.
+  const [rappelRefashion, setRappelRefashion] = useState(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -98,6 +100,7 @@ export default function AdminAssociations() {
       latitude: item.latitude || '',
       longitude: item.longitude || '',
       contact_phone: item.contact_phone || '',
+      contact_email: item.contact_email || '',
       contact_info: item.contact_info || '',
       // `horaires_accessibilite` arrive tel quel (jsonb) : object renseigné ou null — jamais deviné.
       horaires_accessibilite: item.horaires_accessibilite ?? null,
@@ -135,6 +138,10 @@ export default function AdminAssociations() {
         await api.post('/association-points', payload);
         showAlertMsg('Point association créé');
       }
+      // Un point d'apport n'existe pour Refashion que s'il y est DÉCLARÉ, et
+      // c'est sur le nombre de points déclarés que se calcule la subvention.
+      // Le rappel reste à l'écran jusqu'au clic (cf. RappelExtranetRefashion).
+      setRappelRefashion(`Association « ${form.name} »`);
       setShowModal(false);
       loadData();
     } catch (err) {
@@ -151,6 +158,9 @@ export default function AdminAssociations() {
   };
 
   const handleDelete = async (id) => {
+    // Le nom est lu AVANT la suppression : après, la ligne n'existe plus et le
+    // rappel ne pourrait plus dire QUEL point retirer de la déclaration.
+    const supprime = list.find((x) => x.id === id) || null;
     const ok = await confirm({
       title: 'Supprimer ce point association ?',
       message: 'Cette action est définitive.',
@@ -161,6 +171,7 @@ export default function AdminAssociations() {
     try {
       await api.delete(`/association-points/${id}`);
       showAlertMsg('Point supprimé');
+      setRappelRefashion(supprime?.name ? `Association « ${supprime.name} » (supprimée)` : 'Un point d’apport supprimé');
       loadData();
       if (detailItem?.id === id) setDetailItem(null);
     } catch (err) {
@@ -234,6 +245,13 @@ export default function AdminAssociations() {
           }
         />
 
+        {rappelRefashion && (
+          <RappelExtranetRefashion
+            objet={rappelRefashion}
+            onAcquitter={() => setRappelRefashion(null)}
+          />
+        )}
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-2">
           <input
@@ -280,6 +298,15 @@ export default function AdminAssociations() {
                     )}
                   </div>
                   <p className="text-xs text-slate-500 truncate">{[item.address, item.ville].filter(Boolean).join(', ') || 'Adresse non renseignée'}</p>
+                  {/* L'adresse ne suffit pas à un local sans numéro de rue : les
+                      coordonnées décimales l'accompagnent, copiables d'un clic. */}
+                  <CoordonneesGps
+                    latitude={item.latitude}
+                    longitude={item.longitude}
+                    libelle={null}
+                    carte={false}
+                    className="mt-0.5"
+                  />
                   {item.contact_phone && <p className="text-xs text-blue-600 mt-0.5">{item.contact_phone}</p>}
                 </div>
                 <div className="flex gap-1 flex-shrink-0 ml-2">
@@ -313,14 +340,20 @@ export default function AdminAssociations() {
                   <p>{detailItem.contact_phone ? <a href={`tel:${detailItem.contact_phone.replace(/\s/g, '')}`} className="text-blue-600 underline">{detailItem.contact_phone}</a> : '—'}</p>
                 </div>
                 <div>
+                  <p className="text-slate-400 text-xs">E-mail</p>
+                  <p className="break-all">{detailItem.contact_email
+                    ? <a href={`mailto:${detailItem.contact_email}`} className="text-blue-600 underline">{detailItem.contact_email}</a>
+                    : '—'}</p>
+                </div>
+                <div>
                   <p className="text-slate-400 text-xs">Statut</p>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[detailItem.status]}`}>
                     {STATUS_LABELS[detailItem.status]}
                   </span>
                 </div>
                 <div>
-                  <p className="text-slate-400 text-xs">Coordonnées GPS</p>
-                  <p>{detailItem.latitude ? `${detailItem.latitude.toFixed(4)}, ${detailItem.longitude.toFixed(4)}` : 'Non géocodé'}</p>
+                  <p className="text-slate-400 text-xs">Coordonnées GPS (décimales)</p>
+                  <CoordonneesGps latitude={detailItem.latitude} longitude={detailItem.longitude} libelle={null} />
                 </div>
                 <div>
                   <p className="text-slate-400 text-xs">Dernière collecte</p>
@@ -416,6 +449,16 @@ export default function AdminAssociations() {
                 <input type="tel" value={form.contact_phone} onChange={e => setForm({ ...form, contact_phone: e.target.value })} className="input-modern" />
               </div>
               <div>
+                <label className="text-xs text-slate-500">E-mail contact</label>
+                <input
+                  type="email"
+                  value={form.contact_email}
+                  onChange={e => setForm({ ...form, contact_email: e.target.value })}
+                  className="input-modern"
+                  placeholder="contact@association.fr"
+                />
+              </div>
+              <div className="sm:col-span-2">
                 <label className="text-xs text-slate-500">Info contact</label>
                 <input type="text" value={form.contact_info} onChange={e => setForm({ ...form, contact_info: e.target.value })} className="input-modern" placeholder="Nom du référent..." />
               </div>
@@ -479,6 +522,17 @@ export default function AdminAssociations() {
                 {geocoding ? 'Recherche...' : 'Géocoder'}
               </button>
             </div>
+
+            {/* Rappel décimal du point en cours de saisie — c'est ce couple qu'on
+                recopie dans un GPS, et qui dit si le clic sur la carte est
+                tombé au bon endroit. */}
+            <CoordonneesGps
+              latitude={form.latitude}
+              longitude={form.longitude}
+              libelle="Coordonnées décimales"
+              absent="Coordonnées décimales : géocodez l’adresse ou cliquez sur la carte"
+              className="block"
+            />
 
             {/* Mini carte */}
             <div className="h-48 rounded-lg overflow-hidden border">

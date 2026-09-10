@@ -7,6 +7,7 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { validerHoraires, joursFermes } = require('../services/association-horaires');
+const { rappelerExtranetRefashion, auteurDe } = require('../services/rappel-refashion');
 
 router.use(authenticate);
 router.use(autoLogActivity('association-points'));
@@ -42,6 +43,31 @@ function lireDureeCollecte(brut) {
     return { ok: false, message: 'Durée de collecte : nombre entier de minutes entre 1 et 480 attendu (ou vide).' };
   }
   return { ok: true, valeur: n };
+}
+
+/**
+ * Adresse électronique du référent (10/09/2026, demande client).
+ *
+ * Vide ou absente → `null` : une association sans adresse connue reste une
+ * fiche valide. Une adresse MAL FORMÉE, en revanche, est refusée plutôt que
+ * rangée en base « au mieux » — une adresse fausse coûte plus cher qu'une
+ * adresse absente : on croit avoir prévenu l'association, et on ne l'a pas fait.
+ *
+ * Contrôle volontairement SIMPLE (une arobase, un point dans le domaine, pas
+ * d'espace) : les expressions rationnelles exhaustives de la RFC 5322 rejettent
+ * des adresses valides et acceptent des adresses mortes. Seul un envoi réel
+ * prouve qu'une adresse existe.
+ * @returns {{ok: true, valeur: string|null} | {ok: false, message: string}}
+ */
+function lireContactEmail(brut) {
+  if (brut === null || brut === undefined) return { ok: true, valeur: null };
+  const v = String(brut).trim();
+  if (v === '') return { ok: true, valeur: null };
+  if (v.length > 255) return { ok: false, message: 'Adresse e-mail trop longue (255 caractères maximum).' };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) {
+    return { ok: false, message: "Adresse e-mail invalide (exemple attendu : contact@association.fr)." };
+  }
+  return { ok: true, valeur: v };
 }
 
 // ══════════════════════════════════════════
@@ -154,7 +180,7 @@ router.post('/', authorize('ADMIN'), [
   body('name').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
   try {
-    const { name, address, complement_adresse, code_postal, ville, latitude, longitude, contact_phone, contact_info,
+    const { name, address, complement_adresse, code_postal, ville, latitude, longitude, contact_phone, contact_email, contact_info,
       horaires_accessibilite, horaires_notes, duree_collecte_min } = req.body;
 
     // Horaires d'accessibilité : validés AVANT toute écriture — une saisie
@@ -167,6 +193,8 @@ router.post('/', authorize('ADMIN'), [
     }
     const duree = lireDureeCollecte(duree_collecte_min);
     if (!duree.ok) return res.status(400).json({ error: duree.message, code: 'DUREE_COLLECTE_INVALIDE' });
+    const email = lireContactEmail(contact_email);
+    if (!email.ok) return res.status(400).json({ error: email.message, code: 'EMAIL_INVALIDE' });
 
     // Géocodage auto si pas de coordonnées fournies
     let lat = latitude ? parseFloat(latitude) : null;
@@ -178,13 +206,24 @@ router.post('/', authorize('ADMIN'), [
 
     const result = await pool.query(
       `INSERT INTO association_points (name, address, complement_adresse, code_postal, ville, latitude, longitude, geom, contact_phone, contact_info,
-         horaires_accessibilite, horaires_notes, duree_collecte_min)
+         horaires_accessibilite, horaires_notes, duree_collecte_min, contact_email)
        VALUES ($1, $2, $3, $4, $5, $6, $7,
          ${lat && lng ? `ST_SetSRID(ST_MakePoint($7, $6), 4326)` : 'NULL'},
-         $8, $9, $10::jsonb, $11, $12) RETURNING *`,
+         $8, $9, $10::jsonb, $11, $12, $13) RETURNING *`,
       [name, address || null, complement_adresse || null, code_postal || null, ville || null, lat, lng, contact_phone || null, contact_info || null,
-        ctrl.normalise ? JSON.stringify(ctrl.normalise) : null, horaires_notes || null, duree.valeur]
+        ctrl.normalise ? JSON.stringify(ctrl.normalise) : null, horaires_notes || null, duree.valeur, email.valeur]
     );
+    // Rappel « extranet Refashion » (10/09/2026) : un point d'apport créé ici
+    // n'existe pas pour Refashion tant qu'il n'y est pas déclaré — et c'est sur
+    // le nombre de points déclarés que se calcule la subvention DPAV.
+    rappelerExtranetRefashion({
+      objet: `Association « ${name} »`,
+      action: 'créée',
+      detail: [result.rows[0].code_postal, result.rows[0].ville].filter(Boolean).join(' ') || null,
+      auteur: auteurDe(req),
+      lien: '/admin-associations',
+    });
+
     res.status(201).json(enrichirHoraires(result.rows[0]));
   } catch (err) {
     console.error('[ASSO-POINTS] Erreur création :', err);
@@ -234,6 +273,15 @@ router.put('/:id', authorize('ADMIN'), async (req, res) => {
       paramsSup.push(duree.valeur);
       setsSup.push(`duree_collecte_min = $${++idxSup}`);
     }
+    // L'adresse e-mail suit la même règle que les horaires : elle n'est écrite
+    // que si la clé est PRÉSENTE. Un PUT partiel (bascule de statut, par
+    // exemple) ne doit pas effacer un contact que l'appelant n'a pas mentionné.
+    if (Object.prototype.hasOwnProperty.call(req.body, 'contact_email')) {
+      const email = lireContactEmail(req.body.contact_email);
+      if (!email.ok) return res.status(400).json({ error: email.message, code: 'EMAIL_INVALIDE' });
+      paramsSup.push(email.valeur);
+      setsSup.push(`contact_email = $${++idxSup}`);
+    }
 
     const result = await pool.query(
       `UPDATE association_points SET
@@ -256,7 +304,23 @@ router.put('/:id', authorize('ADMIN'), async (req, res) => {
         ...paramsSup]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Point non trouvé' });
-    res.json(enrichirHoraires(result.rows[0]));
+
+    // Rappel « extranet Refashion » : le changement de STATUT est le cas le
+    // plus sensible (un point passé inactif reste déclaré chez Refashion, donc
+    // compté), mais une adresse ou un nom qui change compte aussi — c'est sur
+    // ces libellés que se fait le rapprochement lors d'un contrôle.
+    const modifie = result.rows[0];
+    rappelerExtranetRefashion({
+      objet: `Association « ${modifie.name} »`,
+      action: 'modifiée',
+      detail: Object.prototype.hasOwnProperty.call(req.body, 'status') && status
+        ? `statut : ${status}`
+        : ([modifie.address, modifie.ville].filter(Boolean).join(', ') || null),
+      auteur: auteurDe(req),
+      lien: '/admin-associations',
+    });
+
+    res.json(enrichirHoraires(modifie));
   } catch (err) {
     console.error('[ASSO-POINTS] Erreur mise à jour :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -266,8 +330,20 @@ router.put('/:id', authorize('ADMIN'), async (req, res) => {
 // DELETE /api/association-points/:id — Supprimer un point
 router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM association_points WHERE id = $1 RETURNING id', [req.params.id]);
+    // `RETURNING name` : le rappel doit NOMMER le point, et après le DELETE il
+    // n'y a plus rien à lire. Un rappel qui dirait « une association a été
+    // supprimée » sans dire laquelle n'aiderait personne à corriger l'extranet.
+    const result = await pool.query('DELETE FROM association_points WHERE id = $1 RETURNING id, name', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Point non trouvé' });
+
+    rappelerExtranetRefashion({
+      objet: `Association « ${result.rows[0].name} »`,
+      action: 'supprimée',
+      detail: 'le point ne doit plus figurer parmi les points d\'apport déclarés',
+      auteur: auteurDe(req),
+      lien: '/admin-associations',
+    });
+
     res.json({ message: 'Point supprimé' });
   } catch (err) {
     console.error('[ASSO-POINTS] Erreur suppression :', err);

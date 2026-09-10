@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
+const { rappelerExtranetRefashion, auteurDe, CLE_URL_EXTRANET } = require('../services/rappel-refashion');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
@@ -32,6 +33,23 @@ router.use(authenticate);
 router.use((req, res, next) => {
   const roles = req.method === 'GET' ? ['ADMIN', 'AUTORITE'] : ['ADMIN'];
   return authorize(...roles)(req, res, next);
+});
+
+// GET /api/refashion/extranet-url — l'adresse de l'extranet Refashion, telle
+// qu'elle a été PARAMÉTRÉE (settings « refashion.extranet_url »).
+//
+// Elle sert au bandeau de rappel : « ce que vous venez d'enregistrer est à
+// reporter là-bas ». Non paramétrée → `null`, et le bandeau s'affiche SANS
+// lien. Aucune URL par défaut en dur : envoyer un utilisateur sur une page
+// morte est pire que ne pas proposer de lien.
+router.get('/extranet-url', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT value FROM settings WHERE key = $1', [CLE_URL_EXTRANET]);
+    const v = typeof r.rows[0]?.value === 'string' ? r.rows[0].value.trim() : '';
+    res.json({ url: /^https?:\/\//i.test(v) ? v : null });
+  } catch (_) {
+    res.json({ url: null }); // base non migrée : pas de lien, pas d'erreur
+  }
 });
 
 // ══════ DPAV Trimestriel ══════
@@ -193,6 +211,19 @@ router.post('/dpav', [
     );
 
     await client.query('COMMIT');
+
+    // Rappel « extranet Refashion » (10/09/2026) — APRÈS le COMMIT : prévenir
+    // d'une modification que la transaction aurait annulée enverrait déclarer
+    // un chiffre qui n'existe pas. `action` distingue la création de la reprise
+    // d'un trimestre déjà déclaré, qui est le cas le plus à risque : c'est
+    // celui où l'extranet porte déjà une VALEUR, et donc une valeur fausse.
+    rappelerExtranetRefashion({
+      objet: `DPAV ${annee} T${trimestre}`,
+      action: action === 'INSERT' ? 'enregistrée' : 'modifiée',
+      auteur: auteurDe(req),
+      lien: '/refashion',
+    });
+
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');

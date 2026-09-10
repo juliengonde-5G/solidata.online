@@ -1856,7 +1856,11 @@ router.get('/:id/history-public', async (req, res) => {
       cavs = r.rows;
     } else {
       const r = await pool.query(
-        `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level,
+        // `fill_percent` accompagne `fill_level` : l'échelle 0-4 plafonne à
+        // « plein » et ne sait donc pas dire qu'une borne DÉBORDAIT. Sans elle,
+        // l'historique du chauffeur affichait « 4/4 » à un passage déclaré
+        // au-delà — la même chose qu'une borne pleine (constat du 10/09/2026).
+        `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level, tc.fill_percent,
                 tc.collected_at, tc.notes, tc.skip_reason,
                 c.name AS cav_name, c.commune
            FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id

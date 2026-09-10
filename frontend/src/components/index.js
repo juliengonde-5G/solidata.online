@@ -16,3 +16,5 @@ export { default as DateRangePicker } from './DateRangePicker';
 export { default as FormField } from './FormField';
 export { default as ErrorState } from './ErrorState';
 export { default as MapSizeFix } from './MapSizeFix';
+export { default as CoordonneesGps, formaterCoordonnees } from './CoordonneesGps';
+export { default as RappelExtranetRefashion } from './RappelExtranetRefashion';

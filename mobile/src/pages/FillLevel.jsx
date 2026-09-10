@@ -17,18 +17,7 @@ import { libellePoint } from '../services/pointLabel';
 import { texteRdv } from '../services/pointHoraires';
 import InfosPointAssociation from '../components/InfosPointAssociation';
 import { bordereauRequis } from '../services/decheterie';
-
-// 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
-// (plein) avec une anomalie 'debordement' automatiquement posée.
-const FILL_LEVELS = [
-  { value: 0, label: 'vide',          pct: '0%',   visual: 'empty',         store: 0 },
-  { value: 6, label: 'un fond',       pct: '10%',  visual: 'empty',         store: 0 },
-  { value: 1, label: 'un peu',        pct: '25%',  visual: 'quarter',       store: 1 },
-  { value: 2, label: 'à moitié',      pct: '50%',  visual: 'half',          store: 2 },
-  { value: 3, label: 'presque plein', pct: '75%',  visual: 'three_quarter', store: 3 },
-  { value: 4, label: 'plein',         pct: '100%', visual: 'full',          store: 4 },
-  { value: 5, label: 'au-delà',       pct: '++',   visual: 'overflow',      store: 4, overflow: true },
-];
+import { FILL_LEVELS, POURCENTAGE_DEBORDEMENT } from '../services/remplissage';
 
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
@@ -147,7 +136,7 @@ export default function FillLevel() {
     // moteur y perdait 20 points sur « plein ». Dérivé du libellé affiché pour
     // qu'il n'y ait qu'UNE source de vérité (FILL_LEVELS).
     const storePercent = levelObj
-      ? (levelObj.overflow ? 110 : parseInt(String(levelObj.pct).replace('%', ''), 10))
+      ? (levelObj.overflow ? POURCENTAGE_DEBORDEMENT : parseInt(String(levelObj.pct).replace('%', ''), 10))
       : null;
     const effectiveAnomaly = levelObj?.overflow ? 'debordement' : null;
     setLoading(true);

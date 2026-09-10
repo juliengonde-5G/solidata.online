@@ -5272,6 +5272,7 @@ async function executerInitialisation() {
         longitude DOUBLE PRECISION,
         geom GEOMETRY(Point, 4326),
         contact_phone VARCHAR(50),
+        contact_email VARCHAR(255),
         contact_info TEXT,
         avg_fill_rate DOUBLE PRECISION DEFAULT 0,
         status VARCHAR(30) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'temporairement_indisponible')),
@@ -5370,11 +5371,18 @@ async function executerInitialisation() {
     // `duree_collecte_min` : durée d'arrêt par défaut du point ; NULL = non
     //   renseignée, le réglage global s'applique alors (RG-C3, cascade
     //   passage → fiche → global, aucune valeur inventée).
+    // `contact_email` (10/09/2026, demande client) : la fiche portait le
+    // téléphone du référent, pas son adresse électronique. C'est pourtant par
+    // là que passent la confirmation d'un rendez-vous de collecte et l'envoi
+    // d'un justificatif — le numéro sert sur place, l'adresse sert avant.
+    // Nullable : une association sans adresse connue reste une fiche valide,
+    // et on n'invente rien.
     await client.query(`
       ALTER TABLE association_points
         ADD COLUMN IF NOT EXISTS horaires_accessibilite JSONB,
         ADD COLUMN IF NOT EXISTS horaires_notes TEXT,
-        ADD COLUMN IF NOT EXISTS duree_collecte_min INTEGER;
+        ADD COLUMN IF NOT EXISTS duree_collecte_min INTEGER,
+        ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255);
     `);
 
     // RG-C2 — durée d'arrêt ajustée POUR CETTE TOURNÉE (premier niveau de la

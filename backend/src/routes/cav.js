@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
+const { remplissageEffectif } = require('../utils/remplissage');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
@@ -1268,7 +1269,7 @@ router.get('/:id/historique', authorize('ADMIN'), async (req, res) => {
       pool.query(
         `SELECT t.id AS tour_id, t.date, t.mode, t.status AS tour_status,
                 v.registration, v.name AS vehicle_name,
-                tc.status, tc.fill_level, tc.skip_reason, tc.collected_at
+                tc.status, tc.fill_level, tc.fill_percent, tc.skip_reason, tc.collected_at
            FROM tour_cav tc
            JOIN tours t ON t.id = tc.tour_id
            LEFT JOIN vehicles v ON v.id = t.vehicle_id
@@ -1325,7 +1326,17 @@ router.get('/:id/historique', authorize('ADMIN'), async (req, res) => {
         nb_incidents: incidents.rows.length,
         incidents_ouverts: incidents.rows.filter((i) => !['resolved', 'closed'].includes(i.status)).length,
       },
-      passages: passages.rows,
+      // Chaque passage porte son remplissage DÉCODÉ (libellé, pourcentage,
+      // débordement) plutôt que les deux colonnes brutes, que l'écran devrait
+      // sinon réinterpréter — c'est précisément cette réinterprétation qui
+      // faisait afficher « 4/5 » à une borne déclarée EN DÉBORDEMENT, donc
+      // exactement comme une borne pleine (constat client du 10/09/2026). Les
+      // colonnes brutes restent dans la réponse : aucun appelant existant n'a
+      // à changer.
+      passages: passages.rows.map((p) => ({
+        ...p,
+        remplissage: remplissageEffectif(p.fill_level, p.fill_percent),
+      })),
       tonnages: tonnages.rows,
       incidents: incidents.rows,
       // Volontairement AU PREMIER NIVEAU et non dans `synthese` : la forme de
