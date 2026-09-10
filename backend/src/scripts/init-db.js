@@ -3026,6 +3026,22 @@ async function executerInitialisation() {
       ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS fill_percent DOUBLE PRECISION;
       ALTER TABLE collection_learning_feedback ADD COLUMN IF NOT EXISTS observed_fill_percent DOUBLE PRECISION;
     `);
+
+    // 2.54.0 — POSITION AU MOMENT D'UNE DÉCLARATION « QR INDISPONIBLE ».
+    // Le contrôle de présence (50 m) refusait la déclaration à un chauffeur
+    // trop éloigné — or il l'est souvent PARCE QUE l'accès est impossible
+    // (portail fermé, benne bloquée). Le refus est levé côté mobile ; il est
+    // remplacé par une trace : où était le chauffeur quand il a déclaré. Le
+    // compte rendu de tournée en tire la distance au point.
+    // Colonnes NULLABLES : le GPS peut être refusé ou trop lent, et « position
+    // non relevée » est une réponse honnête — jamais un 0, qui se lirait comme
+    // une coordonnée (golfe de Guinée, cf. 2.42.0).
+    await client.query(`
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_lat DOUBLE PRECISION;
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_lng DOUBLE PRECISION;
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_accuracy_m DOUBLE PRECISION;
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_at TIMESTAMP;
+    `);
     console.log('[INIT-DB] Migration pilotage tournées en cours (arrêts techniques, dégâts, prévention) ✓');
 
     // ══════════════════════════════════════════

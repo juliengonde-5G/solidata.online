@@ -7,10 +7,21 @@ import { authedFetch } from '../services/authedFetch';
 import { getCurrentPosition, distanceMeters } from '../services/geo';
 import { isDemoModeActive } from '../services/demoMode';
 import { libellePoint } from '../services/pointLabel';
+import {
+  enregistrerScan, enregistrerQrIndisponible, relevePositionDeclaration,
+} from '../services/identification';
 
-// Sécurité anti-fraude : impossible de valider un point sans être physiquement
-// à proximité du CAV concerné (scan QR, sélection dans la liste, ou code
-// manuel — les 3 chemins revendiquent la même présence).
+// Sécurité anti-fraude : impossible de valider un point par SCAN sans être
+// physiquement à proximité de la borne. Lire un code ne prouve rien d'autre
+// que la lecture — le contrôle de distance est ce qui rattache ce code au
+// terrain.
+//
+// IL NE S'APPLIQUE PLUS AUX DEUX AUTRES CHEMINS (arbitrage client du
+// 10/09/2026) : un chauffeur qui déclare « QR indisponible » le fait souvent
+// parce qu'il ne PEUT PAS approcher — portail fermé, accès bloqué, voiture
+// devant la borne. Le bloquer à 50 m revenait à lui interdire de rendre
+// compte de la situation qu'il signale. À la place, sa position est relevée
+// et portée jusqu'au compte rendu de tournée (services/identification.js).
 const MAX_SCAN_DISTANCE_M = 50;
 
 /**
@@ -31,6 +42,9 @@ export default function IdentifyCav() {
   const [manualOpen, setManualOpen] = useState(false);
   const [proximityError, setProximityError] = useState('');
   const [checkingProximity, setCheckingProximity] = useState(false);
+  // Relevé de position d'une déclaration « QR indisponible » : sert seulement
+  // à éviter un double appui pendant les quelques secondes du GPS.
+  const [releveEnCours, setReleveEnCours] = useState(false);
   const scannerRef = useRef(null);
   const startingRef = useRef(false);
   const navigate = useNavigate();
@@ -140,35 +154,35 @@ export default function IdentifyCav() {
       return;
     }
     vibrateSuccess();
-    localStorage.setItem('scanned_qr', decodedText);
-    localStorage.removeItem('qr_unavailable_reason');
+    enregistrerScan(decodedText);
     stopScanner();
     navigate('/fill-level');
   };
 
+  // Déclaration SANS scan : jamais refusée pour cause d'éloignement (voir
+  // l'en-tête). La position est relevée pour le compte rendu, avec un délai
+  // court et un repli silencieux — un GPS lent ne retient pas le chauffeur
+  // devant une borne inaccessible.
   const confirmCav = async (cav) => {
-    if (!cav || checkingProximity) return;
-    const near = await ensureNearCav(cav);
-    if (!near) return;
+    if (!cav || releveEnCours) return;
     const cavId = cav.cav_id || cav.id;
+    setReleveEnCours(true);
+    const position = await relevePositionDeclaration();
+    setReleveEnCours(false);
     localStorage.setItem('selected_cav_id', String(cavId));
     localStorage.setItem('selected_cav_name', cav.nom || cav.cav_name || '');
-    localStorage.setItem('scanned_qr', cav.qr_code_data || `CAV-${cavId}`);
-    localStorage.setItem('qr_unavailable_reason', 'fallback');
+    enregistrerQrIndisponible(cav.qr_code_data || `CAV-${cavId}`, 'fallback', position);
     stopScanner();
     navigate('/fill-level');
   };
 
   const submitManualCode = async () => {
     const code = manualCode.trim();
-    if (!code || checkingProximity) return;
-    // Le code saisi n'identifie pas un CAV précis côté client : on vérifie la
-    // proximité au CAV attendu (même hypothèse que resolveCurrentCav côté
-    // FillLevel — c'est le point que ce parcours de collecte adresse).
-    const near = await ensureNearCav(expectedCav);
-    if (!near) return;
-    localStorage.setItem('scanned_qr', code);
-    localStorage.setItem('qr_unavailable_reason', 'manual');
+    if (!code || releveEnCours) return;
+    setReleveEnCours(true);
+    const position = await relevePositionDeclaration();
+    setReleveEnCours(false);
+    enregistrerQrIndisponible(code, 'manual', position);
     stopScanner();
     navigate('/fill-level');
   };
@@ -352,20 +366,20 @@ export default function IdentifyCav() {
           </button>
           <div className="min-w-0">
             <h1 className="font-bold text-lg truncate">Identifier le CAV</h1>
-            <p className="text-white/80 text-sm truncate">Choisissez dans la liste</p>
+            <p className="text-white/80 text-sm truncate">QR indisponible — choisissez le point</p>
           </div>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4 space-y-4">
-        {proximityError && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-medium" role="alert">
-            {proximityError}
-          </div>
+        {releveEnCours && (
+          <p className="text-sm text-gray-500 font-medium">Enregistrement de votre position…</p>
         )}
-        {checkingProximity && (
-          <p className="text-sm text-gray-500 font-medium">Vérification de la position…</p>
-        )}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900">
+          Vous pouvez désigner le point même si vous ne pouvez pas approcher
+          (accès bloqué, portail fermé). Votre position est enregistrée et
+          apparaîtra dans le compte rendu de la tournée.
+        </div>
 
         {expectedCav && (
           <div>
@@ -373,7 +387,7 @@ export default function IdentifyCav() {
             <button
               type="button"
               onClick={() => confirmCav(expectedCav)}
-              disabled={checkingProximity}
+              disabled={releveEnCours}
               className="w-full card-mobile p-4 flex items-center gap-3 ring-2 ring-[var(--color-primary)] bg-[var(--color-primary)]/5 text-left disabled:opacity-50"
             >
               <span className="flex-1 min-w-0">
@@ -403,7 +417,7 @@ export default function IdentifyCav() {
                   key={cav.cav_id || cav.id}
                   type="button"
                   onClick={() => confirmCav(cav)}
-                  disabled={checkingProximity}
+                  disabled={releveEnCours}
                   className="w-full card-mobile p-3 text-left flex items-center gap-3 disabled:opacity-50"
                 >
                   <span className="flex-1 min-w-0">
@@ -440,7 +454,7 @@ export default function IdentifyCav() {
               <button
                 type="button"
                 onClick={submitManualCode}
-                disabled={!manualCode.trim()}
+                disabled={!manualCode.trim() || releveEnCours}
                 className="btn-secondary-mobile py-3 disabled:opacity-50"
               >
                 Utiliser ce code

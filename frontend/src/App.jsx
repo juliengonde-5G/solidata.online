@@ -70,7 +70,6 @@ const ReportingMetropole = lazy(() => import('./pages/ReportingMetropole'));
 const FillRateMap = lazy(() => import('./pages/FillRateMap'));
 const NewsFeed = lazy(() => import('./pages/NewsFeed'));
 const Messagerie = lazy(() => import('./pages/Messagerie'));
-const Pointage = lazy(() => import('./pages/Pointage'));
 const ExutoiresCommandes = lazy(() => import('./pages/ExutoiresCommandes'));
 const ExutoiresPreparation = lazy(() => import('./pages/ExutoiresPreparation'));
 const ExutoiresGantt = lazy(() => import('./pages/ExutoiresGantt'));
@@ -215,7 +214,10 @@ function App() {
               <Route path="/insertion/renouvellement/:milestoneId" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RenouvellementETI /></ProtectedRoute>} />
               <Route path="/admin/insertion" element={<ProtectedRoute roles={['ADMIN']}><AdminInsertion /></ProtectedRoute>} />
               <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PlanningHebdo /></ProtectedRoute>} />
-              <Route path="/pointage" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Pointage /></ProtectedRoute>} />
+              {/* Module « Pointage » retiré le 10/09/2026 (remplacé par la badgeuse).
+                  Redirection plutôt que 404 : l'écran était en favori chez les RH,
+                  et « page introuvable » se lit comme une panne. */}
+              <Route path="/pointage" element={<Navigate to="/badgeuse" replace />} />
 
               {/* Collecte */}
               <Route path="/tours" element={<ProtectedRoute roles={['ADMIN']}><Tours /></ProtectedRoute>} />

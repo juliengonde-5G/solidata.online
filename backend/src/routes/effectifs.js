@@ -129,81 +129,11 @@ async function readConvention(annee) {
   return out;
 }
 
-const stripAccents = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '');
-
-const isCddi = (t) => String(t || '').toUpperCase() === 'CDDI';
-const isCdi = (t) => String(t || '').toUpperCase() === 'CDI';
-const isCdd = (t) => String(t || '').toUpperCase() === 'CDD';
-/** Le salarié a (ou a eu) un parcours d'insertion dans l'ERP. */
-const hasParcours = (emp) => !!emp.insertion_status && emp.insertion_status !== 'none';
-
-/**
- * Types de contrat JAMAIS conventionnés à l'aide au poste, quel que soit le
- * statut de la personne : apprentissage, stage, contrat de professionnalisation,
- * intérim. (Le libellé Malibou brut est parfois conservé tel quel à l'import —
- * on teste donc de façon insensible aux accents et à la casse.)
- */
-function typeHorsInsertion(contractType) {
-  const s = stripAccents(String(contractType || '')).toLowerCase();
-  return /appren|stage|stagiaire|profession|interim/.test(s);
-}
-
-/** Intitulé de poste marquant l'insertion (« … Cddi », « CDI Inclusion »). */
-function posteInsertion(positionTitle) {
-  return /cddi|inclusion/i.test(stripAccents(String(positionTitle || '')));
-}
-
-/**
- * RÈGLE DE PÉRIMÈTRE — quels contrats entrent dans le décompte des ETP
- * conventionnés (correction 2026-08 : le décompte comptait des personnes qui
- * NE SONT PAS en insertion, d'où une SURESTIMATION des mois récents face aux
- * états ASP).
- *
- *   (a) EXCLUSION ABSOLUE des contrats d'apprentissage / stage / contrat de
- *       professionnalisation / intérim : ces contrats ne sont jamais
- *       conventionnés au titre de l'aide au poste, même si la personne a par
- *       ailleurs un parcours d'insertion dans l'ERP.
- *   (b) CDI : retenu UNIQUEMENT si l'intitulé de poste porte la marque de
- *       l'insertion (« … Cddi », « CDI Inclusion ») ou si la fiche porte le
- *       motif explicite `cdi_inclusion`. Un CDI ordinaire ne compte jamais —
- *       y compris pour un ancien salarié en parcours : l'avenant de passage en
- *       CDI (dont l'intitulé perd la mention « Cddi ») fait sortir la personne
- *       du décompte À PARTIR DE SA DATE D'EFFET, les périodes CDDI antérieures
- *       restant comptées (le filtrage est fait ligne à ligne sur les périodes
- *       effectives chaînées d'employee_contracts).
- *   (c) CDD : requalification en CDDI de fait (données héritées d'avant
- *       l'import 2.20.0, qui stockait le type brut Malibou « CDD ») si
- *       l'intitulé de poste contient « Cddi », OU si le salarié est déclaré à
- *       l'ASP (`emp.declare_asp`, jointure etp_asp_salaries), OU — repli des
- *       bases anciennes — si AUCUN intitulé de poste n'est connu et que la
- *       personne a un parcours d'insertion (`emp.insertion_status` ≠ 'none').
- *       L'ancienne règle « tout CDD d'un salarié ayant un parcours » était
- *       trop large dès lors que le poste EST connu : elle faisait entrer des
- *       CDD ordinaires (« Cariste Manutentionnaire ») et les permanents issus
- *       d'un parcours clôturé. Un poste connu SANS mention « Cddi » exclut
- *       donc désormais, tandis qu'un poste inconnu conserve le comportement
- *       historique (aucune régression sur une base non réimportée).
- *
- * @param {Object} contrat { contract_type, position_title }
- * @param {Object} emp     { cddi_derogation_motif, declare_asp, … }
- */
-function keepContractForInsertion(contrat, emp) {
-  const type = contrat && contrat.contract_type;
-  const poste = contrat && contrat.position_title;
-  if (typeHorsInsertion(type)) return false;                            // (a)
-  if (isCddi(type)) return true;
-  if (isCdi(type)) {                                                    // (b)
-    return posteInsertion(poste) || (emp && emp.cddi_derogation_motif === 'cdi_inclusion');
-  }
-  if (isCdd(type)) {                                                    // (c)
-    if (posteInsertion(poste)) return true;
-    if (emp && emp.declare_asp) return true;
-    const posteConnu = poste != null && String(poste).trim() !== '';
-    if (posteConnu) return false;
-    return !!(emp && emp.insertion_status && emp.insertion_status !== 'none');
-  }
-  return false;
-}
+// Règle de périmètre « contrat d'insertion » : source unique partagée avec le
+// module Insertion (espace CIP). Elle a été établie contre les états ASP réels
+// et resserrée une fois — la recopier ici garantirait que les deux écrans
+// finissent par donner deux périmètres différents de la même structure.
+const { isCdi, typeHorsInsertion, keepContractForInsertion } = require('../utils/contrat-insertion');
 
 /**
  * Requête SOUPLE : renvoie `{ rows: [] }` au lieu de propager l'erreur (mêmes

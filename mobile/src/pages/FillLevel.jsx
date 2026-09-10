@@ -18,6 +18,7 @@ import { texteRdv } from '../services/pointHoraires';
 import InfosPointAssociation from '../components/InfosPointAssociation';
 import { bordereauRequis } from '../services/decheterie';
 import { FILL_LEVELS, POURCENTAGE_DEBORDEMENT } from '../services/remplissage';
+import { lireIdentification, oublierIdentification } from '../services/identification';
 
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
@@ -178,6 +179,13 @@ export default function FillLevel() {
       //    perte de donnée, même si le submit backend échoue. La photo n'est
       //    PAS mise en file (pas de blob dans la file de sync, même
       //    contrainte que les incidents) — seulement tentée en ligne ci-dessous.
+      // Comment ce point a-t-il été identifié ? `qrScanned` valait jusqu'ici
+      // « vrai dès que ce n'est pas une association », c'est-à-dire toujours —
+      // y compris quand le chauffeur venait précisément de déclarer le QR
+      // indisponible. La colonne ne disait donc rien. Elle dit désormais la
+      // vérité, et la déclaration voyage avec sa position (relevée au moment
+      // du geste) jusqu'au compte rendu de tournée.
+      const ident = lireIdentification();
       const payload = {
         clientId: newClientId(),
         tourId,
@@ -186,7 +194,10 @@ export default function FillLevel() {
         fillPercent: storePercent,
         anomaly: effectiveAnomaly,
         notes,
-        qrScanned: !tourIsAssociation,
+        qrScanned: !tourIsAssociation && ident.qrScanne,
+        qrUnavailable: !tourIsAssociation && !ident.qrScanne,
+        qrUnavailableReason: tourIsAssociation ? null : ident.motif,
+        declarationPosition: tourIsAssociation ? null : ident.position,
         remballe,
       };
       const pendingId = await addPendingCollect(payload);
@@ -281,10 +292,9 @@ export default function FillLevel() {
   const finishAndReturn = async () => {
     // Draft conservé si non envoyé pour pouvoir corriger plus tard.
     // Nettoyé explicitement si déjà envoyé au serveur (fait dans submit).
-    localStorage.removeItem('scanned_qr');
+    oublierIdentification();
     localStorage.removeItem('selected_cav_id');
     localStorage.removeItem('selected_cav_name');
-    localStorage.removeItem('qr_unavailable_reason');
     navigate('/tour-map');
   };
 

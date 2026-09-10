@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
+const { relevantDeLaCip } = require('../../utils/contrat-insertion');
 const { authorize, resolveBaseRole } = require('../../middleware/auth');
 const { body, param, query } = require('express-validator');
 const { validate } = require('../../middleware/validate');
@@ -131,18 +132,78 @@ router.get('/', async (req, res) => {
       subqueries += `, 0 as has_diagnostic`;
     }
 
-    const result = await pool.query(`
+    // `cddi_derogation_motif` sert la règle de périmètre (CDI « Inclusion »
+    // acté par dérogation). Elle est posée par une migration récente : sur une
+    // base qui ne l'a pas encore, on rejoue SANS elle plutôt que de renvoyer
+    // un 500 — la règle se contentera alors de l'intitulé de poste.
+    const selectListe = (avecDerogation) => `
       SELECT e.id, e.first_name, e.last_name, e.is_active,
+        e.insertion_status, ${avecDerogation ? 'e.cddi_derogation_motif' : 'NULL::varchar AS cddi_derogation_motif'},
         t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end
         ${subqueries}
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       WHERE e.is_active = true
       ORDER BY UPPER(e.last_name), UPPER(e.first_name)
-    `);
+    `;
+    let result;
+    try {
+      result = await pool.query(selectListe(true));
+    } catch (err) {
+      if (err.code !== '42703') throw err;
+      console.warn('[INSERTION] colonne cddi_derogation_motif absente — liste servie sans elle');
+      result = await pool.query(selectListe(false));
+    }
+
+    // ── PÉRIMÈTRE DE L'ESPACE CIP (demande client du 10/09/2026) ───────────
+    // L'écran listait TOUS les salariés actifs : permanents, apprentis, CDD
+    // ordinaires. La CIP y cherchait ses dossiers parmi des personnes dont
+    // elle n'a pas la charge, et le compteur « en parcours » se lisait sur une
+    // liste qui ne l'était pas.
+    //
+    // Le filtrage se fait EN JAVASCRIPT et non en SQL, délibérément : la règle
+    // (`relevantDeLaCip`) est la MÊME que celle du module Effectifs ETP,
+    // établie contre les états ASP réels, et elle doit rester à un seul
+    // endroit. La récrire en SQL ici, c'est la voir diverger à la première
+    // correction — le module Effectifs a déjà connu ce resserrement une fois.
+    // Le volume s'y prête (quelques dizaines de salariés actifs).
+    //
+    // La liste des contrats est chargée à part et DÉGRADE : si
+    // `employee_contracts` est absente ou illisible, on retombe sur le type de
+    // contrat porté par la fiche. Une requête en échec ne doit pas vider
+    // l'espace CIP — un écran vide se lit « plus personne en insertion ».
+    let contratsParEmploye = new Map();
+    try {
+      const ctr = await pool.query(
+        `SELECT employee_id, contract_type, position_title FROM employee_contracts`
+      );
+      for (const c of ctr.rows) {
+        if (!contratsParEmploye.has(c.employee_id)) contratsParEmploye.set(c.employee_id, []);
+        contratsParEmploye.get(c.employee_id).push(c);
+      }
+    } catch (err) {
+      console.warn(`[INSERTION] contrats non lus (${err.code || '?'}) : ${err.message} — repli sur la fiche`);
+      contratsParEmploye = null;
+    }
 
     const now = new Date();
-    const employees = result.rows.map(e => {
+    let ecartes = 0;
+    const employees = result.rows.filter((e) => {
+      const contrats = contratsParEmploye
+        ? (contratsParEmploye.get(e.id) || [])
+        : [{ contract_type: e.contract_type, position_title: e.position }];
+      // Repli : aucun contrat historisé pour cette personne → la fiche fait
+      // foi (bases antérieures à l'import 2.20.0).
+      const source = contrats.length > 0
+        ? contrats
+        : [{ contract_type: e.contract_type, position_title: e.position }];
+      // `declare_asp` n'est pas joint ici (il coûte une lecture des états ASP
+      // importés) : son seul apport serait de rattraper un CDD au poste
+      // inconnu, cas déjà couvert par le parcours ouvert dans l'ERP.
+      const garde = relevantDeLaCip(e, source);
+      if (!garde) ecartes += 1;
+      return garde;
+    }).map(e => {
       let urgency = null;
       if (e.contract_end_date) {
         const days = Math.round((new Date(e.contract_end_date) - now) / 86400000);
@@ -152,7 +213,7 @@ router.get('/', async (req, res) => {
       return { ...e, urgency, has_pcm: e.has_pcm > 0, has_diagnostic: e.has_diagnostic > 0 };
     });
 
-    console.log(`[INSERTION] GET / → ${employees.length} salaries actifs`);
+    console.log(`[INSERTION] GET / → ${employees.length} salariés en insertion (${ecartes} hors périmètre écartés)`);
     res.json(employees);
   } catch (err) {
     console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');

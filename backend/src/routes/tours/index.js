@@ -817,6 +817,37 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
     const skip_reason = req.body.skip_reason || null;
     // multipart : les champs arrivent en string ('true'/'false').
     const remballe = req.body.remballe === true || req.body.remballe === 'true';
+
+    // POSITION DE LA DÉCLARATION « QR INDISPONIBLE » (2.54.0). Le mobile ne
+    // refuse plus la déclaration d'un chauffeur éloigné — c'est justement
+    // parce qu'il ne peut pas approcher qu'il la fait. On garde donc OÙ il
+    // était, et le compte rendu en tire la distance au point.
+    // Coordonnée illisible ou hors bornes → `null` : une position à moitié
+    // lue ne vaut pas mieux qu'une absence, et se lirait comme une mesure.
+    // L'ABSENCE SE TESTE AVANT LA CONVERSION : `Number('')` et `Number(null)`
+    // valent 0, et 0 est une latitude parfaitement valide — une déclaration
+    // sans position serait rangée au large du golfe de Guinée (même piège que
+    // le point de départ en 2.42.0 et le palier de remplissage en 2.48.0).
+    // Débusqué par les tests de ce lot.
+    const coord = (brut, max) => {
+      if (brut === null || brut === undefined || brut === '' || brut === 'null') return null;
+      const v = Number(brut);
+      return Number.isFinite(v) && Math.abs(v) <= max ? v : null;
+    };
+    const latBrute = coord(req.body.declaration_lat, 90);
+    const lngBrute = coord(req.body.declaration_lng, 180);
+    // Une paire INCOMPLÈTE n'est pas une demi-position, c'est une absence : on
+    // écarte les deux plutôt que d'enregistrer une coordonnée orpheline dont
+    // le compte rendu ne pourrait rien tirer.
+    const posComplete = latBrute !== null && lngBrute !== null;
+    const declaration_lat = posComplete ? latBrute : null;
+    const declaration_lng = posComplete ? lngBrute : null;
+    const precisionBrute = Number(req.body.declaration_accuracy_m);
+    const declaration_accuracy_m = posComplete && Number.isFinite(precisionBrute) && precisionBrute >= 0
+      ? Math.min(precisionBrute, 100000) : null;
+    // Même garde d'horloge que l'heure d'arrivée : un téléphone mal réglé ou
+    // une file rejouée le lendemain ne doit pas dater la déclaration.
+    const declaration_at = posComplete ? heureArriveeAcceptable(req.body.declaration_at) : null;
     // Photo d'audit (item « photo aléatoire par tournée ») : présente seulement
     // si ce point est le point tiré au sort pour cette tournée (choisi côté
     // mobile, cf. services/auditPhoto.js). COALESCE : un re-submit sans photo
@@ -925,6 +956,10 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
          qr_scanned = $3,
          qr_unavailable = $4,
          qr_unavailable_reason = $5,
+         declaration_lat = $13::double precision,
+         declaration_lng = $14::double precision,
+         declaration_accuracy_m = $15::double precision,
+         declaration_at = COALESCE($16::timestamptz, CASE WHEN $13::double precision IS NOT NULL THEN NOW() END),
          skip_reason = CASE WHEN $1::varchar = 'skipped' THEN $6::varchar ELSE NULL END,
          notes = $7,
          remballe = $8,
@@ -932,7 +967,8 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
          collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
-         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId, fill_percent]
+         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId, fill_percent,
+         declaration_lat, declaration_lng, declaration_accuracy_m, declaration_at]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);

@@ -1,17 +1,12 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ShoppingBag, Shirt, Footprints, Recycle, Printer, ChevronLeft, Check, Tag, Delete, Sparkles } from 'lucide-react';
+import { Printer, ChevronLeft, Check, Tag, Delete } from 'lucide-react';
 import Layout from '../components/Layout';
 import EtiquetteA4 from '../components/EtiquetteA4';
 import api from '../services/api';
+import {
+  visuelCategorie, visuelSaison, visuelGamme, grouperGenres, VISUEL_NEUTRE,
+} from '../utils/etiquettes-visuels';
 import '../styles/etiquette-print.css';
-
-const CATEGORY_VISUALS = {
-  Textiles: { icon: Shirt, color: '#2563EB', bg: '#DBEAFE' },
-  Chaussures: { icon: Footprints, color: '#92400E', bg: '#FED7AA' },
-  Maroquinerie: { icon: ShoppingBag, color: '#8B5A2B', bg: '#FEF3C7' },
-  Chiffons: { icon: Recycle, color: '#475569', bg: '#E2E8F0' },
-  Upcycling: { icon: Sparkles, color: '#0F766E', bg: '#CCFBF1' },
-};
 
 // Les étapes sont identifiées par un NOM, pas par un rang : une catégorie sans
 // déclinaison (upcycling) n'a que « Catégorie » puis « Poids », et un parcours
@@ -70,12 +65,12 @@ export default function EtiquetteGenerer() {
     return () => { cancelled = true; };
   }, []);
 
-  const categories = useMemo(() => {
-    return (dimensions.categorie_eco_org || []).map((key) => ({
-      key, label: key,
-      ...(CATEGORY_VISUALS[key] || { icon: Tag, color: '#475569', bg: '#E2E8F0' }),
-    }));
-  }, [dimensions.categorie_eco_org]);
+  const categories = useMemo(() => (
+    (dimensions.categorie_eco_org || []).map((key) => ({ key, label: key, ...visuelCategorie(key) }))
+  ), [dimensions.categorie_eco_org]);
+
+  // Genres rangés par famille (Adulte / Enfants / Layettes), demande client.
+  const famillesGenre = useMemo(() => grouperGenres(dimensions.genre), [dimensions.genre]);
 
   // La liste vient du SERVEUR (GET /etiquettes/dimensions) : l'écran ne connaît
   // aucune catégorie particulière en dur, il applique ce que le référentiel dit.
@@ -242,16 +237,18 @@ export default function EtiquetteGenerer() {
           )}
 
           {etape === 'genre' && (
-            <PickGrid title="Genre" items={dimensions.genre} value={sel.genre}
+            <PickGroupes title="Genre" groupes={famillesGenre} value={sel.genre}
               onPick={(v) => { setSel({ ...sel, genre: v }); setStep(2); }} />
           )}
           {etape === 'saison' && (
             <PickGrid title="Saison" items={dimensions.saison} value={sel.saison}
-              onPick={(v) => { setSel({ ...sel, saison: v }); setStep(3); }} cols={3} />
+              visuel={visuelSaison} cols={3}
+              onPick={(v) => { setSel({ ...sel, saison: v }); setStep(3); }} />
           )}
           {etape === 'gamme' && (
             <PickGrid title="Gamme" items={dimensions.gamme} value={sel.gamme}
-              onPick={(v) => { setSel({ ...sel, gamme: v }); setStep(4); }} cols={3} />
+              visuel={visuelGamme} cols={2}
+              onPick={(v) => { setSel({ ...sel, gamme: v }); setStep(4); }} />
           )}
           {etape === 'produit' && (
             <div>
@@ -342,22 +339,97 @@ export default function EtiquetteGenerer() {
   );
 }
 
-function PickGrid({ title, items, value, onPick, cols }) {
-  const colsClass = cols === 3 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
+/**
+ * Tuile d'un choix : image d'abord, nom ensuite, définition métier en dessous
+ * quand la valeur en porte une (les gammes : « Extra » ne dit rien, « Premium »
+ * si). Sans table de visuel (`visuel` non fourni), on retombe sur le bouton
+ * texte historique — aucune icône n'est inventée pour une valeur inconnue.
+ */
+function TuileChoix({ valeur, visuel, actif, onPick }) {
+  const v = visuel ? visuel(valeur) : null;
+  const Icon = v?.icon;
+  const neutre = !v || v === VISUEL_NEUTRE;
+  if (!Icon) {
+    return (
+      <button onClick={() => onPick(valeur)}
+        className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
+          actif ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
+        }`}
+      >{valeur}</button>
+    );
+  }
+  return (
+    <button
+      onClick={() => onPick(valeur)}
+      className={`relative rounded-2xl shadow-md flex flex-col items-center justify-center gap-3 py-8 px-4 transition transform hover:scale-105 ${
+        actif ? 'ring-4 ring-emerald-500' : ''
+      }`}
+      style={{ background: v.bg, color: v.color }}
+    >
+      <Icon className="w-16 h-16" strokeWidth={1.5} />
+      <span className="text-xl font-bold text-center leading-tight">{valeur}</span>
+      {v.definition && (
+        <span className="text-sm font-semibold opacity-80 text-center">{v.definition}</span>
+      )}
+      {neutre && (
+        <span className="text-[11px] font-medium opacity-60 text-center">Image à définir</span>
+      )}
+    </button>
+  );
+}
+
+function PickGrid({ title, items, value, onPick, cols, visuel }) {
+  const colsClass = cols === 2
+    ? 'grid-cols-2 md:grid-cols-4'
+    : cols === 3 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
   return (
     <div>
       <h2 className="text-xl font-bold text-slate-700 mb-6">{title}</h2>
       <div className={`grid gap-4 ${colsClass}`}>
         {(items || []).map((it) => (
-          <button key={it} onClick={() => onPick(it)}
-            className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
-              value === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
-            }`}
-          >{it}</button>
+          <TuileChoix key={it} valeur={it} visuel={visuel} actif={value === it} onPick={onPick} />
         ))}
         {(!items || items.length === 0) && (
           <div className="col-span-full text-slate-400 italic">Aucune valeur — ajoute-en depuis Admin → Catalogue.</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Choix rangé par FAMILLES, une ligne chacune (genres : Adulte / Enfants /
+ * Layettes). Une famille vide n'est pas affichée — un intitulé sans tuile en
+ * dessous se lit comme une donnée manquante.
+ */
+function PickGroupes({ title, groupes, value, onPick }) {
+  return (
+    <div>
+      <h2 className="text-xl font-bold text-slate-700 mb-6">{title}</h2>
+      {(groupes || []).length === 0 && (
+        <div className="text-slate-400 italic">Aucune valeur — ajoute-en depuis Admin → Catalogue.</div>
+      )}
+      <div className="space-y-7">
+        {(groupes || []).map((g) => {
+          const Icon = g.icon;
+          return (
+            <div key={g.id}>
+              <div className="flex items-center gap-2 mb-3 text-slate-600">
+                {Icon && <Icon className="w-6 h-6" strokeWidth={1.8} />}
+                <span className="text-sm font-bold uppercase tracking-wide">{g.label}</span>
+              </div>
+              <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {g.valeurs.map((it) => (
+                  <button key={it} onClick={() => onPick(it)}
+                    className={`px-5 py-7 rounded-2xl text-lg font-bold shadow-md transition transform hover:scale-105 ${
+                      value === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
+                    }`}
+                  >{it}</button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

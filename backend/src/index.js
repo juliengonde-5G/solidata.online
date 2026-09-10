@@ -248,9 +248,12 @@ app.use('/api/pennylane', require('./routes/pennylane'));
 // génération quotidienne de prédictions (ml_fill_predictions) est assurée par
 // routes/tours/predictions.js (heuristique), indépendante de ce module.
 
-// Lot 6 : Pointage / Badgeage (module 25 — LEGACY, cf. ADR-0003 : conservé
-// inchangé, remplacé par le module 33 ci-dessous pour tout nouveau déploiement)
-app.use('/api/pointage', require('./routes/pointage'));
+// Module 25 « Pointage » (badgeage manuel) — RETIRÉ le 10/09/2026 sur demande
+// client : la badgeuse RFID (module 33 « Temps & Présence ») le remplace
+// intégralement. Le routeur et son écran sont supprimés ; les tables
+// `pointage_events`, `pointage_terminals` et `badges` sont CONSERVÉES —
+// elles portent l'historique des badgeages saisis avant la bascule, et une
+// suppression de données ne se décide pas en retirant un écran.
 
 // Module 33 : Temps & Présence (badgeuse). L'API DEVICE est une surface PUBLIQUE
 // (authentifiée par X-Device-Key, pas par JWT) : elle doit donc être montée

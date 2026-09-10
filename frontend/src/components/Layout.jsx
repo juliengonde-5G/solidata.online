@@ -176,7 +176,6 @@ const NAV_TREE = [
         icon: Calendar,
         children: [
           { label: 'Planning hebdo', path: '/planning-hebdo', icon: ClipboardList, roles: ['ADMIN', 'RH'] },
-          { label: 'Pointage', path: '/pointage', icon: IdCard, roles: ['ADMIN', 'RH'] },
           { label: 'Heures de travail', path: '/work-hours', icon: Clock, roles: ['ADMIN', 'RH'] },
         ],
       },
