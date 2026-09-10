@@ -133,7 +133,7 @@ Aucune n'a de valeur par défaut : l'agent refuse de démarrer si l'une manque.
 ### 4.2 Installer
 
 ```bash
-sudo bash badgeuse/deploy/install.sh --target pi5 --config /root/badgeuse.conf
+sudo bash badgeuse/deploy/install.sh --config /root/badgeuse.conf
 ```
 
 Le script est idempotent et journalisé (`/var/log/badgeuse-install.log`). Il

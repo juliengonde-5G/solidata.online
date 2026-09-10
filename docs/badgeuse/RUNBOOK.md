@@ -98,11 +98,28 @@ ssh pi-admin@ST-Badgeuse.local
 
 | Où la trouver | Comment |
 |---|---|
-| Sur le Pi | Brancher un clavier et taper `hostname -I` |
-| Depuis la box Internet | Interface d'administration → liste des appareils connectés → chercher `ST-Badgeuse` |
+| Depuis la box Internet | Interface d'administration → liste des appareils connectés → chercher `ST-Badgeuse` (elle affiche les noms d'hôte) |
 | Depuis le PC (Linux/macOS) | `ping ST-Badgeuse.local` affiche l'IP |
+| Depuis le PC, si le mDNS est filtré | `arp -a \| grep -Ei 'b8:27:eb\|dc:a6:32\|e4:5f:01\|2c:cf:67\|d8:3a:dd'` — ces préfixes constructeur (OUI) sont ceux des Raspberry Pi : `b8:27:eb` = Pi 1/2/3/Zero, les autres = Pi 4/5. Tout le reste du réseau est écarté d'un coup |
+| Sur le Pi | Brancher un clavier et taper `hostname -I` |
 
 Puis : `ssh pi-admin@192.168.1.42` (l'adresse relevée).
+
+**Plusieurs Pi sur le réseau ?** La clé d'hôte SSH les distingue **sans ouvrir de session** : à la
+première connexion à une adresse, `ssh` affiche « This host key is known by the following other
+names » suivi du nom sous lequel la machine est déjà connue (`st-badgeuse.local`,
+`st-badgeusesecours.local`…). Répondre `yes` est sans risque : c'est la même clé, SSH ne fait que
+l'associer aussi à l'adresse IP.
+
+**SOLIDATA ne connaît pas l'adresse des postes** : le battement de cœur ne transporte aucune adresse
+réseau (liste blanche, par conception). Supervision donne la **cible** (`pi5`/`pi3`) et la version du
+poste en ligne — utile pour savoir *quel* matériel est en service, pas *où* il est. Et l'interface du
+kiosque étant servie sur `127.0.0.1` seulement, un navigateur ne permet pas d'identifier un poste
+depuis le réseau.
+
+> **Poste en service aujourd'hui** : le poste de **secours**, `ST-BadgeuseSecours`
+> (`pi-admin@st-badgeusesecours.local`, `192.168.1.44` au 10/09/2026, DHCP). C'est lui qu'il faut
+> mettre à jour et diagnostiquer — voir `EXPLOITATION.md` §1.0.
 
 **3. Sous Windows** : `ssh` est intégré depuis Windows 10 — ouvrez **PowerShell** ou
 **Terminal** et tapez la même commande. Sinon, PuTTY fait l'affaire (hôte, port 22).
@@ -360,7 +377,7 @@ que le script laisse commentées.
 Se connecter en SSH sur le poste (ou brancher un clavier temporairement), puis :
 
 ```bash
-sudo bash badgeuse/deploy/install.sh --target pi5 --config /chemin/vers/badgeuse.conf
+sudo bash badgeuse/deploy/install.sh --config /chemin/vers/badgeuse.conf
 ```
 
 (remplacer `pi5` par `pi3` pour le poste de secours). Le script :

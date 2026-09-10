@@ -103,7 +103,7 @@ done
 case "$CMD" in
   *"kiosque non configure"*)
     retenir "KIOSQUE NON CONFIGURE : le drop-in lancement.conf n'a pas ete pose (installation interrompue ?). Le service refuse de demarrer plutot que de lancer une commande devinee. Corriger :
-      sudo bash /opt/badgeuse/deploy/install.sh --target pi5" ;;
+      sudo bash /opt/badgeuse/deploy/install.sh" ;;
 esac
 
 # Repli X11 : le kiosque tourne en utilisateur non privilegie. Seul le wrapper
@@ -359,7 +359,7 @@ if [ -r "$DPMS_INSTALLE" ]; then
     ligne "scripts du poste" "ANCIENS — la neutralisation de la veille est absente"
     retenir "POSTE NON MIS A JOUR : ${DPMS_INSTALLE} ne contient pas la neutralisation de la veille. Deployer le serveur ne met PAS a jour le Raspberry Pi. /opt/badgeuse est une COPIE posee par install.sh, pas un depot git : on repart du depot, puis on relance l'installation (idempotente) :
     cd <clone du depot solidata.online> && git pull
-    sudo bash badgeuse/deploy/install.sh --target pi5
+    sudo bash badgeuse/deploy/install.sh
     Procedure complete (rootfs en lecture seule, verifications) : docs/badgeuse/EXPLOITATION.md section 1.1"
   fi
 fi
