@@ -110,3 +110,54 @@ la NOTE_JURIDIQUE §3.4 (géolocalisation **d'un salarié**) est intégralement 
 - Deux jobs au scheduler : `syncBadgeusePresse` (horaire) et `syncBadgeuseMeteo`
   (aux passages de `runAllJobs`, plus un rafraîchissement de dernier recours à la
   construction de la playlist).
+
+---
+
+## Addendum du 10/09/2026 — **actualité locale** : une portée par flux, un écran par portée
+
+**Demande de la Direction** : un écran d'actualité **locale** sur le poste.
+
+### Décision
+
+La portée (`nationale` | `locale`) devient une propriété **du flux**, recopiée sur chaque
+article qu'il apporte (`badgeuse_presse_articles.portee`), et un écran de playlist de type
+`presse` choisit la portée qu'il diffuse (`config.portee`, plus `toutes` pour un écran qui
+les mélange délibérément).
+
+### Ce qui a été écarté, et pourquoi
+
+- **Un nouveau type de playlist `presse_locale`.** Il aurait obligé à faire évoluer le
+  contrat d'API device et donc à **mettre à jour physiquement chaque Raspberry** avant que
+  l'écran n'affiche quoi que ce soit. La forme envoyée au poste est ici rigoureusement
+  identique (un élément par article) : seule la **provenance** des articles change, et
+  c'est une décision serveur. Un poste déjà en service diffuse l'actualité locale sans
+  qu'on y touche.
+- **Deviner la portée depuis le texte de l'article.** Rien dans un article ne dit qu'il
+  est local. Un classement par mots-clés fabriquerait une donnée que la source ne porte
+  pas — « jamais de valeur inventée ».
+- **Seeder des adresses de flux locaux.** Les adresses de flux RSS ne se devinent pas,
+  changent et ferment ; c'était déjà la raison pour laquelle aucune URL n'est codée en
+  dur. Aucun flux local n'est donc livré par défaut : l'exploitant déclare le sien, et un
+  bouton **« Tester le flux »** le lui confirme immédiatement, avec le titre du premier
+  article — la seule preuve qui vaille qu'on a attrapé le bon fil.
+
+### Non-régression, explicitement
+
+Le défaut de portée est **`nationale`**, côté colonne comme côté écran : un écran de presse
+configuré avant cet addendum continue d'afficher exactement ce qu'il affichait, et ne se
+met pas à diffuser des brèves locales le jour où quelqu'un configure un flux local.
+
+### Droits : rien de changé
+
+Les règles du corps de cet ADR s'appliquent à l'identique à un flux local : titre, chapô,
+**attribution de la source**, vignette rapatriée par le serveur et servie depuis le cache
+local du poste, **vidéo non rediffusée** sans arbitrage écrit. Un journal local est un
+éditeur comme un autre.
+
+### Habilitation
+
+Les réglages de presse rejoignent la surface **AFFICHAGE** (rôle `COMMUNICATION` compris,
+cf. 2.51.0) : ce sont des adresses publiques de journaux, aucun secret n'y transite — à la
+différence du jeton Meta, qui reste ADMIN. Le serveur reste le seul à sortir, sous les
+gardes anti-SSRF déjà en place (https strict, adresses internes refusées, type et taille
+bornés), à l'essai comme à la synchronisation.

@@ -91,8 +91,15 @@ function installMocks({ settings = {}, employee = { id: 5 }, badges = [] } = {})
     }
     if (/DELETE FROM badgeuse_contenus/.test(s)) return Promise.resolve({ rows: [{ id: 42, fichier: null }] });
     if (/UPDATE employees/.test(s)) {
+      // $2 = accord, $3 = opposition (addendum ADR-0004 du 10/09/2026).
       return Promise.resolve({
-        rows: employee ? [{ id: employee.id, badgeuse_optin_festif: params[1], badgeuse_optin_festif_le: params[1] ? new Date().toISOString() : null }] : [],
+        rows: employee ? [{
+          id: employee.id,
+          badgeuse_optin_festif: params[1],
+          badgeuse_optin_festif_le: params[1] ? new Date().toISOString() : null,
+          badgeuse_refus_festif: params[2],
+          badgeuse_refus_festif_le: params[2] ? new Date().toISOString() : null,
+        }] : [],
       });
     }
     if (/FROM badgeuse_badges b/.test(s)) return Promise.resolve({ rows: badges });
@@ -400,8 +407,48 @@ describe('POST /salaries/:employeeId/optin-festif', () => {
     expect(mockQuery.mock.calls.some((c) => /ROLLBACK/.test(String(c[0])))).toBe(true);
   });
 
-  test('`actif` est obligatoire et booléen', async () => {
+  test('une décision est obligatoire (ni `decision`, ni `actif` → 400)', async () => {
     expect((await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', {})).status).toBe(400);
+  });
+
+  // ── Addendum du 10/09/2026 : trois états, l'opposition l'emporte ─────────
+  test('une OPPOSITION est enregistrée, datée et journalisée', async () => {
+    const r = await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', { decision: 'opposition' });
+    expect(r.status).toBe(200);
+    expect(r.body.badgeuse_refus_festif).toBe(true);
+    expect(r.body.badgeuse_refus_festif_le).toBeTruthy();
+    // Une opposition RETIRE l'accord antérieur : les deux ne coexistent pas.
+    expect(r.body.badgeuse_optin_festif).toBe(false);
+    // Et surtout : elle ferme l'affichage, quel que soit le réglage général.
+    expect(r.body.festif_autorise).toBe(false);
+    expect(journal().find((j) => j.action === 'BADGEUSE_OPTIN_FESTIF').details.decision).toBe('opposition');
+  });
+
+  test('SANS RÉPONSE, l\'affichage reste autorisé (défaut voulu par la Direction)', async () => {
+    const r = await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', { decision: 'sans_reponse' });
+    expect(r.status).toBe(200);
+    expect(r.body.badgeuse_optin_festif).toBe(false);
+    expect(r.body.badgeuse_refus_festif).toBe(false);
+    expect(r.body.festif_autorise).toBe(true);
+  });
+
+  test('avec `festif_accord_prealable`, une absence de réponse ne suffit plus', async () => {
+    installMocks({ settings: { 'badgeuse.festif_accord_prealable': 'true' } });
+    const r = await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', { decision: 'sans_reponse' });
+    expect(r.body.festif_autorise).toBe(false);
+    const r2 = await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', { decision: 'accord' });
+    expect(r2.body.festif_autorise).toBe(true);
+  });
+
+  test('une décision inconnue est refusée (liste fermée)', async () => {
+    expect((await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', { decision: 'peut_etre' })).status).toBe(400);
+  });
+
+  test('le payload historique `{actif}` reste accepté — et ne vaut JAMAIS opposition', async () => {
+    const r = await post('/api/badgeuse/salaries/5/optin-festif', 'ADMIN', { actif: false });
+    expect(r.status).toBe(200);
+    expect(r.body.decision).toBe('sans_reponse');
+    expect(r.body.badgeuse_refus_festif).toBe(false);
   });
 
   test('habilitation : ADMIN/RH seulement', async () => {
@@ -421,6 +468,23 @@ describe('POST /salaries/:employeeId/optin-festif', () => {
     expect(r.body[0]).toMatchObject({
       badgeuse_optin_festif: true, badgeuse_optin_festif_le: '2026-08-01T09:00:00Z',
     });
+  });
+
+  test('GET /badges distingue « opposition » de « sans réponse », et rend l\'état EFFECTIF', async () => {
+    installMocks({
+      badges: [
+        { id: 1, employee_id: 5, uid_hmac: 'a'.repeat(64), statut: 'actif', first_name: 'Karim', last_name: 'Benali',
+          badgeuse_optin_festif: false, badgeuse_refus_festif: false },
+        { id: 2, employee_id: 6, uid_hmac: 'b'.repeat(64), statut: 'actif', first_name: 'Sonia', last_name: 'Dupont',
+          badgeuse_optin_festif: false, badgeuse_refus_festif: true, badgeuse_refus_festif_le: '2026-09-01T08:00:00Z' },
+      ],
+    });
+    const r = await get('/api/badgeuse/badges');
+    // Sans réponse ⇒ affiché ; opposition ⇒ jamais. Deux états que l'ancienne
+    // case à cocher confondait sous un même « Non ».
+    expect(r.body[0]).toMatchObject({ badgeuse_refus_festif: false, festif_autorise: true });
+    expect(r.body[1]).toMatchObject({ badgeuse_refus_festif: true, festif_autorise: false });
+    expect(r.body[1].badgeuse_refus_festif_le).toBe('2026-09-01T08:00:00Z');
   });
 });
 

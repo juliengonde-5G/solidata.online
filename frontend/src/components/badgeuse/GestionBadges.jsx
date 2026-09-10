@@ -8,18 +8,46 @@ import {
   STATUT_BADGE_LABELS, EVENEMENT_HISTORIQUE_LABELS, StatutBadgeChip,
 } from './badgeuseShared';
 
-// Opt-in festif (ADR-0004 §4) — champ confirmé côté GET /badgeuse/badges
-// (routes/badgeuse.js) : `badgeuse_optin_festif` (bool) + `badgeuse_optin_festif_le`.
-const optinFestif = (b) => b?.badgeuse_optin_festif === true;
+// Affichage festif (ADR-0004 §4 + addendum du 10/09/2026) — champs confirmés
+// côté GET /badgeuse/badges (routes/badgeuse.js) : `badgeuse_optin_festif` +
+// `badgeuse_refus_festif` (et leurs dates), plus `festif_autorise` = l'état
+// EFFECTIF calculé par la règle du poste.
+//
+// TROIS ÉTATS et non une case à cocher : depuis que l'affichage est le défaut,
+// « n'a jamais été interrogé » et « a refusé » n'ont plus du tout le même
+// effet, et les confondre reviendrait à afficher quelqu'un qui a dit non.
+const etatFestif = (b) => {
+  if (b?.badgeuse_refus_festif === true) return 'opposition';
+  if (b?.badgeuse_optin_festif === true) return 'accord';
+  return 'sans_reponse';
+};
 
-function OptinFestifBadge({ actif, le }) {
-  return actif ? (
-    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-pink-100 text-pink-700"
-      title={le ? `Accord recueilli le ${fmtDateTimeParis(le)}` : undefined}>
-      <Cake className="w-3.5 h-3.5" aria-hidden="true" /> Oui
+const DECISIONS_FESTIVES = [
+  { value: 'sans_reponse', label: 'Sans réponse' },
+  { value: 'accord', label: 'Accord explicite' },
+  { value: 'opposition', label: 'Opposition' },
+];
+
+function OptinFestifBadge({ badge }) {
+  const etat = etatFestif(badge);
+  // `festif_autorise` vient du SERVEUR : l'écran de gestion ne recalcule pas la
+  // règle, il l'affiche — sinon il finirait par promettre autre chose que ce
+  // que la dalle de l'atelier montre réellement.
+  const affiche = badge?.festif_autorise === true;
+  const quand = etat === 'opposition' ? badge?.badgeuse_refus_festif_le : badge?.badgeuse_optin_festif_le;
+  const titre = etat === 'opposition'
+    ? `Opposition enregistrée${quand ? ` le ${fmtDateTimeParis(quand)}` : ''} — l'anniversaire n'est jamais affiché.`
+    : etat === 'accord'
+      ? `Accord recueilli${quand ? ` le ${fmtDateTimeParis(quand)}` : ''}.`
+      : "Aucune réponse enregistrée — l'affichage suit le réglage général du poste.";
+  return affiche ? (
+    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-pink-100 text-pink-700" title={titre}>
+      <Cake className="w-3.5 h-3.5" aria-hidden="true" /> Affiché
     </span>
   ) : (
-    <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Non</span>
+    <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${etat === 'opposition' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`} title={titre}>
+      {etat === 'opposition' ? 'Opposition' : 'Non affiché'}
+    </span>
   );
 }
 
@@ -120,7 +148,7 @@ export default function GestionBadges({ canWrite }) {
   const [attribuerOpen, setAttribuerOpen] = useState(false);
   const [confirm, setConfirm] = useState(null); // { badge, statut, label }
   const [acting, setActing] = useState(false);
-  const [confirmOptin, setConfirmOptin] = useState(null); // { badge, actif }
+  const [confirmOptin, setConfirmOptin] = useState(null); // { badge, decision }
   const [actingOptin, setActingOptin] = useState(false);
 
   const load = useCallback(() => {
@@ -155,14 +183,18 @@ export default function GestionBadges({ canWrite }) {
     } finally { setActing(false); }
   };
 
-  // Opt-in festif (ADR-0004 §4) : accord LIBRE et révocable, tracé au journal
-  // RGPD côté serveur — jamais de conséquence si le salarié refuse.
+  // Affichage festif : accord, opposition ou sans réponse. Le choix est LIBRE
+  // et révocable dans les deux sens, et chacun des trois est tracé au journal
+  // RGPD côté serveur — une opposition qui ne se prouve pas ne vaut rien.
   const doToggleOptin = async () => {
     if (!confirmOptin) return;
     setActingOptin(true);
     try {
-      await api.post(`/badgeuse/salaries/${confirmOptin.badge.employee_id}/optin-festif`, { actif: confirmOptin.actif });
-      toast.success(confirmOptin.actif ? 'Accord festif recueilli.' : 'Accord festif retiré.');
+      await api.post(`/badgeuse/salaries/${confirmOptin.badge.employee_id}/optin-festif`,
+        { decision: confirmOptin.decision });
+      toast.success(confirmOptin.decision === 'opposition'
+        ? "Opposition enregistrée — l'anniversaire ne sera plus affiché."
+        : confirmOptin.decision === 'accord' ? 'Accord festif recueilli.' : 'Réponse effacée.');
       setConfirmOptin(null);
       load();
     } catch (err) {
@@ -210,16 +242,16 @@ export default function GestionBadges({ canWrite }) {
                       <td className="py-2 px-2 whitespace-nowrap text-slate-500">{fmtDateTimeParis(b.attribue_le)}</td>
                       <td className="py-2 px-2 text-center">
                         <div className="inline-flex items-center gap-2">
-                          <OptinFestifBadge actif={optinFestif(b)} le={b.badgeuse_optin_festif_le} />
+                          <OptinFestifBadge badge={b} />
                           {canWrite && (
-                            <button
-                              onClick={() => setConfirmOptin({ badge: b, actif: !optinFestif(b) })}
-                              className="text-slate-400 hover:text-pink-600 p-1"
-                              title={optinFestif(b) ? "Retirer l'accord" : "Recueillir l'accord"}
-                              aria-label={optinFestif(b) ? "Retirer l'accord festif" : "Recueillir l'accord festif"}
+                            <select
+                              value={etatFestif(b)}
+                              onChange={(e) => setConfirmOptin({ badge: b, decision: e.target.value })}
+                              className="input-modern py-1 text-xs"
+                              aria-label={`Affichage de l'anniversaire de ${employeeName(b)}`}
                             >
-                              <Cake className="w-4 h-4" />
-                            </button>
+                              {DECISIONS_FESTIVES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                            </select>
                           )}
                         </div>
                       </td>
@@ -266,11 +298,15 @@ export default function GestionBadges({ canWrite }) {
         title="Confirmer l'action" message={confirm?.message || ''} confirmLabel="Confirmer" confirmVariant="danger" loading={acting} />
 
       <ConfirmDialog isOpen={!!confirmOptin} onCancel={() => setConfirmOptin(null)} onConfirm={doToggleOptin}
-        title={confirmOptin?.actif ? "Recueillir l'accord festif" : "Retirer l'accord festif"}
-        message={confirmOptin ? `${confirmOptin.actif
-          ? `${employeeName(confirmOptin.badge)} accepte-t-il/elle l'affichage de son anniversaire (prénom + initiale) sur l'écran de badgeage ?`
-          : `Retirer l'accord d'affichage festif de ${employeeName(confirmOptin.badge)} ?`} Accord LIBRE du salarié — refuser n'a aucune conséquence ; tracé au journal RGPD.` : ''}
-        confirmLabel={confirmOptin?.actif ? "Recueillir l'accord" : "Retirer l'accord"} confirmVariant={confirmOptin?.actif ? 'primary' : 'danger'} loading={actingOptin} />
+        title={confirmOptin?.decision === 'opposition' ? "Enregistrer une opposition"
+          : confirmOptin?.decision === 'accord' ? "Recueillir l'accord festif" : 'Effacer la réponse'}
+        message={confirmOptin ? `${{
+          opposition: `${employeeName(confirmOptin.badge)} demande à ce que son anniversaire ne soit PAS affiché sur l'écran du poste. L'opposition est définitive tant qu'elle n'est pas levée ici.`,
+          accord: `${employeeName(confirmOptin.badge)} accepte l'affichage de son anniversaire (prénom + initiale) sur l'écran de badgeage.`,
+          sans_reponse: `Effacer la réponse de ${employeeName(confirmOptin.badge)} : l'affichage suivra de nouveau le réglage général du poste.`,
+        }[confirmOptin.decision]} Choix LIBRE du salarié — s'opposer n'a aucune conséquence ; tracé au journal RGPD.` : ''}
+        confirmLabel="Enregistrer"
+        confirmVariant={confirmOptin?.decision === 'opposition' ? 'danger' : 'primary'} loading={actingOptin} />
     </div>
   );
 }

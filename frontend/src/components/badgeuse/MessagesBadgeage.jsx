@@ -59,6 +59,7 @@ function fromApi(data = {}) {
     phrasesText: parsePhrases(d.phrases_motivation).join('\n'),
     motivationActive: d.motivation_active !== false,
     festifActif: d.festif_actif !== false,
+    festifAccordPrealable: d.festif_accord_prealable === true,
   };
 }
 
@@ -103,6 +104,7 @@ export default function MessagesBadgeage({ canWrite }) {
       const payload = {
         motivation_active: form.motivationActive,
         festif_actif: form.festifActif,
+        festif_accord_prealable: form.festifAccordPrealable,
         phrases_motivation: phrases,
         moment_matin_fin: form.plages.matin_fin,
         moment_pause_debut: form.plages.pause_debut,
@@ -208,8 +210,20 @@ export default function MessagesBadgeage({ canWrite }) {
           <input type="checkbox" checked={form.festifActif} onChange={(e) => setForm((f) => ({ ...f, festifActif: e.target.checked }))} disabled={disabled} className="rounded border-slate-300" />
           Activer l'écran festif (anniversaires) au badgeage
         </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700 mt-3">
+          <input type="checkbox" checked={form.festifAccordPrealable} onChange={(e) => setForm((f) => ({ ...f, festifAccordPrealable: e.target.checked }))} disabled={disabled} className="rounded border-slate-300" />
+          Exiger l'accord préalable de chaque salarié
+        </label>
         <p className="text-xs text-slate-400 mt-2">
-          N'affecte que les salariés ayant donné leur accord — case « Anniversaires à l'écran » dans l'onglet Badges (ADR-0004 §4).
+          Décoché (réglage actuel de la structure) : <strong>tous les anniversaires sont affichés</strong>, sauf
+          opposition du salarié — et uniquement pour les personnes <strong>titulaires d'un badge actif</strong>.
+          Coché : seuls les salariés ayant donné leur accord apparaissent.
+          Dans les deux cas l'opposition l'emporte et se recueille dans l'onglet Badges (ADR-0004 §4 et son
+          addendum du 10/09/2026).
+        </p>
+        <p className="text-xs text-amber-700 mt-2">
+          Afficher par défaut suppose que les salariés en aient été <strong>informés</strong> et que
+          l'opposition soit enregistrée sans discussion : c'est la contrepartie de ce réglage.
         </p>
       </div>
 

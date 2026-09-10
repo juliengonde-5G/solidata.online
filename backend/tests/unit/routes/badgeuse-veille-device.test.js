@@ -241,13 +241,39 @@ describe('playlist — type `presse`', () => {
     installMocks({ contenus: [contenu({ type: 'presse', config: { nb_articles: 2 } })], articles: troisArticles });
     await get(`${PATH}/playlist`);
     const req = mockQuery.mock.calls.find((c) => /FROM badgeuse_presse_articles\b/.test(String(c[0])) && !/WHERE id/.test(String(c[0])));
-    expect(req[1]).toEqual([2]);
+    // Second paramètre : la PORTÉE (addendum ADR-0006). « nationale » par
+    // défaut — un écran de presse créé avant l'addendum affiche exactement ce
+    // qu'il affichait.
+    expect(req[1]).toEqual([2, 'nationale']);
 
     installMocks({ contenus: [contenu({ type: 'presse', config: { nb_articles: 99 } })], articles: troisArticles });
     mockQuery.mockClear();   // sinon `find` retrouverait la requête précédente
     await get(`${PATH}/playlist`);
     const borne = mockQuery.mock.calls.find((c) => /FROM badgeuse_presse_articles\b/.test(String(c[0])) && !/WHERE id/.test(String(c[0])));
-    expect(borne[1]).toEqual([8]);
+    expect(borne[1]).toEqual([8, 'nationale']);
+  });
+
+  // ── PORTÉE (addendum ADR-0006 du 10/09/2026) ──────────────────────────────
+  test('un écran « locale » ne demande QUE les articles locaux', async () => {
+    installMocks({ contenus: [contenu({ type: 'presse', config: { portee: 'locale' } })], articles: troisArticles });
+    await get(`${PATH}/playlist`);
+    const req = mockQuery.mock.calls.find((c) => /FROM badgeuse_presse_articles\b/.test(String(c[0])) && !/WHERE id/.test(String(c[0])));
+    expect(req[1][1]).toBe('locale');
+    expect(String(req[0])).toMatch(/COALESCE\(portee, 'nationale'\) = \$2/);
+  });
+
+  test('un écran « toutes » ne filtre PAS (le NULL neutralise la clause)', async () => {
+    installMocks({ contenus: [contenu({ type: 'presse', config: { portee: 'toutes' } })], articles: troisArticles });
+    await get(`${PATH}/playlist`);
+    const req = mockQuery.mock.calls.find((c) => /FROM badgeuse_presse_articles\b/.test(String(c[0])) && !/WHERE id/.test(String(c[0])));
+    expect(req[1][1]).toBeNull();
+  });
+
+  test('une portée ILLISIBLE retombe sur « nationale » (jamais un écran vide)', async () => {
+    installMocks({ contenus: [contenu({ type: 'presse', config: { portee: 'regionale' } })], articles: troisArticles });
+    await get(`${PATH}/playlist`);
+    const req = mockQuery.mock.calls.find((c) => /FROM badgeuse_presse_articles\b/.test(String(c[0])) && !/WHERE id/.test(String(c[0])));
+    expect(req[1][1]).toBe('nationale');
   });
 
   test('aucun article en base → aucun écran (pas d\'écran creux)', async () => {

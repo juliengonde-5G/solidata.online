@@ -217,6 +217,33 @@ describe('syncPresseArticles', () => {
     expect(insert[1][3]).toBe("Rentrée scolaire : ce qui change à l'école");
   });
 
+  // ── PORTÉE (addendum ADR-0006 du 10/09/2026) ────────────────────────────
+  test('la portée du FLUX est recopiée sur chaque article', async () => {
+    installMocks({ settings: {
+      ...REGLAGES,
+      'badgeuse.presse_flux': JSON.stringify([
+        { libelle: 'Journal local', source: 'Journal local', url: 'https://exemple-presse.fr/local.rss', actif: true, portee: 'locale' },
+      ]),
+    } });
+    globalThis.fetch = jest.fn(async () => reponse(FLUX_RSS));
+    const bilan = await media.syncPresseArticles();
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_presse_articles/.test(String(c[0])));
+    // 11e paramètre = portee (après media_type).
+    expect(insert[1][10]).toBe('locale');
+    // Le rejeu doit RECLASSER : requalifier un flux ne demande pas de réimport.
+    expect(String(insert[0])).toMatch(/portee = EXCLUDED\.portee/);
+    expect(bilan.par_portee).toMatchObject({ locale: 2 });
+  });
+
+  test('un flux SANS portée reste national (aucun article ne change d\'écran)', async () => {
+    installMocks({ settings: REGLAGES });   // le flux de référence n'a pas de portée
+    globalThis.fetch = jest.fn(async () => reponse(FLUX_RSS));
+    const bilan = await media.syncPresseArticles();
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_presse_articles/.test(String(c[0])));
+    expect(insert[1][10]).toBe('nationale');
+    expect(bilan.par_portee).toMatchObject({ nationale: 2 });
+  });
+
   test('ADR-0006 — la VIDÉO de presse n\'est PAS rediffusée par défaut', async () => {
     installMocks({ settings: REGLAGES });
     const appels = [];

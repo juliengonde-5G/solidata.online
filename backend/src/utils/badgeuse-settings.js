@@ -134,10 +134,20 @@ const BADGEUSE_SETTING_DEFAULTS = {
   ],
   'badgeuse.motivation_active': true,
 
-  // ÉCRAN FESTIF : l'interrupteur global. Il ne suffit PAS — chaque salarié
-  // doit en outre avoir donné son accord individuel (ADR-0004 §4,
-  // `employees.badgeuse_optin_festif`, défaut false).
+  // ÉCRAN FESTIF : l'interrupteur global.
   'badgeuse.festif_actif': true,
+
+  // ACCORD PRÉALABLE pour l'affichage d'un anniversaire (ADR-0004, addendum
+  // du 10/09/2026). `false` (défaut) : tout le monde est affiché SAUF
+  // opposition — arbitrage de la Direction, qui suppose que les salariés ont
+  // été informés et que l'opposition est recueillie sans discussion.
+  // `true` : on revient à l'accord individuel préalable (comportement d'avant
+  // l'addendum). Le réglage existe pour que cette décision se voie et se
+  // reprenne, plutôt que d'être enfouie dans une condition SQL.
+  //
+  // DANS LES DEUX CAS : jamais un salarié SANS BADGE ACTIF — l'écran est celui
+  // de l'atelier, il annonce l'anniversaire de gens qui y badgent.
+  'badgeuse.festif_accord_prealable': false,
 
   // MÉDIAS : plafond du cache local du poste (Mo) et taille maximale d'un
   // contenu téléchargé par le SERVEUR depuis un lien partagé (Mo).
@@ -291,6 +301,20 @@ const GABARIT_MAX = 120;
 const PHRASE_MAX = 200;
 const PHRASES_MAX = 30;
 const FLUX_MAX = 5;
+
+/**
+ * Portées d'un flux de presse (ADR-0006, addendum du 10/09/2026). Liste FERMÉE
+ * et volontairement courte : « locale » ne dit pas où, c'est le flux choisi par
+ * l'exploitant qui le dit. Fabriquer ici une géographie (département, EPCI)
+ * serait inventer une donnée que le flux ne porte pas.
+ */
+const PORTEES_PRESSE = ['nationale', 'locale'];
+
+/** Portée effective d'un flux configuré (absente ⇒ nationale, cf. migration). */
+function porteeFlux(flux) {
+  const p = String((flux && flux.portee) || '').trim();
+  return PORTEES_PRESSE.includes(p) ? p : 'nationale';
+}
 const MAX_JOURS_PREVISION = 5;
 
 /** Clés de gabarit de message (toutes exigent la variable `{prenom}`). */
@@ -400,6 +424,12 @@ function validateAffichageSetting(key, value) {
       try { parsee = new URL(url); } catch (_) { return `badgeuse.presse_flux : « ${url} » n'est pas une URL valide`; }
       if (parsee.protocol !== 'https:') return `badgeuse.presse_flux : seuls les flux https sont acceptés (« ${url} »)`;
       if (String(f.libelle || '').length > 120) return 'badgeuse.presse_flux : libellé limité à 120 caractères';
+      // PORTÉE : « nationale » (défaut historique) ou « locale ». Une valeur
+      // absente vaut « nationale » — les flux configurés avant l'addendum
+      // ADR-0006 ne changent donc pas d'écran du jour au lendemain.
+      if (f.portee !== undefined && f.portee !== null && !PORTEES_PRESSE.includes(String(f.portee))) {
+        return `badgeuse.presse_flux : portée « ${f.portee} » inconnue (nationale ou locale)`;
+      }
     }
     return null;
   }
@@ -521,6 +551,8 @@ async function writeSetting(key, value, client = null) {
 
 module.exports = {
   BADGEUSE_SETTING_DEFAULTS,
+  PORTEES_PRESSE,
+  porteeFlux,
   OVERLAY_MIN_SEC,
   OVERLAY_MAX_SEC,
   REGLES_VALIDEES_LE_KEY,

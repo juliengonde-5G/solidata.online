@@ -201,6 +201,25 @@ dans `rgpd_audit_log`, DANS la transaction). Défaut `false` : l'absence de choi
 un accord. Seuls des **booléens** partent ensuite vers le poste — la date de naissance ne quitte
 jamais le serveur.
 
+**Addendum du 10/09/2026 — l'affichage devient le défaut, l'opposition la barrière.**
+`badgeuse_refus_festif BOOLEAN NOT NULL DEFAULT false`, `badgeuse_refus_festif_le TIMESTAMPTZ`,
+`badgeuse_refus_festif_par INTEGER REFERENCES users(id)`. Colonnes **distinctes** de l'accord, et
+non sa relecture à l'envers : un `badgeuse_optin_festif = false` existant veut dire « personne n'a
+posé la question », jamais « cette personne a refusé ». Les confondre afficherait tout le monde en
+croyant respecter des refus jamais enregistrés. **L'opposition l'emporte toujours**, y compris sur
+un accord antérieur. Le basculement du défaut se règle par `badgeuse.festif_accord_prealable`
+(défaut `false`), et l'affichage exige EN OUTRE un **badge actif** — l'écran est celui de l'atelier.
+Les trois décisions (accord, opposition, retour à « sans réponse ») sont journalisées
+`BADGEUSE_OPTIN_FESTIF` avec leur `decision`.
+
+### Articles de presse (`badgeuse_presse_articles`, ADR-0006)
+`portee VARCHAR(16) NOT NULL DEFAULT 'nationale'` + `CHECK (portee IN ('nationale','locale'))`
+(addendum du 10/09/2026). La portée est **recopiée du flux** qui a apporté l'article : c'est une
+propriété de la SOURCE, rien dans un article ne permet de la deviner. Le défaut `nationale` fait
+qu'un écran de presse existant continue d'afficher exactement ce qu'il affichait. Un écran de
+playlist de type `presse` choisit sa portée dans sa `config` (`nationale` par défaut, `locale`, ou
+`toutes`). Aucune donnée personnelle : ce sont des publications de presse.
+
 ## 2. Paramètres (`settings`, catégorie `badgeuse`)
 
 Voir ADR-0002 (règles de gestion, défauts = recommandations RH) + conservation :

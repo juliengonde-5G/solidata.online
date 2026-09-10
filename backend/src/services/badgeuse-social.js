@@ -49,7 +49,8 @@ const crypto = require('crypto');
 const dns = require('dns');
 const net = require('net');
 const pool = require('../config/database');
-const { readBadgeuseParams, writeSetting, META_TOKEN_KEY, SOCIAL_DERNIER_SYNC_KEY } = require('../utils/badgeuse-settings');
+const { readBadgeuseParams, writeSetting, META_TOKEN_KEY, SOCIAL_DERNIER_SYNC_KEY,
+        porteeFlux } = require('../utils/badgeuse-settings');
 const { decryptSecret } = require('../utils/badgeuse-crypto');
 
 // ── Racine de stockage des médias du module ────────────────────────────────
@@ -771,7 +772,7 @@ async function fetchFluxRss(rawUrl, { maxBytes = RSS_MAX_BYTES, timeoutMs = RSS_
  * seul endroit documenté, `badgeusePurgeRetention`.
  */
 async function syncPresseArticles() {
-  const bilan = { items: 0, flux: 0, articles: 0, vignettes: 0, videos_ignorees: 0, erreurs: 0 };
+  const bilan = { items: 0, flux: 0, articles: 0, vignettes: 0, videos_ignorees: 0, erreurs: 0, par_portee: {} };
   try {
     const params = await readBadgeuseParams();
     if (!params.presse_sync_actif) return { ...bilan, ignore: 'desactive' };
@@ -784,6 +785,9 @@ async function syncPresseArticles() {
       if (!f || !f.actif || !f.url) continue;
       const libelle = String(f.libelle || f.url).slice(0, 120);
       const source = String(f.source || f.libelle || '').slice(0, 120) || null;
+      // La portée vient du FLUX et de lui seul : rien dans le texte d'un
+      // article ne dit s'il est local (ADR-0006, addendum du 10/09/2026).
+      const portee = porteeFlux(f);
 
       let articles;
       try {
@@ -828,10 +832,13 @@ async function syncPresseArticles() {
 
           await pool.query(
             `INSERT INTO badgeuse_presse_articles
-               (flux, source, guid, titre, chapo, lien, publie_le, media_fichier, media_sha256, media_type, sync_le)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+               (flux, source, guid, titre, chapo, lien, publie_le, media_fichier, media_sha256, media_type, portee, sync_le)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
              ON CONFLICT (flux, guid) DO UPDATE SET
                source = EXCLUDED.source,
+               -- La portée SUIT le flux : requalifier un flux en « locale »
+               -- reclasse ses articles au prochain passage, sans réimport.
+               portee = EXCLUDED.portee,
                titre = EXCLUDED.titre,
                chapo = COALESCE(EXCLUDED.chapo, badgeuse_presse_articles.chapo),
                lien = COALESCE(EXCLUDED.lien, badgeuse_presse_articles.lien),
@@ -845,9 +852,11 @@ async function syncPresseArticles() {
               media ? media.fichier : null,
               media ? media.media_sha256 : null,
               media ? media.media_type : null,
+              portee,
             ]
           );
           bilan.articles += 1;
+          bilan.par_portee[portee] = (bilan.par_portee[portee] || 0) + 1;
         } catch (err) {
           bilan.erreurs += 1;
           console.error(`[BADGEUSE-PRESSE] ${libelle} — article ignoré : ${err.message}`);
@@ -1042,6 +1051,40 @@ async function syncMeteo() {
   }
 }
 
+/**
+ * ESSAI d'un flux, SANS RIEN ÉCRIRE (route « Tester le flux »).
+ *
+ * POURQUOI CETTE FONCTION EXISTE : les adresses de flux RSS ne sont pas
+ * devinables et changent — c'est écrit noir sur blanc dans les défauts de
+ * `badgeuse.presse_flux`. Un exploitant qui colle l'adresse de son journal
+ * local n'a aucun moyen de savoir si elle est bonne avant que l'écran ne
+ * reste vide pendant deux jours. Ici, il le sait tout de suite, et le
+ * serveur le lui dit AVEC le titre du premier article — la seule preuve qui
+ * vaille qu'on a bien attrapé le bon fil.
+ *
+ * Ne lève JAMAIS : un flux qui refuse est une réponse, pas une panne.
+ */
+async function testerFluxPresse(url) {
+  try {
+    const articles = parseFluxRss(await fetchFluxRss(url));
+    if (articles.length === 0) {
+      return { ok: false, articles: 0, motif: 'Le flux a bien répondu, mais aucun article n\'y a été reconnu.' };
+    }
+    const premier = articles[0];
+    return {
+      ok: true,
+      articles: articles.length,
+      // On rend un ÉCHANTILLON, pas le flux : l'écran de réglage n'a pas
+      // vocation à devenir un lecteur de presse.
+      premier_titre: premier.titre || null,
+      premier_publie_le: premier.publie_le || null,
+      vignette_disponible: !!premier.media_url,
+    };
+  } catch (err) {
+    return { ok: false, articles: 0, motif: err.message };
+  }
+}
+
 module.exports = {
   MEDIA_MIME_BY_EXT,
   MEDIA_EXT_BY_MIME,
@@ -1069,6 +1112,7 @@ module.exports = {
   texteFlux,
   fetchFluxRss,
   syncPresseArticles,
+  testerFluxPresse,
   // Météo de l'écran de veille
   resolveMeteoLieu,
   readMeteoCache,

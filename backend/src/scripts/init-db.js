@@ -7690,6 +7690,23 @@ async function executerInitialisation() {
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_le TIMESTAMPTZ;');
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_optin_festif_par INTEGER REFERENCES users(id) ON DELETE SET NULL;');
 
+    // (i ter) OPPOSITION à l'affichage festif (ADR-0004, addendum du 10/09/2026).
+    //     La Direction a tranché que les anniversaires s'affichent PAR DÉFAUT
+    //     (réglage `badgeuse.festif_accord_prealable`, défaut false) : la base
+    //     légale devient l'intérêt légitime, et ce qu'il faut alors garantir
+    //     n'est plus un accord préalable mais un DROIT D'OPPOSITION effectif
+    //     (art. 21 RGPD).
+    //     POURQUOI UNE COLONNE À PART plutôt que de relire `optin_festif` à
+    //     l'envers : un `false` existant veut dire « personne n'a posé la
+    //     question », JAMAIS « cette personne a refusé ». Les confondre
+    //     afficherait tout le monde en croyant respecter des refus qui n'ont
+    //     jamais été enregistrés — et effacerait la trace des accords déjà
+    //     recueillis. Les deux colonnes coexistent donc, et l'opposition
+    //     l'emporte toujours sur l'accord.
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_refus_festif BOOLEAN NOT NULL DEFAULT false;');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_refus_festif_le TIMESTAMPTZ;');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS badgeuse_refus_festif_par INTEGER REFERENCES users(id) ON DELETE SET NULL;');
+
     // (i bis) APPAIRAGE PAR CODE COURT (ADR-0005). Mettre un poste en service
     //     exigeait de recopier DEUX clés de 64 caractères hex au clavier d'un
     //     Raspberry : illisible, et première cause d'échec de mise en service.
@@ -7827,7 +7844,24 @@ async function executerInitialisation() {
         UNIQUE (flux, guid)
       );
     `);
+    // PORTÉE de l'article (ADR-0006, addendum du 10/09/2026) — « nationale »
+    // ou « locale ». Elle est recopiée du flux qui l'a apporté : c'est une
+    // propriété de la SOURCE, pas du texte, et rien dans un article ne permet
+    // de la deviner. Défaut `nationale` : sur une base déjà déployée, tous les
+    // articles présents viennent des flux nationaux d'origine, et l'écran de
+    // presse existant continue d'afficher exactement ce qu'il affichait.
+    await client.query("ALTER TABLE badgeuse_presse_articles ADD COLUMN IF NOT EXISTS portee VARCHAR(16) NOT NULL DEFAULT 'nationale';");
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'badgeuse_presse_portee_check') THEN
+          ALTER TABLE badgeuse_presse_articles
+            ADD CONSTRAINT badgeuse_presse_portee_check CHECK (portee IN ('nationale', 'locale'));
+        END IF;
+      END $$;
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_presse_publie ON badgeuse_presse_articles(publie_le DESC);');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_presse_portee ON badgeuse_presse_articles(portee, publie_le DESC);');
 
     // Registre RGPD — traitement « Temps & Présence (badgeuse) ». Fiche art. 30
     // OBLIGATOIRE avant la mise en service (NOTE_JURIDIQUE §3.8). Idempotent.

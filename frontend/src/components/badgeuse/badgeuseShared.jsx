@@ -35,7 +35,7 @@ export const TYPE_CONTENU_LABELS = {
   compte_a_rebours: 'Compte à rebours', meteo: 'Météo',
   annonces: 'Annonces du jour (anniversaires)',
   actus: "Fil d'actualités (interne)",
-  presse: 'Actualité nationale (presse)',
+  presse: 'Actualité de la presse (nationale ou locale)',
   tournees: 'Tournées en cours',
   tournees_carte: 'Position des tournées (carte)',
   social: 'Réseaux sociaux',
@@ -54,7 +54,7 @@ export const TYPE_CONTENU_HINTS = {
   meteo: "Météo du lieu du poste, générée côté serveur (rien à saisir). Le corps du message reste un repli : il ne s'affiche que si aucune prévision n'est disponible.",
   annonces: "Anniversaires du jour (naissance et/ou entrée dans la structure) — prénom + initiale, salariés ayant donné leur accord uniquement. Généré côté serveur, rien à saisir ici.",
   actus: "Dernières brèves du fil d'actualités SOLIDATA (titre + résumé + source). Généré côté serveur.",
-  presse: "Actualité nationale issue de flux de presse — UN ÉCRAN PAR ARTICLE (titre, chapô, source, date). Vignettes rapatriées par le serveur : le poste ne contacte jamais un site de presse. Les vidéos ne sont pas rediffusées (droits d'auteur, ADR-0006).",
+  presse: "Actualité issue des flux de presse configurés dans « Presse & actualité locale » — UN ÉCRAN PAR ARTICLE (titre, chapô, source, date). Choisissez la PORTÉE : nationale, locale, ou les deux mélangées. Vignettes rapatriées par le serveur : le poste ne contacte jamais un site de presse. Les vidéos ne sont pas rediffusées (droits d'auteur, ADR-0006).",
   tournees: 'Tournées en cours (véhicule, progression X/Y CAV) — jamais le nom du chauffeur. Généré côté serveur.',
   tournees_carte: "Véhicules situés à la COMMUNE sur un fond dessiné localement (aucune carte en ligne, aucun point GPS exact, jamais le nom du chauffeur). Nécessite des points de collecte géolocalisés en base. Généré côté serveur.",
   social: "Derniers posts des comptes Instagram/Facebook de la structure (réglage dans « Réseaux sociaux »). Généré côté serveur.",
@@ -79,7 +79,22 @@ export const isMediaServeurType = (type) => TYPES_MEDIA_SERVEUR.includes(type);
 export const TYPE_CONTENU_CONFIG_FIELDS = {
   annonces: [],
   actus: [{ key: 'nb_actus', label: 'Nombre de brèves affichées', min: 1, max: 10, default: 3 }],
-  presse: [{ key: 'nb_articles', label: "Nombre d'articles (un écran chacun)", min: 1, max: 8, default: 3 }],
+  presse: [
+    { key: 'nb_articles', label: "Nombre d'articles (un écran chacun)", min: 1, max: 8, default: 3 },
+    // La portée par DÉFAUT est « nationale » et non « toutes » : un écran de
+    // presse existant ne doit pas se mettre à diffuser des brèves locales le
+    // jour où quelqu'un configure un flux local.
+    {
+      key: 'portee',
+      label: 'Portée des articles',
+      default: 'nationale',
+      options: [
+        { value: 'nationale', label: 'Actualité nationale' },
+        { value: 'locale', label: 'Actualité locale' },
+        { value: 'toutes', label: 'Les deux (mélangées)' },
+      ],
+    },
+  ],
   tournees: [],
   tournees_carte: [],
   social: [{ key: 'nb_posts', label: 'Nombre de posts affichés', min: 1, max: 20, default: 5 }],

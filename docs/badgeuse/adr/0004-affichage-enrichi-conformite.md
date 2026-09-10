@@ -110,3 +110,59 @@ collecte relevé** — `gps_positions` n'est pas lue, aucune coordonnée ne desc
 poste, un véhicule ne porte qu'une **référence de secteur**. Fond dessiné à partir des
 barycentres de nos propres points de collecte. Contrat d'API device **v1.6**
 (§3quinquies) ; détail et preuves d'exécution au JOURNAL.
+
+---
+
+## Addendum du 10/09/2026 — anniversaires : l'affichage devient le défaut, l'**opposition** la barrière
+
+**Demande de la Direction** : « par défaut afficher tous les anniversaires à l'écran, mais
+[pas] ceux sans badge affecté ».
+
+### Ce que cela change au §4
+
+Le §4 fondait l'affichage festif sur un **consentement préalable** : rien ne s'affichait
+sans un accord recueilli, salarié par salarié. En pratique, la case n'a presque jamais été
+cochée — non par refus, mais parce que personne n'a été interrogé —, si bien que l'écran
+festif ne fêtait personne. La Direction tranche pour l'inverse : **tout le monde est
+affiché, sauf opposition.**
+
+La base légale bascule alors du consentement (art. 6-1-a) vers l'**intérêt légitime**
+(art. 6-1-f) : une convivialité d'atelier, avec une donnée déjà minimale (prénom +
+initiale, jamais la date de naissance, jamais l'âge). Ce n'est pas une décision technique
+et elle n'est **pas gratuite** : elle déplace la garantie du consentement vers le **droit
+d'opposition** (art. 21), qui doit alors être réel.
+
+### Les trois contreparties, tenues dans le code
+
+1. **Une opposition explicite, distincte de l'absence de réponse.**
+   Nouvelles colonnes `employees.badgeuse_refus_festif` (+ `_le`, `_par`), à côté de
+   `badgeuse_optin_festif` qui est conservée. Relire l'ancienne colonne « à l'envers »
+   aurait été un contresens : un `false` existant veut dire « personne n'a posé la
+   question », jamais « cette personne a refusé ». **L'opposition l'emporte toujours**, y
+   compris sur un accord recueilli plus tôt.
+2. **Le badge actif est une condition d'affichage.**
+   L'écran est celui de l'atelier. Le fichier du personnel contient des personnes qui n'y
+   viennent jamais — autres sites, permanents du siège, fiches conservées après un départ.
+   L'absence de badge est le seul signe fiable, et déjà tenu à jour, qu'une personne badge
+   ici. C'est la partie « mais ceux sans badge » de la demande.
+3. **La décision reste reprenable, et se voit.**
+   Réglage `badgeuse.festif_accord_prealable` (défaut `false`). À `true`, on revient
+   exactement à la règle du §4. Il est exposé dans l'écran « Messages de badgeage » avec
+   sa contrepartie écrite noir sur blanc, plutôt qu'enfoui dans une condition SQL.
+
+**Une seule règle en code** (`badgeuse-device.festifAutorise`), appelée par le cache des
+badges **et** par l'écran « annonces » de la playlist, et réutilisée par le back-office
+pour annoncer l'état effectif. Deux conditions recopiées finiraient par diverger : le jour
+où elles divergeraient, une personne verrait son anniversaire sur un écran et pas sur
+l'autre — c'est-à-dire la promesse qu'on lui a faite qui serait rompue.
+
+### Reste à la charge de la Direction, avant la mise en service
+
+- **Informer les salariés** (art. 12-14) que les anniversaires sont affichés par défaut,
+  et **comment s'y opposer**. Sans cette information, l'intérêt légitime ne tient pas.
+  À joindre à la note d'information déjà prévue (NOTE_JURIDIQUE §9).
+- **Recueillir une opposition sans discussion** quand elle est exprimée : c'est la
+  contrepartie qui rend le choix du défaut acceptable.
+
+Les trois gestes (accord, opposition, retour à « sans réponse ») sont journalisés au
+registre RGPD, datés et attribués — une opposition qui ne se prouve pas ne vaut rien.

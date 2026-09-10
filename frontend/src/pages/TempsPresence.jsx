@@ -9,6 +9,7 @@ import AnomaliesBadgeuse from '../components/badgeuse/AnomaliesBadgeuse';
 import GestionBadges from '../components/badgeuse/GestionBadges';
 import PlaylistAffichage from '../components/badgeuse/PlaylistAffichage';
 import ReseauxSociaux from '../components/badgeuse/ReseauxSociaux';
+import PresseActualite from '../components/badgeuse/PresseActualite';
 import SupervisionPostes from '../components/badgeuse/SupervisionPostes';
 import EcranDirect from '../components/badgeuse/EcranDirect';
 import ParametresBadgeuse from '../components/badgeuse/ParametresBadgeuse';
@@ -107,6 +108,10 @@ export default function TempsPresence() {
         {ongletActif === 'affichage' && (
           <div className="space-y-5">
             <PlaylistAffichage canWrite={canWriteAffichage} />
+            {/* Presse : ouverte à la surface AFFICHAGE (donc au rôle
+                COMMUNICATION) — ce sont des adresses publiques de journaux,
+                aucun secret n'y transite, à la différence du jeton Meta. */}
+            <PresseActualite canWrite={canWriteAffichage} />
             <ReseauxSociaux canWrite={isAdmin} />
           </div>
         )}

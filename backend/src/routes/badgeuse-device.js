@@ -631,10 +631,29 @@ router.post('/v1/devices/:code/pointages',
 //     (jamais deviné : « jamais de valeur inventée »).
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * RÈGLE UNIQUE de l'affichage festif (ADR-0004 §4 + addendum du 10/09/2026).
+ *
+ * Elle est appelée par les DEUX chemins qui affichent un anniversaire — le
+ * cache des badges (overlay au badgeage) et l'écran « annonces » de la
+ * playlist. Une seule fonction, parce que deux conditions recopiées finissent
+ * toujours par diverger : le jour où elles divergeraient ici, une personne
+ * verrait son anniversaire s'afficher sur un écran et pas sur l'autre, ce qui
+ * est précisément la promesse qu'on lui a faite qui serait rompue.
+ *
+ * L'OPPOSITION L'EMPORTE TOUJOURS, y compris sur un accord recueilli plus tôt :
+ * quelqu'un qui a dit oui puis non a dit non.
+ */
+function festifAutorise(row, accordPrealable) {
+  if (row.refus === true) return false;
+  if (accordPrealable === true) return row.optin === true;
+  return true;
+}
+
 /** Colonnes de base du cache (sans les drapeaux v1.3) — repli documenté. */
 const BADGES_SQL_LEGACY = `
   SELECT b.uid_hmac, b.employee_id, e.first_name, e.last_name,
-         false AS optin, false AS anniversaire, NULL::int AS anniversaire_annees,
+         false AS optin, false AS refus, false AS anniversaire, NULL::int AS anniversaire_annees,
          false AS premier_jour
   FROM badgeuse_badges b
   JOIN employees e ON e.id = b.employee_id
@@ -652,6 +671,7 @@ const BADGES_SQL_LEGACY = `
 const BADGES_SQL_V13 = `
   SELECT b.uid_hmac, b.employee_id, e.first_name, e.last_name,
          COALESCE(e.badgeuse_optin_festif, false) AS optin,
+         COALESCE(e.badgeuse_refus_festif, false) AS refus,
          (e.birth_date IS NOT NULL AND to_char(e.birth_date, 'MM-DD') = $2) AS anniversaire,
          CASE
            WHEN e.seniority_date IS NOT NULL
@@ -694,8 +714,8 @@ router.get('/v1/devices/:code/badges', deviceLimiter, authenticateDevice, async 
 
     const festifActif = params.festif_actif !== false;
     const badges = r.rows.map((row) => {
-      // Le consentement conditionne les DEUX drapeaux d'anniversaire.
-      const festif = festifActif && row.optin === true;
+      // La règle partagée conditionne les DEUX drapeaux d'anniversaire.
+      const festif = festifActif && festifAutorise(row, params.festif_accord_prealable);
       const annees = parseInt(row.anniversaire_annees, 10);
       return {
         uid_hmac: row.uid_hmac,
@@ -816,29 +836,72 @@ function nbConfig(config, cle, defaut, max) {
 }
 
 /**
- * Anniversaires du jour (naissance + entrée dans la structure).
- * PRÉNOM + INITIALE uniquement, opt-in obligatoire, salariés actifs. La date
- * de naissance ne sort pas de SQL : seule la coïncidence jour/mois en sort.
+ * Portée d'un écran de presse : « nationale » (défaut, non-régression),
+ * « locale », ou « toutes » pour un écran qui les mélange délibérément.
+ * Une valeur inconnue retombe sur le défaut — un réglage abîmé ne doit pas
+ * vider l'écran.
  */
-async function buildAnnonces(jourParis) {
-  const jourMois = jourParis.slice(5);
-  const r = await pool.query(
-    `SELECT e.first_name, e.last_name,
-            (e.birth_date IS NOT NULL AND to_char(e.birth_date, 'MM-DD') = $2) AS anniversaire,
-            CASE
-              WHEN e.seniority_date IS NOT NULL
-                   AND to_char(e.seniority_date, 'MM-DD') = $2
-                   AND EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int >= 1
-              THEN EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int
-            END AS annees
-     FROM employees e
-     WHERE COALESCE(e.badgeuse_optin_festif, false) = true
-       AND COALESCE(e.is_active, true) = true`,
-    [jourParis, jourMois]
-  );
+function porteeConfig(config) {
+  const p = String(config.portee || '').trim();
+  return ['nationale', 'locale', 'toutes'].includes(p) ? p : 'nationale';
+}
 
+/**
+ * Anniversaires du jour (naissance + entrée dans la structure).
+ *
+ * PRÉNOM + INITIALE uniquement, salariés actifs, ET PORTEURS D'UN BADGE ACTIF.
+ * La date de naissance ne sort pas de SQL : seule la coïncidence jour/mois en
+ * sort.
+ *
+ * POURQUOI LE BADGE EST UNE CONDITION (demande de la Direction, 10/09/2026) :
+ * l'écran est celui de l'atelier. Le fichier du personnel contient des
+ * personnes qui n'y mettent jamais les pieds — sièges, permanents d'un autre
+ * site, fiches conservées après un départ. Leur anniversaire s'afficherait
+ * devant des gens qui ne les connaissent pas, et l'absence de badge est le
+ * seul signe FIABLE, déjà tenu à jour, qu'une personne badge ici.
+ *
+ * Le tri « qui a le droit d'être affiché » n'est PAS fait en SQL mais par
+ * `festifAutorise`, partagée avec le cache des badges : c'est la seule façon
+ * que les deux écrans disent la même chose.
+ */
+const ANNONCES_SQL = `
+  SELECT e.first_name, e.last_name,
+         COALESCE(e.badgeuse_optin_festif, false) AS optin,
+         %REFUS% AS refus,
+         (e.birth_date IS NOT NULL AND to_char(e.birth_date, 'MM-DD') = $2) AS anniversaire,
+         CASE
+           WHEN e.seniority_date IS NOT NULL
+                AND to_char(e.seniority_date, 'MM-DD') = $2
+                AND EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int >= 1
+           THEN EXTRACT(YEAR FROM age($1::date, e.seniority_date))::int
+         END AS annees
+  FROM employees e
+  WHERE COALESCE(e.is_active, true) = true
+    AND EXISTS (
+      SELECT 1 FROM badgeuse_badges b
+      WHERE b.employee_id = e.id AND b.statut = 'actif'
+    )`;
+
+async function buildAnnonces(jourParis, params) {
+  const jourMois = jourParis.slice(5);
+  let r;
+  try {
+    r = await pool.query(ANNONCES_SQL.replace('%REFUS%', 'COALESCE(e.badgeuse_refus_festif, false)'),
+                         [jourParis, jourMois]);
+  } catch (err) {
+    // Base pas encore migrée (colonne d'opposition absente) : on continue SANS
+    // opposition connue plutôt que de faire disparaître l'écran. Le repli est
+    // sûr dans ce sens-là — personne n'a pu s'opposer sur une base où la
+    // colonne n'existe pas encore.
+    if (err.code !== '42703') throw err;
+    console.warn('[BADGEUSE-DEVICE] Annonces servies sans le drapeau d\'opposition (base non migrée) — exécutez init-db');
+    r = await pool.query(ANNONCES_SQL.replace('%REFUS%', 'false'), [jourParis, jourMois]);
+  }
+
+  const accordPrealable = (params || {}).festif_accord_prealable === true;
   const annonces = [];
   for (const row of r.rows) {
+    if (!festifAutorise(row, accordPrealable)) continue;
     const prenom = row.first_name || '';
     const initiale = String(row.last_name || '').trim().charAt(0).toUpperCase() || '';
     const annees = parseInt(row.annees, 10);
@@ -1222,13 +1285,19 @@ async function buildMeteo(siteId, params) {
  * poste la télécharge par l'API device et la sert depuis son cache local — il
  * ne contacte jamais le site de presse (ADR-0004 §6, ADR-0006).
  */
-async function buildPresse(limite) {
+async function buildPresse(limite, portee) {
+  // `toutes` = aucun filtre (un seul écran pour les deux portées) ; sinon on
+  // borne à la portée demandée. Le filtre est en SQL et non en JS : trier
+  // après coup ferait remonter 8 articles nationaux pour n'en garder aucun le
+  // jour où le fil local est le seul alimenté.
+  const filtree = portee === 'nationale' || portee === 'locale';
   const r = await pool.query(
     `SELECT id, source, flux, titre, chapo, publie_le, media_fichier, media_sha256, media_type
      FROM badgeuse_presse_articles
+     WHERE ($2::text IS NULL OR COALESCE(portee, 'nationale') = $2::text)
      ORDER BY publie_le DESC NULLS LAST, id DESC
      LIMIT $1`,
-    [limite]
+    [limite, filtree ? portee : null]
   );
   return r.rows.map((x) => ({
     article: {
@@ -1352,7 +1421,7 @@ async function construirePlaylist(siteId) {
     try {
       if (x.type === 'annonces') {
         if (params.festif_actif === false) continue;
-        const annonces = await buildAnnonces(jourParis);
+        const annonces = await buildAnnonces(jourParis, params);
         if (annonces.length === 0) continue;
         elements.push({ ...base, annonces });
       } else if (x.type === 'actus') {
@@ -1391,7 +1460,12 @@ async function construirePlaylist(siteId) {
         // ni le poste ni l'interface ne s'en servent comme clé (la playlist
         // est une séquence), et c'est ce qui permet de retrouver le réglage
         // d'origine d'un écran.
-        const articles = await buildPresse(nbConfig(config, 'nb_articles', 3, 8));
+        // PORTÉE par défaut « nationale » et non « toutes » : un écran de
+        // presse créé avant l'addendum ADR-0006 doit continuer d'afficher
+        // exactement ce qu'il affichait, sans se mettre à mélanger les fils
+        // locaux le jour où l'exploitant en configure un.
+        const articles = await buildPresse(nbConfig(config, 'nb_articles', 3, 8),
+                                           porteeConfig(config));
         if (articles.length === 0) continue;
         for (const a of articles) {
           elements.push({ ...base, ...(a.media || {}), article: a.article });
@@ -1565,3 +1639,6 @@ module.exports = router;
 module.exports.construirePlaylist = construirePlaylist;
 module.exports.resoudreMediaRef = resoudreMediaRef;
 module.exports.vakDuJour = vakDuJour;
+// Règle d'affichage festif — exportée pour que l'écran de gestion des badges
+// annonce EXACTEMENT ce que le poste fera, sans la recopier.
+module.exports.festifAutorise = festifAutorise;

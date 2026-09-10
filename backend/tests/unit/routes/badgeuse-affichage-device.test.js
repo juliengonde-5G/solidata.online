@@ -77,7 +77,7 @@ function installMocks({
     if (/SELECT key, value FROM settings/.test(s)) {
       return Promise.resolve({ rows: Object.entries(settings).map(([key, value]) => ({ key, value })) });
     }
-    if (/FROM badgeuse_badges b/.test(s)) return Promise.resolve({ rows: badges });
+    if (/FROM badgeuse_badges b\s+JOIN employees e/.test(s)) return Promise.resolve({ rows: badges });
     if (/FROM badgeuse_contenus\b/.test(s) && /SELECT fichier/.test(s)) {
       return Promise.resolve({ rows: contenuFichier === undefined ? [] : [{ fichier: contenuFichier }] });
     }
@@ -111,7 +111,7 @@ const get = (p, key = DEVICE_KEY, headers = {}) => {
 /** Un badge, avec ses drapeaux tels que SQL les rendrait. */
 const badge = (o = {}) => ({
   uid_hmac: UID, employee_id: 7, first_name: 'Karim', last_name: 'Benali',
-  optin: false, anniversaire: false, anniversaire_annees: null, premier_jour: false,
+  optin: false, refus: false, anniversaire: false, anniversaire_annees: null, premier_jour: false,
   ...o,
 });
 
@@ -119,10 +119,29 @@ const badge = (o = {}) => ({
 // ADR-0004 §4 — drapeaux festifs : opt-in obligatoire, jamais de date
 // ═══════════════════════════════════════════════════════════════════════════
 describe('GET /badges — drapeaux festifs (ADR-0004 §4)', () => {
-  test('SANS opt-in, un anniversaire du jour ne produit AUCUN drapeau', async () => {
-    // Le salarié fête bien son anniversaire (SQL le dit) mais n'a pas consenti :
-    // l'écran n'en saura rien.
+  // ADDENDUM DU 10/09/2026 : l'affichage devient le DÉFAUT, l'opposition la
+  // seule barrière. Ces trois tests remplacent l'ancien « sans opt-in, aucun
+  // drapeau » — ils décrivent la règle voulue par la Direction, pas celle
+  // qu'on avait.
+  test('SANS réponse du salarié, l\'anniversaire est affiché (défaut)', async () => {
     installMocks({ badges: [badge({ optin: false, anniversaire: true, anniversaire_annees: 3 })] });
+    const r = await get(`${PATH}/badges`);
+    expect(r.body.badges[0].anniversaire).toBe(true);
+    expect(r.body.badges[0].anniversaire_entreprise_annees).toBe(3);
+  });
+
+  test('OPPOSITION du salarié : aucun drapeau, même avec un accord antérieur', async () => {
+    installMocks({ badges: [badge({ optin: true, refus: true, anniversaire: true, anniversaire_annees: 3 })] });
+    const r = await get(`${PATH}/badges`);
+    expect(r.body.badges[0].anniversaire).toBe(false);
+    expect(r.body.badges[0].anniversaire_entreprise_annees).toBeNull();
+  });
+
+  test('accord préalable EXIGÉ : sans accord, aucun drapeau (règle d\'avant l\'addendum)', async () => {
+    installMocks({
+      settings: { 'badgeuse.festif_accord_prealable': 'true' },
+      badges: [badge({ optin: false, anniversaire: true, anniversaire_annees: 3 })],
+    });
     const r = await get(`${PATH}/badges`);
     expect(r.body.badges[0].anniversaire).toBe(false);
     expect(r.body.badges[0].anniversaire_entreprise_annees).toBeNull();
@@ -332,12 +351,41 @@ describe('GET /playlist — générateurs', () => {
       expect(annonces[1].annees).toBe(2);
     });
 
-    test('seuls les salariés CONSENTANTS et actifs sont interrogés', async () => {
+    test('seuls les salariés ACTIFS et PORTEURS D\'UN BADGE ACTIF sont interrogés', async () => {
       installMocks({ contenus: [contenu({ type: 'annonces' })] });
       await get(`${PATH}/playlist`);
-      const sql = mockQuery.mock.calls.map((c) => String(c[0])).find((x) => /FROM employees e/.test(x));
-      expect(sql).toMatch(/badgeuse_optin_festif, false\) = true/);
+      const sql = mockQuery.mock.calls.map((c) => String(c[0]))
+        .find((x) => /FROM employees e/.test(x) && !/JOIN employees e/.test(x));
       expect(sql).toMatch(/is_active, true\) = true/);
+      // L'écran est celui de l'atelier : quelqu'un qui n'y badge pas n'y est
+      // pas annoncé (demande de la Direction du 10/09/2026).
+      expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM badgeuse_badges b/);
+      expect(sql).toMatch(/b\.statut = 'actif'/);
+    });
+
+    test('un salarié OPPOSÉ n\'est pas annoncé, un salarié sans réponse l\'est', async () => {
+      installMocks({
+        contenus: [contenu({ type: 'annonces' })],
+        employesFestifs: [
+          { first_name: 'Sonia', last_name: 'Dupont', optin: false, refus: false, anniversaire: true, annees: null },
+          { first_name: 'Karim', last_name: 'Benali', optin: true, refus: true, anniversaire: true, annees: null },
+        ],
+      });
+      const annonces = (await get(`${PATH}/playlist`)).body.elements[0].annonces;
+      expect(annonces.map((a) => a.prenom)).toEqual(['Sonia']);
+    });
+
+    test('accord préalable EXIGÉ : seul le salarié consentant est annoncé', async () => {
+      installMocks({
+        settings: { 'badgeuse.festif_accord_prealable': 'true' },
+        contenus: [contenu({ type: 'annonces' })],
+        employesFestifs: [
+          { first_name: 'Sonia', last_name: 'Dupont', optin: false, refus: false, anniversaire: true, annees: null },
+          { first_name: 'Karim', last_name: 'Benali', optin: true, refus: false, anniversaire: true, annees: null },
+        ],
+      });
+      const annonces = (await get(`${PATH}/playlist`)).body.elements[0].annonces;
+      expect(annonces.map((a) => a.prenom)).toEqual(['Karim']);
     });
 
     test('`festif_actif=false` supprime le générateur d\'annonces', async () => {

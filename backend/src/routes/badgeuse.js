@@ -468,6 +468,7 @@ router.get('/badges', READ, [
   q('employee_id').optional().isInt(),
 ], validate, async (req, res) => {
   try {
+    const params = await readBadgeuseParams();
     const clauses = [];
     const vals = [];
     if (req.query.statut) { vals.push(req.query.statut); clauses.push(`b.statut = $${vals.length}`); }
@@ -478,7 +479,9 @@ router.get('/badges', READ, [
       `SELECT b.id, b.employee_id, b.uid_hmac, b.statut, b.attribue_le, b.restitue_le,
               b.commentaire, b.created_at, e.first_name, e.last_name, e.malibou_id,
               COALESCE(e.badgeuse_optin_festif, false) AS badgeuse_optin_festif,
-              e.badgeuse_optin_festif_le
+              e.badgeuse_optin_festif_le,
+              COALESCE(e.badgeuse_refus_festif, false) AS badgeuse_refus_festif,
+              e.badgeuse_refus_festif_le
        FROM badgeuse_badges b
        JOIN employees e ON e.id = b.employee_id
        ${where}
@@ -502,12 +505,36 @@ router.get('/badges', READ, [
       // ne prouve rien.
       badgeuse_optin_festif: x.badgeuse_optin_festif === true,
       badgeuse_optin_festif_le: x.badgeuse_optin_festif_le || null,
+      // Opposition explicite (addendum du 10/09/2026). Elle est rendue À CÔTÉ
+      // de l'accord et non à sa place : l'écran doit pouvoir distinguer
+      // « a refusé » de « n'a jamais été interrogé ».
+      badgeuse_refus_festif: x.badgeuse_refus_festif === true,
+      badgeuse_refus_festif_le: x.badgeuse_refus_festif_le || null,
+      // État EFFECTIF, calculé par la MÊME règle que le poste : sans lui,
+      // l'écran de gestion afficherait deux cases à cocher en laissant
+      // l'encadrant deviner ce qui sortira réellement sur la dalle.
+      festif_autorise: festifAutorisePour(x, params),
     })));
   } catch (err) {
     console.error('[BADGEUSE] Erreur liste badges :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
+/**
+ * L'affichage festif est-il autorisé POUR CETTE PERSONNE ? Délègue à la règle
+ * du poste (`badgeuse-device.festifAutorise`) — jamais une seconde condition
+ * écrite ici, qui finirait par contredire la dalle de l'atelier.
+ * NB : « autorisé » n'est pas « affiché » — l'écran exige EN PLUS un badge
+ * actif et un anniversaire qui tombe aujourd'hui.
+ */
+function festifAutorisePour(row, params) {
+  if (params.festif_actif === false) return false;
+  return deviceApi.festifAutorise(
+    { optin: row.badgeuse_optin_festif === true, refus: row.badgeuse_refus_festif === true },
+    params.festif_accord_prealable
+  );
+}
 
 router.post('/badges', WRITE, [
   body('employee_id').isInt().withMessage('employee_id requis'),
@@ -1996,24 +2023,45 @@ router.get('/ecran-direct', AFFICHAGE_READ, [
 // transaction (même exigence que les actes qui font foi : validation RH,
 // rattachement d'orphelin) : sans trace datée, un consentement ne se prouve pas.
 // ═══════════════════════════════════════════════════════════════════════════
+const DECISIONS_FESTIVES = ['accord', 'opposition', 'sans_reponse'];
+
 router.post('/salaries/:employeeId/optin-festif', WRITE, [
   param('employeeId').isInt(),
-  body('actif').isBoolean().withMessage('actif (booléen) requis'),
+  body('decision').optional().isIn(DECISIONS_FESTIVES)
+    .withMessage('decision : accord, opposition ou sans_reponse'),
+  body('actif').optional().isBoolean(),
 ], validate, async (req, res) => {
   const client = await pool.connect();
   try {
     const employeeId = parseInt(req.params.employeeId, 10);
-    const actif = !!req.body.actif;
+    // TROIS ÉTATS, et pas deux booléens indépendants : « accord » et
+    // « opposition » s'excluent, et « sans réponse » est un état à part entière
+    // (c'est celui de tout le fichier du personnel aujourd'hui). Le payload
+    // historique `{actif:true|false}` reste accepté — il vaut accord / retrait
+    // d'accord, jamais opposition : un retrait n'est pas un refus.
+    let decision = req.body.decision;
+    if (!decision) {
+      if (typeof req.body.actif !== 'boolean') {
+        return res.status(400).json({ error: 'decision (accord, opposition, sans_reponse) requise' });
+      }
+      decision = req.body.actif ? 'accord' : 'sans_reponse';
+    }
+    const accord = decision === 'accord';
+    const opposition = decision === 'opposition';
 
     await client.query('BEGIN');
     const upd = await client.query(
       `UPDATE employees
        SET badgeuse_optin_festif = $2,
            badgeuse_optin_festif_le = CASE WHEN $2 THEN NOW() ELSE NULL END,
-           badgeuse_optin_festif_par = CASE WHEN $2 THEN $3::int ELSE NULL END
+           badgeuse_optin_festif_par = CASE WHEN $2 THEN $4::int ELSE NULL END,
+           badgeuse_refus_festif = $3,
+           badgeuse_refus_festif_le = CASE WHEN $3 THEN NOW() ELSE NULL END,
+           badgeuse_refus_festif_par = CASE WHEN $3 THEN $4::int ELSE NULL END
        WHERE id = $1
-       RETURNING id, badgeuse_optin_festif, badgeuse_optin_festif_le`,
-      [employeeId, actif, req.user.id]
+       RETURNING id, badgeuse_optin_festif, badgeuse_optin_festif_le,
+                 badgeuse_refus_festif, badgeuse_refus_festif_le`,
+      [employeeId, accord, opposition, req.user.id]
     );
     if (upd.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -2024,16 +2072,23 @@ router.post('/salaries/:employeeId/optin-festif', WRITE, [
       [req.user.id, 'BADGEUSE_OPTIN_FESTIF', 'employees', employeeId,
         JSON.stringify({
           employee_id: employeeId,
-          consentement: actif ? 'recueilli' : 'retire',
+          decision,
+          consentement: accord ? 'recueilli' : 'retire',
           finalite: 'affichage des anniversaires sur l\'écran du poste de pointage',
           requested_by: req.user.id,
         })]
     );
     await client.query('COMMIT');
+    const params = await readBadgeuseParams();
+    const ligne = upd.rows[0];
     res.json({
       employee_id: employeeId,
-      badgeuse_optin_festif: upd.rows[0].badgeuse_optin_festif,
-      badgeuse_optin_festif_le: upd.rows[0].badgeuse_optin_festif_le,
+      decision,
+      badgeuse_optin_festif: ligne.badgeuse_optin_festif,
+      badgeuse_optin_festif_le: ligne.badgeuse_optin_festif_le,
+      badgeuse_refus_festif: ligne.badgeuse_refus_festif,
+      badgeuse_refus_festif_le: ligne.badgeuse_refus_festif_le,
+      festif_autorise: festifAutorisePour(ligne, params),
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
@@ -2041,6 +2096,154 @@ router.post('/salaries/:employeeId/optin-festif', WRITE, [
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
     client.release();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRESSE — flux d'actualité NATIONALE et LOCALE (ADR-0006 + addendum 10/09/2026)
+//
+// POURQUOI CES ROUTES EXISTENT : les flux étaient jusqu'ici modifiables
+// UNIQUEMENT en base, par un ADMIN, à la main. Une adresse de flux RSS change,
+// ferme, ou n'est tout simplement pas devinable — c'est écrit dans les défauts
+// du réglage lui-même. Demander à la chargée de communication de faire éditer
+// une ligne SQL pour ajouter le journal local revient à ne pas livrer la
+// fonction. Elles sont donc ouvertes à la surface AFFICHAGE (rôle
+// COMMUNICATION compris) : ce sont des adresses publiques de journaux, aucun
+// secret n'y transite — à la différence du jeton Meta, qui reste ADMIN.
+//
+// LE SERVEUR RESTE LE SEUL À SORTIR : les gardes anti-SSRF de
+// services/badgeuse-social.js (https strict, refus des adresses internes,
+// type de contenu et taille bornés) s'appliquent à l'essai comme à la
+// synchronisation. Le poste, lui, ne joint jamais un site de presse.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Portée effective d'un flux configuré (absente ⇒ nationale). */
+const porteeDeFlux = (f) => (String((f && f.portee) || '') === 'locale' ? 'locale' : 'nationale');
+
+/** État de la presse : ce qui est configuré, et ce qui est RÉELLEMENT en base. */
+async function presseStatus(res) {
+  const params = await readBadgeuseParams();
+  const flux = Array.isArray(params.presse_flux) ? params.presse_flux : [];
+
+  // Compteurs par portée + fraîcheur : sans eux, un exploitant qui vient de
+  // configurer un flux local n'a AUCUN moyen de savoir si quelque chose est
+  // arrivé — et attendrait devant un écran vide sans comprendre.
+  let parPortee = [];
+  try {
+    const r = await pool.query(
+      `SELECT COALESCE(portee, 'nationale') AS portee, COUNT(*)::int AS total,
+              MAX(publie_le) AS dernier
+       FROM badgeuse_presse_articles GROUP BY 1 ORDER BY 1`
+    );
+    parPortee = r.rows.map((x) => ({
+      portee: x.portee, articles: x.total, dernier: x.dernier || null,
+    }));
+  } catch (err) {
+    // Base non migrée : on le DIT plutôt que d'afficher « 0 article », qui se
+    // lirait comme « les flux ne rapportent rien ».
+    if (err.code !== '42703' && err.code !== '42P01') throw err;
+    parPortee = null;
+  }
+
+  res.json({
+    sync_actif: params.presse_sync_actif === true,
+    articles_par_flux: params.presse_articles_par_flux,
+    vignettes: params.presse_vignettes === true,
+    video_autorisee: params.presse_video_autorisee === true,
+    retention_jours: params.retention_presse_jours,
+    flux: flux.map((f) => ({
+      libelle: f.libelle || null,
+      source: f.source || null,
+      url: f.url || null,
+      actif: f.actif === true,
+      portee: porteeDeFlux(f),
+    })),
+    par_portee: parPortee,
+  });
+}
+
+router.get('/presse/status', AFFICHAGE_READ, async (req, res) => {
+  try {
+    await presseStatus(res);
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur état presse :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * PUT /presse/config — flux suivis et réglages de rapatriement.
+ * La validation de fond (https, nombre de flux, portée connue) est celle de
+ * `validateAffichageSettings` : une seule grille de contrôle, partagée avec
+ * l'écran de paramètres.
+ */
+router.put('/presse/config', AFFICHAGE_WRITE, [
+  body('flux').optional().isArray({ max: 5 }),
+  body('sync_actif').optional().isBoolean(),
+  body('articles_par_flux').optional().isInt({ min: 1, max: 20 }),
+  body('vignettes').optional().isBoolean(),
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body || {};
+    const aEcrire = {};
+    if (Array.isArray(b.flux)) {
+      aEcrire['badgeuse.presse_flux'] = b.flux.map((f) => ({
+        libelle: String((f && f.libelle) || '').slice(0, 120),
+        source: String((f && f.source) || '').slice(0, 120),
+        url: String((f && f.url) || '').trim(),
+        actif: !!(f && f.actif),
+        portee: porteeDeFlux(f),
+      }));
+    }
+    if (typeof b.sync_actif === 'boolean') aEcrire['badgeuse.presse_sync_actif'] = b.sync_actif;
+    if (b.articles_par_flux !== undefined) aEcrire['badgeuse.presse_articles_par_flux'] = parseInt(b.articles_par_flux, 10);
+    if (typeof b.vignettes === 'boolean') aEcrire['badgeuse.presse_vignettes'] = b.vignettes;
+
+    // Rend la PREMIÈRE erreur et refuse le lot entier : un paramétrage à
+    // moitié écrit laisserait des flux valides à côté d'un flux illisible.
+    const erreur = validateAffichageSettings(Object.entries(aEcrire));
+    if (erreur) return res.status(400).json({ error: erreur });
+
+    await client.query('BEGIN');
+    for (const [cle, valeur] of Object.entries(aEcrire)) {
+      await writeSetting(cle, valeur, client);
+    }
+    await client.query('COMMIT');
+    await presseStatus(res);
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    console.error('[BADGEUSE] Erreur configuration presse :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /presse/tester — essai d'un flux SANS RIEN ÉCRIRE.
+ * Rend le nombre d'articles lus et le titre du premier : c'est la seule preuve
+ * qui vaille qu'on a attrapé le bon fil. Un flux qui refuse est une RÉPONSE
+ * (200 avec `ok:false` et le motif), pas une panne du serveur.
+ */
+router.post('/presse/tester', AFFICHAGE_WRITE, [
+  body('url').isString().isLength({ min: 8, max: 600 }),
+], validate, async (req, res) => {
+  try {
+    res.json(await media.testerFluxPresse(String(req.body.url).trim()));
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur essai de flux :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/** POST /presse/sync — rapatriement à la demande (pas d'attente du job). */
+router.post('/presse/sync', AFFICHAGE_WRITE, async (req, res) => {
+  try {
+    res.json(await media.syncPresseArticles());
+  } catch (err) {
+    console.error('[BADGEUSE] Erreur synchronisation presse :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

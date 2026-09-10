@@ -176,9 +176,17 @@ function ContenuForm({ open, onClose, onSaved, editing }) {
             {configFields.map((f) => (
               <div key={f.key}>
                 <label className="block text-xs font-medium text-slate-600 mb-1">{f.label}</label>
-                <input type="number" min={f.min} max={f.max} value={form.config[f.key] ?? f.default}
-                  onChange={(e) => setConfigField(f.key, parseInt(e.target.value, 10) || f.default)}
-                  className="input-modern py-2 text-sm w-full" />
+                {f.options ? (
+                  <select value={form.config[f.key] ?? f.default}
+                    onChange={(e) => setConfigField(f.key, e.target.value)}
+                    className="input-modern py-2 text-sm w-full">
+                    {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                ) : (
+                  <input type="number" min={f.min} max={f.max} value={form.config[f.key] ?? f.default}
+                    onChange={(e) => setConfigField(f.key, parseInt(e.target.value, 10) || f.default)}
+                    className="input-modern py-2 text-sm w-full" />
+                )}
               </div>
             ))}
           </div>
