@@ -125,12 +125,18 @@ function PageFallback() {
   );
 }
 
-function ProtectedRoute({ children, roles }) {
-  const { user, loading } = useAuth();
+// `module` : clé d'habilitation de la matrice /admin/permissions. Sans elle, un
+// module décoché ne disparaissait que de la barre latérale — l'URL tapée à la
+// main rouvrait l'écran. Le refus qui FAIT FOI reste côté serveur (les routes
+// d'API du module sont gardées) ; ceci évite d'afficher une page qui se
+// remplirait de 403.
+function ProtectedRoute({ children, roles, module }) {
+  const { user, loading, canAccessModule } = useAuth();
   if (loading) return <PageFallback />;
   if (!user) return <Navigate to="/login" />;
   // Un rôle personnalisé est autorisé si son rôle de base (base_role) l'est.
   if (roles && !roles.includes(user.role) && !roles.includes(user.base_role)) return <Navigate to="/" />;
+  if (module && !canAccessModule(module)) return <Navigate to="/" />;
   return children;
 }
 
@@ -234,7 +240,7 @@ function App() {
               <Route path="/tri/configurateur" element={<ProtectedRoute roles={['ADMIN']}><ChaineConfigurateur /></ProtectedRoute>} />
               <Route path="/stock" element={<ProtectedRoute roles={['ADMIN']}><Stock /></ProtectedRoute>} />
               <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN']}><ProduitsFinis /></ProtectedRoute>} />
-              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']}><EtiquetteGenerer /></ProtectedRoute>} />
+              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']} module="etiquettes"><EtiquetteGenerer /></ProtectedRoute>} />
               <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']}><SortieCartons /></ProtectedRoute>} />
               <Route path="/admin/catalogue" element={<ProtectedRoute roles={['ADMIN']}><AdminCatalogue /></ProtectedRoute>} />
               <Route path="/admin/refashion-config" element={<ProtectedRoute roles={['ADMIN']}><AdminRefashionConfig /></ProtectedRoute>} />

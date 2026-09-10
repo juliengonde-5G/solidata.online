@@ -1961,6 +1961,23 @@ async function executerInitialisation() {
       );
     }
 
+    // 2.53.0 — catégorie d'étiquette « Upcycling » (demande client du 10/09/2026).
+    // Elle se passe de genre / saison / gamme / produit : l'opérateur la choisit
+    // et pèse (cf. backend/src/utils/etiquettes-categories.js, qui porte la
+    // règle et la sert à l'écran).
+    //
+    // ON CONFLICT DO NOTHING, et JAMAIS DO UPDATE is_active = true : à la
+    // différence du bloc « gammes » ci-dessus — qui NORMALISE un référentiel
+    // figé —, il s'agit ici d'AJOUTER une valeur. Un exploitant qui la
+    // désactive depuis Admin → Catalogue doit la voir rester désactivée ;
+    // la remettre à chaque démarrage serait la doctrine inverse de celle du
+    // projet (un élément retiré volontairement ne revient jamais).
+    await client.query(
+      `INSERT INTO ref_dimensions (type, valeur, ordre) VALUES ('categorie_eco_org', $1, $2)
+       ON CONFLICT (type, valeur) DO NOTHING`,
+      ['Upcycling', 50]
+    );
+
     // V2.2 — la table `associations` du référentiel fait doublon avec
     // `association_points` (module collecte). Suppression de la table inutilisée.
     await client.query(`DROP TABLE IF EXISTS associations CASCADE`);

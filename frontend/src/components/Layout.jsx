@@ -122,7 +122,10 @@ const NAV_TREE = [
       { label: 'Chaîne de tri', path: '/chaine-tri', icon: ArrowUpDown, roles: ['ADMIN'] },
       { label: 'Configurateur de chaîne', path: '/tri/configurateur', icon: Workflow, roles: ['ADMIN'] },
       { label: 'Saisie exécution', path: '/tri/execution', icon: ScanLine, roles: ['ADMIN'] },
-      { label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'COLLABORATEUR'] },
+      // `id` porté par une FEUILLE (et non une section) : le filtre récursif
+      // honore l'id de n'importe quel nœud, ce qui donne aux étiquettes leur
+      // habilitation propre sans détacher l'entrée de la section Tri.
+      { id: 'etiquettes', label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'COLLABORATEUR'] },
       { label: 'Référentiel tri', path: '/admin/tri', icon: ListChecks, roles: ['ADMIN'] },
     ],
   },

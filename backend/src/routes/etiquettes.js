@@ -2,9 +2,36 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireModule } = require('../middleware/module-access');
+const { CATEGORIES_SANS_DECLINAISON, sansDeclinaison } = require('../utils/etiquettes-categories');
 const { formatId, parseId } = require('../utils/base24');
 
 router.use(authenticate);
+
+// ══════════════════════════════════════════
+// HABILITATION « ÉTIQUETTES » (10/09/2026, demande client)
+// ──────────────────────────────────────────
+// La clé 'etiquettes' de la matrice /admin/permissions gouverne l'écran
+// /tri/etiquettes. `etiquettesHabilitees` est posé sur les CINQ routes que cet
+// écran appelle — et sur elles seules :
+//   GET /postes, /options, /dimensions, /lots-actifs   POST /generer
+//
+// CE QUI N'EST DÉLIBÉRÉMENT PAS GARDÉ, et pourquoi :
+//   • /sortie-scan, /sortie-session, /commandes-actives — c'est l'écran
+//     « Sortie cartons » (module Inventaire), un autre geste métier : scanner
+//     un carton pour le sortir du stock n'est pas fabriquer une étiquette.
+//     Retirer les étiquettes à quelqu'un ne doit pas lui couper la sortie de
+//     stock au passage.
+//   • /admin/produits, /admin/dimensions — réservées à l'ADMIN, qui n'est
+//     jamais restreint par la matrice (anti-lockout).
+//
+// La garde vient EN PLUS d'`authorize` : le rôle dit qui peut voir l'écran,
+// l'habilitation dit si ce rôle-là l'a encore. Les GET sans `authorize` sont
+// ouverts à tout compte authentifié (ils alimentent aussi Produits Finis, écran
+// ADMIN) : c'est justement pour ceux-là que l'habilitation devient le seul
+// filtre, d'où sa présence sur les cinq.
+// ══════════════════════════════════════════
+const etiquettesHabilitees = requireModule('etiquettes');
 
 const BTQ_ACTIVE_STATUTS = ['envoyee', 'ajustee', 'en_preparation'];
 const VAK_ACTIVE_STATUTS = ['confirmee', 'en_preparation', 'chargee'];
@@ -44,22 +71,31 @@ async function generateProduitFini(client, {
     linkedBatchId = batch.rows[0].id;
   }
 
-  let catRow = await client.query(
-    `SELECT id FROM produits_catalogue
-     WHERE nom = $1 AND categorie_eco_org = $2 AND genre = $3 AND saison = $4 AND gamme = $5
-     LIMIT 1`,
-    [produit, categorie_eco_org, genre, saison, gamme]
-  );
-  let catalogue_id;
-  if (catRow.rowCount > 0) {
-    catalogue_id = catRow.rows[0].id;
-  } else {
-    const ins = await client.query(
-      `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
-       VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
+  // Catégorie SANS DÉCLINAISON (upcycling) : aucune ligne de catalogue n'est
+  // cherchée ni créée. `produits_catalogue` est indexé sur
+  // (nom, categorie, genre, saison, gamme) et exige nom + gamme : il ne sait pas
+  // représenter « pas de produit ». Chercher avec des NULL ne trouverait jamais
+  // rien (NULL = NULL est faux en SQL) et créerait donc une ligne par carton ;
+  // `produits_finis.catalogue_id` étant nullable, on le laisse vide.
+  const sansDecl = sansDeclinaison(categorie_eco_org);
+  let catalogue_id = null;
+  if (!sansDecl) {
+    let catRow = await client.query(
+      `SELECT id FROM produits_catalogue
+       WHERE nom = $1 AND categorie_eco_org = $2 AND genre = $3 AND saison = $4 AND gamme = $5
+       LIMIT 1`,
       [produit, categorie_eco_org, genre, saison, gamme]
     );
-    catalogue_id = ins.rows[0].id;
+    if (catRow.rowCount > 0) {
+      catalogue_id = catRow.rows[0].id;
+    } else {
+      const ins = await client.query(
+        `INSERT INTO produits_catalogue (nom, categorie_eco_org, genre, saison, gamme, is_active)
+         VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
+        [produit, categorie_eco_org, genre, saison, gamme]
+      );
+      catalogue_id = ins.rows[0].id;
+    }
   }
 
   const newCounter = poste.rows[0].compteur_actuel + 1;
@@ -77,7 +113,11 @@ async function generateProduitFini(client, {
         poids_kg, date_fabrication, poste_etiquetage_id, status, batch_id, created_by, source)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'en_stock', $11, $12, $13)
      RETURNING id, code_barre, poids_kg, date_fabrication, produit, categorie_eco_org, genre, saison, gamme, batch_id, source`,
-    [code_barre, catalogue_id, produit, categorie_eco_org, genre, saison, gamme,
+    [code_barre, catalogue_id,
+      // Sans déclinaison : NULL (« sans objet ») plutôt qu'une valeur de
+      // remplissage — cf. utils/etiquettes-categories.js.
+      sansDecl ? null : produit, categorie_eco_org,
+      sansDecl ? null : genre, sansDecl ? null : saison, sansDecl ? null : gamme,
       Number(poids_kg), dateFab, poste_id, linkedBatchId, created_by, source]
   );
 
@@ -93,7 +133,7 @@ async function generateProduitFini(client, {
   };
 }
 
-router.get('/postes', async (req, res) => {
+router.get('/postes', etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, numero_poste, nom, compteur_actuel, is_active, derniere_etiquette_at
@@ -105,7 +145,7 @@ router.get('/postes', async (req, res) => {
   }
 });
 
-router.get('/options', async (req, res) => {
+router.get('/options', etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT MIN(id) AS id, nom, categorie_eco_org
@@ -122,7 +162,7 @@ router.get('/options', async (req, res) => {
 // Lots ouverts (en_attente/en_cours) pour le sélecteur d'étiquetage — exposé ici
 // (routeur étiquettes, accessible COLLABORATEUR) plutôt que via /tri/batches
 // (réservé ADMIN/MANAGER) pour que l'opérateur du poste puisse rattacher le lot.
-router.get('/lots-actifs', authorize('ADMIN', 'COLLABORATEUR'), async (req, res) => {
+router.get('/lots-actifs', authorize('ADMIN', 'COLLABORATEUR'), etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT bt.id, bt.code, bt.status, ct.nom AS chaine_nom
@@ -137,7 +177,7 @@ router.get('/lots-actifs', authorize('ADMIN', 'COLLABORATEUR'), async (req, res)
   }
 });
 
-router.get('/dimensions', async (req, res) => {
+router.get('/dimensions', etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, type, valeur, ordre FROM ref_dimensions
@@ -145,16 +185,29 @@ router.get('/dimensions', async (req, res) => {
     );
     const out = { categorie_eco_org: [], genre: [], saison: [], gamme: [] };
     for (const r of rows) if (out[r.type]) out[r.type].push(r.valeur);
+    // Catégories qui se passent de genre/saison/gamme/produit (upcycling) :
+    // servies au front pour qu'il n'ait AUCUNE liste à recopier — et bornées à
+    // celles réellement présentes et actives au référentiel, sinon l'écran
+    // porterait un comportement particulier pour une catégorie qu'il n'affiche
+    // même pas.
+    out.categories_sans_declinaison = out.categorie_eco_org.filter((c) => sansDeclinaison(c));
     res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/generer', authorize('ADMIN', 'COLLABORATEUR'), async (req, res) => {
+router.post('/generer', authorize('ADMIN', 'COLLABORATEUR'), etiquettesHabilitees, async (req, res) => {
   const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg, batch_id } = req.body || {};
-  if (!poste_id || !produit || !categorie_eco_org || !genre || !saison || !gamme || !poids_kg || Number(poids_kg) <= 0) {
-    return res.status(400).json({ error: 'poste_id, produit, categorie_eco_org, genre, saison, gamme et poids_kg (>0) requis' });
+  if (!poste_id || !categorie_eco_org || !poids_kg || Number(poids_kg) <= 0) {
+    return res.status(400).json({ error: 'poste_id, categorie_eco_org et poids_kg (>0) requis' });
+  }
+  // C'est le SERVEUR qui décide si une catégorie porte des déclinaisons, jamais
+  // la requête : sans quoi il suffirait de ne pas les envoyer pour s'en
+  // dispenser sur n'importe quelle catégorie.
+  const sansDecl = sansDeclinaison(categorie_eco_org);
+  if (!sansDecl && (!produit || !genre || !saison || !gamme)) {
+    return res.status(400).json({ error: 'produit, genre, saison et gamme requis pour cette catégorie' });
   }
 
   const client = await pool.connect();

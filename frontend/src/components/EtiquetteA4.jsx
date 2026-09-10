@@ -38,6 +38,13 @@ export default function EtiquetteA4({ data }) {
     ? new Date(data.date_fabrication).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     : '';
 
+  // Carton SANS DÉCLINAISON (upcycling) : ni produit, ni genre, ni saison, ni
+  // gamme. L'étiquette ne doit alors PAS imprimer trois cases vides et un badge
+  // noir sans texte — un champ vide sur un document se lit « donnée manquante »
+  // alors qu'ici il n'y a rien à déclarer. On retire les cases plutôt que de les
+  // remplir de tirets, et la catégorie occupe toute la largeur.
+  const sansDeclinaison = !data.gamme && !data.produit && !data.genre && !data.saison;
+
   return (
     <div id="etiquette-print-root" style={{ fontFamily: 'Arial, sans-serif', color: '#000' }}>
       <div style={{
@@ -48,40 +55,49 @@ export default function EtiquetteA4({ data }) {
         padding: '6mm',
         height: '270mm',
       }}>
-        <div style={{ fontSize: '52pt', fontWeight: 800, lineHeight: 1, alignSelf: 'start' }}>
+        <div style={{
+          fontSize: '52pt', fontWeight: 800, lineHeight: 1, alignSelf: 'start',
+          ...(sansDeclinaison ? { gridColumn: '1 / -1' } : {}),
+        }}>
           {data.categorie_eco_org}
         </div>
-        <div style={{
-          alignSelf: 'start',
-          textAlign: 'center',
-          fontSize: '36pt',
-          fontWeight: 800,
-          color: '#fff',
-          background: GAMME_COLORS[data.gamme] || '#1f2937',
-          borderRadius: '6mm',
-          padding: '6mm 4mm',
-        }}>
-          {data.gamme}
-        </div>
+        {!sansDeclinaison && (
+          <div style={{
+            alignSelf: 'start',
+            textAlign: 'center',
+            fontSize: '36pt',
+            fontWeight: 800,
+            color: '#fff',
+            background: GAMME_COLORS[data.gamme] || '#1f2937',
+            borderRadius: '6mm',
+            padding: '6mm 4mm',
+          }}>
+            {data.gamme}
+          </div>
+        )}
 
         <div style={{ gridColumn: '1 / -1', borderTop: '2px solid #000', marginTop: '4mm' }} />
 
         <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4mm', marginTop: '2mm' }}>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Produit</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.produit}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Genre</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.genre}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Saison</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.saison}</div>
-          </div>
-          <div>
+          {!sansDeclinaison && (
+            <>
+              <div>
+                <div style={{ fontSize: '14pt', color: '#444' }}>Produit</div>
+                <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.produit}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '14pt', color: '#444' }}>Genre</div>
+                <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.genre}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '14pt', color: '#444' }}>Saison</div>
+                <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.saison}</div>
+              </div>
+            </>
+          )}
+          <div style={sansDeclinaison ? { gridColumn: '1 / -1' } : undefined}>
             <div style={{ fontSize: '14pt', color: '#444' }}>Poids</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.poids_kg} kg</div>
+            <div style={{ fontSize: sansDeclinaison ? '44pt' : '28pt', fontWeight: 700 }}>{data.poids_kg} kg</div>
           </div>
         </div>
 

@@ -13,6 +13,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize, refreshCustomRoles, resolveBaseRole } = require('../middleware/auth');
+const { refreshModuleAccess } = require('../middleware/module-access');
 const { requireMfa } = require('../middleware/mfa');
 const { logActivity } = require('../middleware/activity-logger');
 
@@ -58,6 +59,19 @@ const MODULE_CATALOG = [
   { key: 'accueil', label: 'Accueil' },
   { key: 'operations', label: 'Opérations (Collecte / Logistique)' },
   { key: 'tri', label: 'Tri' },
+  // Étiquettes (demande client du 10/09/2026) : habilitation PROPRE, distincte
+  // de la section « Tri » qui la contient — retirer les étiquettes à un rôle ne
+  // doit pas lui retirer du même geste la feuille de production, la chaîne, le
+  // configurateur et le référentiel. Même mécanique que 'boutiques'/'vak' sous
+  // 'frip' : le filtre récursif de Layout.jsx honore l'id de n'importe quel
+  // nœud, donc 'tri' masque toute la section et 'etiquettes' cette seule entrée.
+  //
+  // C'est aussi la PREMIÈRE clé du catalogue à être appliquée CÔTÉ SERVEUR
+  // (middleware/module-access.js, posé sur les routes que sert l'écran) : ici,
+  // décocher retire l'accès et pas seulement le lien. Les autres clés gardent
+  // leur portée historique — masquage de la barre latérale — tant qu'on ne les
+  // a pas instrumentées une par une.
+  { key: 'etiquettes', label: 'Tri › Étiquettes' },
   // Lot 4 : Boutiques + Vente au Kilo regroupés dans la section de 1er niveau
   // « Frip » (Layout.jsx, sous Administration). 'frip' masque les deux sous-
   // branches d'un coup ; 'boutiques'/'vak' restent au catalogue pour restreindre
@@ -271,6 +285,10 @@ router.put('/matrix', authorize('ADMIN'), async (req, res) => {
       applied.push({ role: e.role, module_key: e.module_key, allowed: !!e.allowed });
     }
     await client.query('COMMIT');
+    // Prise en compte IMMÉDIATE par la garde serveur (middleware/module-access) :
+    // un module retiré doit fermer la porte tout de suite, pas au prochain
+    // rafraîchissement de son cache.
+    refreshModuleAccess();
     // Journalisation (item 3.C-7) : modification de la matrice d'habilitations.
     logActivity({
       userId: req.user.id, username: req.user.username, action: 'permissions_matrix_update',
