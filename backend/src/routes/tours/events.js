@@ -10,7 +10,7 @@ const { validate } = require('../../middleware/validate');
 // ══════════════════════════════════════════
 
 // GET /api/tours/events — Liste des événements locaux
-router.get('/events', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/events', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM evenements_locaux ORDER BY date_debut DESC'
@@ -26,7 +26,7 @@ router.get('/events', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // Événements locaux (brocantes, marchés…) : le responsable de collecte les
 // connaît mieux que l'administrateur — ouvert au MANAGER avec la lecture
 // (demande client 27/08/2026).
-router.post('/events', authorize('ADMIN', 'MANAGER'), [
+router.post('/events', authorize('ADMIN'), [
   body('nom').notEmpty().withMessage('Nom requis'),
   body('date_debut').notEmpty().withMessage('Date de début requise'),
   body('date_fin').notEmpty().withMessage('Date de fin requise'),
@@ -46,7 +46,7 @@ router.post('/events', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/tours/events/:id — Modifier un événement
-router.put('/events/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/events/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const { nom, type, date_debut, date_fin, latitude, longitude, adresse, commune, rayon_km, bonus_factor, notes, is_active } = req.body;
     const result = await pool.query(

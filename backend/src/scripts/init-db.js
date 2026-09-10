@@ -42,7 +42,7 @@ async function executerInitialisation() {
         username VARCHAR(100) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         email VARCHAR(255),
-        role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE')),
+        role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO')),
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         phone VARCHAR(20),
@@ -5665,6 +5665,38 @@ async function executerInitialisation() {
       console.warn('[INIT-DB] Migration users_role_check:', e.message);
     }
 
+    // ── Rôles retirés le 10/09/2026 : MANAGER / QHSE / FINANCE ───────────────
+    // SIGNALEMENT, jamais réaffectation d'office. Promouvoir ces comptes ADMIN
+    // serait une escalade décidée par un script ; les rétrograder COLLABORATEUR
+    // couperait l'accès d'un encadrant sans que personne ne l'apprenne. On les
+    // NOMME donc au démarrage — c'est un ADMIN qui tranche, depuis /users.
+    //
+    // Les rôles PERSONNALISÉS dupliqués de l'un des trois sont dans le même cas :
+    // leur rôle de base n'existe plus, ils n'ouvrent donc plus rien.
+    try {
+      const orphelins = await client.query(
+        `SELECT role, COUNT(*)::int AS n FROM users
+         WHERE role IN ('MANAGER', 'QHSE', 'FINANCE') AND is_active = true
+         GROUP BY role ORDER BY role`
+      );
+      for (const r of orphelins.rows) {
+        console.warn(`[INIT-DB] ⚠ ${r.n} compte(s) actif(s) portent le rôle « ${r.role} », RETIRÉ de l'application. ` +
+          `Ces comptes se connectent mais n'ont plus aucun accès : leur réaffecter un rôle depuis Administration → Utilisateurs.`);
+      }
+      const crOrphelins = await client.query(
+        `SELECT role_key, label, base_role FROM custom_roles WHERE base_role IN ('MANAGER', 'QHSE', 'FINANCE')`
+      ).catch(() => ({ rows: [] }));
+      for (const r of crOrphelins.rows) {
+        console.warn(`[INIT-DB] ⚠ Le rôle personnalisé « ${r.label} » est dupliqué de « ${r.base_role} », rôle retiré : ` +
+          `il n'ouvre plus aucun accès. Le recréer depuis un rôle existant (Administration → Habilitations).`);
+      }
+      if (orphelins.rows.length === 0 && crOrphelins.rows.length === 0) {
+        console.log('[INIT-DB] Rôles retirés (MANAGER/QHSE/FINANCE) : aucun compte ni rôle personnalisé concerné ✓');
+      }
+    } catch (e) {
+      console.warn('[INIT-DB] Contrôle des rôles retirés :', e.message);
+    }
+
     // Table 1 : boutiques (référentiel)
     await client.query(`
       CREATE TABLE IF NOT EXISTS boutiques (
@@ -8452,7 +8484,7 @@ async function executerInitialisation() {
       // être tenus par un prestataire. C'est un arbitrage d'ORGANISATION : la
       // Direction le change ici, sans toucher au code. Un équipage reste borné
       // en tout état de cause (règle d'identité, pas de rôle).
-      ['messagerie.roles_perimetre_restreint', '["AUTORITE","FINANCE","DPO"]', 'messagerie'],
+      ['messagerie.roles_perimetre_restreint', '["AUTORITE","DPO"]', 'messagerie'],
       ['collecte.arret_seuil_min', '5', 'collecte'],         // durée minimale d'un arrêt GPS retenu
       ['collecte.arret_rayon_m', '40', 'collecte'],          // rayon de stationnarité du cluster GPS
       ['collecte.arret_rattachement_m', '80', 'collecte'],   // rayon de rattachement CAV/association

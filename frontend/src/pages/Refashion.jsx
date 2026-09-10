@@ -73,7 +73,7 @@ export default function Refashion() {
   // (DPAV, communes, subventions, justificatif) est masquée ; la consultation
   // (tableaux, badges d'écart, journal d'audit, attestation, exports) reste.
   const { user } = useAuth();
-  const readOnly = !['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const readOnly = !['ADMIN'].includes(user?.base_role || user?.role);
   const isAdmin = (user?.base_role || user?.role) === 'ADMIN';
 
   // Télécharge la pièce justificative d'un taux via l'instance axios (porte le

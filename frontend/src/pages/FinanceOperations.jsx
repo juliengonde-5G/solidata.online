@@ -53,7 +53,7 @@ export default function FinanceOperations() {
   const { user } = useAuth();
   // FINANCE = consultation seule (vague 2) : le backend refuse déjà les
   // écritures (403 méthode-based), on masque donc la saisie côté UI.
-  const canEdit = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const canEdit = ['ADMIN'].includes(user?.base_role || user?.role);
   const [year, setYear] = useState(new Date().getFullYear());
   const [autoData, setAutoData] = useState(null);
   const [overrides, setOverrides] = useState({});

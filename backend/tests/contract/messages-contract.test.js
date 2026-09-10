@@ -42,11 +42,12 @@ const jetonWeb = (id, username, role, first, last) => jwt.sign(
 const ADMIN = jetonWeb(1, 'admin', 'ADMIN', 'Julien', 'Gondé');
 const TRIEUR = jetonWeb(3, 'ctrieur', 'COLLABORATEUR', 'Karim', 'Benali');
 // Rôles à PÉRIMÈTRE RESTREINT (correctif 27/08) : AUTORITE est l'accès EXTERNE
-// en lecture seule créé en vague 2 (auditeur Refashion / Métropole) ; FINANCE
-// et DPO peuvent être tenus par un prestataire (cabinet comptable, DPO
-// externalisé). Aucun des trois n'a à disposer de l'annuaire interne complet.
+// en lecture seule créé en vague 2 (auditeur Refashion / Métropole) ; le DPO
+// peut être tenu par un prestataire (DPO externalisé). Aucun des deux n'a à
+// disposer de l'annuaire interne complet. (FINANCE en faisait partie jusqu'au
+// retrait du rôle, le 10/09/2026.)
 const AUDITEUR = jetonWeb(8, 'auditeur', 'AUTORITE', 'Claire', 'Renaud');
-const COMPTA = jetonWeb(9, 'compta', 'FINANCE', 'Paul', 'Marchand');
+const DPO_EXTERNE = jetonWeb(9, 'dpo', 'DPO', 'Paul', 'Marchand');
 // Jeton chauffeur : compte 5 PARTAGÉ, identité réelle = véhicule 1.
 const CHAUFFEUR = jwt.sign(
   { id: 5, userId: 5, username: `driver_${VEHICULE}`, role: 'COLLABORATEUR', vehicle_id: VEHICULE },
@@ -120,7 +121,7 @@ function mockDb({ participant = null, conversations = [], participants = [], mes
       return Promise.resolve({ rows: [{ id: 1, registration: 'AB-123-CD', name: 'Camion 1' }] });
     }
     if (/FROM users u/.test(t) || /FROM users/.test(t)) {
-      return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'MANAGER', is_active: true }] });
+      return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'ADMIN', is_active: true }] });
     }
     return Promise.resolve({ rows: [] });
   });
@@ -389,7 +390,7 @@ describe('GET /contacts — champs minimaux et périmètre', () => {
     mockQuery.mockImplementation((sql) => {
       const t = String(sql);
       if (/FROM users u/.test(t)) {
-        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'MANAGER' }] });
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'ADMIN' }] });
       }
       if (/FROM vehicles/.test(t)) {
         return Promise.resolve({ rows: [{ id: 1, registration: 'AB-123-CD', name: 'Camion 1' }] });
@@ -399,7 +400,7 @@ describe('GET /contacts — champs minimaux et périmètre', () => {
     const r = await get(ADMIN, '/api/messages/contacts?q=mar');
     expect(r.status).toBe(200);
     expect(r.body.contacts).toEqual([
-      { type: 'utilisateur', user_id: 2, nom: 'Marie LÉVÊQUE', role: 'MANAGER' },
+      { type: 'utilisateur', user_id: 2, nom: 'Marie LÉVÊQUE', role: 'ADMIN' },
       { type: 'vehicule', vehicle_id: 1, nom: 'AB-123-CD — Camion 1' },
     ]);
   });
@@ -429,10 +430,10 @@ describe('GET /contacts — champs minimaux et périmètre', () => {
     expect(sql).toMatch(/status <> 'out_of_service'/);
   });
 
-  it('CHAUFFEUR : ADMIN/MANAGER seulement, et AUCUN véhicule listé', async () => {
+  it('CHAUFFEUR : ADMIN seulement, et AUCUN véhicule listé', async () => {
     mockQuery.mockImplementation((sql) => {
       if (/FROM users u/.test(String(sql))) {
-        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'MANAGER' }] });
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'ADMIN' }] });
       }
       return Promise.resolve({ rows: [] });
     });
@@ -441,9 +442,9 @@ describe('GET /contacts — champs minimaux et périmètre', () => {
     expect(appelSql(/FROM vehicles/)).toBeUndefined();
     const appel = appelSql(/FROM users u/);
     expect(appel[1][2]).toBe(true);                       // drapeau « session chauffeur »
-    expect(String(appel[0])).toMatch(/IN \('ADMIN', 'MANAGER'\)/);
+    expect(String(appel[0])).toMatch(/COALESCE\(cr\.base_role, u\.role\) = 'ADMIN'/);
     // Le rôle est résolu par son rôle DE BASE : un rôle personnalisé dérivé de
-    // MANAGER reste joignable depuis un camion.
+    // Le gestionnaire (ADMIN) reste joignable depuis un camion.
     expect(String(appel[0])).toMatch(/COALESCE\(cr\.base_role, u\.role\)/);
   });
 
@@ -543,12 +544,12 @@ describe('POST /conversations', () => {
     expect(inexistant.body).toEqual(existant.body);
   });
 
-  it('CHAUFFEUR → MANAGER : autorisé, et c’est le VÉHICULE qui devient participant', async () => {
+  it('CHAUFFEUR → ADMIN : autorisé, et c’est le VÉHICULE qui devient participant', async () => {
     mockQuery.mockImplementation((sql) => {
       const t = String(sql);
       if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(t)) return Promise.resolve({ rows: [] });
       if (/FROM users u/.test(t)) {
-        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', is_active: true, base_role: 'MANAGER' }] });
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', is_active: true, base_role: 'ADMIN' }] });
       }
       if (/INSERT INTO messagerie_conversations/.test(t)) return Promise.resolve({ rows: [{ id: 30 }] });
       return Promise.resolve({ rows: [] });
@@ -633,12 +634,12 @@ describe('routes/chat — extraction sans changement de comportement', () => {
 // privée avec n'importe qui. La garde manquait côté serveur, pas seulement au
 // menu.
 // ═══════════════════════════════════════════════════════════════════════════
-describe('rôles à périmètre restreint (AUTORITE, FINANCE, DPO)', () => {
+describe('rôles à périmètre restreint (AUTORITE, DPO)', () => {
   const usersEtVehicules = () => {
     mockQuery.mockImplementation((sql) => {
       const t = String(sql);
       if (/FROM users u/.test(t)) {
-        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'MANAGER' }] });
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', first_name: 'Marie', last_name: 'Lévêque', base_role: 'ADMIN' }] });
       }
       if (/FROM vehicles/.test(t)) {
         return Promise.resolve({ rows: [{ id: 1, registration: 'AB-123-CD', name: 'Camion 1' }] });
@@ -647,7 +648,7 @@ describe('rôles à périmètre restreint (AUTORITE, FINANCE, DPO)', () => {
     });
   };
 
-  it('AUTORITE : annuaire borné aux ADMIN/MANAGER, aucun véhicule listé', async () => {
+  it('AUTORITE : annuaire borné aux ADMIN, aucun véhicule listé', async () => {
     usersEtVehicules();
     const r = await get(AUDITEUR, '/api/messages/contacts');
     expect(r.status).toBe(200);
@@ -656,12 +657,12 @@ describe('rôles à périmètre restreint (AUTORITE, FINANCE, DPO)', () => {
     expect(appelSql(/FROM vehicles/)).toBeUndefined();
     const appel = appelSql(/FROM users u/);
     expect(appel[1][2]).toBe(true);                       // drapeau « périmètre restreint »
-    expect(String(appel[0])).toMatch(/IN \('ADMIN', 'MANAGER'\)/);
+    expect(String(appel[0])).toMatch(/COALESCE\(cr\.base_role, u\.role\) = 'ADMIN'/);
   });
 
-  it('FINANCE : même borne que l’auditeur', async () => {
+  it('DPO : même borne que l’auditeur', async () => {
     usersEtVehicules();
-    const r = await get(COMPTA, '/api/messages/contacts');
+    const r = await get(DPO_EXTERNE, '/api/messages/contacts');
     expect(r.status).toBe(200);
     expect(appelSql(/FROM users u/)[1][2]).toBe(true);
     expect(appelSql(/FROM vehicles/)).toBeUndefined();
@@ -691,12 +692,12 @@ describe('rôles à périmètre restreint (AUTORITE, FINANCE, DPO)', () => {
     expect(r.body.error).toMatch(/responsables d'exploitation/i);
   });
 
-  it('AUTORITE → MANAGER : autorisé (le canal reste utile)', async () => {
+  it('AUTORITE → ADMIN : autorisé (le canal reste utile)', async () => {
     mockQuery.mockImplementation((sql, params) => {
       const t = String(sql);
       if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(t)) return Promise.resolve({ rows: [] });
       if (/FROM users u/.test(t) && /LEFT JOIN custom_roles/.test(t)) {
-        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', is_active: true, base_role: 'MANAGER' }] });
+        return Promise.resolve({ rows: [{ id: 2, username: 'mchef', is_active: true, base_role: 'ADMIN' }] });
       }
       if (/INSERT INTO messagerie_conversations/.test(t) || /FROM messagerie_conversations/.test(t)) {
         return Promise.resolve({ rows: [{ id: 30, type: 'directe', titre: null, cle_unique: 'directe:u2:u8', created_at: null, dernier_message_at: null }] });

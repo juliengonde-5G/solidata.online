@@ -63,7 +63,7 @@ async function getEquipesPrioritaires() {
 // et des véhicules (annotés affectés/libres). La requête reste plate : la page
 // frontend assemble les associations et les conflits.
 router.get('/planning/resources',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const date = req.query.date || new Date().toISOString().slice(0, 10);
@@ -181,7 +181,7 @@ router.get('/planning/resources',
 // jusqu'à PostgreSQL, qui la refusait en 23502 — l'utilisateur voyait
 // « Erreur serveur » sans jamais savoir pourquoi.
 router.patch('/:id/assign',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   [
     body('driver_employee_id').optional({ nullable: true }),
     body('suiveur1_employee_id').optional({ nullable: true }),

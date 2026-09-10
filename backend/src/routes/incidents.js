@@ -61,7 +61,7 @@ router.use(authenticate);
 // ADMIN/MANAGER sur tout le routeur. NB : le délai d'intervention AGRÉGÉ et non
 // nominatif destiné à l'auditeur Métropole est exposé séparément côté
 // routes/metropole.js (le rôle AUTORITE n'accède jamais à la liste nominative ici).
-router.use(authorize('ADMIN', 'MANAGER', 'QHSE'));
+router.use(authorize('ADMIN'));
 
 // GET /api/incidents — Liste transverse filtrable
 // Filtres : status, type, tour_id, vehicle_id, cav_id, from, to (created_at)

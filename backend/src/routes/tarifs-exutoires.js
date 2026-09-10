@@ -5,7 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 
 // Item 38a — Nomenclature UNIQUE des types produit tarifables.
 // Source de vérité côté backend : utilisée à la fois par le validateur

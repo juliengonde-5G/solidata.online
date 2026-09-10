@@ -17,8 +17,14 @@
 //  3. [FAIBLE] DELETE /action-plans/:id — un MANAGER pouvait supprimer une
 //     action de suivi CIP.
 //
-// Chaque test vérifie les DEUX faces : ce que le MANAGER ne reçoit plus, ET que
-// l'ADMIN le reçoit toujours (le correctif ne doit pas appauvrir la CIP).
+// Chaque test vérifiait les DEUX faces : ce que le MANAGER ne reçoit plus, ET
+// que l'ADMIN le reçoit toujours (le correctif ne doit pas appauvrir la CIP).
+//
+// MISE À JOUR DU 10/09/2026 — le rôle MANAGER a été RETIRÉ de l'application.
+// Le module insertion est donc ADMIN/RH, et il n'y a plus de vue masquée à
+// servir : le jeton qui porte ce rôle est refusé en 403. Les gardes de masquage
+// restent au code (elles protégeraient de nouveau si le rôle revenait), mais ce
+// qui est OBSERVABLE, et donc testable ici, c'est le refus.
 // ═══════════════════════════════════════════════════════════════════════════
 const jwt = require('jsonwebtoken');
 
@@ -55,7 +61,12 @@ const request = require('supertest');
 let app;
 const tokenFor = (role) => jwt.sign(
   { id: 9, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
-const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
+const TOKENS = {
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  // Rôles retirés le 10/09/2026 : le JWT les porte encore (il accepte n'importe
+  // quelle chaîne), plus aucun `authorize` ne les reconnaît.
+  MANAGER: tokenFor('MANAGER'), CR_CHEF: tokenFor('CR_CHEF'),
+};
 
 beforeAll(() => {
   app = express();
@@ -126,49 +137,27 @@ describe('[CRITIQUE] GET /insertion/:employeeId — le PCM ne fuit plus vers un 
     expect(r.body.has_interview).toBe(true);
   });
 
-  it('un MANAGER ne reçoit NI profil_pcm NI aucune mention du type PCM', async () => {
+  // Le rôle MANAGER a été RETIRÉ le 10/09/2026 : il n'y a plus de vue masquée à
+  // lui servir, la fiche lui est REFUSÉE. Ce qui se prouvait par « la clé
+  // profil_pcm est absente » se prouve désormais par « rien ne sort du tout » —
+  // et il faut le dire ainsi : sur une réponse 403, chercher une clé absente
+  // passerait au vert sans rien démontrer.
+  it("un jeton portant le rôle RETIRÉ n'obtient RIEN : 403 et corps vide de toute donnée", async () => {
     mockFiche();
     const r = await get('/api/insertion/7', 'MANAGER');
-    expect(r.status).toBe(200);
-    expect(r.body).not.toHaveProperty('profil_pcm');      // clé RETIRÉE (≠ null)
-    // Balayage exhaustif de la réponse : le type PCM ne doit apparaître nulle
-    // part (fiche_synthese, pistes_metiers, recommandations_cip, parcours_dev,
-    // competences, ai_recommendations…).
+    expect(r.status).toBe(403);
     const brut = JSON.stringify(r.body);
-    expect(brut).not.toMatch(/Empathique/i);
-    expect(brut).not.toMatch(/Persévérant/i);
-    expect(brut).not.toMatch(/nourricier/i);
-    expect(brut).not.toMatch(/Reconnaissance de la personne/i);
+    for (const fuite of [/Empathique/i, /Persévérant/i, /nourricier/i, /ponctuel et volontaire/i, /judiciaire/i]) {
+      expect(brut).not.toMatch(fuite);
+    }
   });
 
-  it("un MANAGER ne reçoit plus l'extrait du commentaire d'entretien de recrutement", async () => {
-    mockFiche();
-    const r = await get('/api/insertion/7', 'MANAGER');
-    const brut = JSON.stringify(r.body);
-    expect(brut).not.toMatch(/ponctuel et volontaire/i);
-    expect(r.body.fiche_synthese.resume).not.toMatch(/Entretien :/);
-  });
-
-  it('les booléens has_* restent exposés au MANAGER (non habilité ≠ inexistant)', async () => {
-    mockFiche();
-    const r = await get('/api/insertion/7', 'MANAGER');
-    expect(r.body.has_pcm).toBe(true);
-    expect(r.body.has_interview).toBe(true);
-    expect(r.body.has_cv).toBe(true);
-    // …mais le DÉTAIL des sources PCM/entretien est retiré, pas mis à
-    // « non disponible » (ce serait faux : la source existe).
-    expect(r.body.data_sources).not.toHaveProperty('pcm');
-    expect(r.body.data_sources).not.toHaveProperty('interview');
-    expect(r.body.data_sources.cv).toBeTruthy();          // le CV lui reste accessible
-    expect(r.body.data_sources.diagnostic).toBeTruthy();
-  });
-
-  it("l'axe judiciaire reste retiré des freins sociaux d'un MANAGER (non-régression)", async () => {
-    mockFiche();
-    const r = await get('/api/insertion/7', 'MANAGER');
-    const types = (r.body.freins_sociaux?.freins || []).map((f) => f.type);
-    expect(types).not.toContain('judiciaire');
-    expect(types).toContain('mobilite');
+  it("un rôle personnalisé dérivé du rôle retiré n'hérite de rien non plus", async () => {
+    mockQuery.mockImplementation((sql) => (/FROM custom_roles/i.test(String(sql))
+      ? Promise.resolve({ rows: [{ role_key: 'CR_CHEF', base_role: 'MANAGER' }] })
+      : Promise.resolve({ rows: [] })));
+    await require('../../src/middleware/auth').refreshCustomRoles();
+    expect((await get('/api/insertion/7', 'CR_CHEF')).status).toBe(403);
   });
 });
 
@@ -198,75 +187,33 @@ describe('[MOYEN] Actions CIP — texte libre santé/judiciaire masqué au MANAG
     expect(r.body.some((a) => a.frein_type === 'judiciaire')).toBe(true);
   });
 
-  it('un MANAGER ne voit plus les actions de l\'axe judiciaire (art. 10)', async () => {
+  // Même bascule que ci-dessus : le masquage du texte libre santé/judiciaire
+  // visait le MANAGER, rôle retiré. Le filtre SQL et le retrait des clés
+  // RESTENT dans routes/insertion/routes.js (garde de secours), mais la seule
+  // chose observable de l'extérieur est désormais le refus.
+  it("le rôle RETIRÉ n'atteint plus aucune action CIP (403), ni la fiche agrégée", async () => {
     mockActions();
-    const r = await get('/api/insertion/action-plans/7', 'MANAGER');
-    expect(r.status).toBe(200);
-    expect(r.body.some((a) => a.frein_type === 'judiciaire')).toBe(false);
-    expect(JSON.stringify(r.body)).not.toMatch(/SPIP|Aménagement de peine/);
-    // Le SQL lui-même exclut l'axe (pour que les totaux restent cohérents).
-    const sqlActions = mockQuery.mock.calls.map(([s]) => String(s)).find((s) => s.includes('FROM cip_action_plans ap'));
-    expect(sqlActions).toMatch(/<> 'judiciaire'/);
+    expect((await get('/api/insertion/action-plans/7', 'MANAGER')).status).toBe(403);
+    expect((await get('/api/insertion/actions-overview', 'MANAGER')).status).toBe(403);
+    expect((await get('/api/insertion/7', 'MANAGER')).status).toBe(403);
+    // Aucune lecture des actions n'a même été tentée.
+    const lectures = mockQuery.mock.calls.map(([s]) => String(s)).filter((q) => q.includes('cip_action_plans'));
+    expect(lectures).toHaveLength(0);
   });
 
-  it('un MANAGER garde l\'action santé mais SANS son texte libre', async () => {
+  it("l'ADMIN garde la vue complète des actions (aucun appauvrissement)", async () => {
     mockActions();
-    const r = await get('/api/insertion/action-plans/7', 'MANAGER');
-    const sante = r.body.find((a) => a.frein_type === 'sante');
-    expect(sante).toBeTruthy();               // l'encadrant doit pouvoir suivre l'action
-    expect(sante).not.toHaveProperty('notes'); // clé RETIRÉE (≠ null)
-    expect(sante).not.toHaveProperty('resultat');
-    // Les autres axes ne sont pas touchés.
-    const logement = r.body.find((a) => a.frein_type === 'logement');
-    expect(logement.notes).toBe('RDV bailleur');
-    expect(logement.resultat).toBe('en attente');
-  });
-
-  it('GET /actions-overview : même masquage, et le total suit le filtre SQL', async () => {
-    mockQuery.mockImplementation((sql) => {
-      const s = String(sql);
-      const exclu = s.includes("<> 'judiciaire'");
-      if (s.includes('COUNT(*)::int AS n')) return Promise.resolve({ rows: [{ n: exclu ? 2 : 3 }] });
-      if (s.includes('FROM cip_action_plans a')) {
-        const rows = exclu ? ACTIONS.filter((a) => a.frein_type !== 'judiciaire') : ACTIONS;
-        return Promise.resolve({ rows: rows.map((a) => ({ ...a, first_name: 'Amina', last_name: 'Berthelot' })) });
-      }
-      return Promise.resolve({ rows: [] });
-    });
-    const rm = await get('/api/insertion/actions-overview', 'MANAGER');
-    expect(rm.status).toBe(200);
-    expect(rm.body.total).toBe(2);
-    expect(rm.body.actions).toHaveLength(2);   // total ET lignes cohérents
-    expect(rm.body.actions.find((a) => a.frein_type === 'sante')).not.toHaveProperty('notes');
-
-    const ra = await get('/api/insertion/actions-overview', 'ADMIN');
-    expect(ra.body.total).toBe(3);
-    expect(ra.body.actions).toHaveLength(3);
-    expect(ra.body.actions.find((a) => a.frein_type === 'sante').notes).toBe('Rendez-vous cardiologue le 12');
-  });
-
-  it('la fiche agrégée GET /:employeeId applique le même masquage aux actions', async () => {
-    mockQuery.mockImplementation((sql) => {
-      const s = String(sql);
-      if (s.includes('prescripteur_orgas')) {
-        return Promise.resolve({ rows: [{ id: 7, first_name: 'A', last_name: 'B', candidate_id: null, parcours_num: 1 }] });
-      }
-      if (s.includes('FROM cip_action_plans WHERE employee_id')) {
-        return Promise.resolve({ rows: ACTIONS.map((a) => ({ ...a })) });
-      }
-      return Promise.resolve({ rows: [] });
-    });
-    const r = await get('/api/insertion/7', 'MANAGER');
-    expect(r.status).toBe(200);
-    expect(r.body.action_plans.some((a) => a.frein_type === 'judiciaire')).toBe(false);
-    expect(r.body.action_plans.find((a) => a.frein_type === 'sante')).not.toHaveProperty('notes');
+    const ra = await get('/api/insertion/action-plans/7', 'ADMIN');
+    expect(ra.status).toBe(200);
+    expect(ra.body).toHaveLength(3);
+    expect(ra.body.find((a) => a.frein_type === 'sante').notes).toBe('Rendez-vous cardiologue le 12');
   });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
 describe('[FAIBLE] DELETE /insertion/action-plans/:id — écriture sensible ADMIN/RH', () => {
-  it('refuse un MANAGER (403) et ne supprime rien', async () => {
-    const r = await del('/api/insertion/action-plans/3', 'MANAGER');
+  it('refuse un rôle non habilité (403) et ne supprime rien', async () => {
+    const r = await del('/api/insertion/action-plans/3', 'COLLABORATEUR');
     expect(r.status).toBe(403);
     const suppressions = mockQuery.mock.calls.map(([s]) => String(s)).filter((s) => s.includes('DELETE FROM cip_action_plans'));
     expect(suppressions).toHaveLength(0);

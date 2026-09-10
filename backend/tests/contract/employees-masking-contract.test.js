@@ -9,7 +9,8 @@
 // route la plus consultée, qui est pourtant la SOURCE de ces données.
 //
 // Ce que ces tests verrouillent :
-//   1. MANAGER ne voit plus les colonnes sensibles (liste, fiche, contrats) ;
+//   1. le rôle MANAGER, RETIRÉ le 10/09/2026, n'atteint plus la fiche du tout
+//      (403) — la projection par colonne reste au code comme garde de secours ;
 //   2. ADMIN et RH continuent de tout voir — le correctif ne doit RIEN retirer
 //      à ceux dont c'est le métier ;
 //   3. ce dont l'encadrement a besoin pour planifier reste visible (identité,
@@ -111,49 +112,38 @@ beforeEach(() => {
 
 const get = (url, role) => request(app).get(url).set('Authorization', `Bearer ${jeton(role)}`);
 
-describe('MANAGER — les données sensibles ne sortent plus', () => {
-  test('GET /employees (liste) : aucune colonne sensible', async () => {
+describe('MANAGER — rôle RETIRÉ le 10/09/2026 : plus de fiche du tout', () => {
+  // Ce bloc prouvait le MASQUAGE par colonne servi au MANAGER. Le rôle ayant été
+  // retiré de l'application, il n'y a plus de vue masquée à servir : la fiche est
+  // simplement REFUSÉE. La distinction n'est pas cosmétique — un test qui
+  // continuerait de lire `r.body.gross_salary` sur une réponse 403 passerait au
+  // vert sans rien prouver (le corps d'un refus n'a aucune de ces clés).
+  //
+  // La projection par rôle, elle, RESTE dans routes/employees.js : la supprimer
+  // rouvrirait le salaire et le RQTH si le rôle revenait un jour. Elle est
+  // couverte par ses tests unitaires ; ici on tient la porte, pas le filtre.
+  test('GET /employees (liste) : refusé (403)', async () => {
     const r = await get('/api/employees', 'MANAGER');
-    expect(r.status).toBe(200);
-    for (const col of SENSIBLES) expect(r.body[0]).not.toHaveProperty(col);
+    expect(r.status).toBe(403);
   });
 
-  test('GET /employees/:id (fiche) : aucune colonne sensible', async () => {
+  test('GET /employees/:id (fiche) : refusé (403), et AUCUNE donnée dans le corps', async () => {
     const r = await get('/api/employees/42', 'MANAGER');
-    expect(r.status).toBe(200);
-    for (const col of SENSIBLES) expect(r.body).not.toHaveProperty(col);
+    expect(r.status).toBe(403);
+    const corps = JSON.stringify(r.body);
+    expect(corps).not.toContain('RQTH');
+    expect(corps).not.toContain('1 802,00');
+    expect(corps).not.toContain('DURAND');
   });
 
-  test('le RQTH et le salaire, nommément — les deux plus graves', async () => {
-    // disability_status est une donnée de SANTÉ, de la même famille que les
-    // freins santé que le module insertion masque déjà pour MANAGER.
-    const r = await get('/api/employees/42', 'MANAGER');
-    expect(r.body.disability_status).toBeUndefined();
-    expect(r.body.gross_salary).toBeUndefined();
-    expect(JSON.stringify(r.body)).not.toContain('RQTH');
-    expect(JSON.stringify(r.body)).not.toContain('1 802,00');
-  });
-
-  test('la clé est ABSENTE (jamais un null) — « non habilité » ≠ « non renseigné »', async () => {
-    const r = await get('/api/employees/42', 'MANAGER');
-    expect('disability_status' in r.body).toBe(false);
-    expect(Object.keys(r.body)).not.toContain('gross_salary');
-  });
-
-  test('GET /employees/:id/contracts : le salaire de l’avenant est masqué aussi', async () => {
-    // Masquer le salaire sur la fiche sans le masquer sur l'historique des
-    // avenants n'aurait rien protégé : c'est la même donnée, une porte plus loin.
+  test('GET /employees/:id/contracts : refusé (403)', async () => {
     const r = await get('/api/employees/42/contracts', 'MANAGER');
-    expect(r.status).toBe(200);
-    expect(r.body[0]).not.toHaveProperty('gross_salary');
-    expect(r.body[0]).not.toHaveProperty('siret');
-    // Le contenu opérationnel de l'avenant reste, lui, intégralement visible.
-    for (const col of ['contract_type', 'start_date', 'end_date', 'weekly_hours', 'position_title']) {
-      expect(r.body[0]).toHaveProperty(col);
-    }
+    expect(r.status).toBe(403);
   });
 
-  test('un rôle PERSONNALISÉ dérivé de MANAGER est masqué comme lui', async () => {
+  test('un rôle PERSONNALISÉ dérivé de MANAGER n’hérite plus de rien', async () => {
+    // Son rôle de base n'existe plus : il n'ouvre aucune porte. C'est ce que
+    // signale aussi le démarrage (init-db) pour qu'un ADMIN le recrée.
     mockQuery.mockImplementation(async (sql) => {
       const q = String(sql).replace(/\s+/g, ' ');
       if (/FROM custom_roles/i.test(q)) return { rows: [{ role_key: 'CR_CHEF', base_role: 'MANAGER' }] };
@@ -164,22 +154,7 @@ describe('MANAGER — les données sensibles ne sortent plus', () => {
     });
     await require('../../src/middleware/auth').refreshCustomRoles();
     const r = await get('/api/employees/42', 'CR_CHEF');
-    expect(r.status).toBe(200);
-    expect(r.body).not.toHaveProperty('gross_salary');
-    expect(r.body).not.toHaveProperty('disability_status');
-  });
-});
-
-describe('MANAGER — ce dont l’encadrement a besoin reste visible', () => {
-  test('identité, poste, équipe, contrat, permis, quotité, ville', async () => {
-    const r = await get('/api/employees/42', 'MANAGER');
-    for (const col of OPERATIONNELLES) expect(r.body).toHaveProperty(col);
-    expect(r.body.last_name).toBe('DURAND');
-    expect(r.body.has_permis_b).toBe(true);
-    // `city` est délibérément CONSERVÉE (utile aux tournées et covoiturages,
-    // sensibilité faible) là où `address` et `postal_code` sont retirées.
-    expect(r.body.city).toBe('Rouen');
-    expect(r.body).not.toHaveProperty('address');
+    expect(r.status).toBe(403);
   });
 });
 

@@ -34,7 +34,7 @@ const { TOLERANCE_RDV_DEFAUT_MIN, minutesDepuisHHMM, jourDeDate } = require('../
 const { getScoringConfig } = require('./tours/predictions');
 
 router.use(authenticate);
-router.use(authorize('ADMIN', 'MANAGER'));
+router.use(authorize('ADMIN'));
 router.use(autoLogActivity('association-demandes'));
 
 const STATUTS = ['a_planifier', 'planifiee', 'honoree', 'non_honoree', 'annulee'];

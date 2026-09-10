@@ -50,7 +50,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/teams
-router.post('/', authorize('ADMIN', 'MANAGER'), [
+router.post('/', authorize('ADMIN'), [
   body('name').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
   try {
@@ -69,7 +69,7 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/teams/:id
-router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const { name, type, is_active } = req.body;
     const result = await pool.query(

@@ -249,7 +249,7 @@ async function meteoDuJour(dateTournee, soft) {
 }
 
 // ── GET /api/tours/:id/rapport ─────────────────────────────────────────────
-router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/rapport', authorize('ADMIN'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     if (!Number.isInteger(tourId) || tourId <= 0) {

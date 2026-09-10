@@ -13,7 +13,7 @@ const { freinsExportColumns, rowToCells, computeCompletude } = require('../utils
 // Double authentification (2.43.0) : pour les rôles soumis (settings
 // « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
 // franchi le défi TOTP. No-op intégral pour les autres rôles.
-router.use(authenticate, requireMfa, authorize('ADMIN', 'MANAGER', 'RH'));
+router.use(authenticate, requireMfa, authorize('ADMIN', 'RH'));
 
 // GET /api/exports/collecte — Export Excel collecte
 router.get('/collecte', async (req, res) => {

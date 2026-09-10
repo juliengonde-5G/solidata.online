@@ -61,9 +61,9 @@ const deviceApi = require('./badgeuse-device');
 router.use(authenticate);
 router.use(autoLogActivity('badgeuse'));
 
-const READ = authorize('ADMIN', 'RH', 'MANAGER');
+const READ = authorize('ADMIN', 'RH');
 const WRITE = authorize('ADMIN', 'RH');
-const CORRECTION = authorize('ADMIN', 'RH', 'MANAGER');
+const CORRECTION = authorize('ADMIN', 'RH');
 const ADMIN_ONLY = authorize('ADMIN');
 // Surface « affichage » : la playlist de l'écran d'information, sa
 // restitution, et l'état de la passerelle réseaux sociaux qui l'alimente.
@@ -77,7 +77,7 @@ const ADMIN_ONLY = authorize('ADMIN');
 // onglets dans /admin/permissions n'aurait rien fermé côté API, cette matrice
 // ne filtrant que la barre latérale. D'où deux constantes de plus, appliquées
 // aux SEULES routes de l'affichage.
-const AFFICHAGE_READ = authorize('ADMIN', 'RH', 'MANAGER', 'COMMUNICATION');
+const AFFICHAGE_READ = authorize('ADMIN', 'RH', 'COMMUNICATION');
 const AFFICHAGE_WRITE = authorize('ADMIN', 'RH', 'COMMUNICATION');
 
 // Seuil de silence d'un poste (BO-09) : il n'est plus codé en dur (QA-11), il

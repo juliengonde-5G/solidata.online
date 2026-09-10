@@ -8,7 +8,7 @@ const { validate } = require('../middleware/validate');
 // généré (base24 + compteur poste), mêmes champs, created_by + source systématiques.
 const { generateProduitFini } = require('./etiquettes');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 
 // GET /api/produits-finis
 router.get('/', async (req, res) => {

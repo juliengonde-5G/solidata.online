@@ -89,7 +89,7 @@ router.use(authenticate);
 // ADMIN/MANAGER/QHSE, écritures (POST/PUT upload ticket, validation) réservées
 // à ADMIN/MANAGER. Filtrage par méthode → fail-safe pour toute nouvelle route.
 router.use((req, res, next) => {
-  const roles = req.method === 'GET' ? ['ADMIN', 'MANAGER', 'QHSE'] : ['ADMIN', 'MANAGER'];
+  const roles = req.method === 'GET' ? ['ADMIN'] : ['ADMIN'];
   return authorize(...roles)(req, res, next);
 });
 

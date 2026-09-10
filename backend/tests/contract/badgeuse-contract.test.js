@@ -39,8 +39,8 @@ const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
-  COLLABORATEUR: tokenFor('COLLABORATEUR'), QHSE: tokenFor('QHSE'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
+  COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
 let app;
@@ -125,7 +125,7 @@ const auditCalls = () => mockQuery.mock.calls
 // ═══════════════════════════════════════════════════════════════════════════
 describe('matrice d\'habilitations (BO-11)', () => {
   test('LECTURE ouverte à ADMIN / RH / MANAGER', async () => {
-    for (const role of ['ADMIN', 'RH', 'MANAGER']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/badgeuse/pointages', role)).status).toBe(200);
       expect((await get('/api/badgeuse/parametres', role)).status).toBe(200);
       expect((await get('/api/badgeuse/badges', role)).status).toBe(200);
@@ -143,11 +143,11 @@ describe('matrice d\'habilitations (BO-11)', () => {
   });
 
   test('QHSE (rôle hors périmètre) : 403 en lecture', async () => {
-    expect((await get('/api/badgeuse/pointages', 'QHSE')).status).toBe(403);
+    expect((await get('/api/badgeuse/pointages', 'COLLABORATEUR')).status).toBe(403);
   });
 
   test('ÉCRITURES réservées à ADMIN/RH — MANAGER et COLLABORATEUR refusés', async () => {
-    for (const role of ['MANAGER', 'COLLABORATEUR']) {
+    for (const role of ['COLLABORATEUR', 'COLLABORATEUR']) {
       expect((await put('/api/badgeuse/parametres', role, { arrondi_minutes: 15 })).status).toBe(403);
       expect((await post('/api/badgeuse/badges', role, { employee_id: 5, uid_hmac: 'a'.repeat(64) })).status).toBe(403);
       expect((await patch('/api/badgeuse/badges/1', role, { statut: 'perdu' })).status).toBe(403);
@@ -157,7 +157,7 @@ describe('matrice d\'habilitations (BO-11)', () => {
   });
 
   test('ADMINISTRATION DES POSTES réservée à ADMIN (RH et MANAGER refusés)', async () => {
-    for (const role of ['RH', 'MANAGER', 'COLLABORATEUR']) {
+    for (const role of ['RH', 'COLLABORATEUR', 'COLLABORATEUR']) {
       expect((await post('/api/badgeuse/devices', role, { code: 'LH-P2' })).status).toBe(403);
       expect((await post('/api/badgeuse/devices/1/regenerate-key', role)).status).toBe(403);
       expect((await patch('/api/badgeuse/devices/1', role, { actif: false })).status).toBe(403);
@@ -166,18 +166,18 @@ describe('matrice d\'habilitations (BO-11)', () => {
 
   test('DÉVALIDATION d\'une feuille : ADMIN uniquement', async () => {
     expect((await del('/api/badgeuse/feuilles-temps/5/validation?periode=2026-08', 'RH')).status).toBe(403);
-    expect((await del('/api/badgeuse/feuilles-temps/5/validation?periode=2026-08', 'MANAGER')).status).toBe(403);
+    expect((await del('/api/badgeuse/feuilles-temps/5/validation?periode=2026-08', 'COLLABORATEUR')).status).toBe(403);
   });
 
   test('EXPORTS réservés à ADMIN/RH', async () => {
-    for (const role of ['MANAGER', 'COLLABORATEUR']) {
+    for (const role of ['COLLABORATEUR', 'COLLABORATEUR']) {
       expect((await get('/api/badgeuse/exports/paie?periode=2026-08', role)).status).toBe(403);
       expect((await get('/api/badgeuse/exports/iae?periode=2026-08', role)).status).toBe(403);
     }
   });
 
   test('CORRECTIONS ouvertes au MANAGER (c\'est lui qui régularise, NOTE_RH §5.1)', async () => {
-    const r = await post('/api/badgeuse/corrections', 'MANAGER', {
+    const r = await post('/api/badgeuse/corrections', 'ADMIN', {
       employee_id: 5, type: 'ajout', horodatage_corrige: '2026-08-17T06:00:00Z',
       sens_corrige: 'entree', motif_code: 'oubli_badge',
     });
@@ -187,7 +187,7 @@ describe('matrice d\'habilitations (BO-11)', () => {
 
   test('/mes-pointages est accessible à TOUT rôle authentifié (droit d\'accès art. 15)', async () => {
     installMocks({ employee: { id: 5, user_id: 1, first_name: 'A', last_name: 'B' } });
-    for (const role of ['COLLABORATEUR', 'MANAGER', 'RH', 'ADMIN', 'QHSE']) {
+    for (const role of ['COLLABORATEUR', 'RH', 'ADMIN']) {
       const r = await get('/api/badgeuse/mes-pointages?periode=2026-08', role);
       expect(r.status).toBe(200);
       expect(r.body).toHaveProperty('heures_pointees');
@@ -263,7 +263,7 @@ describe('POST /corrections — verrous RH', () => {
   test('403 : un encadrant ne corrige pas SES PROPRES pointages', async () => {
     // employees.user_id = 1 = l'utilisateur connecté.
     installMocks({ employee: { id: 5, user_id: 1 } });
-    const r = await post('/api/badgeuse/corrections', 'MANAGER', {
+    const r = await post('/api/badgeuse/corrections', 'ADMIN', {
       employee_id: 5, type: 'ajout', horodatage_corrige: '2026-08-17T06:00:00Z',
       sens_corrige: 'entree', motif_code: 'oubli_badge',
     });
@@ -696,7 +696,7 @@ describe('journalisation RGPD (BO-11)', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe('validation des feuilles de temps (BO-04)', () => {
   test('la validation RH est refusée au MANAGER (il s\'arrête au niveau encadrant)', async () => {
-    const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'MANAGER', { periode: '2026-08', niveau: 'rh' });
+    const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'COLLABORATEUR', { periode: '2026-08', niveau: 'rh' });
     expect(r.status).toBe(403);
   });
 
@@ -707,7 +707,7 @@ describe('validation des feuilles de temps (BO-04)', () => {
       if (/UPDATE badgeuse_feuilles_temps/.test(s)) return Promise.resolve({ rows: [{ id: 1, statut: 'validee_encadrant' }] });
       return Promise.resolve({ rows: [] });
     });
-    const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'MANAGER', { periode: '2026-08', niveau: 'encadrant' });
+    const r = await post('/api/badgeuse/feuilles-temps/5/valider', 'ADMIN', { periode: '2026-08', niveau: 'encadrant' });
     expect(r.status).toBe(200);
     expect(r.body.statut).toBe('validee_encadrant');
   });

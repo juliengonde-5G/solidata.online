@@ -17,11 +17,13 @@ const { requireMfa } = require('../middleware/mfa');
 const { logActivity } = require('../middleware/activity-logger');
 
 // Rôles intégrés (labels affichés). ADMIN n'est jamais restreignable/duplicable.
-// DPO / FINANCE / QHSE : rôles intégrés « parties prenantes » ajoutés en vague 2.
+// MANAGER / QHSE / FINANCE retirés le 10/09/2026 (demande client) : ils ne sont
+// plus proposés ici, donc plus assignables ni duplicables. La source unique de
+// la liste reste utils/roles.js.
 const BUILTIN_ROLES = {
-  ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines',
+  ADMIN: 'Administrateur', RH: 'Ressources Humaines',
   COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique',
-  DPO: 'Délégué à la protection des données (DPO)', FINANCE: 'Finance (consultation)', QHSE: 'QHSE',
+  DPO: 'Délégué à la protection des données (DPO)',
   // Praticien PCM : fait passer les tests de personnalité et restitue les
   // profils, SANS accès au dossier de recrutement (CV, entretiens) ni au
   // reste des RH (contrats, salaires, parcours d'insertion).
@@ -31,7 +33,7 @@ const BUILTIN_ROLES = {
   COMMUNICATION: 'Chargé de communication',
 };
 // Rôles pouvant servir de base à un rôle personnalisé (jamais ADMIN → pas d'escalade).
-const BASE_ROLES = ['MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE', 'PCM', 'COMMUNICATION'];
+const BASE_ROLES = ['RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'PCM', 'COMMUNICATION'];
 
 // Génère une clé de rôle sûre et sans collision avec les rôles intégrés.
 function slugRoleKey(label) {
@@ -76,7 +78,7 @@ const MODULE_CATALOG = [
   { key: 'analyse', label: 'Analyse & Finances' },
   // RSEI-10 : module « Pilotage RSE » (28e module). Ajouté au catalogue pour que
   // /admin/permissions puisse l'accorder/masquer par rôle — notamment au rôle
-  // personnalisé REF_RSE (dupliqué de MANAGER, restreint à ce module).
+  // personnalisé REF_RSE (à redupliquer depuis RH depuis le retrait de MANAGER).
   { key: 'rse', label: 'Pilotage RSE' },
   // RSEI-11 : module « Énergie & GES » (29e module). Ajouté au catalogue pour que
   // /admin/permissions puisse l'accorder/masquer par rôle (notamment au référent

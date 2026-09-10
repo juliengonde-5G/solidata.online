@@ -52,7 +52,7 @@ const chat = require('../../src/routes/chat');
 const botTools = require('../../src/services/bot-tools');
 const { toolsForRole, EXTENDED_TOOL_ROLES, executeTool } = chat;
 
-const TOUS_LES_ROLES = ['ADMIN', 'MANAGER', 'RH', 'QHSE', 'DPO', 'FINANCE', 'RESP_BTQ', 'AUTORITE', 'COLLABORATEUR'];
+const TOUS_LES_ROLES = ['ADMIN', 'RH', 'DPO', 'RESP_BTQ', 'AUTORITE', 'COLLABORATEUR'];
 const NOUVEAUX_ETENDUS = botTools.BOT_EXTENDED_TOOLS.map((t) => t.name);
 
 let app;
@@ -111,15 +111,15 @@ describe('double filtrage — liste ET exécution, outil par outil', () => {
   // Les habilitations recopient le `READ` du routeur natif : le bot ne doit
   // jamais ouvrir plus large que l'écran équivalent au même rôle.
   it.each([
-    ['resume_vak_live', ['ADMIN', 'MANAGER']],
-    ['resume_rse', ['ADMIN', 'MANAGER', 'RH']],
-    ['resume_energie_ges', ['ADMIN', 'MANAGER', 'RH', 'QHSE']],
-    ['resume_achats_responsables', ['ADMIN', 'MANAGER', 'RH', 'QHSE']],
-    ['resultats_enquete', ['ADMIN', 'MANAGER', 'RH', 'QHSE']],
-    ['saturation_cav', ['ADMIN', 'MANAGER']],
-    ['arrets_gps_tournee', ['ADMIN', 'MANAGER']],
-    ['echeances_commandes_recurrentes', ['ADMIN', 'MANAGER']],
-    ['resume_effectifs_etp', ['ADMIN', 'RH', 'MANAGER']],
+    ['resume_vak_live', ['ADMIN']],
+    ['resume_rse', ['ADMIN', 'RH']],
+    ['resume_energie_ges', ['ADMIN', 'RH']],
+    ['resume_achats_responsables', ['ADMIN', 'RH']],
+    ['resultats_enquete', ['ADMIN', 'RH']],
+    ['saturation_cav', ['ADMIN']],
+    ['arrets_gps_tournee', ['ADMIN']],
+    ['echeances_commandes_recurrentes', ['ADMIN']],
+    ['resume_effectifs_etp', ['ADMIN', 'RH']],
     ['etat_purges_rgpd', ['ADMIN', 'DPO']],
   ])('%s : habilitations conformes à l\'écran natif', (nom, attendus) => {
     expect(EXTENDED_TOOL_ROLES[nom].slice().sort()).toEqual(attendus.slice().sort());
@@ -167,11 +167,11 @@ describe('double filtrage — liste ET exécution, outil par outil', () => {
   });
 
   it('un rôle personnalisé hérite du filtrage de son rôle de base', async () => {
-    mockQuery.mockResolvedValue({ rows: [{ role_key: 'REF_RSE', base_role: 'MANAGER' }] });
+    mockQuery.mockResolvedValue({ rows: [{ role_key: 'REF_RSE', base_role: 'RH' }] });
     await require('../../src/middleware/auth').refreshCustomRoles();
     const n = toolsForRole('REF_RSE').map((t) => t.name);
-    expect(n).toContain('resume_rse');       // MANAGER y a droit
-    expect(n).not.toContain('etat_purges_rgpd'); // MANAGER n'y a pas droit
+    expect(n).toContain('resume_rse');       // RH y a droit
+    expect(n).not.toContain('etat_purges_rgpd'); // RH n'y a pas droit
     mockQuery.mockResolvedValue({ rows: [] });
     await require('../../src/middleware/auth').refreshCustomRoles();
   });
@@ -236,7 +236,7 @@ describe('resultats_enquete — le seuil n ≥ 5 tient par le chemin conversatio
       { 11: 2, 12: 'ambiance tendue' }, { 11: 3, 12: 'ok' },
       { 11: 4, 12: 'correct' }, { 11: 1, 12: 'difficile' },
     ]);
-    const res = await json('resultats_enquete', {}, 'QHSE');
+    const res = await json('resultats_enquete', {}, 'ADMIN');
     expect(res.sous_seuil).toBe(false);
     const brut = JSON.stringify(res);
     // L'agrégateur natif renvoie `reponses_texte` ET `nuage_mots` quand le
@@ -270,7 +270,7 @@ describe('troncature — les sorties riches sont bornées CÔTÉ OUTIL', () => {
     mockQuery.mockImplementation((sql) => (/FROM cav c JOIN pred/.test(String(sql))
       ? Promise.resolve({ rows: bornes })
       : Promise.resolve({ rows: [] })));
-    const res = await json('saturation_cav', {}, 'MANAGER');
+    const res = await json('saturation_cav', {}, 'ADMIN');
     expect(res.nb_bornes_menacees).toBe(12);
     expect(res.a_planifier.total).toBe(12);
     expect(res.a_planifier.montres).toHaveLength(botTools.MAX_DETAIL);
@@ -352,7 +352,7 @@ describe('doctrine — une donnée absente n\'est jamais un zéro', () => {
       annee: 2026, energie: [], carburant: [], totaux: { tco2e_energie: 0, tco2e_carburant: 0, tco2e_total: 0 },
     });
     jest.spyOn(require('../../src/routes/energie'), 'resolveCA').mockResolvedValue({ ca: null, source: null });
-    const res = await json('resume_energie_ges', { annee: 2026 }, 'QHSE');
+    const res = await json('resume_energie_ges', { annee: 2026 }, 'ADMIN');
     expect(res.mesure).toBe(false);
     expect(res.tco2e).toBeNull();
     expect(res.note_mesure).toMatch(/pas mesuré/i);
@@ -374,7 +374,7 @@ describe('doctrine — une donnée absente n\'est jamais un zéro', () => {
 
   it('resume_vak_live : aucune VAK aujourd\'hui → le dit, sans compteurs à zéro', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
-    const res = await json('resume_vak_live', {}, 'MANAGER');
+    const res = await json('resume_vak_live', {}, 'ADMIN');
     expect(res.vak_en_cours).toBe(false);
     expect(res.depuis_le_debut).toBeUndefined();
     expect(res.note).toMatch(/aucune vente au kilo/i);
@@ -417,7 +417,7 @@ describe('lecture seule — aucun outil n\'émet d\'écriture', () => {
     const moteur = require('../../src/services/commandes-recurrence');
     const spy = jest.spyOn(moteur, 'genererCommandesRecurrentes')
       .mockResolvedValue({ ok: true, horizon_jours: 30, generees: [], preparations: [], ignorees: [], simulation: true });
-    await json('echeances_commandes_recurrentes', {}, 'MANAGER');
+    await json('echeances_commandes_recurrentes', {}, 'ADMIN');
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ simulation: true }));
     spy.mockRestore();
   });

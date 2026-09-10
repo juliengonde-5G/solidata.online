@@ -124,7 +124,7 @@ router.get('/map', async (req, res) => {
 });
 
 // POST /api/association-points/geocode — Géocoder une adresse
-router.post('/geocode', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/geocode', authorize('ADMIN'), async (req, res) => {
   try {
     const { address, city, postcode } = req.body;
     const result = await geocodeAddress(address, city, postcode);
@@ -150,7 +150,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/association-points — Créer un point
-router.post('/', authorize('ADMIN', 'MANAGER'), [
+router.post('/', authorize('ADMIN'), [
   body('name').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
   try {
@@ -193,7 +193,7 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/association-points/:id — Modifier un point
-router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const { name, address, complement_adresse, code_postal, ville, latitude, longitude, contact_phone, contact_info, status, unavailable_reason } = req.body;
 
@@ -276,7 +276,7 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/association-points/:id/geocode — Regéocoder un point existant
-router.post('/:id/geocode', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/geocode', authorize('ADMIN'), async (req, res) => {
   try {
     const point = await pool.query('SELECT address, ville, code_postal FROM association_points WHERE id = $1', [req.params.id]);
     if (point.rows.length === 0) return res.status(404).json({ error: 'Point non trouvé' });

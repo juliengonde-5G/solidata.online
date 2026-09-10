@@ -38,6 +38,10 @@ const MANAGER_HIDDEN_PREFIX = 'frein_judiciaire';
  */
 function maskInsertionRow(row, baseRole) {
   if (!row || typeof row !== 'object') return row;
+  // Le rôle MANAGER a été retiré de l'application le 10/09/2026 : cette garde
+  // ne se déclenche donc plus. Elle est CONSERVÉE plutôt que supprimée — c'est
+  // elle qui retire le frein judiciaire et les détails de santé ; la retirer
+  // rouvrirait la surface en silence si le rôle revenait un jour.
   if (baseRole !== 'MANAGER') return row;
   for (const key of Object.keys(row)) {
     if (MANAGER_HIDDEN_FIELDS.includes(key) || key.startsWith(MANAGER_HIDDEN_PREFIX)) {

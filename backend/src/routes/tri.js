@@ -139,7 +139,7 @@ router.get('/operations', authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/tri/operations
-router.post('/operations', authorize('ADMIN', 'MANAGER'), [
+router.post('/operations', authorize('ADMIN'), [
   body('chaine_id').isInt().withMessage('ID chaîne requis'),
   body('nom').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
@@ -209,7 +209,7 @@ router.get('/postes', authorize('ADMIN'), async (req, res) => {
 });
 
 // POST /api/tri/postes
-router.post('/postes', authorize('ADMIN', 'MANAGER'), [
+router.post('/postes', authorize('ADMIN'), [
   body('operation_id').isInt().withMessage('ID opération requis'),
   body('nom').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
@@ -263,7 +263,7 @@ router.put('/postes/:id', authorize('ADMIN'), [
 // ══════ SORTIES ══════
 
 // POST /api/tri/sorties
-router.post('/sorties', authorize('ADMIN', 'MANAGER'), [
+router.post('/sorties', authorize('ADMIN'), [
   body('operation_id').isInt().withMessage('ID opération requis'),
   body('nom').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
@@ -371,7 +371,7 @@ router.put('/categories-sortantes/:id', authorize('ADMIN'), [
 // ══════ LOTS / BATCHES ══════
 
 // POST /api/tri/batches — Créer un lot à trier
-router.post('/batches', authorize('ADMIN', 'MANAGER'), [
+router.post('/batches', authorize('ADMIN'), [
   body('chaine_id').isInt().withMessage('ID chaîne requis'),
   body('poids_initial_kg').isFloat({ min: 0 }).withMessage('Poids initial requis (valeur numérique)'),
 ], validate, async (req, res) => {
@@ -480,7 +480,7 @@ router.get('/batches/:id', async (req, res) => {
 });
 
 // PUT /api/tri/batches/:id/start — Démarrer un lot
-router.put('/batches/:id/start', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/batches/:id/start', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE batch_tracking SET status = 'en_cours', date_debut = NOW(), updated_at = NOW()
@@ -497,7 +497,7 @@ router.put('/batches/:id/start', authorize('ADMIN', 'MANAGER'), async (req, res)
 
 // GET /api/tri/executions?date=YYYY-MM-DD — exécutions du jour (défaut : aujourd'hui).
 // Alimente la page atelier « Saisie d'exécution » (liste en cours / terminées).
-router.get('/executions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/executions', authorize('ADMIN'), async (req, res) => {
   try {
     const date = req.query.date || null; // null → CURRENT_DATE
     const result = await pool.query(
@@ -523,7 +523,7 @@ router.get('/executions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/tri/executions/:id — détail d'une exécution + ses sorties (reprise atelier)
-router.get('/executions/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/executions/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const exec = await pool.query(
       `SELECT oe.*, bt.code AS batch_code, bt.status AS batch_status, bt.poids_restant_kg,
@@ -554,7 +554,7 @@ router.get('/executions/:id', authorize('ADMIN', 'MANAGER'), async (req, res) =>
 // POST /api/tri/executions — Démarrer une opération sur un lot.
 // Transactionnel : verrou sur le lot, refus si lot clôturé/annulé, cohérence
 // opération↔chaîne du lot, et démarrage paresseux du lot (en_attente → en_cours).
-router.post('/executions', authorize('ADMIN', 'MANAGER'), [
+router.post('/executions', authorize('ADMIN'), [
   body('batch_id').isInt().withMessage('ID lot requis'),
   body('operation_id').isInt().withMessage('ID opération requis'),
 ], validate, async (req, res) => {
@@ -612,7 +612,7 @@ router.post('/executions', authorize('ADMIN', 'MANAGER'), [
 // à la complétion, les sorties triées sont reversées en stock (une entrée par
 // catégorie sortante) — auparavant le stock trié par catégorie n'était alimenté
 // par RIEN (rupture R2/R5 de l'audit).
-router.put('/executions/:id/complete', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/executions/:id/complete', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { notes } = req.body;
@@ -683,7 +683,7 @@ router.put('/executions/:id/complete', authorize('ADMIN', 'MANAGER'), async (req
 // POST /api/tri/executions/:id/outputs — Ajouter une sortie (pilotée par la CATÉGORIE).
 // La saisie atelier est catégorie-driven : categorie_sortante_id pilote le reversement
 // stock à la complétion (aucune sortie_operation n'est seedée, sortie_id reste optionnel).
-router.post('/executions/:id/outputs', authorize('ADMIN', 'MANAGER'), [
+router.post('/executions/:id/outputs', authorize('ADMIN'), [
   body('categorie_sortante_id').isInt().withMessage('Catégorie sortante requise'),
   body('poids_kg').isFloat({ gt: 0 }).withMessage('Poids requis (valeur numérique > 0)'),
 ], validate, async (req, res) => {
@@ -710,7 +710,7 @@ router.post('/executions/:id/outputs', authorize('ADMIN', 'MANAGER'), [
 
 // DELETE /api/tri/executions/:id/outputs/:outputId — corriger une sortie mal saisie
 // (uniquement tant que l'exécution n'est pas terminée).
-router.delete('/executions/:id/outputs/:outputId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/executions/:id/outputs/:outputId', authorize('ADMIN'), async (req, res) => {
   try {
     const exec = await pool.query('SELECT status FROM operation_executions WHERE id = $1', [req.params.id]);
     if (exec.rows.length === 0) return res.status(404).json({ error: 'Exécution introuvable' });
@@ -731,7 +731,7 @@ router.delete('/executions/:id/outputs/:outputId', authorize('ADMIN', 'MANAGER')
 // ══════ COLISAGES ══════
 
 // POST /api/tri/colisages — Créer un colisage
-router.post('/colisages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/colisages', authorize('ADMIN'), async (req, res) => {
   try {
     const { categorie_sortante_id, type_conteneur_id, exutoire_id } = req.body;
     const code = `COL-${Date.now().toString(36).toUpperCase()}`;
@@ -815,7 +815,7 @@ router.get('/colisages/:id', async (req, res) => {
 });
 
 // POST /api/tri/colisages/:id/items — Ajouter un article au colisage
-router.post('/colisages/:id/items', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/colisages/:id/items', authorize('ADMIN'), async (req, res) => {
   try {
     const { output_id, produit_fini_id, poids_kg, description } = req.body;
 
@@ -867,7 +867,7 @@ router.post('/colisages/:id/items', authorize('ADMIN', 'MANAGER'), async (req, r
 });
 
 // PUT /api/tri/colisages/:id/status — Changer le statut d'un colisage
-router.put('/colisages/:id/status', authorize('ADMIN', 'MANAGER'), [
+router.put('/colisages/:id/status', authorize('ADMIN'), [
   body('status').notEmpty().withMessage('Statut requis'),
 ], validate, async (req, res) => {
   try {

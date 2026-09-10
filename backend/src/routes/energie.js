@@ -37,8 +37,8 @@ const { autoLogActivity } = require('../middleware/activity-logger');
 router.use(authenticate);
 router.use(autoLogActivity('energie'));
 
-const READ = authorize('ADMIN', 'MANAGER', 'RH', 'QHSE');
-const WRITE = authorize('ADMIN', 'RH', 'MANAGER');
+const READ = authorize('ADMIN', 'RH');
+const WRITE = authorize('ADMIN', 'RH');
 const FACTEURS_WRITE = authorize('ADMIN', 'RH'); // facteurs d'émission : ADMIN/RH
 
 const TYPES_COMPTEUR = ['electricite', 'gaz', 'eau', 'autre'];

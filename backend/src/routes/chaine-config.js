@@ -209,7 +209,7 @@ router.get('/layout-actif', async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════
 
 /** GET /api/chaine-config/layouts — liste des plans avec leurs indicateurs. */
-router.get('/layouts', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/layouts', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT l.*,
@@ -241,7 +241,7 @@ router.get('/layouts', authorize('ADMIN', 'MANAGER'), async (req, res) => {
  * « duplication ») : c'est la manœuvre normale pour essayer une variante sans
  * toucher au plan en vigueur.
  */
-router.post('/layouts', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/layouts', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const nom = typeof req.body?.nom === 'string' ? req.body.nom.trim() : '';
@@ -318,7 +318,7 @@ router.post('/layouts', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 /** GET /api/chaine-config/layouts/:id — un plan et tous ses blocs. */
-router.get('/layouts/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/layouts/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const id = parseId(req.params.id);
     if (id === null) return erreur(res, 400, 'Identifiant invalide', 'ID_INVALIDE');
@@ -333,7 +333,7 @@ router.get('/layouts/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 /** PUT /api/chaine-config/layouts/:id — identité du plan (pas ses blocs). */
-router.put('/layouts/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/layouts/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const id = parseId(req.params.id);
     if (id === null) return erreur(res, 400, 'Identifiant invalide', 'ID_INVALIDE');
@@ -394,7 +394,7 @@ router.put('/layouts/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
  * exactement celui affiché, jamais un mélange de l'ancien et du nouveau.
  * Le dépassement d'effectif est SIGNALÉ dans la réponse, jamais refusé.
  */
-router.put('/layouts/:id/postes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/layouts/:id/postes', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseId(req.params.id);
@@ -468,7 +468,7 @@ router.put('/layouts/:id/postes', authorize('ADMIN', 'MANAGER'), async (req, res
  * l'index unique partiel de la base (deux plans actifs, même une fraction de
  * transaction, sont refusés).
  */
-router.post('/layouts/:id/activer', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/layouts/:id/activer', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseId(req.params.id);

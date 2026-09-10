@@ -30,7 +30,7 @@ router.use(authenticate);
 // Filtrage par méthode → fail-safe : une nouvelle route non-GET reste fermée
 // aux rôles de consultation.
 router.use((req, res, next) => {
-  const roles = req.method === 'GET' ? ['ADMIN', 'MANAGER', 'AUTORITE', 'QHSE'] : ['ADMIN', 'MANAGER'];
+  const roles = req.method === 'GET' ? ['ADMIN', 'AUTORITE'] : ['ADMIN'];
   return authorize(...roles)(req, res, next);
 });
 

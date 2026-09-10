@@ -40,8 +40,8 @@ const request = require('supertest');
 const adminToken = jwt.sign(
   { id: 1, username: 'admin', role: 'ADMIN', first_name: 'A', last_name: 'D' },
   JWT_SECRET, { expiresIn: '1h' });
-const managerToken = jwt.sign(
-  { id: 2, username: 'manager', role: 'MANAGER' },
+const gestionnaireToken = jwt.sign(
+  { id: 2, username: 'manager', role: 'ADMIN' },
   JWT_SECRET, { expiresIn: '1h' });
 const collabToken = jwt.sign(
   { id: 3, username: 'collab', role: 'COLLABORATEUR' },
@@ -128,7 +128,7 @@ describe('GET /api/cav/:id/historique — consolidation fiche AdminCAV', () => {
 
     const r2 = await request(app)
       .get('/api/cav/7/historique?mois=abc')
-      .set('Authorization', `Bearer ${managerToken}`);
+      .set('Authorization', `Bearer ${gestionnaireToken}`);
     expect(r2.status).toBe(200);
     expect(r2.body.periode_mois).toBe(12);
   });
@@ -137,7 +137,7 @@ describe('GET /api/cav/:id/historique — consolidation fiche AdminCAV', () => {
     mockDb([]); // toutes les requêtes → rows: []
     const res = await request(app)
       .get('/api/cav/42/historique')
-      .set('Authorization', `Bearer ${managerToken}`);
+      .set('Authorization', `Bearer ${gestionnaireToken}`);
     expect(res.status).toBe(200);
     expect(res.body.passages).toEqual([]);
     expect(res.body.tonnages).toEqual([]);

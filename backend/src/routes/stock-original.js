@@ -194,7 +194,7 @@ router.get('/balance-historique', async (req, res) => {
 // ══════════════════════════════════════════
 // ROUTES AUTHENTIFIÉES (ADMIN / MANAGER)
 // ══════════════════════════════════════════
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('stock_original'));
 
 // Helper : vérifier si un trimestre est verrouillé

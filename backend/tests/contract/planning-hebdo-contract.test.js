@@ -37,7 +37,7 @@ app.use('/api/planning-hebdo', require('../../src/routes/planning-hebdo'));
 
 const jeton = (role, id = 1) => jwt.sign({ id, username: 'u', role }, JWT_SECRET, { expiresIn: '1h' });
 const ADMIN = jeton('ADMIN');
-const MANAGER = jeton('MANAGER', 3);
+const GESTION = jeton('ADMIN', 3);
 const RH = jeton('RH', 4);
 const RESP_BTQ = jeton('RESP_BTQ', 7);
 
@@ -272,9 +272,9 @@ describe('Habilitations', () => {
     expect(ecrit.status).toBe(403);
   });
 
-  it('MANAGER écrit ; sans jeton, tout est fermé', async () => {
+  it('un compte de gestion écrit ; sans jeton, tout est fermé', async () => {
     const ecrit = await request(app).post('/api/planning-hebdo/affecter')
-      .set('Authorization', `Bearer ${MANAGER}`).send({ employee_id: 1, date: '2026-08-24' });
+      .set('Authorization', `Bearer ${GESTION}`).send({ employee_id: 1, date: '2026-08-24' });
     expect(ecrit.status).not.toBe(403);
     expect((await request(app).get('/api/planning-hebdo/postes')).status).toBe(401);
     expect((await request(app).get('/api/planning-hebdo')).status).toBe(401);

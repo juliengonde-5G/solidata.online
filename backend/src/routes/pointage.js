@@ -174,7 +174,7 @@ router.use(authenticate);
 router.use(autoLogActivity('pointage'));
 
 // GET /api/pointage/events — Liste des événements de pointage
-router.get('/events', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/events', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { date, employee_id, status, limit = 100, offset = 0 } = req.query;
     let query = `
@@ -217,7 +217,7 @@ router.get('/events', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/pointage/daily-summary — Résumé journalier pour tous les collaborateurs
-router.get('/daily-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/daily-summary', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { date = new Date().toISOString().slice(0, 10) } = req.query;
 
@@ -247,7 +247,7 @@ router.get('/daily-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, re
 });
 
 // GET /api/pointage/monthly-summary — Résumé mensuel
-router.get('/monthly-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/monthly-summary', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { month = new Date().toISOString().slice(0, 7) } = req.query;
     const [startDate, endDate] = monthBounds(month);
@@ -277,7 +277,7 @@ router.get('/monthly-summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
 });
 
 // POST /api/pointage/manual — Saisie manuelle d'heures (manager)
-router.post('/manual', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/manual', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { employee_id, date, entry_am, exit_am, entry_pm, exit_pm, notes } = req.body;
 
@@ -446,7 +446,7 @@ router.post('/terminals', authorize('ADMIN'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // GET /api/pointage/alerts — Collaborateurs planifiés mais non badgés
-router.get('/alerts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/alerts', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { date = new Date().toISOString().slice(0, 10) } = req.query;
 
@@ -485,7 +485,7 @@ router.get('/alerts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/pointage/movement-log — Registre des mouvements
-router.get('/movement-log', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/movement-log', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { date_from, date_to, employee_id, limit = 200, offset = 0 } = req.query;
     let query = `

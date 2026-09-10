@@ -91,7 +91,7 @@ router.get('/:id/interactions', async (req, res) => {
 });
 
 // POST /api/partners — Créer
-router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authorize('ADMIN'), async (req, res) => {
   try {
     const {
       type, nom, siret, adresse, code_postal, ville, latitude, longitude,
@@ -117,7 +117,7 @@ router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // PUT /api/partners/:id
-router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const allowed = [
       'type', 'nom', 'siret', 'adresse', 'code_postal', 'ville', 'latitude',

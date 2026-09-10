@@ -160,7 +160,7 @@ function DocumentsTab() {
 export default function PilotageRSE() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
-  const canWrite = ['ADMIN', 'RH', 'MANAGER'].includes(base);
+  const canWrite = ['ADMIN', 'RH'].includes(base);
 
   const [tab, setTab] = useState('dashboard');
   const [dashboard, setDashboard] = useState(null);

@@ -31,7 +31,7 @@ const copie = (blocs) => blocs.map((b) => ({ ...b, proprietes: b.proprietes ? { 
 export default function ChaineConfigurateur() {
   const { user } = useAuth();
   const role = user?.base_role || user?.role;
-  const peutEditer = role === 'ADMIN' || role === 'MANAGER';
+  const peutEditer = role === 'ADMIN';
   const peutSupprimer = role === 'ADMIN';
   const lectureSeule = !peutEditer;
   const { confirm, ConfirmDialogElement } = useConfirm();

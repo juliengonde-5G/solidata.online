@@ -23,8 +23,8 @@ const { validate } = require('../middleware/validate');
 // affiche le message plutôt qu'une erreur.
 router.use(authenticate);
 
-const READ_ROLES = ['ADMIN', 'MANAGER', 'RH', 'RESP_BTQ'];
-const WRITE_ROLES = ['ADMIN', 'MANAGER'];
+const READ_ROLES = ['ADMIN', 'RH', 'RESP_BTQ'];
+const WRITE_ROLES = ['ADMIN'];
 const isRespBtq = (req) => resolveBaseRole(req.user && req.user.role) === 'RESP_BTQ';
 
 const MESSAGE_BOUTIQUES = 'Le planning des boutiques est géré hors logiciel.';

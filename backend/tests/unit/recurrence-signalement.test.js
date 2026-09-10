@@ -48,7 +48,7 @@ describe('signalerPreparationsNonPosees — ce qui mérite un message', () => {
     ]);
     expect(mockEnvoyerRoles).toHaveBeenCalledTimes(1);
     const [roles, options] = mockEnvoyerRoles.mock.calls[0];
-    expect(roles).toEqual(['ADMIN', 'MANAGER']);
+    expect(roles).toEqual(['ADMIN']);
     expect(options.source).toBe('recurrence');
     // Le lien doit mener là où l'on agit : sans lui, le message dit qu'il y a
     // un problème sans dire où le régler.

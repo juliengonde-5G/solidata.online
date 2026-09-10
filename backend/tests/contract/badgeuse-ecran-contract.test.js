@@ -48,7 +48,7 @@ const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
   COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
@@ -217,7 +217,7 @@ describe('GET /ecran-direct — le back-office lit ce que le poste reçoit', () 
   test('habilitations : lecture ADMIN/RH/MANAGER, refus aux autres', async () => {
     contenus = [contenuMessage()];
     devices = [];
-    for (const role of ['ADMIN', 'RH', 'MANAGER']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/badgeuse/ecran-direct', role)).status).toBe(200);
     }
     expect((await get('/api/badgeuse/ecran-direct', 'COLLABORATEUR')).status).toBe(403);

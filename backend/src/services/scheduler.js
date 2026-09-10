@@ -1298,7 +1298,7 @@ async function checkQhseHabilitationExpiries() {
     if (BREVO_API_KEY) {
       const dests = await pool.query(
         `SELECT email FROM users
-         WHERE role IN ('ADMIN','QHSE') AND is_active = true AND email IS NOT NULL AND email <> ''`
+         WHERE role = 'ADMIN' AND is_active = true AND email IS NOT NULL AND email <> ''`
       );
       if (dests.rows.length > 0) {
         const lignes = exp.rows.map((r) => {

@@ -340,7 +340,7 @@ describe('CONTRAT GET /pennylane/sync/diagnostic-invoices (PennylaneConfig.jsx)'
 
   it('est réservé aux ADMIN', async () => {
     brancherSql({});
-    const jetonManager = jwt.sign({ id: 2, username: 'm', role: 'MANAGER' }, JWT_SECRET, { expiresIn: '1h' });
+    const jetonManager = jwt.sign({ id: 2, username: 'm', role: 'COLLABORATEUR' }, JWT_SECRET, { expiresIn: '1h' });
     const res = await request(app).get('/api/pennylane/sync/diagnostic-invoices').set('Authorization', `Bearer ${jetonManager}`);
     expect(res.status).toBe(403);
   });

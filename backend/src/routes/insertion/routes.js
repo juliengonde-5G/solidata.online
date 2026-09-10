@@ -3477,7 +3477,7 @@ router.get('/competences/:employeeId', [
 
 // POST /api/insertion/competences — créer une évaluation + ses scores
 // (ADMIN/RH/MANAGER — l'ETI est un évaluateur légitime). Transactionnel.
-router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.post('/competences', authorize('ADMIN', 'RH'), [
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
   body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide (brouillon/valide)'),
@@ -3518,7 +3518,7 @@ router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
 
 // PUT /api/insertion/competences/:id — modifier l'évaluation (statut,
 // validations…) et REMPLACER ses scores si `scores` est fourni (ADMIN/RH/MANAGER).
-router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.put('/competences/:id', authorize('ADMIN', 'RH'), [
   param('id').isInt().withMessage('ID invalide'),
   body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide'),
   body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),

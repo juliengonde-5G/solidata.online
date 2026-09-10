@@ -24,7 +24,7 @@ const { requireMfa } = require('../../middleware/mfa');
 // Double authentification (2.43.0) : pour les rôles soumis (settings
 // « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
 // franchi le défi TOTP. No-op intégral pour les autres rôles.
-router.use(authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER'));
+router.use(authenticate, requireMfa, authorize('ADMIN', 'RH'));
 
 // Mount routes
 const routes = require('./routes');

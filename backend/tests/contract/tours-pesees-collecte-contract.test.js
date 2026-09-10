@@ -33,7 +33,7 @@ const request = require('supertest');
 const { authenticate } = require('../../src/middleware/auth');
 
 const adminToken = jwt.sign({ id: 1, username: 'a', role: 'ADMIN', first_name: 'Camille', last_name: 'GESTION' }, JWT_SECRET, { expiresIn: '1h' });
-const managerToken = jwt.sign({ id: 5, username: 'm', role: 'MANAGER' }, JWT_SECRET, { expiresIn: '1h' });
+const gestionnaireToken = jwt.sign({ id: 5, username: 'm', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
 const collabToken = jwt.sign({ id: 2, username: 'c', role: 'COLLABORATEUR' }, JWT_SECRET, { expiresIn: '1h' });
 
 let app;
@@ -154,7 +154,7 @@ describe('POST /:id/pesees', () => {
   it('accepte le rôle MANAGER', async () => {
     baseType();
     const res = await request(app).post('/api/tours/7/pesees')
-      .set('Authorization', `Bearer ${managerToken}`).send({ weight_kg: 500 });
+      .set('Authorization', `Bearer ${gestionnaireToken}`).send({ weight_kg: 500 });
     expect(res.status).toBe(201);
   });
 

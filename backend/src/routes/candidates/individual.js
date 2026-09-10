@@ -12,7 +12,7 @@ const { RECRUITMENT_DOCS } = require('./documents');
 // ══════════════════════════════════════════
 
 // GET /api/candidates/:id
-router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT c.*, t.name as team_name FROM candidates c
@@ -183,7 +183,7 @@ router.post('/:id/upload-cv', authorize('ADMIN', 'RH'), (req, res, next) => {
 });
 
 // GET /api/candidates/:id/download-cv
-router.get('/:id/download-cv', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/download-cv', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query('SELECT cv_file_path FROM candidates WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0 || !result.rows[0].cv_file_path) {
@@ -204,7 +204,7 @@ router.get('/:id/download-cv', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
 });
 
 // GET /api/candidates/:id/skills
-router.get('/:id/skills', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/skills', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM candidate_skills WHERE candidate_id = $1 ORDER BY skill_name',
@@ -283,7 +283,7 @@ router.post('/:id/documents/deliver', authorize('ADMIN', 'RH'), async (req, res)
 });
 
 // GET /api/candidates/:id/documents — Documents remis au candidat
-router.get('/:id/documents', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/documents', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT d.*, u.first_name as delivered_by_name, u.last_name as delivered_by_lastname

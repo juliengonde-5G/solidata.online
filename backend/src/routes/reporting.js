@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER', 'AUTORITE'));
+router.use(authenticate, authorize('ADMIN', 'AUTORITE'));
 
 /**
  * Helper: check if a materialized view exists and is populated

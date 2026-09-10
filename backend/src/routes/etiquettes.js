@@ -122,7 +122,7 @@ router.get('/options', async (req, res) => {
 // Lots ouverts (en_attente/en_cours) pour le sélecteur d'étiquetage — exposé ici
 // (routeur étiquettes, accessible COLLABORATEUR) plutôt que via /tri/batches
 // (réservé ADMIN/MANAGER) pour que l'opérateur du poste puisse rattacher le lot.
-router.get('/lots-actifs', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+router.get('/lots-actifs', authorize('ADMIN', 'COLLABORATEUR'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT bt.id, bt.code, bt.status, ct.nom AS chaine_nom
@@ -151,7 +151,7 @@ router.get('/dimensions', async (req, res) => {
   }
 });
 
-router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+router.post('/generer', authorize('ADMIN', 'COLLABORATEUR'), async (req, res) => {
   const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg, batch_id } = req.body || {};
   if (!poste_id || !produit || !categorie_eco_org || !genre || !saison || !gamme || !poids_kg || Number(poids_kg) <= 0) {
     return res.status(400).json({ error: 'poste_id, produit, categorie_eco_org, genre, saison, gamme et poids_kg (>0) requis' });
@@ -181,7 +181,7 @@ router.post('/generer', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (r
 });
 
 // === Admin catalogue ===
-router.get('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/admin/produits', authorize('ADMIN'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT MIN(id) AS id, nom, categorie_eco_org, bool_or(is_active) AS is_active
@@ -193,7 +193,7 @@ router.get('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) =>
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/admin/produits', authorize('ADMIN'), async (req, res) => {
   const { nom, categorie_eco_org } = req.body || {};
   if (!nom || !categorie_eco_org) return res.status(400).json({ error: 'nom et categorie_eco_org requis' });
   try {
@@ -208,7 +208,7 @@ router.post('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) =
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.patch('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/admin/produits', authorize('ADMIN'), async (req, res) => {
   const { nom, categorie_eco_org, is_active } = req.body || {};
   if (!nom || !categorie_eco_org || typeof is_active !== 'boolean') {
     return res.status(400).json({ error: 'nom, categorie_eco_org, is_active (boolean) requis' });
@@ -223,7 +223,7 @@ router.patch('/admin/produits', authorize('ADMIN', 'MANAGER'), async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/admin/dimensions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/admin/dimensions', authorize('ADMIN'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, type, valeur, ordre, is_active FROM ref_dimensions ORDER BY type, ordre, valeur`
@@ -232,7 +232,7 @@ router.get('/admin/dimensions', authorize('ADMIN', 'MANAGER'), async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/admin/dimensions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/admin/dimensions', authorize('ADMIN'), async (req, res) => {
   const { type, valeur, ordre } = req.body || {};
   if (!type || !valeur) return res.status(400).json({ error: 'type et valeur requis' });
   if (!['categorie_eco_org', 'genre', 'saison', 'gamme'].includes(type)) {
@@ -249,7 +249,7 @@ router.post('/admin/dimensions', authorize('ADMIN', 'MANAGER'), async (req, res)
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.patch('/admin/dimensions/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/admin/dimensions/:id', authorize('ADMIN'), async (req, res) => {
   const { id } = req.params;
   const { is_active, ordre, valeur } = req.body || {};
   const sets = []; const vals = [];
@@ -268,7 +268,7 @@ router.patch('/admin/dimensions/:id', authorize('ADMIN', 'MANAGER'), async (req,
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/sortie-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+router.post('/sortie-scan', authorize('ADMIN', 'COLLABORATEUR'), async (req, res) => {
   const { code_barre, commande_type, commande_id } = req.body || {};
   if (!code_barre || !commande_type) {
     return res.status(400).json({ error: 'code_barre et commande_type requis' });
@@ -390,7 +390,7 @@ router.get('/sortie-session/:type/:commande_id', async (req, res) => {
   }
 });
 
-router.post('/sortie-session/:type/:commande_id/annuler-scan', authorize('ADMIN', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+router.post('/sortie-session/:type/:commande_id/annuler-scan', authorize('ADMIN', 'COLLABORATEUR'), async (req, res) => {
   const { type, commande_id } = req.params;
   const { code_barre } = req.body || {};
   if (!code_barre) return res.status(400).json({ error: 'code_barre requis' });

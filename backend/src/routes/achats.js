@@ -67,8 +67,8 @@ const uploadFds = multer({
 router.use(authenticate);
 router.use(autoLogActivity('achats'));
 
-const READ = authorize('ADMIN', 'MANAGER', 'RH', 'QHSE');
-const WRITE = authorize('ADMIN', 'RH', 'MANAGER');
+const READ = authorize('ADMIN', 'RH');
+const WRITE = authorize('ADMIN', 'RH');
 
 // ───────────────────────────────────────────────────────────────────────────
 // ORACLES DE CALCUL (spécifications exécutables, verrouillées par les tests) —

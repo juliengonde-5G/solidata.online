@@ -41,7 +41,7 @@ const { encryptField } = require('../../src/utils/field-crypto');
 let app;
 const tokenFor = (role) => jwt.sign(
   { id: 9, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
-const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
+const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR') };
 
 beforeAll(() => {
   app = express();
@@ -137,7 +137,7 @@ describe('GET /insertion/notes-profil/:employeeId', () => {
   });
 
   it('refuse un MANAGER (403) — la note croise le PCM', async () => {
-    const r = await get('/api/insertion/notes-profil/7', 'MANAGER');
+    const r = await get('/api/insertion/notes-profil/7', 'COLLABORATEUR');
     expect(r.status).toBe(403);
   });
 
@@ -182,7 +182,7 @@ describe('POST /insertion/ia/note-profil/:employeeId', () => {
   });
 
   it('refuse un MANAGER (403)', async () => {
-    const r = await post('/api/insertion/ia/note-profil/7', 'MANAGER');
+    const r = await post('/api/insertion/ia/note-profil/7', 'COLLABORATEUR');
     expect(r.status).toBe(403);
     expect(mockAnalyser).not.toHaveBeenCalled();
   });
@@ -225,7 +225,7 @@ describe('POST /insertion/notes-profil/:employeeId/communiquer', () => {
   });
 
   it('refuse un MANAGER (403)', async () => {
-    const r = await post('/api/insertion/notes-profil/7/communiquer', 'MANAGER');
+    const r = await post('/api/insertion/notes-profil/7/communiquer', 'COLLABORATEUR');
     expect(r.status).toBe(403);
   });
 });

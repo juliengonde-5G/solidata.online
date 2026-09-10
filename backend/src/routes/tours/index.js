@@ -678,7 +678,7 @@ router.post('/:id/checklist-public', async (req, res) => {
       const corps = `${nomVehicule} — ${anomalies.resume}`
         + (anomalies.remarque ? ` · « ${anomalies.remarque.slice(0, 120)} »` : '');
 
-      sendPushToRoles(['ADMIN', 'MANAGER'], {
+      sendPushToRoles(['ADMIN'], {
         title: 'Vérification du camion : anomalie signalée',
         body: corps.slice(0, 160),
         tag: `checklist-${vehId ?? req.params.id}`,
@@ -1443,7 +1443,7 @@ router.post('/:id/incident-public', upload.single('photo'), async (req, res) => 
     // JAMAIS en mode démo : un exercice de formation ne réveille personne.
     if (!demo) {
       const libelle = libelleTypeIncident(dbType);
-      sendPushToRoles(['ADMIN', 'MANAGER'], {
+      sendPushToRoles(['ADMIN'], {
         title: 'Incident signalé',
         body: `Tournée #${req.params.id} — ${dbType}${finalDescription ? ` : ${finalDescription.slice(0, 80)}` : ''}`,
         tag: `incident-${req.params.id}`,
@@ -1637,7 +1637,7 @@ router.put('/:id/status-public', async (req, res) => {
     if ((status === 'completed' || status === 'cancelled') && !isDemoTour(result.rows[0])) {
       const label = status === 'completed' ? 'terminée' : 'annulée';
       const tour = result.rows[0];
-      sendPushToRoles(['ADMIN', 'MANAGER'], {
+      sendPushToRoles(['ADMIN'], {
         title: `Tournée #${req.params.id} ${label}`,
         body: tour?.total_weight_kg
           ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
@@ -1908,7 +1908,7 @@ router.use('/', bordereauxBackOffice);
 // LECTURE + ÉCRITURE réservées ADMIN/MANAGER (aucune écriture pour AUTORITE).
 
 // POST /api/tours/messages — envoyer une consigne au chauffeur d'un véhicule.
-router.post('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/messages', authorize('ADMIN'), async (req, res) => {
   try {
     const vehicleId = parseInt(req.body?.vehicle_id, 10);
     const tourId = req.body?.tour_id != null && req.body.tour_id !== ''
@@ -1935,7 +1935,7 @@ router.post('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/tours/messages?vehicle_id=&tour_id= — consignes envoyées (lu/non lu).
-router.get('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/messages', authorize('ADMIN'), async (req, res) => {
   try {
     const vehicleId = req.query.vehicle_id ? parseInt(req.query.vehicle_id, 10) : null;
     const tourId = req.query.tour_id ? parseInt(req.query.tour_id, 10) : null;

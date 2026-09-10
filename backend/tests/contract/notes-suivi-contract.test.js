@@ -37,7 +37,7 @@ const tokenFor = (role) => jwt.sign(
   { id: 7, username: 'cip', role, first_name: 'C', last_name: 'IP', mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
   JWT_SECRET, { expiresIn: '1h' }
 );
-const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
+const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR') };
 
 beforeAll(() => {
   app = express();
@@ -68,15 +68,15 @@ const ligne = (over = {}) => ({
 
 // ───────────────────────────────────────────────────────────────────────────
 describe('Habilitations — ADMIN/RH strict', () => {
-  it('un MANAGER est refusé sur les quatre routes', async () => {
-    expect((await get('/api/insertion/notes-suivi/5', 'MANAGER')).status).toBe(403);
-    expect((await post('/api/insertion/notes-suivi', 'MANAGER', { employee_id: 5, contenu: 'x' })).status).toBe(403);
-    expect((await put('/api/insertion/notes-suivi/3', 'MANAGER', { contenu: 'x' })).status).toBe(403);
-    expect((await del('/api/insertion/notes-suivi/3', 'MANAGER')).status).toBe(403);
+  it('un rôle non habilité est refusé sur les quatre routes', async () => {
+    expect((await get('/api/insertion/notes-suivi/5', 'COLLABORATEUR')).status).toBe(403);
+    expect((await post('/api/insertion/notes-suivi', 'COLLABORATEUR', { employee_id: 5, contenu: 'x' })).status).toBe(403);
+    expect((await put('/api/insertion/notes-suivi/3', 'COLLABORATEUR', { contenu: 'x' })).status).toBe(403);
+    expect((await del('/api/insertion/notes-suivi/3', 'COLLABORATEUR')).status).toBe(403);
   });
 
-  it('un refus MANAGER ne touche AUCUNE requête en base', async () => {
-    await get('/api/insertion/notes-suivi/5', 'MANAGER');
+  it('un refus ne touche AUCUNE requête en base', async () => {
+    await get('/api/insertion/notes-suivi/5', 'COLLABORATEUR');
     const lues = mockQuery.mock.calls.filter(([sql]) => /insertion_notes_suivi/.test(String(sql)));
     expect(lues).toHaveLength(0);
   });

@@ -55,7 +55,7 @@ const crudRouter = require('../../src/routes/tours/crud');
 const tokenFor = (role) => jwt.sign(
   { id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
-const TOKENS = { ADMIN: tokenFor('ADMIN'), MANAGER: tokenFor('MANAGER') };
+const TOKENS = { ADMIN: tokenFor('ADMIN'), MANAGER: tokenFor('ADMIN') };
 
 let app;
 beforeAll(() => {
@@ -142,13 +142,13 @@ beforeEach(() => {
 describe('POST /api/tours/estimate — sélection association et durées ajustées', () => {
   it('accepte `association_points` avec la durée ajustée et la consomme', async () => {
     installMocks({ associationPoints: [ASSO(51), ASSO(52)] });
-    const court = await post('/api/tours/estimate', 'MANAGER', {
+    const court = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_points: [{ id: 51 }, { id: 52 }],
     });
     expect(court.status).toBe(200);
 
     installMocks({ associationPoints: [ASSO(51), ASSO(52)] });
-    const long = await post('/api/tours/estimate', 'MANAGER', {
+    const long = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE,
       association_points: [{ id: 51, duree_min: 60 }, { id: 52, duree_min: 60 }],
     });
@@ -159,13 +159,13 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
 
   it('la durée de la FICHE s’applique quand aucun ajustement n’est saisi', async () => {
     installMocks({ associationPoints: [ASSO(51, { duree: 40 }), ASSO(52)] });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52],
     });
     expect(res.status).toBe(200);
     // Référence : 2 points à 10 min. Ici 40 + 10 → +30 min.
     installMocks({ associationPoints: [ASSO(51), ASSO(52)] });
-    const ref = await post('/api/tours/estimate', 'MANAGER', {
+    const ref = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52],
     });
     expect(res.body.estimation.duree_travail_min - ref.body.estimation.duree_travail_min).toBe(30);
@@ -186,7 +186,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
 
   it('expose `violations` et `ordre_suggere` (tableau vide / null quand tout va bien)', async () => {
     installMocks({ associationPoints: [ASSO(51), ASSO(52)] });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52],
     });
     expect(res.status).toBe(200);
@@ -200,7 +200,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
     // Le 1er point est ouvert toute la journée et occupe l'équipe 4 h ; le 2e,
     // fermé entre 12:00 et 14:00, serait desservi en plein créneau de fermeture.
     installMocks({ associationPoints: FERME_A_MIDI });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52],
     });
     expect(res.status).toBe(200);
@@ -220,7 +220,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
         heure_debut: '09:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
       }],
     });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
     });
     expect(res.status).toBe(200);
@@ -244,7 +244,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
       }],
     });
     const estimer = async () => {
-      const r = await post('/api/tours/estimate', 'MANAGER', {
+      const r = await post('/api/tours/estimate', 'ADMIN', {
         vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
       });
       expect(r.status).toBe(200);
@@ -272,7 +272,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
         heure_debut: '10:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
       }],
     });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [7],
     });
     expect(res.status).toBe(200);
@@ -300,7 +300,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
           heure_debut: '10:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
         }],
       });
-      const res = await post('/api/tours/estimate', 'MANAGER', {
+      const res = await post('/api/tours/estimate', 'ADMIN', {
         vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [7],
       });
       expect(res.status).toBe(200);
@@ -319,7 +319,7 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
         heure_debut: '09:00:00', heure_fin: null, tolerance_min: null, annulee_le: null,
       }],
     });
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
     });
     expect(res.status).toBe(409);
@@ -335,21 +335,21 @@ describe('POST /api/tours/estimate — sélection association et durées ajusté
       ],
     };
     installMocks(base);
-    const inconnue = await post('/api/tours/estimate', 'MANAGER', {
+    const inconnue = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [404],
     });
     expect(inconnue.status).toBe(400);
     expect(inconnue.body.error).toMatch(/introuvable/i);
 
     installMocks(base);
-    const annulee = await post('/api/tours/estimate', 'MANAGER', {
+    const annulee = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [9],
     });
     expect(annulee.status).toBe(400);
     expect(annulee.body.error).toMatch(/annulée/i);
 
     installMocks(base);
-    const etrangere = await post('/api/tours/estimate', 'MANAGER', {
+    const etrangere = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51], demande_ids: [8],
     });
     expect(etrangere.status).toBe(400);
@@ -363,7 +363,7 @@ describe('POST /api/tours/association — 409 ASSOCIATION_HORS_HORAIRES', () => 
 
   it('refuse avec la forme EXACTE du contrat et n’écrit rien', async () => {
     const calls = installMocks(HORS_HORAIRES);
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52],
     });
     expect(res.status).toBe(409);
@@ -398,7 +398,7 @@ describe('POST /api/tours/association — 409 ASSOCIATION_HORS_HORAIRES', () => 
 
   it('des horaires NON RENSEIGNÉS ne bloquent jamais (information inconnue ≠ interdit)', async () => {
     const calls = installMocks({ associationPoints: [ASSO(51), ASSO(52)] });
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52],
     });
     expect(res.status).toBe(201);
@@ -407,7 +407,7 @@ describe('POST /api/tours/association — 409 ASSOCIATION_HORS_HORAIRES', () => 
 
   it('force:true crée la tournée ET trace le forçage dans ai_explanation', async () => {
     const calls = installMocks(HORS_HORAIRES);
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], force: true,
     });
     expect(res.status).toBe(201);
@@ -429,7 +429,7 @@ describe('POST /api/tours/association — 409 RDV_NON_TENABLE', () => {
 
   it('refuse avec la forme EXACTE du contrat, ordre suggéré joint', async () => {
     const calls = installMocks(RDV_MANQUE);
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
     });
     expect(res.status).toBe(409);
@@ -448,7 +448,7 @@ describe('POST /api/tours/association — 409 RDV_NON_TENABLE', () => {
 
   it('force:true crée la tournée, trace le rendez-vous manqué et rattache la demande', async () => {
     const calls = installMocks(RDV_MANQUE);
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7], force: true,
     });
     expect(res.status).toBe(201);
@@ -470,7 +470,7 @@ describe('POST /api/tours/association — 409 RDV_NON_TENABLE', () => {
         heure_debut: '09:00:00', heure_fin: '10:00:00', tolerance_min: null, annulee_le: null,
       }],
     });
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
     });
     expect(res.status).toBe(201);
@@ -485,7 +485,7 @@ describe('POST /api/tours/association — ordre des contrôles et durées', () =
     // 30 points fermés le mardi : les deux règles sont violées à la fois.
     const points = Array.from({ length: 30 }, (_, i) => ASSO(60 + i, { horaires: SEMAINE([]), x: i }));
     installMocks({ associationPoints: points });
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: points.map((p) => p.id),
     });
     expect(res.status).toBe(409);
@@ -503,7 +503,7 @@ describe('POST /api/tours/association — ordre des contrôles et durées', () =
         heure_debut: '09:00:00', heure_fin: null, tolerance_min: 15, annulee_le: null,
       }],
     });
-    const res = await post('/api/tours/association', 'MANAGER', {
+    const res = await post('/api/tours/association', 'ADMIN', {
       vehicle_id: 3, date: DATE, association_point_ids: [51, 52], demande_ids: [7],
     });
     expect(res.status).toBe(409);
@@ -540,7 +540,7 @@ describe('Aucune régression sur les tournées CAV', () => {
 
   it('une estimation CAV ne porte ni violation ni ordre suggéré', async () => {
     installMocks({ cavs: CAVS });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: DATE, cav_ids: [1, 2],
     });
     expect(res.status).toBe(200);
@@ -551,7 +551,7 @@ describe('Aucune régression sur les tournées CAV', () => {
 
   it('une tournée manuelle CAV se crée exactement comme avant', async () => {
     const calls = installMocks({ cavs: CAVS });
-    const res = await post('/api/tours/manual', 'MANAGER', {
+    const res = await post('/api/tours/manual', 'ADMIN', {
       vehicle_id: 3, date: DATE, cav_ids: [1, 2],
     });
     expect(res.status).toBe(201);

@@ -937,7 +937,7 @@ const DEFINITIONS = [
   },
   {
     name: 'resume_vak_live',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     handler: resumeVakLive,
     tool: {
       name: 'resume_vak_live',
@@ -947,7 +947,7 @@ const DEFINITIONS = [
   },
   {
     name: 'resume_rse',
-    roles: ['ADMIN', 'MANAGER', 'RH'],
+    roles: ['ADMIN', 'RH'],
     handler: resumeRse,
     tool: {
       name: 'resume_rse',
@@ -957,7 +957,7 @@ const DEFINITIONS = [
   },
   {
     name: 'resume_energie_ges',
-    roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'],
+    roles: ['ADMIN', 'RH'],
     handler: resumeEnergieGes,
     tool: {
       name: 'resume_energie_ges',
@@ -967,7 +967,7 @@ const DEFINITIONS = [
   },
   {
     name: 'resume_achats_responsables',
-    roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'],
+    roles: ['ADMIN', 'RH'],
     handler: resumeAchatsResponsables,
     tool: {
       name: 'resume_achats_responsables',
@@ -977,7 +977,7 @@ const DEFINITIONS = [
   },
   {
     name: 'resultats_enquete',
-    roles: ['ADMIN', 'MANAGER', 'RH', 'QHSE'],
+    roles: ['ADMIN', 'RH'],
     handler: resultatsEnquete,
     tool: {
       name: 'resultats_enquete',
@@ -994,7 +994,7 @@ const DEFINITIONS = [
   },
   {
     name: 'saturation_cav',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     handler: saturationCav,
     tool: {
       name: 'saturation_cav',
@@ -1008,7 +1008,7 @@ const DEFINITIONS = [
   },
   {
     name: 'arrets_gps_tournee',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     handler: arretsGpsTournee,
     tool: {
       name: 'arrets_gps_tournee',
@@ -1022,7 +1022,7 @@ const DEFINITIONS = [
   },
   {
     name: 'echeances_commandes_recurrentes',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     handler: echeancesCommandesRecurrentes,
     tool: {
       name: 'echeances_commandes_recurrentes',
@@ -1036,7 +1036,7 @@ const DEFINITIONS = [
   },
   {
     name: 'resume_effectifs_etp',
-    roles: ['ADMIN', 'RH', 'MANAGER'],
+    roles: ['ADMIN', 'RH'],
     handler: resumeEffectifsEtp,
     tool: {
       name: 'resume_effectifs_etp',

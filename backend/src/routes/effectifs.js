@@ -59,7 +59,7 @@ router.use(authenticate);
 router.use(requireMfa);
 router.use(autoLogActivity('effectifs'));
 
-const READ = authorize('ADMIN', 'RH', 'MANAGER');
+const READ = authorize('ADMIN', 'RH');
 const WRITE = authorize('ADMIN', 'RH');
 const ADMIN_ONLY = authorize('ADMIN');
 

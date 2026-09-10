@@ -156,7 +156,7 @@ router.get('/', async (req, res) => {
 // ───────────────────────────────────────────────────────────────────────────
 
 // GET /epcis — liste des EPCI suivis (ADMIN/MANAGER, comme le refresh)
-router.get('/epcis', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/epcis', authorize('ADMIN'), async (req, res) => {
   try {
     const epcis = await getConfiguredEpcis();
     res.json({ epcis, metropole_code: METROPOLE_ROUEN_EPCI });
@@ -210,7 +210,7 @@ router.delete('/epcis/:code', authorize('ADMIN'), async (req, res) => {
 // dep optionnel (ex. 27, 76) : passé à l'API (codeDepartement) ET refiltré
 // côté serveur sur codesDepartements.
 // ───────────────────────────────────────────────────────────────────────────
-router.get('/epci-search', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/epci-search', authorize('ADMIN'), async (req, res) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const dep = typeof req.query.dep === 'string' ? req.query.dep.trim() : '';
@@ -322,14 +322,14 @@ async function refreshEpcisHandler(req, res) {
   }
 }
 
-router.post('/refresh-metropole', authorize('ADMIN', 'MANAGER'), refreshEpcisHandler);
-router.post('/refresh-epcis', authorize('ADMIN', 'MANAGER'), refreshEpcisHandler);
+router.post('/refresh-metropole', authorize('ADMIN'), refreshEpcisHandler);
+router.post('/refresh-epcis', authorize('ADMIN'), refreshEpcisHandler);
 
 // ───────────────────────────────────────────────────────────────────────────
 // Saisie / import manuels (inchangés)
 // ───────────────────────────────────────────────────────────────────────────
 
-router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authorize('ADMIN'), async (req, res) => {
   const { code_insee, nom, code_postal, epci_code, epci_nom, population_insee, is_metropole_rouen } = req.body || {};
   if (!code_insee || !nom) return res.status(400).json({ error: 'code_insee et nom requis' });
   try {
@@ -386,7 +386,7 @@ router.post('/import', authorize('ADMIN'), async (req, res) => {
   } finally { client.release(); }
 });
 
-router.patch('/cav/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/cav/:cavId', authorize('ADMIN'), async (req, res) => {
   const { code_insee } = req.body || {};
   try {
     if (code_insee) {
