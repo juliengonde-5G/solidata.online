@@ -433,6 +433,38 @@ mv "$VEILLE/bin/xset-vivant" "$VEILLE/bin/xset"
 verifier_contient "veille : la piste sans autorisation supprime XAUTHORITY" \
   "env -u XAUTHORITY" "$DPMS_SH"
 
+titre "Diagnostic : la limite thermique douce n'est pas une cause d'ecran noir"
+# Les bits de get_throttled disent « c'etait vrai a cet instant ». Lus juste
+# apres une installation (apt, copies, redemarrage du navigateur), ils
+# signalent un pic deja retombe : le 10/09/2026, le poste etait annonce en
+# limite thermique alors qu'il mesurait 52,6 C. Promouvoir cela en « cause
+# probable » d'ecran noir envoie chercher un probleme de refroidissement au
+# lieu du vrai defaut. Le bridage SEVERE (bit 2), lui, reste un verdict.
+TEMPE="$TRAVAIL/temperature"
+mkdir -p "$TEMPE/bin"
+cat > "$TEMPE/bin/vcgencmd" <<'FIN'
+#!/bin/sh
+case "$1" in
+  get_throttled) echo "throttled=${FAUX_THROTTLED:-0x0}" ;;
+  measure_temp)  echo "temp=${FAUX_TEMP:-52.6}'C" ;;
+  *) exit 0 ;;
+esac
+FIN
+chmod +x "$TEMPE/bin/vcgencmd"
+diagnostic_avec_throttled() {
+  FAUX_THROTTLED="$1" FAUX_TEMP="${2:-52.6}" PATH="$TEMPE/bin:$PATH" \
+    bash "$RACINE/diagnostic.sh" 2>/dev/null
+}
+SORTIE_DOUCE="$(diagnostic_avec_throttled 0x80008)"
+verifier_contient "diagnostic : la temperature mesuree est affichee" \
+  "temperature processeur" "$SORTIE_DOUCE"
+verifier_absent "diagnostic : la limite DOUCE ne monte pas au verdict" \
+  "TEMPERATURE : bridage SEVERE" "$SORTIE_DOUCE"
+verifier_contient "diagnostic : la limite DOUCE est tout de meme signalee" \
+  "N'explique NI un ecran noir" "$SORTIE_DOUCE"
+verifier_contient "diagnostic : le bridage SEVERE reste un verdict" \
+  "TEMPERATURE : bridage SEVERE" "$(diagnostic_avec_throttled 0x4 81.2)"
+
 titre "Ecran : la sortie HDMI est rallumee meme quand xset repond"
 # LE DEFAUT CORRIGE (poste de secours, 10/09/2026) : « vcgencmd display_power 0 »
 # coupe l'ALIMENTATION de la sortie HDMI ; xset ne gere que le DPMS du moniteur.

@@ -41,11 +41,26 @@ if command -v vcgencmd >/dev/null 2>&1; then
   [ $((VAL & 8)) -ne 0 ]        && DETAIL="${DETAIL}limite thermique EN COURS ; "
   [ $((VAL & 524288)) -ne 0 ]   && DETAIL="${DETAIL}limite thermique atteinte par le passe ; "
   ligne "alimentation/thermique" "${ETAT_ALIM}${DETAIL:+ — ${DETAIL%% ; }}"
+  # LA TEMPERATURE ELLE-MEME, pas seulement le drapeau. Les bits de
+  # get_throttled disent « c'etait vrai a cet instant » : lus juste apres une
+  # installation (apt, copies, redemarrage du navigateur), ils signalent un
+  # pic deja retombe. Sans la mesure a cote, on fait chercher un probleme de
+  # refroidissement a un poste a 52 degres (constate le 10/09/2026).
+  TEMP_CPU="$(vcgencmd measure_temp 2>/dev/null | sed 's/^temp=//')"
+  [ -n "$TEMP_CPU" ] && ligne "temperature processeur" "${TEMP_CPU} (limite douce 60 C, severe 80 C)"
   if [ $((VAL & 65537)) -ne 0 ]; then
     retenir "ALIMENTATION : ${ETAT_ALIM} — sous-tension ($( [ $((VAL & 1)) -ne 0 ] && echo EN COURS || echo survenue depuis le demarrage)). Le Pi 5 exige un bloc 5 V / 5 A. Remplacer l'alimentation AVANT tout autre diagnostic."
   fi
-  if [ $((VAL & 8)) -ne 0 ]; then
-    retenir "TEMPERATURE : limite thermique EN COURS — le processeur est bride. Verifier ventilation/dissipateur."
+  # BRIDAGE SEVERE (bit 2, 80 C ou sous-tension) : cause probable a part
+  # entiere — a ce stade la machine rame au point de tout fausser.
+  if [ $((VAL & 4)) -ne 0 ]; then
+    retenir "TEMPERATURE : bridage SEVERE en cours (${TEMP_CPU:-temperature inconnue}) — le processeur est fortement ralenti. Dissipateur et ventilation AVANT tout autre diagnostic."
+  elif [ $((VAL & 8)) -ne 0 ]; then
+    # LIMITE DOUCE (bit 3, 60 C) : la frequence passe de 1,4 a 1,2 GHz. C'est
+    # une observation, PAS une cause d'ecran noir — la promouvoir en « cause
+    # probable » envoyait chercher un probleme de refroidissement au lieu du
+    # vrai defaut. On le dit, sans le mettre au verdict.
+    ligne "  a noter" "limite thermique douce atteinte (${TEMP_CPU:-?}) — frequence reduite. N'explique NI un ecran noir NI un kiosque absent ; un dissipateur rendrait le poste plus vif."
   fi
 fi
 
