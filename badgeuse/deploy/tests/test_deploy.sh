@@ -433,6 +433,69 @@ mv "$VEILLE/bin/xset-vivant" "$VEILLE/bin/xset"
 verifier_contient "veille : la piste sans autorisation supprime XAUTHORITY" \
   "env -u XAUTHORITY" "$DPMS_SH"
 
+titre "Diagnostic : pas de fausse alerte, et la plage affichee est celle qui s'applique"
+DIAG_SH="$(cat "$RACINE/diagnostic.sh")"
+
+# LA PLAGE AFFICHEE DOIT ETRE CELLE QUI S'APPLIQUE. Depuis la 2.49.0 les heures
+# reglees dans SOLIDATA descendent dans <data_dir>/dpms.conf, qui PRIME sur la
+# section [dpms] d'installation ; la section 5 lisait la seconde et annoncait
+# donc une plage perimee (07:30-19:00 affiche alors que 05:30-21:30 
+# s'appliquait, constate en exploitation le 10/09/2026).
+PLAGE="$TRAVAIL/plage"
+mkdir -p "$PLAGE/data"
+cat > "$PLAGE/badgeuse.conf" <<FIN
+[system]
+data_dir = ${PLAGE}/data
+
+[dpms]
+allumage = 07:30
+extinction = 19:00
+FIN
+lire_plage_comme_le_diagnostic() {
+  # Exactement l'invocation du diagnostic : sous-shell, jamais dans le shell
+  # courant (voir le test d'isolation ci-dessous).
+  BADGEUSE_CONFIG="$PLAGE/badgeuse.conf" bash -c \
+    '( BADGEUSE_DPMS_SOURCE_SEULEMENT=1 . "'"$RACINE"'/dpms.sh" >/dev/null 2>&1 \
+       && lire_plage '"$1"' ) || true'
+}
+printf '[dpms]\nallumage = 05:30\nextinction = 21:30\n' > "$PLAGE/data/dpms.conf"
+verifier "diagnostic : la plage du serveur prime sur celle de l'installation" \
+  "05:30 -> 21:30" \
+  "$(lire_plage_comme_le_diagnostic allumage) -> $(lire_plage_comme_le_diagnostic extinction)"
+rm -f "$PLAGE/data/dpms.conf"
+verifier "diagnostic : sans plage du serveur, repli sur l'installation" \
+  "07:30 -> 19:00" \
+  "$(lire_plage_comme_le_diagnostic allumage) -> $(lire_plage_comme_le_diagnostic extinction)"
+verifier_contient "diagnostic : la plage lue est annoncee comme effective" \
+  "plage d'allumage (effective)" "$DIAG_SH"
+
+# ISOLATION OBLIGATOIRE. dpms.sh pose « set -euo pipefail » ; le diagnostic
+# tourne DELIBEREMENT sans -e. Le sourcer dans le shell courant le ferait
+# mourir a la premiere commande qui rend non-zero — l'outil qui doit survivre
+# a tout. Chaque source doit donc etre dans une substitution/sous-shell.
+SOURCE_HORS_SOUS_SHELL=0
+while IFS= read -r ligne_source; do
+  case "$ligne_source" in
+    *'( BADGEUSE_DPMS_SOURCE_SEULEMENT=1 .'*) ;;
+    *) SOURCE_HORS_SOUS_SHELL=1 ;;
+  esac
+done <<FIN
+$(printf '%s' "$DIAG_SH" | grep -F 'BADGEUSE_DPMS_SOURCE_SEULEMENT=1 .' || true)
+FIN
+verifier "diagnostic : dpms.sh n'est jamais source dans le shell courant" \
+  "0" "$SOURCE_HORS_SOUS_SHELL"
+
+# DEUX VERDICTS SONT FAUX SUR UN KIOSQUE QUI VIENT DE DEMARRER, et c'est
+# precisement quand on lance le diagnostic (juste apres install.sh) : chromium
+# met des dizaines de secondes a apparaitre sur un Pi 3, et un serveur X neuf
+# a toujours le DPMS actif jusqu'au passage suivant du minuteur.
+verifier_contient "diagnostic : l'age du kiosque est mesure" \
+  "KIOSQUE_AGE_S=" "$DIAG_SH"
+verifier_contient "diagnostic : « compositeur seul » epargne un kiosque qui demarre" \
+  '[ "$NAV_VU" -eq 0 ] && [ "$KIOSQUE_JEUNE" -eq 1 ]' "$DIAG_SH"
+verifier_contient "diagnostic : « veille active » epargne un serveur X neuf" \
+  '[ "$KIOSQUE_AGE_S" -lt 300 ]' "$DIAG_SH"
+
 titre "Pointeur de souris masque en permanence"
 KIOSK_SH="$(cat "$RACINE/kiosk-client.sh")"
 # La regle CSS ne couvre QUE la fenetre du navigateur : la fleche reste visible
