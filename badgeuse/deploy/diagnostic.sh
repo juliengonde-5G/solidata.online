@@ -179,6 +179,22 @@ if [ -n "${MAINPID:-}" ] && [ "${MAINPID:-0}" != "0" ] && [ -r "/proc/${MAINPID}
   ligne "cgroup du MainPID" "$(sed -n 's/^0:://p' "/proc/${MAINPID}/cgroup" 2>/dev/null | head -1)"
 fi
 
+# AGE DU KIOSQUE. Deux verdicts en dependent (navigateur absent, DPMS encore
+# actif) et tous deux sont FAUX sur un service qui vient de redemarrer : sur un
+# Pi 3, chromium met des dizaines de secondes a apparaitre, et un serveur X
+# neuf demarre avec le DPMS actif jusqu'au passage suivant du minuteur. Or le
+# diagnostic est lance juste apres install.sh — precisement a cet instant.
+KIOSQUE_AGE_S=""
+if [ -n "${MAINPID:-}" ] && [ "${MAINPID:-0}" != "0" ]; then
+  KIOSQUE_AGE_S="$(ps -o etimes= -p "$MAINPID" 2>/dev/null | tr -d ' ')"
+fi
+DELAI_DEMARRAGE_S="${DELAI_DEMARRAGE_S:-90}"
+KIOSQUE_JEUNE=0
+if [ -n "$KIOSQUE_AGE_S" ] && [ "$KIOSQUE_AGE_S" -lt "$DELAI_DEMARRAGE_S" ] 2>/dev/null; then
+  KIOSQUE_JEUNE=1
+  ligne "demarre il y a" "${KIOSQUE_AGE_S} s"
+fi
+
 NAV_VU=0
 PROCS_VUS=0
 while read -r pid nom tps; do
@@ -192,7 +208,9 @@ $(ps -u badgeuse -o pid=,comm=,etimes= --no-headers 2>/dev/null \
 EOF
 [ "$PROCS_VUS" -eq 1 ] || ligne "processus" "aucun (hors agent)"
 
-if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
+if [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ] && [ "$KIOSQUE_JEUNE" -eq 1 ]; then
+  ligne "navigateur" "pas encore lance — le kiosque a ${KIOSQUE_AGE_S} s ; sur un Pi 3 chromium met du temps. Relancer le diagnostic dans une minute avant de conclure."
+elif [ "$KIOSQUE_OK" -eq 1 ] && [ "$NAV_VU" -eq 0 ]; then
   retenir "COMPOSITEUR SEUL : le service est actif, mais aucun processus chromium ne tourne sous l'utilisateur du kiosque — l'ecran affiche un fond vide. La cause exacte est dans la section 6 bis (lanceur + sortie de chromium et code de fin). Si elle est vide, l'installation est anterieure, ou le client n'a jamais ete lance :
       sudo bash /opt/badgeuse/deploy/install.sh && sudo systemctl restart badgeuse-kiosk"
 fi
@@ -334,13 +352,39 @@ if [ -d /sys/class/drm ]; then
     ligne "$(basename "$e")" "$(cat "$e/status" 2>/dev/null)"
   done
 fi
+# PLAGE EFFECTIVE, pas celle de l'installation. Depuis la 2.49.0, les heures
+# reglees dans SOLIDATA descendent dans <data_dir>/dpms.conf, qui PRIME sur la
+# section [dpms] du fichier d'installation. Lire la seconde afficherait une
+# plage qui ne s'applique plus — exactement le genre d'ecart qui envoie
+# chercher une panne ailleurs. On appelle donc la fonction REELLE de dpms.sh
+# (source unique, deja testee) plutot que d'en recopier la cascade.
+PLAGE_LUE=0
+DPMS_POUR_PLAGE=/opt/badgeuse/deploy/dpms.sh
+[ -r "$DPMS_POUR_PLAGE" ] || DPMS_POUR_PLAGE="$(dirname "${BASH_SOURCE[0]}")/dpms.sh"
+plage_effective() {
+  # SOUS-SHELL OBLIGATOIRE (substitution de commande) : dpms.sh pose
+  # « set -euo pipefail », et ce diagnostic tourne DELIBEREMENT sans -e
+  # (en-tete ligne 13). Le sourcer dans le shell courant ferait mourir le
+  # diagnostic a la premiere commande qui rend non-zero — soit exactement
+  # l'outil qui doit survivre a tout.
+  ( BADGEUSE_DPMS_SOURCE_SEULEMENT=1 . "$DPMS_POUR_PLAGE" >/dev/null 2>&1 \
+    && lire_plage "$1" 2>/dev/null ) || true
+}
+if [ -r "$DPMS_POUR_PLAGE" ]; then
+  DEB="$(plage_effective allumage)"
+  FIN="$(plage_effective extinction)"
+  if [ -n "${DEB:-}" ] || [ -n "${FIN:-}" ]; then
+    ligne "plage d'allumage (effective)" "${DEB:-non defini} -> ${FIN:-non defini}"
+    PLAGE_LUE=1
+  fi
+fi
 CONF=/etc/badgeuse/badgeuse.conf
-if [ -r "$CONF" ]; then
+if [ "$PLAGE_LUE" -eq 0 ] && [ -r "$CONF" ]; then
   DEB="$(grep -E '^\s*(screen_on|allumage)' "$CONF" 2>/dev/null | head -1)"
   FIN="$(grep -E '^\s*(screen_off|extinction)' "$CONF" 2>/dev/null | head -1)"
-  ligne "plage d'allumage" "${DEB:-non defini} / ${FIN:-non defini}"
-  ligne "heure locale du poste" "$(date '+%H:%M')"
+  ligne "plage d'allumage (installation)" "${DEB:-non defini} / ${FIN:-non defini}"
 fi
+ligne "heure locale du poste" "$(TZ=Europe/Paris date '+%H:%M') (Europe/Paris)"
 
 # ── 5 bis. Veille de l'ecran ─────────────────────────────────────────────────
 # « L'ecran se met en veille tout seul en pleine journee » est une panne a part
@@ -396,7 +440,13 @@ if [ -n "$ETAT_XSET" ]; then
   ECRAN_DPMS="$(printf '%s' "$ETAT_XSET" | grep -i 'DPMS is' | tr -s ' ' | sed 's/^ *//')"
   ligne "economiseur X" "${ECRAN_SAVER:-inconnu}"
   ligne "DPMS X" "${ECRAN_DPMS:-inconnu}"
-  if printf '%s' "$ETAT_XSET" | grep -qi 'DPMS is Enabled'; then
+  if printf '%s' "$ETAT_XSET" | grep -qi 'DPMS is Enabled' \
+     && [ -n "$KIOSQUE_AGE_S" ] && [ "$KIOSQUE_AGE_S" -lt 300 ] 2>/dev/null; then
+    # Un serveur X qui vient de demarrer a TOUJOURS le DPMS actif : la
+    # neutralisation est posee par le minuteur, qui bat toutes les 5 min. Ce
+    # n'est un defaut que si elle ne revient pas.
+    ligne "veille" "DPMS actif, mais le serveur X a ${KIOSQUE_AGE_S} s — normal : la neutralisation est reposee au prochain passage du minuteur (5 min max). Pour ne pas attendre : sudo systemctl start badgeuse-dpms.service"
+  elif printf '%s' "$ETAT_XSET" | grep -qi 'DPMS is Enabled'; then
     retenir "MISE EN VEILLE ACTIVE : le serveur X a DPMS *Enabled* — le moniteur s'eteindra tout seul apres quelques minutes sans frappe, et un kiosque n'en recoit jamais. Remettre la neutralisation tout de suite :
     sudo systemctl start badgeuse-dpms.service
     puis verifier qu'elle tient : sudo journalctl -u badgeuse-dpms -n 5 --no-pager"
