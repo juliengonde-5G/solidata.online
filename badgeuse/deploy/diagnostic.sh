@@ -477,15 +477,24 @@ titre "6. Journaux — kiosque (20 dernieres lignes)"
 journalctl -u badgeuse-kiosk -n 20 --no-pager 2>/dev/null | sed 's/^/    /' \
   || echo "    (journal indisponible)"
 
-titre "6 bis. Sortie du lanceur et de chromium (journal de l'unite)"
+titre "6 bis. Sortie du lanceur et de chromium"
 # Le lanceur ecrit sur son stderr HERITE (prefixe « kiosk-client: »), chromium
-# aussi : tout est dans le journal de l'unite — aucun intermediaire qui puisse
-# bloquer ou se perdre.
-SORTIE_CLIENT="$(journalctl -u badgeuse-kiosk --no-pager 2>/dev/null | grep -E 'kiosk-client:|chromium' | tail -12)"
+# aussi. MAIS PAS DANS LE JOURNAL DE L'UNITE : « PAMName=login » fait creer par
+# logind une session utilisateur, qui DEPLACE les processus dans
+# user.slice/user-999.slice/session-N.scope. journald etiquette ce qu'il
+# recoit d'apres le cgroup de l'emetteur : « journalctl -u badgeuse-kiosk » ne
+# voit donc RIEN de ce que dit le client, et concluait a tort « client jamais
+# lance » — sur un poste ou il tournait, echouait et redemarrait en boucle
+# (constate le 10/09/2026 : le vrai message vivait dans le journal general).
+# On cherche donc par le CONTENU, dans tout le journal du demarrage courant.
+SORTIE_CLIENT="$(journalctl -b --no-pager 2>/dev/null \
+  | grep -E 'kiosk-client:|Openbox-Message|ERROR:.*(ozone|aura|X server)|chromium' \
+  | tail -14)"
 if [ -n "$SORTIE_CLIENT" ]; then
   printf '%s\n' "$SORTIE_CLIENT" | sed 's/^/    /'
 else
-  echo "    (aucune ligne du lanceur — installation anterieure, ou client jamais lance : relancer install.sh)"
+  echo "    (aucune ligne du lanceur depuis le demarrage — client jamais lance :"
+  echo "     verifier que xinit atteint son client, puis relancer install.sh)"
 fi
 
 titre "7. Journaux — agent (20 dernieres lignes)"
