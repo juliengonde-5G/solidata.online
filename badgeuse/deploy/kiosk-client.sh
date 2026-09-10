@@ -35,11 +35,36 @@ fi
 # openbox, deja installe par la voie X11, applique le plein ecran demande.
 # Sous Wayland, cage EST le gestionnaire : rien a lancer.
 if [ "${XDG_SESSION_TYPE:-}" = "x11" ]; then
+  # L'AFFICHAGE D'ABORD, avant de lancer quoi que ce soit dessus. Sans lui,
+  # openbox, xset, xsetroot puis chromium echouent l'un apres l'autre, et le
+  # seul message qui reste est un « Missing X server or $DISPLAY » d'ozone —
+  # illisible pour qui n'est pas dans le code de Chromium. Constate le
+  # 10/09/2026 : trois avertissements disaient deja « je n'atteins pas
+  # l'ecran », et le lanceur a quand meme demarre le navigateur.
+  if command -v xset >/dev/null 2>&1 && ! xset q >/dev/null 2>&1; then
+    dire "ERREUR : affichage ${DISPLAY:-<non defini>} injoignable — le serveur X"
+    dire "  n'a pas demarre, ou refuse la connexion. Chromium ne peut rien"
+    dire "  afficher : inutile de le lancer. A regarder, dans cet ordre —"
+    dire "  le journal du serveur X (~badgeuse/.local/share/xorg/Xorg.0.log,"
+    dire "  chercher « (EE) »), puis sudo bash /opt/badgeuse/deploy/diagnostic.sh"
+    exit 3
+  fi
+
   if command -v openbox >/dev/null 2>&1; then
     openbox &
     GESTIONNAIRE=$!
     sleep 1
-    dire "gestionnaire de fenetres openbox demarre (plein ecran honore)"
+    # ON VERIFIE AVANT D'ANNONCER. La version precedente affichait « openbox
+    # demarre (plein ecran honore) » alors qu'openbox venait d'ecrire
+    # « Failed to open the display » deux lignes plus haut : le journal
+    # affirmait le contraire de ce qui s'etait passe.
+    if kill -0 "$GESTIONNAIRE" 2>/dev/null; then
+      dire "gestionnaire de fenetres openbox demarre (plein ecran honore)"
+    else
+      GESTIONNAIRE=""
+      dire "AVERTISSEMENT : openbox n'a pas demarre — chromium ouvrira une"
+      dire "  fenetre de taille par defaut au lieu du plein ecran"
+    fi
   fi
   # CEINTURE. « -s off -dpms » est deja passe au serveur X ; on le redit ici
   # parce qu'une configuration Xorg du systeme peut reactiver l'economiseur

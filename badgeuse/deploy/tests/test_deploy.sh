@@ -433,6 +433,28 @@ mv "$VEILLE/bin/xset-vivant" "$VEILLE/bin/xset"
 verifier_contient "veille : la piste sans autorisation supprime XAUTHORITY" \
   "env -u XAUTHORITY" "$DPMS_SH"
 
+titre "Lanceur du kiosque : un affichage injoignable est NOMME, pas contourne"
+CLIENT="$TRAVAIL/client"
+mkdir -p "$CLIENT/bin"
+# Faux xset qui echoue : c'est l'etat d'un poste dont le serveur X n'est pas
+# joignable (constate le 10/09/2026 — openbox, xset, xsetroot et chromium ont
+# echoue l'un apres l'autre, et seul le dernier message, illisible, restait).
+printf '#!/bin/sh\nexit 1\n' > "$CLIENT/bin/xset"
+# Faux navigateur : il LAISSE UNE TRACE s'il est lance. Le lanceur ne doit pas
+# le lancer quand l'affichage ne repond pas.
+printf '#!/bin/sh\ntouch "%s/navigateur-lance"\n' "$CLIENT" > "$CLIENT/bin/faux-navigateur"
+chmod +x "$CLIENT/bin/xset" "$CLIENT/bin/faux-navigateur"
+rm -f "$CLIENT/navigateur-lance"
+SORTIE_CLIENT_TEST="$(PATH="$CLIENT/bin:$PATH" XDG_SESSION_TYPE=x11 DISPLAY=:99 \
+  NAVIGATEUR_BIN="$CLIENT/bin/faux-navigateur" bash "$RACINE/kiosk-client.sh" 2>&1)"
+CODE_CLIENT_TEST=$?
+verifier_contient "lanceur : l'affichage injoignable est nomme" \
+  "affichage :99 injoignable" "$SORTIE_CLIENT_TEST"
+verifier "lanceur : le navigateur n'est PAS lance sans affichage" \
+  "absent" "$([ -e "$CLIENT/navigateur-lance" ] && echo present || echo absent)"
+verifier_absent "lanceur : aucun succes openbox annonce sans affichage" \
+  "openbox demarre" "$SORTIE_CLIENT_TEST"
+
 titre "Diagnostic : pas de fausse alerte, et la plage affichee est celle qui s'applique"
 DIAG_SH="$(cat "$RACINE/diagnostic.sh")"
 
