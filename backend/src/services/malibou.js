@@ -42,6 +42,24 @@ const store = secretStore({ envVar: 'MALIBOU_ENCRYPTION_KEY', libelle: 'clé Mal
 const CLE_API = 'malibou.api_key';
 const CLE_BASE = 'malibou.api_base';
 const CLE_AUTH = 'malibou.auth_mode';
+const CLE_ORG = 'malibou.organization_id';
+
+/**
+ * Valeurs par défaut ÉTABLIES SUR LA DOCUMENTATION Malibou (11/09/2026,
+ * API publique v1.11.0), et non supposées : l'hôte, le préfixe et le mode
+ * d'authentification y sont écrits noir sur blanc. Elles restent surchargeables
+ * par réglage — une documentation est vraie le jour où on la lit.
+ */
+const BASE_PAR_DEFAUT = 'https://app.malibou.com/api/public/v1';
+const AUTH_PAR_DEFAUT = 'bearer';
+
+/**
+ * Points d'accès réservés aux partenaires conventionnés. Une clé libre-service
+ * y reçoit TOUJOURS un 403, quelles que soient les permissions cochées — la
+ * documentation le dit explicitement. Les nommer ici permet de rendre un
+ * message qui explique, au lieu d'un « interdit » que personne ne sait lever.
+ */
+const PARTENAIRES_SEULEMENT = /\/(complementary-contracts|meal-vouchers|affiliations)|\/organizations\/[^/]+$/;
 
 /** Délai maximal d'un appel. Un import de paie ne doit pas retenir un job. */
 const TIMEOUT_MS = 20000;
@@ -76,31 +94,38 @@ async function lireCle() {
 }
 
 async function lireConfig() {
-  const [cle, base, auth] = await Promise.all([
+  const [cle, base, auth, org] = await Promise.all([
     lireCle(),
     store.getSetting(CLE_BASE),
     store.getSetting(CLE_AUTH),
+    store.getSetting(CLE_ORG),
   ]);
   return {
     cle,
-    base: base || process.env.MALIBOU_API_BASE || null,
-    auth: auth || null,
+    base: base || process.env.MALIBOU_API_BASE || BASE_PAR_DEFAUT,
+    auth: auth || AUTH_PAR_DEFAUT,
+    org: org || process.env.MALIBOU_ORGANIZATION_ID || null,
   };
 }
 
 /** État de la configuration, sans jamais rendre le secret. */
 async function statut() {
-  const { cle, base, auth } = await lireConfig();
+  const { cle, base, auth, org } = await lireConfig();
   return {
-    configure: Boolean(cle && base && auth),
+    configure: Boolean(cle && base && auth && org),
     cle_presente: Boolean(cle),
     cle_apercu: masquerCle(cle),
     base_url: base,
     mode_auth: auth,
+    organization_id: org,
     manques: [
       !cle ? 'clé API' : null,
-      !base ? 'URL de base (lancer le diagnostic)' : null,
-      !auth ? "mode d'authentification (lancer le diagnostic)" : null,
+      !base ? 'URL de base' : null,
+      !auth ? "mode d'authentification" : null,
+      // L'identifiant d'organisation fait partie du CHEMIN de chaque appel :
+      // sans lui, aucune route n'existe. Il se copie depuis la page « Clés
+      // d'API » de Malibou (menu d'actions → « Copier l'ID d'organisation »).
+      !org ? "identifiant d'organisation" : null,
     ].filter(Boolean),
   };
 }
@@ -145,26 +170,55 @@ async function appelBrut({ base, chemin, cle, modeAuth, query, timeout = TIMEOUT
   }
 }
 
-/** GET authentifié sur la configuration enregistrée. */
-async function malibouGet(chemin, query = {}) {
+/** Attente passive, pour les temporisations de débit. */
+const attendre = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * GET authentifié sur la configuration enregistrée.
+ *
+ * TEMPORISATION SUR 429 : la documentation Malibou demande explicitement un
+ * retrait exponentiel. Un import de paie balaie plusieurs centaines d'appels
+ * (une fiche détaillée par salarié) — sans cette attente, la première limite
+ * atteinte ferait échouer l'import entier alors qu'il suffisait de patienter.
+ * L'en-tête `Retry-After` fait foi quand il est présent ; sinon on double.
+ */
+async function malibouGet(chemin, query = {}, { essais = 3 } = {}) {
   const { cle, base, auth } = await lireConfig();
   if (!cle) { const e = new Error('Clé API Malibou non configurée'); e.code = 'MALIBOU_NON_CONFIGURE'; throw e; }
   if (!base || !auth) {
-    const e = new Error("URL de base ou mode d'authentification Malibou inconnus — lancer scripts/malibou-diagnostic.js");
+    const e = new Error("URL de base ou mode d'authentification Malibou inconnus");
     e.code = 'MALIBOU_NON_DECOUVERT';
     throw e;
   }
-  const r = await appelBrut({ base, chemin, cle, modeAuth: auth, query });
-  if (!r.ok) {
+
+  let attente = 1000;
+  for (let essai = 1; ; essai += 1) {
+    const r = await appelBrut({ base, chemin, cle, modeAuth: auth, query });
+    if (r.ok) return r.json;
+
+    const rejouable = r.status === 429 || r.status === 500 || r.status === 0;
+    if (rejouable && essai < essais) {
+      const delai = Number(r.retryAfter) > 0 ? Number(r.retryAfter) * 1000 : attente;
+      logger.warn('[MALIBOU] temporisation', { chemin, status: r.status, essai, delai_ms: delai });
+      await attendre(delai);
+      attente *= 2;
+      continue;
+    }
+
     const e = new Error(`Malibou ${chemin} → HTTP ${r.status}`);
     e.code = r.status === 401 || r.status === 403 ? 'MALIBOU_AUTH' : 'MALIBOU_HTTP';
     e.status = r.status;
-    // On garde le corps d'erreur (utile : Malibou y met souvent le motif),
-    // borné pour ne pas inonder les journaux.
+    // On garde le corps d'erreur (Malibou y met le motif), borné pour ne pas
+    // inonder les journaux.
     e.detail = String(r.texte || '').slice(0, 500);
+    if (r.status === 403 && PARTENAIRES_SEULEMENT.test(chemin)) {
+      e.message += " — point d'accès réservé aux partenaires conventionnés : une clé"
+        + ' libre-service y reçoit toujours 403, quelles que soient ses permissions.';
+    } else if (r.status === 403) {
+      e.message += " — la clé n'a pas la permission requise pour ce point d'accès.";
+    }
     throw e;
   }
-  return r.json;
 }
 
 /**
@@ -195,29 +249,84 @@ function pageSuivante(charge, pageCourante) {
 }
 
 /** Parcourt toutes les pages d'une ressource et rend la liste complète. */
+/**
+ * Parcourt toutes les pages d'une ressource.
+ *
+ * LA RÈGLE EST CELLE DE MALIBOU, ET ELLE N'EST PAS CELLE QU'ON DEVINE :
+ * l'API ne renvoie NI curseur, NI total, NI drapeau « page suivante ». Sa
+ * documentation dit d'incrémenter `page` « jusqu'à ce qu'une page rende moins
+ * d'éléments que `limit` ». La première version de cette fonction s'arrêtait
+ * faute de méta-données — elle aurait donc importé la PREMIÈRE PAGE et
+ * annoncé un succès. C'est le pire genre de défaut : un import tronqué qui
+ * ressemble à un import complet, et qu'on ne découvre qu'en comptant les
+ * salariés manquants des mois plus tard.
+ *
+ * `page` et `limit` doivent être des entiers STRICTEMENT positifs : l'API
+ * refuse le reste en 400.
+ */
 async function listerTout(chemin, query = {}) {
+  const limit = Math.max(1, Number(query.limit) || TAILLE_PAGE);
   const tout = [];
-  let page = 1;
-  let curseur = null;
-  for (let i = 0; i < MAX_PAGES; i += 1) {
-    const q = { ...query, limit: query.limit || TAILLE_PAGE };
-    if (curseur) q.cursor = curseur; else if (page > 1) q.page = page;
-    const charge = await malibouGet(chemin, q);
+
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const charge = await malibouGet(chemin, { ...query, page, limit });
     const lot = extraireListe(charge);
     tout.push(...lot);
-    const suite = pageSuivante(charge, page);
-    if (!suite || lot.length === 0) return tout;
-    if (suite.cursor) curseur = suite.cursor; else page = suite.page;
+    // Page incomplète = dernière page. Page vide = terminé aussi.
+    if (lot.length < limit) return tout;
   }
+
   // On ne boucle pas indéfiniment en silence : la troncature est ANNONCÉE,
   // sans quoi un import partiel passerait pour un import complet.
   logger.warn('[MALIBOU] pagination interrompue au plafond', { chemin, pages: MAX_PAGES, lignes: tout.length });
   return tout;
 }
 
+/** Construit un chemin scopé à l'organisation configurée. */
+async function cheminOrg(suffixe) {
+  const { org } = await lireConfig();
+  if (!org) {
+    const e = new Error("Identifiant d'organisation Malibou non configuré"
+      + " — le copier depuis la page « Clés d'API » (menu d'actions → « Copier l'ID d'organisation »)");
+    e.code = 'MALIBOU_ORG_MANQUANTE';
+    throw e;
+  }
+  return `organizations/${encodeURIComponent(org)}/${suffixe.replace(/^\//, '')}`;
+}
+
+// ── Ressources accessibles avec une clé LIBRE-SERVICE ────────────────────
+// (company, meal-vouchers et complementary-contracts sont « Partners only »
+//  et ne sont donc délibérément pas exposés ici.)
+
+/** Liste des collaborateurs. Permission `org:employee:read`. */
+async function listerCollaborateurs(query = {}) {
+  return listerTout(await cheminOrg('collaborators'), query);
+}
+
+/**
+ * Fiche détaillée d'un collaborateur. Permission `org:employee:read` ; les
+ * données personnelles n'arrivent qu'avec `org:employee:details:read`, et le
+ * tableau des contrats qu'avec `org:contract:details:read`.
+ * NON paginé (la documentation le précise pour le tableau des contrats).
+ */
+async function lireCollaborateur(collaboratorId) {
+  return malibouGet(await cheminOrg(`collaborators/${encodeURIComponent(collaboratorId)}`));
+}
+
+/** Absences chevauchant la période demandée. Permission `org:absence:read`. */
+async function listerAbsences({ startDate, endDate, status } = {}) {
+  return listerTout(await cheminOrg('absences'), { startDate, endDate, status });
+}
+
+/** Lieux de travail et télétravail. Permission `org:work_location:read`. */
+async function listerLieuxTravail({ startDate, endDate, status } = {}) {
+  return listerTout(await cheminOrg('work-locations'), { startDate, endDate, status });
+}
+
 module.exports = {
   MODES_AUTH,
-  CLE_API, CLE_BASE, CLE_AUTH,
+  CLE_API, CLE_BASE, CLE_AUTH, CLE_ORG,
+  BASE_PAR_DEFAUT, AUTH_PAR_DEFAUT, PARTENAIRES_SEULEMENT,
   store,
   masquerCle,
   lireCle,
@@ -226,6 +335,11 @@ module.exports = {
   appelBrut,
   malibouGet,
   listerTout,
+  cheminOrg,
+  listerCollaborateurs,
+  lireCollaborateur,
+  listerAbsences,
+  listerLieuxTravail,
   extraireListe,
   pageSuivante,
   construireUrl,
