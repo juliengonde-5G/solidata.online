@@ -53,8 +53,7 @@ const tokenFor = (role) => jwt.sign(
   { id: 7, username: 'dpo.test', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
   JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), DPO: tokenFor('DPO'), RH: tokenFor('RH'),
-  MANAGER: tokenFor('MANAGER'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), DPO: tokenFor('DPO'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
 let app;
@@ -99,7 +98,7 @@ const journalClient = () => mockClientQuery.mock.calls.filter((c) => /INSERT INT
 // ═══════════════════════════════════════════════════════════════════════════
 describe('GET /api/rgpd/purges — habilitations', () => {
   it('403 pour un rôle non ADMIN/DPO', async () => {
-    for (const role of ['MANAGER', 'RH', 'COLLABORATEUR']) {
+    for (const role of ['COLLABORATEUR', 'RH', 'COLLABORATEUR']) {
       expect((await get('/api/rgpd/purges', role)).status).toBe(403);
     }
   });
@@ -186,7 +185,7 @@ describe('POST /api/rgpd/purges/:cle/executer', () => {
   });
 
   it('403 pour un rôle non ADMIN/DPO, et rien n’est exécuté', async () => {
-    for (const role of ['MANAGER', 'RH', 'COLLABORATEUR']) {
+    for (const role of ['COLLABORATEUR', 'RH', 'COLLABORATEUR']) {
       const res = await post('/api/rgpd/purges/gps_positions/executer', role);
       expect(res.status).toBe(403);
     }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Package } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, PageHeader } from '../components';
+import { LoadingSpinner, Modal, PageHeader, CoordonneesGps } from '../components';
 import SensorSection from '../components/SensorSection';
 import BordereauxDecheterie from '../components/tours/BordereauxDecheterie';
 import useConfirm from '../hooks/useConfirm';
@@ -82,6 +82,36 @@ function LocationPicker({ position, onPick }) {
     },
   });
   return position ? <Marker position={position} /> : null;
+}
+
+// Remplissage d'un passage, tel que le chauffeur l'a déclaré.
+//
+// L'ancienne cellule affichait « 4/5 » — l'échelle historique, qui PLAFONNE à
+// « plein ». Une borne déclarée « au-delà » (elle débordait) s'y lisait donc
+// exactement comme une borne pleine : l'information la plus utile du passage,
+// celle qui dit de repasser plus tôt, se perdait à l'affichage alors qu'elle
+// était bien en base (constat client du 10/09/2026).
+//
+// Le serveur envoie désormais `remplissage` déjà décodé (utils/remplissage.js) ;
+// on ne réinterprète rien ici. Le repli sur les colonnes brutes couvre un
+// serveur pas encore déployé — jamais une valeur inventée.
+function remplissageCellule(p) {
+  const r = p.remplissage;
+  if (!r) {
+    return p.fill_level != null
+      ? <span className="text-gray-700">{`${p.fill_level}/4`}</span>
+      : <span className="text-gray-400">—</span>;
+  }
+  const texte = `${r.libelle} — ${Math.round(r.pourcentage)} %${r.approche ? ' (approché)' : ''}`;
+  if (!r.debordement) return <span className="text-gray-700">{texte}</span>;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-50 text-red-700 font-medium"
+      title="Le chauffeur a déclaré la borne AU-DELÀ du plein : elle débordait."
+    >
+      ⚠ {texte}
+    </span>
+  );
 }
 
 const EMPTY_FORM = { name: '', address: '', commune: '', latitude: '', longitude: '', nb_containers: 1,
@@ -201,7 +231,7 @@ function HistoriqueSection({ cavId }) {
                         <th className="px-2 py-1.5 font-medium">Tournée</th>
                         <th className="px-2 py-1.5 font-medium">Véhicule</th>
                         <th className="px-2 py-1.5 font-medium">Statut</th>
-                        <th className="px-2 py-1.5 font-medium">Niveau</th>
+                        <th className="px-2 py-1.5 font-medium">Remplissage déclaré</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -211,7 +241,7 @@ function HistoriqueSection({ cavId }) {
                           <td className="px-2 py-1.5 text-gray-500">#{p.tour_id}</td>
                           <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{p.registration || '—'}</td>
                           <td className="px-2 py-1.5">{passageBadge(p)}</td>
-                          <td className="px-2 py-1.5 text-gray-700">{p.fill_level != null ? `${p.fill_level}/5` : '—'}</td>
+                          <td className="px-2 py-1.5 text-gray-700">{remplissageCellule(p)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -703,6 +733,16 @@ export default function AdminCAV() {
                             )}
                           </div>
                           <div className="text-xs text-gray-400 truncate max-w-[200px]">{cav.address || '—'}</div>
+                          {/* Coordonnées décimales sous l'adresse : une borne posée
+                              sur un parking n'a souvent pas de numéro de rue, et
+                              c'est ce couple qu'on entre dans un GPS. */}
+                          <CoordonneesGps
+                            latitude={cav.latitude}
+                            longitude={cav.longitude}
+                            libelle={null}
+                            carte={false}
+                            className="mt-0.5"
+                          />
                         </td>
                         <td className="px-4 py-3 text-xs">
                           {cav.code_insee_commune ? (
@@ -813,11 +853,12 @@ export default function AdminCAV() {
                   </div>
                   <div className="flex gap-2">
                     <span className="text-gray-400 w-24 shrink-0">GPS</span>
-                    <span className="text-gray-700 font-mono text-xs">
-                      {detailCav.latitude && detailCav.longitude
-                        ? `${Number(detailCav.latitude).toFixed(6)}, ${Number(detailCav.longitude).toFixed(6)}`
-                        : 'Non renseigné'}
-                    </span>
+                    <CoordonneesGps
+                      latitude={detailCav.latitude}
+                      longitude={detailCav.longitude}
+                      libelle={null}
+                      absent="Non renseigné"
+                    />
                   </div>
                   {detailCav.code_postal && (
                     <div className="flex gap-2">
@@ -1134,6 +1175,17 @@ export default function AdminCAV() {
                         className="input-modern" />
                     </div>
                   </div>
+
+                  {/* Rappel des coordonnées décimales du point en cours de saisie :
+                      c'est ce couple qu'on recopie dans un GPS de camion, et c'est
+                      lui qui dit si le clic sur la carte est tombé au bon endroit. */}
+                  <CoordonneesGps
+                    latitude={form.latitude}
+                    longitude={form.longitude}
+                    libelle="Coordonnées décimales"
+                    absent="Coordonnées décimales : cliquez sur la carte ou saisissez-les"
+                    className="block -mt-2"
+                  />
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>

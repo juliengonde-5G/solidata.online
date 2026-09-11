@@ -94,6 +94,17 @@ const LIBELLE_SKIP_REASON = {
  */
 const libelleSkipReason = (v) => (v ? (LIBELLE_SKIP_REASON[v] || v) : null);
 
+/**
+ * Motifs d'une identification SANS scan du QR (mobile : services/
+ * identification.js). Un motif inconnu est rendu tel quel plutôt que traduit
+ * au jugé — un compte rendu ne doit pas nommer ce qu'il ne reconnaît pas.
+ */
+const LIBELLE_QR_INDISPONIBLE = {
+  fallback: 'Point choisi dans la liste',
+  manual: 'Code saisi à la main',
+};
+const libelleQrIndisponible = (v) => (v ? (LIBELLE_QR_INDISPONIBLE[v] || v) : null);
+
 /** Distance haversine en km — même formule que live-summary, mêmes chiffres. */
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -117,6 +128,20 @@ function arrondi(v, d = 1) {
   if (n === null) return null;
   const f = 10 ** d;
   return Math.round(n * f) / f;
+}
+
+/**
+ * Distance, en mètres, entre l'endroit d'où la déclaration « QR indisponible »
+ * a été faite et le point lui-même. `null` dès qu'un des quatre bouts manque —
+ * haversine rendrait NaN, et un NaN rangé dans un compte rendu s'imprime.
+ * C'est ce chiffre qui donne son sens à la déclaration (« déclaré à 180 m ») :
+ * l'inventer la viderait de tout intérêt.
+ */
+function distanceDeclarationM(p) {
+  const dLat = num(p.declaration_lat), dLng = num(p.declaration_lng);
+  const pLat = num(p.latitude), pLng = num(p.longitude);
+  if (dLat == null || dLng == null || pLat == null || pLng == null) return null;
+  return Math.round(haversineKm(dLat, dLng, pLat, pLng) * 1000);
 }
 
 /** Date exploitable, ou `null` (une date illisible ne vaut pas « maintenant »). */
@@ -249,7 +274,7 @@ async function meteoDuJour(dateTournee, soft) {
 }
 
 // ── GET /api/tours/:id/rapport ─────────────────────────────────────────────
-router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/rapport', authorize('ADMIN'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     if (!Number.isInteger(tourId) || tourId <= 0) {
@@ -297,6 +322,9 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         `SELECT tc.id, tc.cav_id AS ref_id, tc.position, tc.status,
                 tc.fill_level, tc.fill_percent, tc.skip_reason, tc.remballe,
                 tc.collected_at, tc.notes, tc.planned_passage_time,
+                tc.qr_scanned, tc.qr_unavailable, tc.qr_unavailable_reason,
+                tc.declaration_lat, tc.declaration_lng, tc.declaration_accuracy_m,
+                tc.declaration_at,
                 c.name, c.address, c.commune, c.latitude, c.longitude, c.nb_containers
            FROM tour_cav tc
            JOIN cav c ON c.id = tc.cav_id
@@ -305,6 +333,12 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
                 tc.fill_level, NULL::double precision AS fill_percent,
                 NULL::varchar AS skip_reason, NULL::boolean AS remballe,
                 tc.collected_at, tc.notes, NULL::timestamp AS planned_passage_time,
+                NULL::boolean AS qr_scanned, NULL::boolean AS qr_unavailable,
+                NULL::varchar AS qr_unavailable_reason,
+                NULL::double precision AS declaration_lat,
+                NULL::double precision AS declaration_lng,
+                NULL::double precision AS declaration_accuracy_m,
+                NULL::timestamp AS declaration_at,
                 c.name, c.address, c.commune, c.latitude, c.longitude, c.nb_containers
            FROM tour_cav tc
            JOIN cav c ON c.id = tc.cav_id
@@ -417,6 +451,24 @@ router.get('/:id/rapport', authorize('ADMIN', 'MANAGER'), async (req, res) => {
         fill_source: fillSource,
         skip_reason: p.skip_reason ?? null,
         skip_reason_label: libelleSkipReason(p.skip_reason),
+        // ── Identification du point (2.54.0) ──────────────────────────────
+        // Le chauffeur a-t-il scanné le QR, ou l'a-t-il déclaré indisponible ?
+        // Depuis que la déclaration n'est plus refusée quand l'accès est
+        // impossible, c'est ce bloc qui en rend compte : le motif, et surtout
+        // OÙ était le chauffeur — d'où la distance au point, calculée ici
+        // plutôt que stockée (les deux coordonnées sont déjà sous la main, et
+        // une valeur dérivée figée finirait par mentir).
+        qr_scanned: p.qr_scanned ?? null,
+        qr_unavailable: p.qr_unavailable ?? null,
+        qr_unavailable_reason: p.qr_unavailable_reason ?? null,
+        qr_unavailable_label: libelleQrIndisponible(p.qr_unavailable_reason),
+        declaration_lat: num(p.declaration_lat),
+        declaration_lng: num(p.declaration_lng),
+        declaration_accuracy_m: arrondi(num(p.declaration_accuracy_m), 0),
+        declaration_at: dateOuNull(p.declaration_at),
+        // `null` = position non relevée (GPS refusé, trop lent) OU point sans
+        // coordonnées connues. Le compte rendu le DIT au lieu d'imprimer 0 m.
+        declaration_distance_m: distanceDeclarationM(p),
         motif: estArret ? (p.motif ?? null) : null,
         motif_label: estArret ? (LIBELLE_MOTIF[p.motif] || p.name || 'Arrêt technique') : null,
         lieu_categorie: estArret ? (p.categorie ?? null) : null,

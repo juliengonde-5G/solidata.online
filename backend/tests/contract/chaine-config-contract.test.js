@@ -29,7 +29,7 @@ const jeton = (role) => jwt.sign(
   { id: 3, username: 'chef', role, first_name: 'C', last_name: 'T' }, JWT_SECRET, { expiresIn: '1h' },
 );
 const ADMIN = jeton('ADMIN');
-const MANAGER = jeton('MANAGER');
+const GESTION = jeton('ADMIN');
 
 let app;
 beforeAll(() => {
@@ -92,7 +92,7 @@ describe('habilitations', () => {
     expect((await request(app).get('/api/chaine-config/layout-actif')).status).toBe(401);
   });
 
-  test('la gestion des plans est réservée à ADMIN/MANAGER', async () => {
+  test('la gestion des plans est réservée à ADMIN', async () => {
     for (const role of ['COLLABORATEUR', 'RH', 'AUTORITE', 'RESP_BTQ']) {
       const t = jeton(role);
       expect((await get('/api/chaine-config/layouts', t)).status).toBe(403);
@@ -102,7 +102,7 @@ describe('habilitations', () => {
   });
 
   test('le plan ACTIF est lisible par tout rôle authentifié — les autres écrans en dépendent', async () => {
-    for (const role of ['COLLABORATEUR', 'RH', 'QHSE']) {
+    for (const role of ['COLLABORATEUR', 'RH', 'ADMIN']) {
       const r = await get('/api/chaine-config/layout-actif', jeton(role));
       expect(r.status).toBe(200);
       expect(r.body.layout.id).toBe(4);
@@ -110,9 +110,9 @@ describe('habilitations', () => {
     }
   });
 
-  test('la suppression reste ADMIN — MANAGER conçoit, il ne détruit pas', async () => {
+  test('la suppression reste ADMIN', async () => {
     installerMocks({ layout: { ...LAYOUT, is_actif: false } });
-    expect((await del('/api/chaine-config/layouts/4', MANAGER)).status).toBe(403);
+    expect((await del('/api/chaine-config/layouts/4', jeton('RH'))).status).toBe(403);
     expect((await del('/api/chaine-config/layouts/4', ADMIN)).status).toBe(200);
   });
 });

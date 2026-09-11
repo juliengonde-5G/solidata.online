@@ -36,8 +36,7 @@ let app;
 const energie = require('../../src/routes/energie');
 const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
-  QHSE: tokenFor('QHSE'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 const YEAR = 2027;
 
@@ -109,7 +108,7 @@ describe('ORACLE pickFacteur', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /energie/sites + /compteurs (habilitations)', () => {
   it('GET /sites : lecture ADMIN/MANAGER/RH/QHSE, refusée COLLABORATEUR (403)', async () => {
-    for (const role of ['ADMIN', 'MANAGER', 'RH', 'QHSE']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/energie/sites', role)).status).toBe(200);
     }
     expect((await get('/api/energie/sites', 'COLLABORATEUR')).status).toBe(403);
@@ -121,7 +120,7 @@ describe('CONTRAT /energie/sites + /compteurs (habilitations)', () => {
       if (/INSERT INTO energie_sites/.test(String(sql))) return Promise.resolve({ rows: [{ id: 2, nom: params[0] }] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/energie/sites', 'MANAGER', { nom: 'Boutique St-Sever' });
+    const res = await post('/api/energie/sites', 'ADMIN', { nom: 'Boutique St-Sever' });
     expect(res.status).toBe(201);
     expect(res.body.nom).toBe('Boutique St-Sever');
   });
@@ -143,14 +142,14 @@ describe('CONTRAT /energie/sites + /compteurs (habilitations)', () => {
 // RELEVÉS — saisie mensuelle
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /energie/releves', () => {
-  it('POST : mois hors 1-12 → 400 ; COLLABORATEUR → 403 ; MANAGER valide → 201', async () => {
-    expect((await post('/api/energie/releves', 'MANAGER', { compteur_id: 1, periode_annee: 2027, periode_mois: 13, valeur: 100 })).status).toBe(400);
+  it('POST : mois hors 1-12 → 400 ; COLLABORATEUR → 403 ; rôle habilité → 201', async () => {
+    expect((await post('/api/energie/releves', 'ADMIN', { compteur_id: 1, periode_annee: 2027, periode_mois: 13, valeur: 100 })).status).toBe(400);
     expect((await post('/api/energie/releves', 'COLLABORATEUR', { compteur_id: 1, periode_annee: 2027, periode_mois: 1, valeur: 100 })).status).toBe(403);
     mockQuery.mockImplementation((sql, params) => {
       if (/INSERT INTO energie_releves/.test(String(sql))) return Promise.resolve({ rows: [{ id: 9, compteur_id: params[0], valeur: params[3] }] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/energie/releves', 'MANAGER', { compteur_id: 1, periode_annee: 2027, periode_mois: 3, valeur: 1234.5 });
+    const res = await post('/api/energie/releves', 'ADMIN', { compteur_id: 1, periode_annee: 2027, periode_mois: 3, valeur: 1234.5 });
     expect(res.status).toBe(201);
     expect(res.body.compteur_id).toBe(1);
   });
@@ -169,7 +168,7 @@ describe('CONTRAT /energie/releves', () => {
       if (/FROM energie_releves r/.test(String(sql))) return Promise.resolve({ rows: [{ id: 1, valeur: '1000', compteur_type: 'electricite', periode_annee: params[0] }] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/energie/releves?annee=2027&site=1', 'QHSE');
+    const res = await get('/api/energie/releves?annee=2027&site=1', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body[0].compteur_type).toBe('electricite');
   });
@@ -180,12 +179,12 @@ describe('CONTRAT /energie/releves', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /energie/pleins', () => {
   it('POST : type_carburant hors enum → 400 ; MANAGER valide → 201', async () => {
-    expect((await post('/api/energie/pleins', 'MANAGER', { date_plein: '2027-01-10', litres: 50, type_carburant: 'kerosene' })).status).toBe(400);
+    expect((await post('/api/energie/pleins', 'ADMIN', { date_plein: '2027-01-10', litres: 50, type_carburant: 'kerosene' })).status).toBe(400);
     mockQuery.mockImplementation((sql, params) => {
       if (/INSERT INTO carburant_pleins/.test(String(sql))) return Promise.resolve({ rows: [{ id: 1, vehicle_id: params[0], litres: params[2], type_carburant: params[5] }] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/energie/pleins', 'MANAGER', { vehicle_id: 3, date_plein: '2027-01-10', litres: 62.4, km_compteur: 100500 });
+    const res = await post('/api/energie/pleins', 'ADMIN', { vehicle_id: 3, date_plein: '2027-01-10', litres: 62.4, km_compteur: 100500 });
     expect(res.status).toBe(201);
     expect(res.body.type_carburant).toBe('gazole'); // défaut
   });
@@ -209,7 +208,7 @@ describe('CONTRAT /energie/facteurs (ADMIN/RH)', () => {
       if (/FROM ges_facteurs/.test(String(sql))) return Promise.resolve({ rows: [{ id: 1, poste: 'gazole', facteur_kgco2e: '2.51000' }] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/energie/facteurs', 'MANAGER');
+    const res = await get('/api/energie/facteurs', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.avertissement).toMatch(/indicatif|ajuster/i);
     expect(res.body.facteurs[0].poste).toBe('gazole');
@@ -218,7 +217,7 @@ describe('CONTRAT /energie/facteurs (ADMIN/RH)', () => {
   it('PUT /facteurs/:id : MANAGER refusé (403) ; RH autorisé (200)', async () => {
     // Écriture des facteurs réservée ADMIN/RH (MANAGER a l'écriture des relevés,
     // pas des facteurs d'émission).
-    expect((await put('/api/energie/facteurs/1', 'MANAGER', { facteur_kgco2e: 2.6 })).status).toBe(403);
+    expect((await put('/api/energie/facteurs/1', 'COLLABORATEUR', { facteur_kgco2e: 2.6 })).status).toBe(403);
     mockQuery.mockImplementation((sql, params) => {
       if (/UPDATE ges_facteurs SET/.test(String(sql))) return Promise.resolve({ rows: [{ id: 1, facteur_kgco2e: params[0] }], rowCount: 1 });
       return Promise.resolve({ rows: [] });
@@ -271,7 +270,7 @@ describe('CONTRAT GET /energie/dashboard', () => {
 
   it('lecture QHSE → 200 ; calcule tCO2e par poste + totaux', async () => {
     mockQuery.mockImplementation(wire);
-    const res = await get(`/api/energie/dashboard?annee=${YEAR}`, 'QHSE');
+    const res = await get(`/api/energie/dashboard?annee=${YEAR}`, 'ADMIN');
     expect(res.status).toBe(200);
     expect(typeof res.body.generated_at).toBe('string');
 
@@ -347,7 +346,7 @@ describe('CONTRAT GET /energie/vsme-b3b6', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get(`/api/energie/vsme-b3b6?annee=${YEAR}`, 'MANAGER');
+    const res = await get(`/api/energie/vsme-b3b6?annee=${YEAR}`, 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.b3_energie_ges.energie.electricite_kwh).toBe(10000);
     expect(res.body.b3_energie_ges.energie.total_energie_kwh).toBe(15000);

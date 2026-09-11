@@ -12,6 +12,7 @@ import { authedFetch } from '../services/authedFetch';
 import { addGpsPosition } from '../services/db';
 import { libellePoint } from '../services/pointLabel';
 import InfosPointAssociation from '../components/InfosPointAssociation';
+import CoordonneesPoint from '../components/CoordonneesPoint';
 import FondCarte from '../components/FondCarte';
 import { infoHorairesJour, texteRdv } from '../services/pointHoraires';
 // `lireArrivee` sert au libellé du bouton chez une association (arrivée déjà
@@ -855,6 +856,15 @@ export default function TourMap() {
                 dans cet encart, avec une cible tactile utilisable en tournée. */}
             {mode !== USAGE_MODES.DRIVING && isAssociationTour && (
               <InfosPointAssociation point={currentCAV} className="mt-2" />
+            )}
+            {/* Coordonnées décimales du point : le recours quand la navigation
+                ne démarre pas et qu'il faut les taper dans un GPS. */}
+            {mode !== USAGE_MODES.DRIVING && (
+              <CoordonneesPoint
+                latitude={currentCAV.latitude}
+                longitude={currentCAV.longitude}
+                className="mt-1"
+              />
             )}
           </div>
           )}

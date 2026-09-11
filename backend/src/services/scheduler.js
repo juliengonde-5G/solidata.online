@@ -1298,7 +1298,7 @@ async function checkQhseHabilitationExpiries() {
     if (BREVO_API_KEY) {
       const dests = await pool.query(
         `SELECT email FROM users
-         WHERE role IN ('ADMIN','QHSE') AND is_active = true AND email IS NOT NULL AND email <> ''`
+         WHERE role = 'ADMIN' AND is_active = true AND email IS NOT NULL AND email <> ''`
       );
       if (dests.rows.length > 0) {
         const lignes = exp.rows.map((r) => {
@@ -1696,6 +1696,29 @@ async function hourlyTick() {
       if (shouldRunAutoBackup(now)) {
         console.log('[SCHEDULER] Sauvegarde automatique de la base (mardi/vendredi 04h Europe/Paris)...');
         await runInstrumented('autoDatabaseBackup', () => runAutoBackup(now));
+      }
+    }
+    // Synchronisation Malibou (API de paie) à 5h — APRÈS les imports Pennylane
+    // et AVANT la journée de travail, pour que l'écran RH du matin voie déjà
+    // les sorties et les absences saisies la veille.
+    //
+    // POURQUOI ELLE NE REMPLACE PAS L'IMPORT DU CLASSEUR : l'API n'expose ni
+    // heures hebdomadaires contractuelles, ni libellé de poste, et sa nature
+    // de contrat ignore le CDDI — c'est-à-dire exactement ce dont dépendent
+    // les ETP conventionnés et le périmètre d'insertion. Elle COMPLÈTE donc
+    // le classeur : identité, statut d'emploi au jour le jour, dates de
+    // contrat, absences. La fusion est non destructive (COALESCE) : ce que
+    // l'API ne porte pas reste ce que le classeur a posé.
+    //
+    // Sans clé configurée, le job ne fait rien et ne crie pas : une
+    // installation qui n'a pas souscrit à l'API n'a pas à voir une erreur
+    // quotidienne.
+    if (now.getHours() === 5) {
+      const malibou = require('./malibou');
+      const { configure } = await malibou.statut();
+      if (configure) {
+        console.log('[SCHEDULER] Synchronisation Malibou...');
+        await runInstrumented('syncMalibou', () => require('./malibou-sync').synchroniserTout({ appliquer: true }));
       }
     }
     // Facteur de circulation du jour (TomTom Traffic Flow Segment Data) :

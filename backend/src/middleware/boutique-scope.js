@@ -5,7 +5,9 @@ const { resolveBaseRole } = require('./auth');
 // La direction est représentée par ADMIN/MANAGER (pas de rôle « DIRECTION »
 // distinct). Tout autre rôle non-RESP_BTQ conserve le comportement historique
 // (accès total en lecture) — seul RESP_BTQ est cloisonné (audit item 55a).
-const FULL_ACCESS_ROLES = ['ADMIN', 'MANAGER'];
+// MANAGER retiré le 10/09/2026 : l'accès total au parc de boutiques revient au
+// seul ADMIN. Le cloisonnement des RESP_BTQ, lui, est inchangé.
+const FULL_ACCESS_ROLES = ['ADMIN'];
 
 /**
  * Périmètre de boutiques d'un utilisateur RESP_BTQ.
@@ -45,7 +47,7 @@ async function attachBoutiqueScope(req, res, next) {
       req.boutiqueScope = new Set(ids);
       return next();
     }
-    // Autres rôles (RH, FINANCE, AUTORITE, QHSE, DPO, COLLABORATEUR…) :
+    // Autres rôles (RH, AUTORITE, DPO, COLLABORATEUR…) :
     // comportement historique inchangé (accès total en lecture).
     req.boutiqueScope = null;
     return next();

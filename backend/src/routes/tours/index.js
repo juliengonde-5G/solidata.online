@@ -678,7 +678,7 @@ router.post('/:id/checklist-public', async (req, res) => {
       const corps = `${nomVehicule} — ${anomalies.resume}`
         + (anomalies.remarque ? ` · « ${anomalies.remarque.slice(0, 120)} »` : '');
 
-      sendPushToRoles(['ADMIN', 'MANAGER'], {
+      sendPushToRoles(['ADMIN'], {
         title: 'Vérification du camion : anomalie signalée',
         body: corps.slice(0, 160),
         tag: `checklist-${vehId ?? req.params.id}`,
@@ -817,6 +817,37 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
     const skip_reason = req.body.skip_reason || null;
     // multipart : les champs arrivent en string ('true'/'false').
     const remballe = req.body.remballe === true || req.body.remballe === 'true';
+
+    // POSITION DE LA DÉCLARATION « QR INDISPONIBLE » (2.54.0). Le mobile ne
+    // refuse plus la déclaration d'un chauffeur éloigné — c'est justement
+    // parce qu'il ne peut pas approcher qu'il la fait. On garde donc OÙ il
+    // était, et le compte rendu en tire la distance au point.
+    // Coordonnée illisible ou hors bornes → `null` : une position à moitié
+    // lue ne vaut pas mieux qu'une absence, et se lirait comme une mesure.
+    // L'ABSENCE SE TESTE AVANT LA CONVERSION : `Number('')` et `Number(null)`
+    // valent 0, et 0 est une latitude parfaitement valide — une déclaration
+    // sans position serait rangée au large du golfe de Guinée (même piège que
+    // le point de départ en 2.42.0 et le palier de remplissage en 2.48.0).
+    // Débusqué par les tests de ce lot.
+    const coord = (brut, max) => {
+      if (brut === null || brut === undefined || brut === '' || brut === 'null') return null;
+      const v = Number(brut);
+      return Number.isFinite(v) && Math.abs(v) <= max ? v : null;
+    };
+    const latBrute = coord(req.body.declaration_lat, 90);
+    const lngBrute = coord(req.body.declaration_lng, 180);
+    // Une paire INCOMPLÈTE n'est pas une demi-position, c'est une absence : on
+    // écarte les deux plutôt que d'enregistrer une coordonnée orpheline dont
+    // le compte rendu ne pourrait rien tirer.
+    const posComplete = latBrute !== null && lngBrute !== null;
+    const declaration_lat = posComplete ? latBrute : null;
+    const declaration_lng = posComplete ? lngBrute : null;
+    const precisionBrute = Number(req.body.declaration_accuracy_m);
+    const declaration_accuracy_m = posComplete && Number.isFinite(precisionBrute) && precisionBrute >= 0
+      ? Math.min(precisionBrute, 100000) : null;
+    // Même garde d'horloge que l'heure d'arrivée : un téléphone mal réglé ou
+    // une file rejouée le lendemain ne doit pas dater la déclaration.
+    const declaration_at = posComplete ? heureArriveeAcceptable(req.body.declaration_at) : null;
     // Photo d'audit (item « photo aléatoire par tournée ») : présente seulement
     // si ce point est le point tiré au sort pour cette tournée (choisi côté
     // mobile, cf. services/auditPhoto.js). COALESCE : un re-submit sans photo
@@ -925,6 +956,10 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
          qr_scanned = $3,
          qr_unavailable = $4,
          qr_unavailable_reason = $5,
+         declaration_lat = $13::double precision,
+         declaration_lng = $14::double precision,
+         declaration_accuracy_m = $15::double precision,
+         declaration_at = COALESCE($16::timestamptz, CASE WHEN $13::double precision IS NOT NULL THEN NOW() END),
          skip_reason = CASE WHEN $1::varchar = 'skipped' THEN $6::varchar ELSE NULL END,
          notes = $7,
          remballe = $8,
@@ -932,7 +967,8 @@ router.put('/:id/cav/:cavId/collect-public', uploadCollectePhoto.single('photo')
          collected_at = CASE WHEN $1::varchar = 'collected' THEN NOW() ELSE collected_at END
          WHERE tour_id = $10 AND cav_id = $11 RETURNING *`,
         [status, fill_level, qr_scanned || false, qr_unavailable || false, qr_unavailable_reason || null,
-         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId, fill_percent]
+         skip_reason, notes || null, remballe, photo_path, req.params.id, req.params.cavId, fill_percent,
+         declaration_lat, declaration_lng, declaration_accuracy_m, declaration_at]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'CAV de tournée non trouvé' });
       res.json(result.rows[0]);
@@ -1443,7 +1479,7 @@ router.post('/:id/incident-public', upload.single('photo'), async (req, res) => 
     // JAMAIS en mode démo : un exercice de formation ne réveille personne.
     if (!demo) {
       const libelle = libelleTypeIncident(dbType);
-      sendPushToRoles(['ADMIN', 'MANAGER'], {
+      sendPushToRoles(['ADMIN'], {
         title: 'Incident signalé',
         body: `Tournée #${req.params.id} — ${dbType}${finalDescription ? ` : ${finalDescription.slice(0, 80)}` : ''}`,
         tag: `incident-${req.params.id}`,
@@ -1637,7 +1673,7 @@ router.put('/:id/status-public', async (req, res) => {
     if ((status === 'completed' || status === 'cancelled') && !isDemoTour(result.rows[0])) {
       const label = status === 'completed' ? 'terminée' : 'annulée';
       const tour = result.rows[0];
-      sendPushToRoles(['ADMIN', 'MANAGER'], {
+      sendPushToRoles(['ADMIN'], {
         title: `Tournée #${req.params.id} ${label}`,
         body: tour?.total_weight_kg
           ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
@@ -1856,7 +1892,11 @@ router.get('/:id/history-public', async (req, res) => {
       cavs = r.rows;
     } else {
       const r = await pool.query(
-        `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level,
+        // `fill_percent` accompagne `fill_level` : l'échelle 0-4 plafonne à
+        // « plein » et ne sait donc pas dire qu'une borne DÉBORDAIT. Sans elle,
+        // l'historique du chauffeur affichait « 4/4 » à un passage déclaré
+        // au-delà — la même chose qu'une borne pleine (constat du 10/09/2026).
+        `SELECT tc.id, tc.cav_id, tc.position, tc.status, tc.fill_level, tc.fill_percent,
                 tc.collected_at, tc.notes, tc.skip_reason,
                 c.name AS cav_name, c.commune
            FROM tour_cav tc JOIN cav c ON c.id = tc.cav_id
@@ -1908,7 +1948,7 @@ router.use('/', bordereauxBackOffice);
 // LECTURE + ÉCRITURE réservées ADMIN/MANAGER (aucune écriture pour AUTORITE).
 
 // POST /api/tours/messages — envoyer une consigne au chauffeur d'un véhicule.
-router.post('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/messages', authorize('ADMIN'), async (req, res) => {
   try {
     const vehicleId = parseInt(req.body?.vehicle_id, 10);
     const tourId = req.body?.tour_id != null && req.body.tour_id !== ''
@@ -1935,7 +1975,7 @@ router.post('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/tours/messages?vehicle_id=&tour_id= — consignes envoyées (lu/non lu).
-router.get('/messages', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/messages', authorize('ADMIN'), async (req, res) => {
   try {
     const vehicleId = req.query.vehicle_id ? parseInt(req.query.vehicle_id, 10) : null;
     const tourId = req.query.tour_id ? parseInt(req.query.tour_id, 10) : null;

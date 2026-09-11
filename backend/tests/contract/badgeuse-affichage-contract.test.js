@@ -53,7 +53,7 @@ const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
   COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
@@ -256,7 +256,7 @@ describe('POST /contenus/lien — le serveur télécharge à la place du poste',
 
   test('habilitation : écriture réservée ADMIN/RH', async () => {
     expect((await post('/api/badgeuse/contenus/lien', 'RH', { url: LIEN })).status).toBe(201);
-    expect((await post('/api/badgeuse/contenus/lien', 'MANAGER', { url: LIEN })).status).toBe(403);
+    expect((await post('/api/badgeuse/contenus/lien', 'COLLABORATEUR', { url: LIEN })).status).toBe(403);
     expect((await post('/api/badgeuse/contenus/lien', 'COLLABORATEUR', { url: LIEN })).status).toBe(403);
     // Nettoyage des fichiers créés par les cas autorisés.
     for (const c of mockQuery.mock.calls.filter((x) => /INSERT INTO badgeuse_contenus/.test(String(x[0])))) {
@@ -293,7 +293,7 @@ describe('POST /contenus/upload', () => {
   });
 
   test('habilitation : MANAGER refusé', async () => {
-    expect((await attach('MANAGER', 'affiche.png', 'image/png')).status).toBe(403);
+    expect((await attach('COLLABORATEUR', 'affiche.png', 'image/png')).status).toBe(403);
   });
 
   // ── Plafond de taille (défaut de production : « network error » sur vidéo) ──
@@ -406,7 +406,7 @@ describe('POST /salaries/:employeeId/optin-festif', () => {
 
   test('habilitation : ADMIN/RH seulement', async () => {
     expect((await post('/api/badgeuse/salaries/5/optin-festif', 'RH', { actif: true })).status).toBe(200);
-    expect((await post('/api/badgeuse/salaries/5/optin-festif', 'MANAGER', { actif: true })).status).toBe(403);
+    expect((await post('/api/badgeuse/salaries/5/optin-festif', 'COLLABORATEUR', { actif: true })).status).toBe(403);
   });
 
   test('GET /badges expose l\'état du consentement ET sa date', async () => {
@@ -569,7 +569,7 @@ describe('Configuration des réseaux sociaux', () => {
   test('habilitations : configuration et déclenchement réservés à ADMIN', async () => {
     expect((await put('/api/badgeuse/social/config', 'RH', { sync_actif: true })).status).toBe(403);
     expect((await post('/api/badgeuse/social/sync', 'RH')).status).toBe(403);
-    expect((await get('/api/badgeuse/social/status', 'MANAGER')).status).toBe(200); // lecture ouverte READ
+    expect((await get('/api/badgeuse/social/status', 'ADMIN')).status).toBe(200); // lecture ouverte READ
   });
 
   test('POST /social/sync sans jeton : no-op SILENCIEUX, jamais une erreur', async () => {

@@ -205,7 +205,7 @@ router.get('/', async (req, res) => {
 // remarques/anomalies) n'était consultable par aucun écran web. On expose ici
 // les dernières checklists avec date, chauffeur, état et NOTES (anomalies) mises
 // en évidence côté UI (fiche véhicule).
-router.get('/:id/checklists', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
+router.get('/:id/checklists', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT vc.id, vc.tour_id, vc.exterior_ok, vc.fuel_level, vc.km_start, vc.km_end,
@@ -237,7 +237,7 @@ router.get('/:id/checklists', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req,
 //
 // Réponse honnête : aucune checklist → `{ disponible: false }` avec le motif,
 // jamais un état « conforme » par défaut.
-router.get('/:id/etat-declare', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
+router.get('/:id/etat-declare', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT vc.id, vc.tour_id, vc.exterior_ok, vc.fuel_level, vc.km_start, vc.km_end,
@@ -301,7 +301,7 @@ router.get('/:id/etat-declare', authorize('ADMIN', 'MANAGER', 'QHSE'), async (re
 });
 
 // PATCH /api/vehicles/:id/archive — Archiver un véhicule retiré du service
-router.patch('/:id/archive', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/archive', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE vehicles SET is_archived = true, archived_at = NOW(), updated_at = NOW()
@@ -317,7 +317,7 @@ router.patch('/:id/archive', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 });
 
 // PATCH /api/vehicles/:id/restore — Restaurer un véhicule archivé
-router.patch('/:id/restore', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/restore', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE vehicles SET is_archived = false, archived_at = NULL, updated_at = NOW()
@@ -353,7 +353,7 @@ const MOBILE_BASE_URL = process.env.MOBILE_BASE_URL || 'https://m.solidata.onlin
 const buildVehicleUrl = (token) => `${MOBILE_BASE_URL}/v/${token}`;
 
 // GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante (ADMIN + MANAGER lecture)
-router.get('/:id/access-info', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT id, registration, name, qr_token FROM vehicles WHERE id = $1',
@@ -409,7 +409,7 @@ router.post('/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
 // Voir plus bas dans le fichier
 
 // POST /api/vehicles
-router.post('/', authorize('ADMIN', 'MANAGER'), [
+router.post('/', authorize('ADMIN'), [
   body('registration').notEmpty().withMessage('Immatriculation requise'),
 ], validate, async (req, res) => {
   try {
@@ -446,7 +446,7 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/vehicles/:id
-router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const { name, brand, model, type, max_capacity_kg, tare_weight_kg, team_id, status, current_km, next_maintenance, insurance_expiry, vehicle_type } = req.body;
     const result = await pool.query(
@@ -471,7 +471,7 @@ router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // PUT /api/vehicles/:id/assign-driver — Affecter un chauffeur à un véhicule (lien simple)
-router.put('/:id/assign-driver', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id/assign-driver', authorize('ADMIN'), async (req, res) => {
   try {
     const { employee_id } = req.body; // null pour désaffecter
 
@@ -900,7 +900,7 @@ router.get('/maintenance/profiles-db/:id', async (req, res) => {
 });
 
 // GET /api/vehicles/maintenance/overview — Vue d'ensemble maintenance flotte
-router.get('/maintenance/overview', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
+router.get('/maintenance/overview', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT v.id, v.name, v.registration, v.current_km, v.status,
@@ -971,7 +971,7 @@ router.get('/:id/maintenance', async (req, res) => {
 });
 
 // PUT /api/vehicles/:id/maintenance — Configurer/mettre à jour la maintenance
-router.put('/:id/maintenance', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id/maintenance', authorize('ADMIN'), async (req, res) => {
   try {
     const d = req.body;
     const result = await pool.query(
@@ -1011,7 +1011,7 @@ router.put('/:id/maintenance', authorize('ADMIN', 'MANAGER'), async (req, res) =
 });
 
 // POST /api/vehicles/:id/maintenance/resolve-alert — Résoudre une alerte
-router.post('/:id/maintenance/resolve-alert', authorize('ADMIN', 'MANAGER'), [
+router.post('/:id/maintenance/resolve-alert', authorize('ADMIN'), [
   body('alert_id').isInt().withMessage('ID alerte requis'),
 ], validate, async (req, res) => {
   try {
@@ -1052,7 +1052,7 @@ router.get('/:id/events', async (req, res) => {
 });
 
 // POST /api/vehicles/:id/events — Ajouter un événement
-router.post('/:id/events', authorize('ADMIN', 'MANAGER'), [
+router.post('/:id/events', authorize('ADMIN'), [
   body('event_type').notEmpty().withMessage('Type requis'),
   body('event_date').notEmpty().withMessage('Date requise'),
 ], validate, async (req, res) => {
@@ -1215,7 +1215,7 @@ const DOC_TYPES = [
 ];
 
 // GET /api/vehicles/:id/documents — Liste des documents d'un véhicule
-router.get('/:id/documents', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
+router.get('/:id/documents', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT vd.*, COALESCE(u.first_name || ' ' || u.last_name, 'Système') as created_by_name
@@ -1257,7 +1257,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/vehicles/:id/documents — Uploader un document
-router.post('/:id/documents', authorize('ADMIN', 'MANAGER'), uploadVehicleDoc.single('file'), async (req, res) => {
+router.post('/:id/documents', authorize('ADMIN'), uploadVehicleDoc.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
 
@@ -1286,7 +1286,7 @@ router.post('/:id/documents', authorize('ADMIN', 'MANAGER'), uploadVehicleDoc.si
 });
 
 // GET /api/vehicles/:id/documents/:docId/download — Télécharger un document
-router.get('/:id/documents/:docId/download', authorize('ADMIN', 'MANAGER', 'QHSE'), async (req, res) => {
+router.get('/:id/documents/:docId/download', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT filename, original_name, mime_type FROM vehicle_documents WHERE id = $1 AND vehicle_id = $2',
@@ -1332,7 +1332,7 @@ router.delete('/:id/documents/:docId', authorize('ADMIN'), async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════
 const Anthropic = require('@anthropic-ai/sdk');
 
-router.post('/maintenance/generate-plan', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/maintenance/generate-plan', authorize('ADMIN'), async (req, res) => {
   const { brand, model, year, engine, vehicle_id } = req.body;
   if (!brand || !model) {
     return res.status(400).json({ error: 'Marque et modèle requis' });

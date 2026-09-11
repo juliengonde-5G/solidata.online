@@ -53,7 +53,7 @@ const deviceRouter = require('../../src/routes/badgeuse-device');
 const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
-const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
+const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR') };
 
 let app;
 beforeAll(() => {
@@ -261,7 +261,7 @@ describe('émission du code d\'appairage (ADMIN)', () => {
   test('404 sur un poste inexistant, 403 hors ADMIN', async () => {
     expect((await post('/api/badgeuse/devices/999/code-appairage', 'ADMIN')).status).toBe(404);
     expect((await post('/api/badgeuse/devices/1/code-appairage', 'RH')).status).toBe(403);
-    expect((await post('/api/badgeuse/devices/1/code-appairage', 'MANAGER')).status).toBe(403);
+    expect((await post('/api/badgeuse/devices/1/code-appairage', 'COLLABORATEUR')).status).toBe(403);
   });
 });
 

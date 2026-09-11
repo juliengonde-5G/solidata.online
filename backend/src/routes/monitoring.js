@@ -104,6 +104,7 @@ const JOB_SCHEDULE = {
   genererNotesProfilManquantes:   { label: 'Notes de profil initial manquantes', cadence: '3×/jour',           maxAgeHours: DAILY },
   purgeInsertionDossiers:         { label: 'Purge RGPD dossiers insertion',     cadence: '3×/jour',            maxAgeHours: DAILY },
   checkRseEcheances:              { label: 'Échéances plan RSE (actions/preuves)', cadence: '3×/jour',          maxAgeHours: DAILY },
+  syncMalibou:                    { label: 'Synchronisation Malibou (paie)',    cadence: 'quotidien 5h',       maxAgeHours: DAILY },
   checkEnergieSaisie:             { label: 'Relevés énergie mensuels manquants', cadence: '3×/jour',           maxAgeHours: DAILY },
   checkQhseDocuments:             { label: 'Documents QHSE à réviser (DUERP…)',  cadence: '3×/jour',           maxAgeHours: DAILY },
   // Module 33 — Temps & Présence (badgeuse). La supervision des postes est le

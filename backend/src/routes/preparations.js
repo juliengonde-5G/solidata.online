@@ -5,7 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 
 // GET /api/preparations — List preparations with filters
 router.get('/', async (req, res) => {

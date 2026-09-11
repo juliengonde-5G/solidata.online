@@ -61,7 +61,10 @@ const { FREINS } = require('../../src/routes/insertion/freins-registry');
 let app;
 let appExports;
 const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
-const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER') };
+const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  // Rôle RETIRÉ le 10/09/2026 : le jeton se signe encore (le JWT porte n'importe
+  // quelle chaîne), mais plus aucun `authorize` ne le reconnaît.
+  RETIRE: tokenFor('MANAGER') };
 
 beforeAll(() => {
   app = express();
@@ -310,7 +313,7 @@ describe('CONTRAT POST /insertion/milestones/:id/close', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT POST /insertion/milestones/:id/reopen', () => {
   it('MANAGER → 403 (réservé ADMIN/RH)', async () => {
-    const res = await post('/api/insertion/milestones/10/reopen', 'MANAGER', { motif: 'test' });
+    const res = await post('/api/insertion/milestones/10/reopen', 'COLLABORATEUR', { motif: 'test' });
     expect(res.status).toBe(403);
   });
 
@@ -379,13 +382,25 @@ describe('CONTRAT GET /insertion/milestones/:id/radar (9 axes)', () => {
     expect(serie.data[8]).toBe(5);     // judiciaire visible pour ADMIN
   });
 
-  it("MANAGER : l'axe Judiciaire est ABSENT (8 axes, aucune donnée judiciaire)", async () => {
+  // Le radar amputé était servi au seul MANAGER, rôle RETIRÉ le 10/09/2026 : le
+  // masquage n'a donc plus de destinataire. Ce qui reste à prouver, c'est que
+  // les rôles habilités voient les 9 axes — et que le rôle retiré n'entre plus.
+  it('ADMIN : les 9 axes, judiciaire compris', async () => {
     mockQuery.mockImplementation(wire);
-    const res = await get('/api/insertion/milestones/5/radar', 'MANAGER');
+    const res = await get('/api/insertion/milestones/5/radar', 'ADMIN');
     expect(res.status).toBe(200);
-    expect(res.body.axes).toHaveLength(8);
-    expect(res.body.axes).not.toContain('Judiciaire');
-    for (const s of res.body.series) expect(s.data).toHaveLength(8);
+    expect(res.body.axes).toHaveLength(9);
+    expect(res.body.axes).toContain('Judiciaire');
+    for (const s of res.body.series) expect(s.data).toHaveLength(9);
+  });
+
+  it('un rôle RETIRÉ (MANAGER) est refusé (403), sans lecture en base', async () => {
+    mockQuery.mockImplementation(wire);
+    mockQuery.mockClear();
+    const res = await request(app).get('/api/insertion/milestones/5/radar')
+      .set('Authorization', `Bearer ${TOKENS.RETIRE}`);
+    expect(res.status).toBe(403);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 });
 
@@ -455,17 +470,17 @@ describe('CONTRAT PUT/GET /insertion/diagnostic/:employeeId (chiffrement + masqu
     expect(res.body.frein_judiciaire_detail).toBe('Contrainte de planning');
   });
 
-  it('GET (MANAGER) : frein_judiciaire*, détails santé et commentaire_budget RETIRÉS ; le reste visible', async () => {
+  it('GET (ADMIN) : plus rien n’est masqué — le masquage ne visait que MANAGER, rôle retiré', async () => {
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
       if (/SELECT COALESCE\(parcours_num, 1\) AS pn FROM employees/.test(s)) return Promise.resolve({ rows: [{ pn: 1 }] });
       if (/FROM insertion_diagnostics/.test(s)) return Promise.resolve({ rows: [diagRow()] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/diagnostic/5', 'MANAGER');
+    const res = await get('/api/insertion/diagnostic/5', 'ADMIN');
     expect(res.status).toBe(200);
-    for (const hidden of ['frein_judiciaire', 'frein_judiciaire_detail', 'commentaire_sante', 'frein_sante_detail', 'commentaire_budget']) {
-      expect(hidden in res.body).toBe(false);
+    for (const champ of ['frein_judiciaire', 'frein_judiciaire_detail', 'commentaire_sante', 'frein_sante_detail', 'commentaire_budget']) {
+      expect(champ in res.body).toBe(true);
     }
     // Le score santé (non détaillé) et les rubriques non sensibles restent visibles
     expect(res.body.frein_sante).toBe(3);
@@ -478,7 +493,7 @@ describe('CONTRAT PUT/GET /insertion/diagnostic/:employeeId (chiffrement + masqu
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /insertion/objectifs (Lot 3)', () => {
   it('POST par MANAGER → 403 (écriture A/RH)', async () => {
-    const res = await post('/api/insertion/objectifs', 'MANAGER', { employee_id: 5, titre: 'X' });
+    const res = await post('/api/insertion/objectifs', 'COLLABORATEUR', { employee_id: 5, titre: 'X' });
     expect(res.status).toBe(403);
   });
 
@@ -517,7 +532,7 @@ describe('CONTRAT /insertion/objectifs (Lot 3)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/objectifs/5', 'MANAGER');
+    const res = await get('/api/insertion/objectifs/5', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
     expect(res.body[0].nb_sous_objectifs).toBe(1);
@@ -536,13 +551,13 @@ describe('CONTRAT /insertion/partenaires (Lot 3)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/partenaires', 'MANAGER');
+    const res = await get('/api/insertion/partenaires', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body[0].nom).toBe('CAF');
   });
 
   it('POST par MANAGER → 403 ; POST ADMIN → 201 ; doublon de nom → 409', async () => {
-    expect((await post('/api/insertion/partenaires', 'MANAGER', { nom: 'X' })).status).toBe(403);
+    expect((await post('/api/insertion/partenaires', 'COLLABORATEUR', { nom: 'X' })).status).toBe(403);
 
     mockQuery.mockImplementation((sql, params) => {
       if (/INSERT INTO insertion_partenaires/.test(String(sql))) {
@@ -702,7 +717,7 @@ describe('CONTRAT POST /insertion/alertes/:employeeId/ack (phase D)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/insertion/alertes/5/ack', 'MANAGER', { type: 'pass_iae_a_surveiller', jusqu_au: future });
+    const res = await post('/api/insertion/alertes/5/ack', 'ADMIN', { type: 'pass_iae_a_surveiller', jusqu_au: future });
     expect(res.status).toBe(201);
     expect(res.body.employee_id).toBe(5);
     expect(res.body.alert_type).toBe('pass_iae_a_surveiller');
@@ -864,7 +879,7 @@ describe('CONTRAT PUT /insertion/diagnostic/:id — suggestions_freins (phase D)
 describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
   it('sans réglage en base → défauts documentés (14 j / 2 mois / 30 j / 7 mois / IA off / note de profil ON)', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
-    const res = await get('/api/insertion/parametres', 'MANAGER'); // tous rôles du module
+    const res = await get('/api/insertion/parametres', 'ADMIN'); // tous rôles du module
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       echeance_action_defaut_jours: 14,
@@ -903,8 +918,8 @@ describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
 // ───────────────────────────────────────────────────────────────────────────
 // Masquage MANAGER sur les listes d'entretiens
 // ───────────────────────────────────────────────────────────────────────────
-describe('CONTRAT habilitations — MANAGER ne voit JAMAIS frein_judiciaire', () => {
-  it('GET /milestones/:employeeId : frein_judiciaire retiré pour MANAGER, présent pour RH', async () => {
+describe('CONTRAT habilitations — le frein judiciaire après le retrait de MANAGER', () => {
+  it('GET /milestones/:employeeId : visible pour RH ET ADMIN ; le rôle retiré est refusé', async () => {
     const wire = (sql) => {
       if (/FROM insertion_milestones im/.test(String(sql))) {
         return Promise.resolve({ rows: [fullMilestone({ frein_judiciaire: 5 })] });
@@ -917,10 +932,15 @@ describe('CONTRAT habilitations — MANAGER ne voit JAMAIS frein_judiciaire', ()
     expect(rh.body[0].frein_judiciaire).toBe(5);
 
     mockQuery.mockImplementation(wire);
-    const mgr = await get('/api/insertion/milestones/5', 'MANAGER');
-    expect(mgr.status).toBe(200);
-    expect('frein_judiciaire' in mgr.body[0]).toBe(false);
-    expect(mgr.body[0].frein_mobilite).toBe(2); // les autres axes restent visibles
+    const adm = await get('/api/insertion/milestones/5', 'ADMIN');
+    expect(adm.status).toBe(200);
+    expect(adm.body[0].frein_judiciaire).toBe(5);
+    expect(adm.body[0].frein_mobilite).toBe(2);
+
+    // Le seul rôle à qui l'axe était retiré n'existe plus : il est refusé net.
+    const retire = await request(app).get('/api/insertion/milestones/5')
+      .set('Authorization', `Bearer ${TOKENS.RETIRE}`);
+    expect(retire.status).toBe(403);
   });
 });
 
@@ -946,8 +966,8 @@ describe('CONTRAT /insertion/pmsmp (PR 2 — EXG-05)', () => {
   };
 
   it('POST par MANAGER → 403 (écriture A/RH) ; DELETE MANAGER → 403', async () => {
-    expect((await post('/api/insertion/pmsmp', 'MANAGER', {})).status).toBe(403);
-    expect((await request(app).delete('/api/insertion/pmsmp/1').set('Authorization', `Bearer ${TOKENS.MANAGER}`)).status).toBe(403);
+    expect((await post('/api/insertion/pmsmp', 'COLLABORATEUR', {})).status).toBe(403);
+    expect((await request(app).delete('/api/insertion/pmsmp/1').set('Authorization', `Bearer ${TOKENS.COLLABORATEUR}`)).status).toBe(403);
   });
 
   it('durée > 31 jours par convention → 409 { error, code: pmsmp_duree } (non forçable)', async () => {
@@ -1044,7 +1064,7 @@ describe('CONTRAT /insertion/pmsmp (PR 2 — EXG-05)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/pmsmp/5', 'MANAGER');
+    const res = await get('/api/insertion/pmsmp/5', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.employee_id).toBe(5);
     expect(res.body.total).toBe(1);
@@ -1059,7 +1079,7 @@ describe('CONTRAT /insertion/pmsmp (PR 2 — EXG-05)', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /insertion/satisfaction (PR 2 — EXG-09)', () => {
   it('POST par MANAGER → 403 (saisie A/RH)', async () => {
-    expect((await post('/api/insertion/satisfaction/5', 'MANAGER', {})).status).toBe(403);
+    expect((await post('/api/insertion/satisfaction/5', 'COLLABORATEUR', {})).status).toBe(403);
   });
 
   it('POST RH → 201, upsert par (employee_id, parcours_num) — parcours courant du salarié', async () => {
@@ -1099,7 +1119,7 @@ describe('CONTRAT /insertion/satisfaction (PR 2 — EXG-09)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/satisfaction-stats?year=2026', 'MANAGER');
+    const res = await get('/api/insertion/satisfaction-stats?year=2026', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.annee).toBe(2026);
     expect(res.body.nb_reponses).toBe(2);
@@ -1129,7 +1149,7 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
       }
       return Promise.resolve({ rows: [] }); // settings → défaut 42
     });
-    const res = await get('/api/insertion/renouvellements', 'MANAGER');
+    const res = await get('/api/insertion/renouvellements', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.anticipation_jours).toBe(42);
     expect(res.body.total).toBe(2);
@@ -1141,7 +1161,7 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
   });
 
   it('PUT formulaire : tout champ HORS bloc renouvellement → 400 { champs_refuses, champs_acceptes }', async () => {
-    const res = await put('/api/insertion/renouvellements/44/formulaire', 'MANAGER', {
+    const res = await put('/api/insertion/renouvellements/44/formulaire', 'ADMIN', {
       renouvellement_avis: 'favorable', observations: 'tentative hors périmètre',
     });
     expect(res.status).toBe(400);
@@ -1149,7 +1169,7 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
     expect(res.body.champs_acceptes).toEqual(['renouvellement_form', 'renouvellement_avis', 'renouvellement_duree_mois']);
   });
 
-  it('PUT formulaire (MANAGER) : n’écrit QUE le bloc renouvellement + validation « eti » horodatée ; réponse masquée', async () => {
+  it('PUT formulaire : n’écrit QUE le bloc renouvellement + validation « eti » horodatée', async () => {
     let update = null;
     mockQuery.mockImplementation((sql, params) => {
       const s = String(sql);
@@ -1166,7 +1186,7 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await put('/api/insertion/renouvellements/44/formulaire', 'MANAGER', {
+    const res = await put('/api/insertion/renouvellements/44/formulaire', 'ADMIN', {
       renouvellement_form: { assiduite: 'bonne', motivation: 'ok' },
       renouvellement_avis: 'favorable_reserves',
       renouvellement_duree_mois: 4,
@@ -1180,26 +1200,20 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
     expect(update.sql).not.toMatch(/frein_|observations =|bilan_professionnel =|sortie_/);
     const validations = JSON.parse(update.params[3]);
     expect(validations[validations.length - 1]).toEqual(expect.objectContaining({ role: 'eti', user_id: 1, mode: 'compte' }));
-    // Masquage MANAGER conservé sur la réponse
-    expect('frein_judiciaire' in res.body).toBe(false);
+    // Plus de masquage sur la réponse : il ne visait que MANAGER, rôle retiré.
+    expect(res.body.frein_judiciaire).toBe(4);
     expect(res.body.renouvellement_avis).toBe('favorable_reserves');
   });
 
-  it('PUT formulaire (MANAGER NON référent) → 403 { code: renouvellement_non_autorise } (P1 Codex PR#74)', async () => {
-    mockQuery.mockImplementation((sql) => {
-      const s = String(sql);
-      if (/SELECT \* FROM insertion_milestones WHERE id = \$1/.test(s)) {
-        return Promise.resolve({ rows: [fullMilestone({ id: 44, milestone_type: 'renouvellement' })] });
-      }
-      // Ownership : ni CIP référent ni encadrant du salarié (autre encadrant).
-      if (/cip_referent_user_id, mgr\.user_id/.test(s)) {
-        return Promise.resolve({ rows: [{ cip_referent_user_id: 99, manager_user_id: 42 }] });
-      }
-      return Promise.resolve({ rows: [] });
-    });
-    const res = await put('/api/insertion/renouvellements/44/formulaire', 'MANAGER', { renouvellement_avis: 'favorable' });
+  // Le contrôle d'ownership (P1 Codex PR#74) ne s'appliquait qu'au MANAGER, rôle
+  // RETIRÉ le 10/09/2026. La garde reste dans le code (elle protège si le rôle
+  // revenait), mais plus personne ne l'atteint : ce qui doit être prouvé est
+  // qu'un rôle non habilité n'entre pas du tout, et sans lecture en base.
+  it('un rôle non habilité est refusé (403) avant toute lecture en base', async () => {
+    mockQuery.mockClear();
+    const res = await put('/api/insertion/renouvellements/44/formulaire', 'COLLABORATEUR', { renouvellement_avis: 'favorable' });
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('renouvellement_non_autorise');
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it('ADMIN/RH conservent le bypass d’ownership sur le formulaire de renouvellement', async () => {
@@ -1236,17 +1250,22 @@ describe('CONTRAT /insertion/renouvellements (PR 2 — EXG-04/RES-10)', () => {
     expect((await put('/api/insertion/renouvellements/44/formulaire', 'RH', { renouvellement_avis: 'tres_favorable' })).status).toBe(400);
   });
 
-  it('garde RES-10 : un MANAGER ne peut NI créer un entretien non-renouvellement NI passer par le PUT générique', async () => {
+  // La garde RES-10 bornait le MANAGER au seul entretien de renouvellement. Le
+  // rôle est RETIRÉ : elle n'a plus de sujet, et ce qui compte désormais est
+  // qu'un rôle non habilité n'entre pas, et que les rôles habilités ne soient
+  // pas bornés par une garde qui ne les visait pas.
+  it('garde RES-10 : sans sujet depuis le retrait de MANAGER — non habilité refusé, ADMIN non borné', async () => {
     mockQuery.mockImplementation((sql) => {
       if (/SELECT COALESCE\(parcours_num, 1\) AS pn FROM employees/.test(String(sql))) return Promise.resolve({ rows: [{ pn: 1 }] });
+      if (/INSERT INTO insertion_milestones/.test(String(sql))) return Promise.resolve({ rows: [fullMilestone({ id: 77, milestone_type: 'bilan_intermediaire' })] });
       return Promise.resolve({ rows: [] });
     });
-    const creation = await post('/api/insertion/milestones', 'MANAGER', { employee_id: 5, milestone_type: 'bilan_intermediaire' });
-    expect(creation.status).toBe(403);
+    expect((await post('/api/insertion/milestones', 'COLLABORATEUR', { employee_id: 5, milestone_type: 'bilan_intermediaire' })).status).toBe(403);
+    expect((await put('/api/insertion/milestones/44', 'COLLABORATEUR', { renouvellement_avis: 'favorable' })).status).toBe(403);
 
-    const putGenerique = await put('/api/insertion/milestones/44', 'MANAGER', { renouvellement_avis: 'favorable' });
-    expect(putGenerique.status).toBe(403);
-    expect(putGenerique.body.hint).toMatch(/renouvellements\/:id\/formulaire/);
+    // ADMIN : la création d'un entretien non-renouvellement passe.
+    const creation = await post('/api/insertion/milestones', 'ADMIN', { employee_id: 5, milestone_type: 'bilan_intermediaire' });
+    expect(creation.status).toBeLessThan(400);
   });
 });
 
@@ -1281,7 +1300,7 @@ describe('CONTRAT GET /insertion/:employeeId — agrégation PMSMP/satisfaction 
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT GET /insertion/pass-iae/bilan/:employeeId (PR 2 — EXG-02)', () => {
   it('MANAGER → 403 (document destiné au prescripteur, généré par A/RH)', async () => {
-    expect((await get('/api/insertion/pass-iae/bilan/5', 'MANAGER')).status).toBe(403);
+    expect((await get('/api/insertion/pass-iae/bilan/5', 'COLLABORATEUR')).status).toBe(403);
   });
 
   it('ADMIN → JSON structuré : Pass, entretiens, freins SANS judiciaire, actions sans détail santé/judiciaire, PMSMP', async () => {
@@ -1340,7 +1359,7 @@ describe('CONTRAT GET /insertion/pass-iae/bilan/:employeeId (PR 2 — EXG-02)', 
 describe('CONTRAT /insertion/cibles (PR 2 — EXG-47)', () => {
   it('GET (MANAGER lecture) sans paramétrage → les 6 cibles à null + note « objectif non paramétré »', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
-    const res = await get('/api/insertion/cibles', 'MANAGER');
+    const res = await get('/api/insertion/cibles', 'ADMIN');
     expect(res.status).toBe(200);
     for (const k of ['cible_etp_conventionnes', 'cible_taux_dynamiques', 'cible_taux_durable', 'cible_taux_transition', 'cible_taux_positive', 'effectif_reference']) {
       expect(res.body[k]).toBeNull();
@@ -1367,7 +1386,7 @@ describe('CONTRAT /insertion/cibles (PR 2 — EXG-47)', () => {
   });
 
   it('PUT par MANAGER → 403 ; pourcentage hors 0-100 → 400 ; valeur négative → 400', async () => {
-    expect((await put('/api/insertion/cibles', 'MANAGER', { cible_taux_dynamiques: 80 })).status).toBe(403);
+    expect((await put('/api/insertion/cibles', 'COLLABORATEUR', { cible_taux_dynamiques: 80 })).status).toBe(403);
     expect((await put('/api/insertion/cibles', 'RH', { cible_taux_dynamiques: 150 })).status).toBe(400);
     expect((await put('/api/insertion/cibles', 'RH', { cible_etp_conventionnes: -3 })).status).toBe(400);
     expect((await put('/api/insertion/cibles', 'RH', {})).status).toBe(400); // rien à modifier
@@ -1461,8 +1480,8 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
   };
 
   it('MANAGER → 403 (export nominatif réservé ADMIN/RH — le router exports autorise MANAGER ailleurs)', async () => {
-    expect((await getX('/api/exports/insertion-freins?format=csv', 'MANAGER')).status).toBe(403);
-    expect((await getX('/api/exports/insertion-freins/completude', 'MANAGER')).status).toBe(403);
+    expect((await getX('/api/exports/insertion-freins?format=csv', 'COLLABORATEUR')).status).toBe(403);
+    expect((await getX('/api/exports/insertion-freins/completude', 'COLLABORATEUR')).status).toBe(403);
   });
 
   it('CSV (RH) : 23 colonnes dans l’ordre CDC, SANS frein judiciaire par défaut ; génération JOURNALISÉE (rgpd_audit_log)', async () => {
@@ -1528,7 +1547,7 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
 describe('CONTRAT GET /exports/insertion-synthese (PR 2 — EXG-14)', () => {
   it('JSON (MANAGER autorisé) : mention « non nominatif » + mêmes blocs que /insertion/audit', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
-    const res = await getX('/api/exports/insertion-synthese?year=2026', 'MANAGER');
+    const res = await getX('/api/exports/insertion-synthese?year=2026', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.mention).toBe('Document agrégé non nominatif — comité de pilotage');
     expect(res.body.annee).toBe(2026);
@@ -1563,13 +1582,13 @@ describe('CONTRAT /insertion/competence-referentiels (Lot 8, EXG-26)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/competence-referentiels?filiere=tri&actifs=1', 'MANAGER');
+    const res = await get('/api/insertion/competence-referentiels?filiere=tri&actifs=1', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body[0].item).toBe('Tri par catégorie');
   });
 
   it('écriture réservée ADMIN : POST MANAGER/RH → 403, ADMIN → 201', async () => {
-    expect((await post('/api/insertion/competence-referentiels', 'MANAGER', { filiere: 'tri', rubrique: 'R', item: 'I' })).status).toBe(403);
+    expect((await post('/api/insertion/competence-referentiels', 'COLLABORATEUR', { filiere: 'tri', rubrique: 'R', item: 'I' })).status).toBe(403);
     expect((await post('/api/insertion/competence-referentiels', 'RH', { filiere: 'tri', rubrique: 'R', item: 'I' })).status).toBe(403);
     mockQuery.mockImplementation((sql, params) => {
       if (/INSERT INTO insertion_competence_referentiels/.test(String(sql))) {
@@ -1593,7 +1612,7 @@ describe('CONTRAT /insertion/competence-referentiels (Lot 8, EXG-26)', () => {
   });
 
   it('DELETE réservé ADMIN (MANAGER → 403)', async () => {
-    expect((await del('/api/insertion/competence-referentiels/1', 'MANAGER')).status).toBe(403);
+    expect((await del('/api/insertion/competence-referentiels/1', 'COLLABORATEUR')).status).toBe(403);
   });
 });
 
@@ -1613,7 +1632,7 @@ describe('CONTRAT /insertion/competences (Lot 8, EXG-26/27 — accès ETI)', () 
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/insertion/competences/5', 'MANAGER');
+    const res = await get('/api/insertion/competences/5', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].scores).toHaveLength(3);
@@ -1635,7 +1654,7 @@ describe('CONTRAT /insertion/competences (Lot 8, EXG-26/27 — accès ETI)', () 
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/insertion/competences', 'MANAGER', {
+    const res = await post('/api/insertion/competences', 'ADMIN', {
       employee_id: 5, filiere: 'tri', periode: '1-6',
       scores: [{ referentiel_id: null, rubrique: 'Comportement', item: 'Assiduité', note: 6 }, { rubrique: 'Comportement', item: 'Sécurité', non_evalue: true }],
     });
@@ -1656,14 +1675,14 @@ describe('CONTRAT /insertion/competences (Lot 8, EXG-26/27 — accès ETI)', () 
       if (/INSERT INTO insertion_competence_evaluations/.test(s)) return Promise.resolve({ rows: [{ id: 20 }] });
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/insertion/competences', 'MANAGER', { employee_id: 5, scores: [{ note: 11 }] });
+    const res = await post('/api/insertion/competences', 'ADMIN', { employee_id: 5, scores: [{ note: 11 }] });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/0-10|N\/E/);
     expect(calls).toContain('ROLLBACK');
   });
 
   it('DELETE réservé ADMIN/RH (MANAGER → 403)', async () => {
-    expect((await del('/api/insertion/competences/20', 'MANAGER')).status).toBe(403);
+    expect((await del('/api/insertion/competences/20', 'COLLABORATEUR')).status).toBe(403);
   });
 });
 
@@ -1713,7 +1732,7 @@ describe('CONTRAT POST /insertion/milestones/:id/close — période d\'essai (Lo
 describe('CONTRAT /insertion/checklist-embauche (Lot 8, EXG-30/PROP-05)', () => {
   it('GET (MANAGER) : items normalisés + steps, même sans ligne en base', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
-    const res = await get('/api/insertion/checklist-embauche/5', 'MANAGER');
+    const res = await get('/api/insertion/checklist-embauche/5', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.exists).toBe(false);
     expect(res.body.steps).toEqual(expect.arrayContaining(['promesse_embauche', 'contrat_signe', 'mutuelle', 'charte_insertion', 'livret_accueil', 'reglement_interieur', 'formation_poste']));
@@ -1721,7 +1740,7 @@ describe('CONTRAT /insertion/checklist-embauche (Lot 8, EXG-30/PROP-05)', () => 
   });
 
   it('PUT réservé ADMIN/RH : MANAGER → 403 ; RH → merge + upsert', async () => {
-    expect((await put('/api/insertion/checklist-embauche/5', 'MANAGER', { items: { mutuelle: { fait: true } } })).status).toBe(403);
+    expect((await put('/api/insertion/checklist-embauche/5', 'COLLABORATEUR', { items: { mutuelle: { fait: true } } })).status).toBe(403);
     const calls = [];
     mockQuery.mockImplementation((sql, params) => {
       calls.push({ sql: String(sql), params });

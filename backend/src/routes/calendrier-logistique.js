@@ -6,7 +6,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 // exactement ce qui a produit le défaut corrigé plus bas (valeurs fantômes).
 const { avancerEcheance, normaliserDate, jourDuMois, PAS_RECURRENCE } = require('../services/commandes-recurrence');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 
 // Helper: get ISO week string (e.g. "2026-W12")
 function getISOWeek(date) {

@@ -62,7 +62,7 @@ describe('insertion schema — IIFE retirée de routes/insertion/index.js', () =
   });
 
   test('index.js reste un pur montage de routeur (authorize + mount)', () => {
-    expect(insertionIndexSrc).toMatch(/authorize\('ADMIN', 'RH', 'MANAGER'\)/);
+    expect(insertionIndexSrc).toMatch(/authorize\('ADMIN', 'RH'\)/);
     expect(insertionIndexSrc).toMatch(/require\('\.\/routes'\)/);
     expect(insertionIndexSrc).toMatch(/module\.exports = router/);
   });

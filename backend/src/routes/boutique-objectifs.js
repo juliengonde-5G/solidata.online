@@ -91,7 +91,7 @@ router.get('/compare', async (req, res) => {
 
 // POST /api/boutique-objectifs — créer ou upsert
 router.post('/',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   [
     body('boutique_id').isInt(),
     body('annee').isInt({ min: 2020, max: 2100 }),
@@ -125,7 +125,7 @@ router.post('/',
 
 // POST /api/boutique-objectifs/bulk — saisie en masse (12 mois)
 router.post('/bulk',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     const client = await pool.connect();
     try {
@@ -161,7 +161,7 @@ router.post('/bulk',
 );
 
 // DELETE /api/boutique-objectifs/:id
-router.delete('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     await pool.query('DELETE FROM boutique_objectifs WHERE id = $1', [req.params.id]);
     res.json({ success: true });

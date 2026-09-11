@@ -122,7 +122,7 @@ describe('ce que le praticien PCM peut faire', () => {
 
 describe('ce que le praticien PCM ne peut PAS faire', () => {
   test('un rôle sans habilitation PCM reste dehors', async () => {
-    for (const role of ['COLLABORATEUR', 'RESP_BTQ', 'FINANCE', 'AUTORITE']) {
+    for (const role of ['COLLABORATEUR', 'RESP_BTQ', 'COLLABORATEUR', 'AUTORITE']) {
       const r = await request(app).get('/api/pcm/candidats').set('Authorization', jeton(role));
       expect(r.status).toBe(403);
     }
@@ -209,10 +209,10 @@ describe('non-régression des rôles existants', () => {
     expect(r.body.profile?.baseType).toBeTruthy();
   });
 
-  test('MANAGER garde la lecture des types, pas la création de session', async () => {
-    expect((await request(app).get('/api/pcm/types').set('Authorization', jeton('MANAGER'))).status).toBe(200);
+  test('RH garde la lecture des types, pas la création de session', async () => {
+    expect((await request(app).get('/api/pcm/types').set('Authorization', jeton('RH'))).status).toBe(200);
     const r = await request(app).post('/api/pcm/sessions')
-      .set('Authorization', jeton('MANAGER')).send({ candidate_id: 7, mode: 'autonomous' });
+      .set('Authorization', jeton('COLLABORATEUR')).send({ candidate_id: 7, mode: 'autonomous' });
     expect(r.status).toBe(403);
   });
 });

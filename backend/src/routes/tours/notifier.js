@@ -26,7 +26,7 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 /** Rôles destinataires des notifications d'exploitation. */
-const ROLES_EXPLOITATION = ['ADMIN', 'MANAGER'];
+const ROLES_EXPLOITATION = ['ADMIN'];
 
 /**
  * Dépose un message système dans la messagerie des gestionnaires.

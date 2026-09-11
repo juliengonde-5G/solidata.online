@@ -16,7 +16,7 @@ router.use(authenticate);
 // route non-GET est automatiquement fermée à FINANCE (jamais d'écriture pour un
 // rôle de consultation).
 router.use((req, res, next) => {
-  const roles = req.method === 'GET' ? ['ADMIN', 'MANAGER', 'FINANCE'] : ['ADMIN', 'MANAGER'];
+  const roles = req.method === 'GET' ? ['ADMIN'] : ['ADMIN'];
   return authorize(...roles)(req, res, next);
 });
 router.use(autoLogActivity('finance'));

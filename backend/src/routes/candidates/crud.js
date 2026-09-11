@@ -28,7 +28,7 @@ const HAS_PCM_SQL = `EXISTS(
       ) AS has_pcm`;
 
 // GET /api/candidates — Liste avec filtres
-router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { status, search, team_id } = req.query;
     let query = `SELECT c.*, t.name as team_name,
@@ -61,7 +61,7 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/candidates/kanban — Groupé par statut
-router.get('/kanban', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/kanban', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       // has_pcm : c'est le kanban qui alimente RÉELLEMENT les cartes et le
@@ -147,7 +147,7 @@ router.post('/', authorize('ADMIN', 'RH'), [
 });
 
 // GET /api/candidates/stats — KPIs recrutement
-router.get('/stats', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/stats', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const counts = await pool.query(
       `SELECT status, COUNT(*)::int as count FROM candidates GROUP BY status`

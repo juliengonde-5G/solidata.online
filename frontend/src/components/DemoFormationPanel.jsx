@@ -34,7 +34,7 @@ import StatusBadge from './StatusBadge';
 export default function DemoFormationPanel() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
-  const canView = ['ADMIN', 'MANAGER'].includes(base);
+  const canView = ['ADMIN'].includes(base);
 
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);

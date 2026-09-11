@@ -37,7 +37,9 @@ const jeton = (role) => jwt.sign(
   JWT_SECRET, { expiresIn: '1h' }
 );
 const ADMIN = jeton('ADMIN');
-const MANAGER = jeton('MANAGER');
+// Témoin d'un rôle qui existe encore mais n'a rien à faire ici : la reprise
+// d'une tournée close est réservée à l'ADMIN (MANAGER a été retiré le 10/09/2026).
+const AUTRE_ROLE = jeton('RH');
 
 let app;
 beforeAll(() => {
@@ -64,13 +66,13 @@ function mocker(tour = TERMINEE, extra = () => null) {
 beforeEach(() => { mockQuery.mockReset(); mocker(); });
 
 describe('Qui peut reprendre une tournée', () => {
-  test('un MANAGER est refusé (403) — la reprise n\'est pas du pilotage', async () => {
-    const r = await request(app).get('/api/tours/676/reprise').set('Authorization', `Bearer ${MANAGER}`);
+  test('un rôle non ADMIN est refusé (403) — la reprise n\'est pas du pilotage', async () => {
+    const r = await request(app).get('/api/tours/676/reprise').set('Authorization', `Bearer ${AUTRE_ROLE}`);
     expect(r.status).toBe(403);
   });
 
   test('le refus tombe AVANT toute lecture en base', async () => {
-    await request(app).get('/api/tours/676/reprise').set('Authorization', `Bearer ${MANAGER}`);
+    await request(app).get('/api/tours/676/reprise').set('Authorization', `Bearer ${AUTRE_ROLE}`);
     expect(mockQuery).not.toHaveBeenCalled();
   });
 

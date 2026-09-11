@@ -34,7 +34,7 @@ const CENTRE_TRI_LAT = parseFloat(process.env.CENTRE_TRI_LAT) || 49.4231;
 const CENTRE_TRI_LNG = parseFloat(process.env.CENTRE_TRI_LNG) || 1.0993;
 
 // GET /api/geocodage/adresse?q=...
-router.get('/adresse', authorize('ADMIN', 'MANAGER', 'RH', 'QHSE'), async (req, res) => {
+router.get('/adresse', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     res.json(await chercherAdresse(req.query.q, {
       // Biais vers le territoire de collecte : « rue de la République » est

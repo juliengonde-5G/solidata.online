@@ -337,7 +337,7 @@ function signalerPreparationsNonPosees(ignorees) {
       + lignes.join('\n')
       + (reste > 0 ? `\n• … et ${reste} autre(s)` : '')
       + '\nLa commande reste en attente : le créneau est à poser à la main.';
-    Promise.resolve(envoyerMessageSystemeRoles(['ADMIN', 'MANAGER'], {
+    Promise.resolve(envoyerMessageSystemeRoles(['ADMIN'], {
       texte, source: 'recurrence', lien: '/exutoires-commandes',
     })).catch((err) => console.warn('[RECURRENCE] Messagerie interne indisponible :', err.message));
   } catch (err) {

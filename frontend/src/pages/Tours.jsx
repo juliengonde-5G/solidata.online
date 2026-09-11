@@ -1299,7 +1299,7 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
   const [bordereauxOuverts, setBordereauxOuverts] = useState(
     () => String(searchParams.get('tour')) === String(tour.id)
   );
-  const peutValiderBordereau = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const peutValiderBordereau = ['ADMIN'].includes(user?.base_role || user?.role);
 
   // Le panneau n'est pas démonté d'une tournée à l'autre : sans cette remise à
   // zéro, la fiche de la tournée suivante afficherait le rapport de la

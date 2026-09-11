@@ -220,7 +220,7 @@ function resolveBaseRole(role) {
 
 /**
  * Middleware d'autorisation par rôles
- * Usage : authorize('ADMIN', 'MANAGER')
+ * Usage : authorize('ADMIN')
  * Un rôle personnalisé passe s'il l'est explicitement OU si son rôle de base
  * figure dans la liste (les rôles intégrés se résolvent vers eux-mêmes).
  */

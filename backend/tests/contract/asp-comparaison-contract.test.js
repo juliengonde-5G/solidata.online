@@ -38,8 +38,7 @@ const tokenFor = (role) => jwt.sign(
   JWT_SECRET, { expiresIn: '1h' },
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
-  MANAGER: tokenFor('MANAGER'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
 let app;
@@ -86,7 +85,7 @@ describe('CONTRAT GET /asp/comparaison', () => {
   });
 
   it('lecture ouverte ADMIN/RH/MANAGER, fermée aux autres rôles', async () => {
-    for (const role of ['ADMIN', 'RH', 'MANAGER']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/effectifs/asp/comparaison?annee=2026', role)).status).toBe(200);
     }
     expect((await get('/api/effectifs/asp/comparaison?annee=2026', 'COLLABORATEUR')).status).toBe(403);
@@ -118,7 +117,7 @@ describe('CONTRAT POST /asp/import — habilitations et validation', () => {
     .set('Authorization', `Bearer ${TOKENS[role]}`);
 
   it('écriture réservée ADMIN/RH (MANAGER refusé en lecture seule)', async () => {
-    expect((await post('MANAGER')).status).toBe(403);
+    expect((await post('COLLABORATEUR')).status).toBe(403);
     expect((await post('COLLABORATEUR')).status).toBe(403);
   });
 
@@ -133,7 +132,7 @@ describe('CONTRAT /asp/liaison — correspondance des noms d\'usage', () => {
   it('création réservée ADMIN/RH', async () => {
     const body = { nom_asp: 'GINFRAY VERONIQUE', date_naissance: '1961-01-31', employee_id: 12 };
     const r = await request(app).post('/api/effectifs/asp/liaison')
-      .set('Authorization', `Bearer ${TOKENS.MANAGER}`).send(body);
+      .set('Authorization', `Bearer ${TOKENS.COLLABORATEUR}`).send(body);
     expect(r.status).toBe(403);
   });
 
@@ -145,14 +144,14 @@ describe('CONTRAT /asp/liaison — correspondance des noms d\'usage', () => {
 
   it('suppression réservée ADMIN/RH', async () => {
     const r = await request(app).delete('/api/effectifs/asp/liaison/1')
-      .set('Authorization', `Bearer ${TOKENS.MANAGER}`);
+      .set('Authorization', `Bearer ${TOKENS.COLLABORATEUR}`);
     expect(r.status).toBe(403);
   });
 });
 
 describe('CONTRAT GET /asp/export', () => {
   it('renvoie un classeur .xlsx pour un rôle en lecture', async () => {
-    const res = await get('/api/effectifs/asp/export?annee=2026', 'MANAGER');
+    const res = await get('/api/effectifs/asp/export?annee=2026', 'ADMIN');
     expect(res.status).toBe(200);
     expect(String(res.headers['content-type'])).toMatch(/spreadsheetml|octet-stream/);
   });

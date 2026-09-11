@@ -81,7 +81,7 @@ const tokenFor = (role) => jwt.sign(
   { id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), MANAGER: tokenFor('MANAGER'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
 let app;
@@ -201,7 +201,7 @@ beforeEach(() => {
 describe('POST /api/tours/estimate — forme de l’objet `estimation`', () => {
   it('renvoie tous les champs du contrat, pause exclue du temps de travail', async () => {
     installMocks({ cavs: makeCavs(3), predictions: [] });
-    const res = await post('/api/tours/estimate', 'MANAGER', {
+    const res = await post('/api/tours/estimate', 'ADMIN', {
       vehicle_id: 3, date: '2026-09-01', cav_ids: [1, 2, 3],
     });
     expect(res.status).toBe(200);
@@ -316,7 +316,7 @@ describe('POST /api/tours/estimate — forme de l’objet `estimation`', () => {
 describe('POST /api/tours/manual — contrainte de durée sur le mode manuel', () => {
   it('409 DUREE_MAX_DEPASSEE avec l’estimation jointe, aucune tournée créée', async () => {
     const calls = installMocks({ cavs: makeCavs(20) });
-    const res = await post('/api/tours/manual', 'MANAGER', {
+    const res = await post('/api/tours/manual', 'ADMIN', {
       vehicle_id: 3, date: '2026-09-01', cav_ids: makeCavs(20).map((c) => c.id),
     });
     expect(res.status).toBe(409);
@@ -329,7 +329,7 @@ describe('POST /api/tours/manual — contrainte de durée sur le mode manuel', (
 
   it('force:true crée quand même la tournée et trace le forçage', async () => {
     const calls = installMocks({ cavs: makeCavs(20) });
-    const res = await post('/api/tours/manual', 'MANAGER', {
+    const res = await post('/api/tours/manual', 'ADMIN', {
       vehicle_id: 3, date: '2026-09-01', cav_ids: makeCavs(20).map((c) => c.id), force: true,
     });
     expect(res.status).toBe(201);
@@ -341,7 +341,7 @@ describe('POST /api/tours/manual — contrainte de durée sur le mode manuel', (
 
   it('tournée courte : création normale, distance / durée / nb_cav stockés', async () => {
     const calls = installMocks({ cavs: makeCavs(3) });
-    const res = await post('/api/tours/manual', 'MANAGER', {
+    const res = await post('/api/tours/manual', 'ADMIN', {
       vehicle_id: 3, date: '2026-09-01', cav_ids: [1, 2, 3],
     });
     expect(res.status).toBe(201);
@@ -385,7 +385,7 @@ describe('POST /api/tours/standard — contrainte de durée sur le mode standard
 describe('Modèles de tournée — CRUD', () => {
   it('GET /routes/:id renvoie { route, cavs } ordonnés par position', async () => {
     installMocks({ cavs: makeCavs(3) });
-    const res = await get('/api/tours/routes/9', 'MANAGER');
+    const res = await get('/api/tours/routes/9', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.route).toBeTruthy();
     expect(Array.isArray(res.body.cavs)).toBe(true);
@@ -448,7 +448,7 @@ describe('Modèles de tournée — CRUD', () => {
 
   it('GET /routes/list n’expose PAS les modèles association et inclut les compteurs', async () => {
     const calls = installMocks();
-    const res = await get('/api/tours/routes/list', 'MANAGER');
+    const res = await get('/api/tours/routes/list', 'ADMIN');
     expect(res.status).toBe(200);
     const sql = calls.find((c) => /FROM standard_routes sr/.test(c.sql)).sql;
     expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM standard_route_association/);
@@ -495,7 +495,7 @@ describe('GET /api/tours/saturation-risks', () => {
       ],
       coverageRows: [{ cav_id: 12, tour_id: 77, tour_date: dayOffset(1) }],
     });
-    const res = await get('/api/tours/saturation-risks?days=7', 'MANAGER');
+    const res = await get('/api/tours/saturation-risks?days=7', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.seuil_pct).toBe(90);
     expect(res.body.horizon_jours).toBe(7);

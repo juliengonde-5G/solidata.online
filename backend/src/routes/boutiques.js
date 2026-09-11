@@ -307,7 +307,7 @@ router.post('/',
 
 // PUT /api/boutiques/:id
 router.put('/:id',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const fields = [
@@ -403,7 +403,7 @@ router.get('/:id/budget', async (req, res) => {
 
 // PUT /api/boutiques/:id/budget — définir le budget annuel
 router.put('/:id/budget',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   [body('budget_annuel').isFloat({ min: 0 })],
   validate,
   async (req, res) => {

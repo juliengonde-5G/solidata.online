@@ -255,10 +255,7 @@ describe('envoyerMessageSystemeRoles — resolveBaseRole, pas le rôle brut', ()
       const t = String(sql);
       if (/SELECT id, role FROM users WHERE is_active = true/.test(t)) {
         return Promise.resolve({
-          rows: [
-            { id: 1, role: 'ADMIN' }, { id: 2, role: 'MANAGER' },
-            { id: 3, role: 'COLLABORATEUR' }, { id: 4, role: 'REF_RSE' },
-          ],
+          rows: [{ id: 1, role: 'ADMIN' }, { id: 2, role: 'MANAGER' }, { id: 3, role: 'COLLABORATEUR' }, { id: 4, role: 'REF_RSE' }],
         });
       }
       if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(t)) return Promise.resolve({ rows: [] });

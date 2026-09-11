@@ -70,7 +70,6 @@ const ReportingMetropole = lazy(() => import('./pages/ReportingMetropole'));
 const FillRateMap = lazy(() => import('./pages/FillRateMap'));
 const NewsFeed = lazy(() => import('./pages/NewsFeed'));
 const Messagerie = lazy(() => import('./pages/Messagerie'));
-const Pointage = lazy(() => import('./pages/Pointage'));
 const ExutoiresCommandes = lazy(() => import('./pages/ExutoiresCommandes'));
 const ExutoiresPreparation = lazy(() => import('./pages/ExutoiresPreparation'));
 const ExutoiresGantt = lazy(() => import('./pages/ExutoiresGantt'));
@@ -125,27 +124,34 @@ function PageFallback() {
   );
 }
 
-function ProtectedRoute({ children, roles }) {
-  const { user, loading } = useAuth();
+// `module` : clé d'habilitation de la matrice /admin/permissions. Sans elle, un
+// module décoché ne disparaissait que de la barre latérale — l'URL tapée à la
+// main rouvrait l'écran. Le refus qui FAIT FOI reste côté serveur (les routes
+// d'API du module sont gardées) ; ceci évite d'afficher une page qui se
+// remplirait de 403.
+function ProtectedRoute({ children, roles, module }) {
+  const { user, loading, canAccessModule } = useAuth();
   if (loading) return <PageFallback />;
   if (!user) return <Navigate to="/login" />;
   // Un rôle personnalisé est autorisé si son rôle de base (base_role) l'est.
   if (roles && !roles.includes(user.role) && !roles.includes(user.base_role)) return <Navigate to="/" />;
+  if (module && !canAccessModule(module)) return <Navigate to="/" />;
   return children;
 }
 
 // Page d'accueil adaptée au rôle (vague 2). Les parties prenantes (auditeur
-// externe AUTORITE, DPO, Finance en consultation, QHSE) n'ont pas de tableau de
-// bord opérationnel pertinent : on les dépose sur leur espace principal plutôt
-// que sur un dashboard générique. base_role : un rôle personnalisé suit son modèle.
+// externe AUTORITE, DPO) n'ont pas de tableau de bord opérationnel pertinent :
+// on les dépose sur leur espace principal plutôt que sur un dashboard
+// générique. base_role : un rôle personnalisé suit son modèle.
 function HomeRedirect() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
   const landing = {
     AUTORITE: '/reporting-metropole',
     DPO: '/rgpd',
-    FINANCE: '/finance',
-    QHSE: '/qhse/accidents', // module QHSE (item 58) = espace principal du rôle ; /incidents reste au menu
+    // FINANCE et QHSE retirés le 10/09/2026 : ces profils d'habilitation
+    // n'existent plus (les MODULES Finance et QHSE, eux, restent — ils sont
+    // simplement réservés aux rôles qui subsistent).
     PCM: '/pcm',             // praticien PCM : son unique écran est son accueil
   }[base];
   if (landing) return <Navigate to={landing} replace />;
@@ -174,146 +180,149 @@ function App() {
 
 
               {/* Boutiques */}
-              <Route path="/boutiques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesDashboard /></ProtectedRoute>} />
-              <Route path="/boutiques/ventes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesVentes /></ProtectedRoute>} />
-              <Route path="/boutiques/commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesCommandes /></ProtectedRoute>} />
-              <Route path="/boutiques/planning" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RESP_BTQ']}><BoutiquesPlanning /></ProtectedRoute>} />
-              <Route path="/boutiques/objectifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesObjectifs /></ProtectedRoute>} />
-              <Route path="/boutiques/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><BoutiquesImport /></ProtectedRoute>} />
+              <Route path="/boutiques" element={<ProtectedRoute roles={['ADMIN', 'RESP_BTQ']}><BoutiquesDashboard /></ProtectedRoute>} />
+              <Route path="/boutiques/ventes" element={<ProtectedRoute roles={['ADMIN', 'RESP_BTQ']}><BoutiquesVentes /></ProtectedRoute>} />
+              <Route path="/boutiques/commandes" element={<ProtectedRoute roles={['ADMIN', 'RESP_BTQ']}><BoutiquesCommandes /></ProtectedRoute>} />
+              <Route path="/boutiques/planning" element={<ProtectedRoute roles={['ADMIN', 'RESP_BTQ']}><BoutiquesPlanning /></ProtectedRoute>} />
+              <Route path="/boutiques/objectifs" element={<ProtectedRoute roles={['ADMIN']}><BoutiquesObjectifs /></ProtectedRoute>} />
+              <Route path="/boutiques/import" element={<ProtectedRoute roles={['ADMIN']}><BoutiquesImport /></ProtectedRoute>} />
 
               {/* Vente au Kilo (VAK) — caisse SumUp, dashboards perf, live TV */}
-              <Route path="/vak" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakPerformance /></ProtectedRoute>} />
-              <Route path="/vak/jours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakJournee /></ProtectedRoute>} />
-              <Route path="/vak/annuel" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakAnnuel /></ProtectedRoute>} />
-              <Route path="/vak/sessions" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakSessions /></ProtectedRoute>} />
-              <Route path="/vak/live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><VakLive /></ProtectedRoute>} />
+              <Route path="/vak" element={<ProtectedRoute roles={['ADMIN']}><VakPerformance /></ProtectedRoute>} />
+              <Route path="/vak/jours" element={<ProtectedRoute roles={['ADMIN']}><VakJournee /></ProtectedRoute>} />
+              <Route path="/vak/annuel" element={<ProtectedRoute roles={['ADMIN']}><VakAnnuel /></ProtectedRoute>} />
+              <Route path="/vak/sessions" element={<ProtectedRoute roles={['ADMIN']}><VakSessions /></ProtectedRoute>} />
+              <Route path="/vak/live" element={<ProtectedRoute roles={['ADMIN']}><VakLive /></ProtectedRoute>} />
               <Route path="/admin/vak/sumup-config" element={<ProtectedRoute roles={['ADMIN']}><VakSumupConfig /></ProtectedRoute>} />
 
               {/* Recrutement */}
-              <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Candidates /></ProtectedRoute>} />
+              <Route path="/candidates" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Candidates /></ProtectedRoute>} />
               <Route path="/recruitment-plan" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RecruitmentPlan /></ProtectedRoute>} />
               <Route path="/pcm" element={<ProtectedRoute roles={['ADMIN', 'RH', 'PCM']}><PersonalityMatrix /></ProtectedRoute>} />
 
               {/* Équipe */}
-              <Route path="/employees" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Employees /></ProtectedRoute>} />
-              <Route path="/work-hours" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><WorkHours /></ProtectedRoute>} />
-              <Route path="/rh/formation" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><PlanFormation /></ProtectedRoute>} />
-              <Route path="/rh/effectifs" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><EffectifsETP /></ProtectedRoute>} />
-              <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Skills /></ProtectedRoute>} />
+              <Route path="/employees" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Employees /></ProtectedRoute>} />
+              <Route path="/work-hours" element={<ProtectedRoute roles={['ADMIN', 'RH']}><WorkHours /></ProtectedRoute>} />
+              <Route path="/rh/formation" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PlanFormation /></ProtectedRoute>} />
+              <Route path="/rh/effectifs" element={<ProtectedRoute roles={['ADMIN', 'RH']}><EffectifsETP /></ProtectedRoute>} />
+              <Route path="/skills" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Skills /></ProtectedRoute>} />
               <Route path="/prescripteurs" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Prescripteurs /></ProtectedRoute>} />
-              <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
-              <Route path="/insertion/actions" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><ActionsCIP /></ProtectedRoute>} />
-              <Route path="/insertion/audit" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><AuditInsertion /></ProtectedRoute>} />
+              <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH']}><InsertionParcours /></ProtectedRoute>} />
+              <Route path="/insertion/actions" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ActionsCIP /></ProtectedRoute>} />
+              <Route path="/insertion/audit" element={<ProtectedRoute roles={['ADMIN', 'RH']}><AuditInsertion /></ProtectedRoute>} />
               {/* Écran ETI (REC-UX-06) : un écran, un salarié, accessible par lien direct */}
-              <Route path="/insertion/renouvellement/:milestoneId" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><RenouvellementETI /></ProtectedRoute>} />
+              <Route path="/insertion/renouvellement/:milestoneId" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RenouvellementETI /></ProtectedRoute>} />
               <Route path="/admin/insertion" element={<ProtectedRoute roles={['ADMIN']}><AdminInsertion /></ProtectedRoute>} />
-              <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><PlanningHebdo /></ProtectedRoute>} />
-              <Route path="/pointage" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><Pointage /></ProtectedRoute>} />
+              <Route path="/planning-hebdo" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PlanningHebdo /></ProtectedRoute>} />
+              {/* Module « Pointage » retiré le 10/09/2026 (remplacé par la badgeuse).
+                  Redirection plutôt que 404 : l'écran était en favori chez les RH,
+                  et « page introuvable » se lit comme une panne. */}
+              <Route path="/pointage" element={<Navigate to="/badgeuse" replace />} />
 
               {/* Collecte */}
-              <Route path="/tours" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Tours /></ProtectedRoute>} />
-              <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><CollectionProposals /></ProtectedRoute>} />
-              <Route path="/route-templates" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><RouteTemplates /></ProtectedRoute>} />
-              <Route path="/admin-lieux-techniques" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminLieuxTechniques /></ProtectedRoute>} />
+              <Route path="/tours" element={<ProtectedRoute roles={['ADMIN']}><Tours /></ProtectedRoute>} />
+              <Route path="/collection-proposals" element={<ProtectedRoute roles={['ADMIN']}><CollectionProposals /></ProtectedRoute>} />
+              <Route path="/route-templates" element={<ProtectedRoute roles={['ADMIN']}><RouteTemplates /></ProtectedRoute>} />
+              <Route path="/admin-lieux-techniques" element={<ProtectedRoute roles={['ADMIN']}><AdminLieuxTechniques /></ProtectedRoute>} />
               <Route path="/cav-map" element={<Navigate to="/fill-rate" replace />} />
-              <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><FillRateMap /></ProtectedRoute>} />
-              <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Vehicles /></ProtectedRoute>} />
-              <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><VehicleMaintenance /></ProtectedRoute>} />
-              <Route path="/collections-live" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><LiveVehicles /></ProtectedRoute>} />
-              <Route path="/incidents" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Incidents /></ProtectedRoute>} />
-              <Route path="/planning-tournees" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PlanningTournees /></ProtectedRoute>} />
-              <Route path="/dashboard-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><DashboardCollecte /></ProtectedRoute>} />
+              <Route path="/fill-rate" element={<ProtectedRoute roles={['ADMIN', 'AUTORITE']}><FillRateMap /></ProtectedRoute>} />
+              <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN']}><Vehicles /></ProtectedRoute>} />
+              <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN']}><VehicleMaintenance /></ProtectedRoute>} />
+              <Route path="/collections-live" element={<ProtectedRoute roles={['ADMIN']}><LiveVehicles /></ProtectedRoute>} />
+              <Route path="/incidents" element={<ProtectedRoute roles={['ADMIN']}><Incidents /></ProtectedRoute>} />
+              <Route path="/planning-tournees" element={<ProtectedRoute roles={['ADMIN']}><PlanningTournees /></ProtectedRoute>} />
+              <Route path="/dashboard-collecte" element={<ProtectedRoute roles={['ADMIN']}><DashboardCollecte /></ProtectedRoute>} />
               <Route path="/live-vehicles" element={<Navigate to="/collections-live" replace />} />
 
               {/* Tri / Production */}
-              <Route path="/production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Production /></ProtectedRoute>} />
-              <Route path="/chaine-tri" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ChaineTri /></ProtectedRoute>} />
-              <Route path="/tri/execution" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><TriExecution /></ProtectedRoute>} />
+              <Route path="/production" element={<ProtectedRoute roles={['ADMIN']}><Production /></ProtectedRoute>} />
+              <Route path="/chaine-tri" element={<ProtectedRoute roles={['ADMIN']}><ChaineTri /></ProtectedRoute>} />
+              <Route path="/tri/execution" element={<ProtectedRoute roles={['ADMIN']}><TriExecution /></ProtectedRoute>} />
               <Route path="/admin/tri" element={<ProtectedRoute roles={['ADMIN']}><AdminTri /></ProtectedRoute>} />
-              <Route path="/tri/configurateur" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ChaineConfigurateur /></ProtectedRoute>} />
-              <Route path="/stock" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Stock /></ProtectedRoute>} />
-              <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ProduitsFinis /></ProtectedRoute>} />
-              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'COLLABORATEUR']}><EtiquetteGenerer /></ProtectedRoute>} />
-              <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'COLLABORATEUR']}><SortieCartons /></ProtectedRoute>} />
-              <Route path="/admin/catalogue" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminCatalogue /></ProtectedRoute>} />
-              <Route path="/admin/refashion-config" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminRefashionConfig /></ProtectedRoute>} />
-              <Route path="/admin/refashion-exports" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE', 'QHSE']}><AdminRefashionExports /></ProtectedRoute>} />
-              <Route path="/admin/communes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminCommunes /></ProtectedRoute>} />
+              <Route path="/tri/configurateur" element={<ProtectedRoute roles={['ADMIN']}><ChaineConfigurateur /></ProtectedRoute>} />
+              <Route path="/stock" element={<ProtectedRoute roles={['ADMIN']}><Stock /></ProtectedRoute>} />
+              <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN']}><ProduitsFinis /></ProtectedRoute>} />
+              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']} module="etiquettes"><EtiquetteGenerer /></ProtectedRoute>} />
+              <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']}><SortieCartons /></ProtectedRoute>} />
+              <Route path="/admin/catalogue" element={<ProtectedRoute roles={['ADMIN']}><AdminCatalogue /></ProtectedRoute>} />
+              <Route path="/admin/refashion-config" element={<ProtectedRoute roles={['ADMIN']}><AdminRefashionConfig /></ProtectedRoute>} />
+              <Route path="/admin/refashion-exports" element={<ProtectedRoute roles={['ADMIN', 'AUTORITE']}><AdminRefashionExports /></ProtectedRoute>} />
+              <Route path="/admin/communes" element={<ProtectedRoute roles={['ADMIN']}><AdminCommunes /></ProtectedRoute>} />
 
               {/* Logistique */}
-              <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCommandes /></ProtectedRoute>} />
-              <Route path="/exutoires-preparation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresPreparation /></ProtectedRoute>} />
-              <Route path="/exutoires-gantt" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresGantt /></ProtectedRoute>} />
-              <Route path="/exutoires-controle-facturation" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresControleFacturation /></ProtectedRoute>} />
-              <Route path="/exutoires-calendrier" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresCalendrier /></ProtectedRoute>} />
-              <Route path="/exutoires-clients" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresClients /></ProtectedRoute>} />
-              <Route path="/exutoires-tarifs" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ExutoiresTarifs /></ProtectedRoute>} />
-              <Route path="/inventaire-original" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><InventaireOriginal /></ProtectedRoute>} />
+              <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresCommandes /></ProtectedRoute>} />
+              <Route path="/exutoires-preparation" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresPreparation /></ProtectedRoute>} />
+              <Route path="/exutoires-gantt" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresGantt /></ProtectedRoute>} />
+              <Route path="/exutoires-controle-facturation" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresControleFacturation /></ProtectedRoute>} />
+              <Route path="/exutoires-calendrier" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresCalendrier /></ProtectedRoute>} />
+              <Route path="/exutoires-clients" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresClients /></ProtectedRoute>} />
+              <Route path="/exutoires-tarifs" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresTarifs /></ProtectedRoute>} />
+              <Route path="/inventaire-original" element={<ProtectedRoute roles={['ADMIN']}><InventaireOriginal /></ProtectedRoute>} />
 
               {/* Reporting */}
-              <Route path="/performance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><PerformanceDashboard /></ProtectedRoute>} />
-              <Route path="/dashboard-executif" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><DashboardExecutif /></ProtectedRoute>} />
-              <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><ReportingCollecte /></ProtectedRoute>} />
+              <Route path="/performance" element={<ProtectedRoute roles={['ADMIN']}><PerformanceDashboard /></ProtectedRoute>} />
+              <Route path="/dashboard-executif" element={<ProtectedRoute roles={['ADMIN']}><DashboardExecutif /></ProtectedRoute>} />
+              <Route path="/reporting-collecte" element={<ProtectedRoute roles={['ADMIN', 'AUTORITE']}><ReportingCollecte /></ProtectedRoute>} />
               <Route path="/reporting-rh" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ReportingRH /></ProtectedRoute>} />
-              <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><ReportingProduction /></ProtectedRoute>} />
+              <Route path="/reporting-production" element={<ProtectedRoute roles={['ADMIN']}><ReportingProduction /></ProtectedRoute>} />
               <Route path="/reporting" element={<Navigate to="/reporting-collecte" />} />
-              <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE', 'QHSE']}><Refashion /></ProtectedRoute>} />
-              <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'AUTORITE']}><ReportingMetropole /></ProtectedRoute>} />
+              <Route path="/refashion" element={<ProtectedRoute roles={['ADMIN', 'AUTORITE']}><Refashion /></ProtectedRoute>} />
+              <Route path="/reporting-metropole" element={<ProtectedRoute roles={['ADMIN', 'AUTORITE']}><ReportingMetropole /></ProtectedRoute>} />
 
               {/* Facturation — la facturation interne /billing est retirée (arbitrage A2 audit 2026-07) */}
-              <Route path="/pennylane" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><Pennylane /></ProtectedRoute>} />
+              <Route path="/pennylane" element={<ProtectedRoute roles={['ADMIN']}><Pennylane /></ProtectedRoute>} />
               <Route path="/admin/pennylane-config" element={<ProtectedRoute roles={['ADMIN']}><PennylaneConfig /></ProtectedRoute>} />
 
               {/* Finance */}
               {/* FINANCE (consultation) : accès en lecture aux vues finance. La page
                   d'import (écriture) reste ADMIN/MANAGER. Les boutons d'écriture des
                   autres pages 403 côté API pour FINANCE (masquage bouton = hors périmètre). */}
-              <Route path="/finance" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><Finance /></ProtectedRoute>} />
-              <Route path="/finance/import" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><FinanceImport /></ProtectedRoute>} />
-              <Route path="/finance/operations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceOperations /></ProtectedRoute>} />
-              <Route path="/finance/rentabilite" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceRentabilite /></ProtectedRoute>} />
-              <Route path="/finance/tresorerie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceTresorerie /></ProtectedRoute>} />
-              <Route path="/finance/pl" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinancePL /></ProtectedRoute>} />
-              <Route path="/finance/bilan" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceBilan /></ProtectedRoute>} />
-              <Route path="/finance/controles" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'FINANCE']}><FinanceControles /></ProtectedRoute>} />
+              <Route path="/finance" element={<ProtectedRoute roles={['ADMIN']}><Finance /></ProtectedRoute>} />
+              <Route path="/finance/import" element={<ProtectedRoute roles={['ADMIN']}><FinanceImport /></ProtectedRoute>} />
+              <Route path="/finance/operations" element={<ProtectedRoute roles={['ADMIN']}><FinanceOperations /></ProtectedRoute>} />
+              <Route path="/finance/rentabilite" element={<ProtectedRoute roles={['ADMIN']}><FinanceRentabilite /></ProtectedRoute>} />
+              <Route path="/finance/tresorerie" element={<ProtectedRoute roles={['ADMIN']}><FinanceTresorerie /></ProtectedRoute>} />
+              <Route path="/finance/pl" element={<ProtectedRoute roles={['ADMIN']}><FinancePL /></ProtectedRoute>} />
+              <Route path="/finance/bilan" element={<ProtectedRoute roles={['ADMIN']}><FinanceBilan /></ProtectedRoute>} />
+              <Route path="/finance/controles" element={<ProtectedRoute roles={['ADMIN']}><FinanceControles /></ProtectedRoute>} />
 
               {/* Pilotage RSE (RSEI-10 — 28e module, labellisation RSEi) */}
-              <Route path="/rse" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH']}><PilotageRSE /></ProtectedRoute>} />
+              <Route path="/rse" element={<ProtectedRoute roles={['ADMIN', 'RH']}><PilotageRSE /></ProtectedRoute>} />
 
               {/* Énergie & GES (RSEI-11 — 29e module, critère RSEi 4.2) */}
-              <Route path="/energie" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><EnergieGES /></ProtectedRoute>} />
+              <Route path="/energie" element={<ProtectedRoute roles={['ADMIN', 'RH']}><EnergieGES /></ProtectedRoute>} />
 
               {/* Achats responsables (RSEI-17 — 31e module, critère RSEi 1.7) */}
-              <Route path="/achats" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><AchatsResponsables /></ProtectedRoute>} />
+              <Route path="/achats" element={<ProtectedRoute roles={['ADMIN', 'RH']}><AchatsResponsables /></ProtectedRoute>} />
 
               {/* Enquêtes (RSEI-13 — 30e module) — administration ; la réponse publique /enquete/:token est hors auth */}
-              <Route path="/enquetes" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'RH', 'QHSE']}><Enquetes /></ProtectedRoute>} />
+              <Route path="/enquetes" element={<ProtectedRoute roles={['ADMIN', 'RH']}><Enquetes /></ProtectedRoute>} />
 
               {/* Temps & Présence (badgeuse) — 33e module, pointage par badge RFID (Le Houlme) */}
-              <Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER', 'COMMUNICATION']}><TempsPresence /></ProtectedRoute>} />
+              <Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'COMMUNICATION']}><TempsPresence /></ProtectedRoute>} />
 
               {/* QHSE (item 58 — accidents, habilitations, EPI) */}
               <Route path="/qhse" element={<Navigate to="/qhse/accidents" replace />} />
-              <Route path="/qhse/accidents" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="accidents" /></ProtectedRoute>} />
-              <Route path="/qhse/habilitations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="habilitations" /></ProtectedRoute>} />
-              <Route path="/qhse/epi" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="epi" /></ProtectedRoute>} />
-              <Route path="/qhse/documents" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="documents" /></ProtectedRoute>} />
-              <Route path="/qhse/rex" element={<ProtectedRoute roles={['ADMIN', 'MANAGER', 'QHSE']}><Qhse tab="rex" /></ProtectedRoute>} />
+              <Route path="/qhse/accidents" element={<ProtectedRoute roles={['ADMIN']}><Qhse tab="accidents" /></ProtectedRoute>} />
+              <Route path="/qhse/habilitations" element={<ProtectedRoute roles={['ADMIN']}><Qhse tab="habilitations" /></ProtectedRoute>} />
+              <Route path="/qhse/epi" element={<ProtectedRoute roles={['ADMIN']}><Qhse tab="epi" /></ProtectedRoute>} />
+              <Route path="/qhse/documents" element={<ProtectedRoute roles={['ADMIN']}><Qhse tab="documents" /></ProtectedRoute>} />
+              <Route path="/qhse/rex" element={<ProtectedRoute roles={['ADMIN']}><Qhse tab="rex" /></ProtectedRoute>} />
 
               {/* Administration */}
               <Route path="/users" element={<ProtectedRoute roles={['ADMIN']}><Users /></ProtectedRoute>} />
               <Route path="/admin/permissions" element={<ProtectedRoute roles={['ADMIN']}><AdminPermissions /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute roles={['ADMIN']}><Settings /></ProtectedRoute>} />
               <Route path="/referentiels" element={<Navigate to="/admin/catalogue" replace />} />
-              <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminPredictive /></ProtectedRoute>} />
-              <Route path="/admin-alert-thresholds" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAlertThresholds /></ProtectedRoute>} />
+              <Route path="/admin-predictive" element={<ProtectedRoute roles={['ADMIN']}><AdminPredictive /></ProtectedRoute>} />
+              <Route path="/admin-alert-thresholds" element={<ProtectedRoute roles={['ADMIN']}><AdminAlertThresholds /></ProtectedRoute>} />
               <Route path="/rgpd" element={<ProtectedRoute roles={['ADMIN', 'DPO']}><RGPD /></ProtectedRoute>} />
               <Route path="/admin-db" element={<ProtectedRoute roles={['ADMIN']}><AdminDB /></ProtectedRoute>} />
               <Route path="/activity-log" element={<ProtectedRoute roles={['ADMIN']}><ActivityLog /></ProtectedRoute>} />
-              <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminCAV /></ProtectedRoute>} />
-              <Route path="/admin-sensors" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminSensors /></ProtectedRoute>} />
+              <Route path="/admin-cav" element={<ProtectedRoute roles={['ADMIN']}><AdminCAV /></ProtectedRoute>} />
+              <Route path="/admin-sensors" element={<ProtectedRoute roles={['ADMIN']}><AdminSensors /></ProtectedRoute>} />
               <Route path="/admin-stock-original" element={<ProtectedRoute roles={['ADMIN']}><AdminStockOriginal /></ProtectedRoute>} />
-              <Route path="/admin-associations" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><AdminAssociations /></ProtectedRoute>} />
+              <Route path="/admin-associations" element={<ProtectedRoute roles={['ADMIN']}><AdminAssociations /></ProtectedRoute>} />
               <Route path="/admin-collaborators-import" element={<ProtectedRoute roles={['ADMIN', 'RH']}><AdminCollaboratorsImport /></ProtectedRoute>} />
               <Route path="/news" element={<ProtectedRoute><NewsFeed /></ProtectedRoute>} />
               <Route path="/messagerie" element={<ProtectedRoute><Messagerie /></ProtectedRoute>} />

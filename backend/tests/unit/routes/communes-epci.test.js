@@ -167,18 +167,18 @@ describe('ORACLE filterEpcisByDep', () => {
 // 2. Habilitations
 // ───────────────────────────────────────────────────────────────────────────
 describe('Habilitations', () => {
-  it('GET /epcis : ADMIN et MANAGER oui, COLLABORATEUR non', async () => {
+  it('GET /epcis : ADMIN oui, COLLABORATEUR non', async () => {
     expect((await get('/api/communes/epcis', 'ADMIN')).status).toBe(200);
-    expect((await get('/api/communes/epcis', 'MANAGER')).status).toBe(200);
+    expect((await get('/api/communes/epcis', 'ADMIN')).status).toBe(200);
     expect((await get('/api/communes/epcis', 'COLLABORATEUR')).status).toBe(403);
   });
   it('POST /epcis et DELETE /epcis/:code : ADMIN uniquement', async () => {
     expect((await post('/api/communes/epcis', 'MANAGER', { code: '247600620', nom: 'CC' })).status).toBe(403);
     expect((await del('/api/communes/epcis/247600620', 'MANAGER')).status).toBe(403);
   });
-  it('GET /epci-search : MANAGER oui, COLLABORATEUR non', async () => {
+  it('GET /epci-search : ADMIN oui, COLLABORATEUR non', async () => {
     global.fetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
-    expect((await get('/api/communes/epci-search?q=caux', 'MANAGER')).status).toBe(200);
+    expect((await get('/api/communes/epci-search?q=caux', 'ADMIN')).status).toBe(200);
     expect((await get('/api/communes/epci-search?q=caux', 'COLLABORATEUR')).status).toBe(403);
   });
   it('sans token → 401', async () => {

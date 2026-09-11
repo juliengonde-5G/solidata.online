@@ -17,18 +17,8 @@ import { libellePoint } from '../services/pointLabel';
 import { texteRdv } from '../services/pointHoraires';
 import InfosPointAssociation from '../components/InfosPointAssociation';
 import { bordereauRequis } from '../services/decheterie';
-
-// 6 niveaux visuels. Le backend ne gère que 0-4 : 'overflow' mappe sur 4
-// (plein) avec une anomalie 'debordement' automatiquement posée.
-const FILL_LEVELS = [
-  { value: 0, label: 'vide',          pct: '0%',   visual: 'empty',         store: 0 },
-  { value: 6, label: 'un fond',       pct: '10%',  visual: 'empty',         store: 0 },
-  { value: 1, label: 'un peu',        pct: '25%',  visual: 'quarter',       store: 1 },
-  { value: 2, label: 'à moitié',      pct: '50%',  visual: 'half',          store: 2 },
-  { value: 3, label: 'presque plein', pct: '75%',  visual: 'three_quarter', store: 3 },
-  { value: 4, label: 'plein',         pct: '100%', visual: 'full',          store: 4 },
-  { value: 5, label: 'au-delà',       pct: '++',   visual: 'overflow',      store: 4, overflow: true },
-];
+import { FILL_LEVELS, POURCENTAGE_DEBORDEMENT } from '../services/remplissage';
+import { lireIdentification, oublierIdentification } from '../services/identification';
 
 export default function FillLevel() {
   const [fillLevel, setFillLevel] = useState(null);
@@ -147,7 +137,7 @@ export default function FillLevel() {
     // moteur y perdait 20 points sur « plein ». Dérivé du libellé affiché pour
     // qu'il n'y ait qu'UNE source de vérité (FILL_LEVELS).
     const storePercent = levelObj
-      ? (levelObj.overflow ? 110 : parseInt(String(levelObj.pct).replace('%', ''), 10))
+      ? (levelObj.overflow ? POURCENTAGE_DEBORDEMENT : parseInt(String(levelObj.pct).replace('%', ''), 10))
       : null;
     const effectiveAnomaly = levelObj?.overflow ? 'debordement' : null;
     setLoading(true);
@@ -189,6 +179,13 @@ export default function FillLevel() {
       //    perte de donnée, même si le submit backend échoue. La photo n'est
       //    PAS mise en file (pas de blob dans la file de sync, même
       //    contrainte que les incidents) — seulement tentée en ligne ci-dessous.
+      // Comment ce point a-t-il été identifié ? `qrScanned` valait jusqu'ici
+      // « vrai dès que ce n'est pas une association », c'est-à-dire toujours —
+      // y compris quand le chauffeur venait précisément de déclarer le QR
+      // indisponible. La colonne ne disait donc rien. Elle dit désormais la
+      // vérité, et la déclaration voyage avec sa position (relevée au moment
+      // du geste) jusqu'au compte rendu de tournée.
+      const ident = lireIdentification();
       const payload = {
         clientId: newClientId(),
         tourId,
@@ -197,7 +194,10 @@ export default function FillLevel() {
         fillPercent: storePercent,
         anomaly: effectiveAnomaly,
         notes,
-        qrScanned: !tourIsAssociation,
+        qrScanned: !tourIsAssociation && ident.qrScanne,
+        qrUnavailable: !tourIsAssociation && !ident.qrScanne,
+        qrUnavailableReason: tourIsAssociation ? null : ident.motif,
+        declarationPosition: tourIsAssociation ? null : ident.position,
         remballe,
       };
       const pendingId = await addPendingCollect(payload);
@@ -292,10 +292,9 @@ export default function FillLevel() {
   const finishAndReturn = async () => {
     // Draft conservé si non envoyé pour pouvoir corriger plus tard.
     // Nettoyé explicitement si déjà envoyé au serveur (fait dans submit).
-    localStorage.removeItem('scanned_qr');
+    oublierIdentification();
     localStorage.removeItem('selected_cav_id');
     localStorage.removeItem('selected_cav_name');
-    localStorage.removeItem('qr_unavailable_reason');
     navigate('/tour-map');
   };
 

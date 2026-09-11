@@ -252,7 +252,7 @@ async function positionSuivante(client, tourId) {
 const kindAttendu = (tour) => (tour.collection_type === 'association' ? 'association' : 'cav');
 
 // ── GET /api/tours/:id/programme ───────────────────────────────────────────
-router.get('/:id/programme', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/programme', authorize('ADMIN'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
@@ -285,7 +285,7 @@ router.get('/:id/programme', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 
 // ── PUT /api/tours/:id/programme/ordre ─────────────────────────────────────
 // Body : { ordre: [{ kind: 'cav'|'arret_technique', id }] }
-router.put('/:id/programme/ordre', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id/programme/ordre', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
   const ordre = Array.isArray(req.body?.ordre) ? req.body.ordre : null;
@@ -366,7 +366,7 @@ router.put('/:id/programme/ordre', authorize('ADMIN', 'MANAGER'), async (req, re
 });
 
 // ── POST /api/tours/:id/programme/cav ──────────────────────────────────────
-router.post('/:id/programme/cav', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/programme/cav', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const cavId = parseInt(req.body?.cav_id, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(cavId)) {
@@ -424,7 +424,7 @@ router.post('/:id/programme/cav', authorize('ADMIN', 'MANAGER'), async (req, res
 });
 
 // ── DELETE /api/tours/:id/programme/cav/:tourCavId ─────────────────────────
-router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const tourCavId = parseInt(req.params.tourCavId, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(tourCavId)) {
@@ -474,7 +474,7 @@ router.delete('/:id/programme/cav/:tourCavId', authorize('ADMIN', 'MANAGER'), as
 // Ajout d'un point association depuis le référentiel, sur une tournée en cours.
 // Jusqu'ici l'édition en direct ne connaissait que les bornes : une tournée
 // d'associations n'était donc PAS pilotable (constat L5).
-router.post('/:id/programme/association', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/programme/association', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const pointId = parseInt(req.body?.association_point_id, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(pointId)) {
@@ -545,7 +545,7 @@ router.post('/:id/programme/association', authorize('ADMIN', 'MANAGER'), async (
 });
 
 // ── DELETE /api/tours/:id/programme/association/:tourPointId ───────────────
-router.delete('/:id/programme/association/:tourPointId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id/programme/association/:tourPointId', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const tourPointId = parseInt(req.params.tourPointId, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(tourPointId)) {
@@ -593,7 +593,7 @@ router.delete('/:id/programme/association/:tourPointId', authorize('ADMIN', 'MAN
 // ── POST /api/tours/:id/programme/arret ────────────────────────────────────
 // Body : { lieu_id } ou { libelle } — un arrêt ponctuel sans lieu référencé
 // reste possible (le gestionnaire ne doit pas être bloqué par le référentiel).
-router.post('/:id/programme/arret', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/programme/arret', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
   const lieuId = Number.isInteger(parseInt(req.body?.lieu_id, 10)) ? parseInt(req.body.lieu_id, 10) : null;
@@ -642,7 +642,7 @@ router.post('/:id/programme/arret', authorize('ADMIN', 'MANAGER'), async (req, r
 });
 
 // ── DELETE /api/tours/:id/programme/arret/:arretId ─────────────────────────
-router.delete('/:id/programme/arret/:arretId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id/programme/arret/:arretId', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const arretId = parseInt(req.params.arretId, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(arretId)) {
@@ -686,7 +686,7 @@ router.delete('/:id/programme/arret/:arretId', authorize('ADMIN', 'MANAGER'), as
 // Changement de chauffeur / suiveurs EN COURS de journée (relève, renfort,
 // absence). Mêmes garde-fous que l'affectation au planning : une personne ne
 // peut pas tenir deux rôles sur la même tournée.
-router.patch('/:id/equipe', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/equipe', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
   const tour = await loadTourEditable(tourId, res);
@@ -809,7 +809,7 @@ function marqueBureau(req) {
 // ── GET /api/tours/:id/pesees ──────────────────────────────────────────────
 // Pesées de la tournée + total recalculé. `modifiable` dit à l'écran s'il peut
 // proposer une correction, plutôt que de la laisser tenter puis échouer.
-router.get('/:id/pesees', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/pesees', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
   try {
@@ -856,7 +856,7 @@ function lirePesee(body) {
 }
 
 // ── POST /api/tours/:id/pesees ─────────────────────────────────────────────
-router.post('/:id/pesees', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/pesees', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
   const lu = lirePesee(req.body);
@@ -890,7 +890,7 @@ router.post('/:id/pesees', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // ── PUT /api/tours/:id/pesees/:peseeId ─────────────────────────────────────
-router.put('/:id/pesees/:peseeId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id/pesees/:peseeId', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const peseeId = parseInt(req.params.peseeId, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(peseeId)) {
@@ -939,7 +939,7 @@ router.put('/:id/pesees/:peseeId', authorize('ADMIN', 'MANAGER'), async (req, re
 });
 
 // ── DELETE /api/tours/:id/pesees/:peseeId ──────────────────────────────────
-router.delete('/:id/pesees/:peseeId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id/pesees/:peseeId', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   const peseeId = parseInt(req.params.peseeId, 10);
   if (!Number.isInteger(tourId) || !Number.isInteger(peseeId)) {
@@ -1078,9 +1078,9 @@ async function marquerCollecte(req, res, kind) {
   }
 }
 
-router.post('/:id/programme/cav/:pointId/collecte', authorize('ADMIN', 'MANAGER'),
+router.post('/:id/programme/cav/:pointId/collecte', authorize('ADMIN'),
   (req, res) => marquerCollecte(req, res, 'cav'));
-router.post('/:id/programme/association/:pointId/collecte', authorize('ADMIN', 'MANAGER'),
+router.post('/:id/programme/association/:pointId/collecte', authorize('ADMIN'),
   (req, res) => marquerCollecte(req, res, 'association'));
 
 // ── POST /api/tours/:id/programme/retour-centre ────────────────────────────
@@ -1096,7 +1096,7 @@ router.post('/:id/programme/association/:pointId/collecte', authorize('ADMIN', '
 // motif. Écrire une seconde version, c'était garantir qu'elles divergent.
 const MOTIFS_RETOUR_GESTIONNAIRE = ['vidage', 'pause_dejeuner', 'fin_tournee'];
 
-router.post('/:id/programme/retour-centre', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/programme/retour-centre', authorize('ADMIN'), async (req, res) => {
   const tourId = parseInt(req.params.id, 10);
   if (!Number.isInteger(tourId)) return res.status(400).json({ error: 'Identifiant invalide' });
   const motif = String(req.body?.motif || '');
@@ -1171,7 +1171,7 @@ function coordonnee(valeur) {
 // Un lieu sans coordonnées renvoie `disponible: false` avec son motif — et la
 // carte n'affiche AUCUN marqueur plutôt qu'un point inventé au milieu de nulle
 // part.
-router.get('/centre-tri', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/centre-tri', authorize('ADMIN'), async (req, res) => {
   try {
     const centre = await centreDeTri(pool);
     // `Number(null)` vaut 0, et 0 est un nombre fini : lu naïvement, un lieu
@@ -1207,7 +1207,7 @@ router.get('/centre-tri', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // ── Référentiel des lieux d'arrêt technique ────────────────────────────────
-router.get('/lieux-techniques', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/lieux-techniques', authorize('ADMIN'), async (req, res) => {
   try {
     const inclureInactifs = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
     const r = await pool.query(
@@ -1246,7 +1246,7 @@ function lireLieu(body) {
   };
 }
 
-router.post('/lieux-techniques', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/lieux-techniques', authorize('ADMIN'), async (req, res) => {
   const lu = lireLieu(req.body);
   if (lu.error) return res.status(400).json({ error: lu.error });
   try {
@@ -1262,7 +1262,7 @@ router.post('/lieux-techniques', authorize('ADMIN', 'MANAGER'), async (req, res)
   }
 });
 
-router.put('/lieux-techniques/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/lieux-techniques/:id', authorize('ADMIN'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Identifiant invalide' });
   const lu = lireLieu(req.body);
@@ -1286,7 +1286,7 @@ router.put('/lieux-techniques/:id', authorize('ADMIN', 'MANAGER'), async (req, r
 
 // Un lieu déjà utilisé par une tournée n'est pas supprimé : l'historique
 // perdrait son libellé. On propose la désactivation, comme pour les modèles.
-router.delete('/lieux-techniques/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/lieux-techniques/:id', authorize('ADMIN'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Identifiant invalide' });
   try {
@@ -1314,7 +1314,7 @@ router.delete('/lieux-techniques/:id', authorize('ADMIN', 'MANAGER'), async (req
 // Événements de circulation de la zone affichée sur « Collecte en direct ».
 // Réponse honnête quand la source n'est pas configurée ou ne répond pas : la
 // carte doit distinguer « aucune perturbation » de « information indisponible ».
-router.get('/trafic', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/trafic', authorize('ADMIN'), async (req, res) => {
   try {
     const { getTrafficIncidents } = require('../../services/traffic');
     res.json(await getTrafficIncidents(req.query.bbox));

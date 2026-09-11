@@ -23,7 +23,7 @@ export default function TempsPresence() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
   const canWriteRh = ['ADMIN', 'RH'].includes(base);   // corrections RH, validation, exports, badges, paramètres
-  const canCorrect = ['ADMIN', 'RH', 'MANAGER'].includes(base); // corrections (encadrant inclus, NOTE_RH §5.1)
+  const canCorrect = ['ADMIN', 'RH'].includes(base); // corrections (MANAGER retiré le 10/09/2026)
   const isAdmin = base === 'ADMIN';                    // appairage/régénération de postes
   // Chargé de communication : il DIFFUSE des contenus sur l'écran du poste et
   // ne voit rien d'autre du module — ni pointages, ni feuilles de temps, ni

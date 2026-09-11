@@ -440,7 +440,7 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 // ══════════════════════════════════════════
 
 // POST /api/tours/events-auto/discover — Lancer la découverte automatique multi-sources
-router.post('/events-auto/discover', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/events-auto/discover', authorize('ADMIN'), async (req, res) => {
   try {
     const { months_ahead, sources } = req.body;
     const lookAheadMonths = months_ahead || 3;
@@ -567,7 +567,7 @@ router.post('/events-auto/discover', authorize('ADMIN', 'MANAGER'), async (req, 
 });
 
 // GET /api/tours/events-auto/sources — Lister les sources disponibles
-router.get('/events-auto/sources', authorize('ADMIN', 'MANAGER'), (req, res) => {
+router.get('/events-auto/sources', authorize('ADMIN'), (req, res) => {
   const hasOpenAgendaKey = !!process.env.OPENAGENDA_API_KEY;
   res.json([
     {
@@ -620,7 +620,7 @@ router.get('/events-auto/sources', authorize('ADMIN', 'MANAGER'), (req, res) => 
 });
 
 // GET /api/tours/events-auto/predictions — Prédictions d'impact sur les prochaines semaines
-router.get('/events-auto/predictions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/events-auto/predictions', authorize('ADMIN'), async (req, res) => {
   try {
     const { weeks } = req.query;
     const nbWeeks = parseInt(weeks) || 4;
@@ -669,7 +669,7 @@ router.get('/events-auto/predictions', authorize('ADMIN', 'MANAGER'), async (req
 });
 
 // GET /api/tours/events-auto/stats — Statistiques IA des événements
-router.get('/events-auto/stats', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/events-auto/stats', authorize('ADMIN'), async (req, res) => {
   try {
     const total = await pool.query('SELECT COUNT(*) as total FROM evenements_locaux WHERE is_active = true');
     const upcoming = await pool.query(
@@ -724,7 +724,7 @@ router.get('/events-auto/stats', authorize('ADMIN', 'MANAGER'), async (req, res)
 // ══════════════════════════════════════════
 
 // POST /api/tours/events-auto/discover-by-cav — découverte autour de chaque CAV
-router.post('/events-auto/discover-by-cav', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/events-auto/discover-by-cav', authorize('ADMIN'), async (req, res) => {
   try {
     const { discoverNearAllCAVs } = require('../../services/event-discovery');
     const result = await discoverNearAllCAVs({ triggeredBy: 'manual' });
@@ -736,7 +736,7 @@ router.post('/events-auto/discover-by-cav', authorize('ADMIN', 'MANAGER'), async
 });
 
 // POST /api/tours/events-auto/discover-by-association
-router.post('/events-auto/discover-by-association', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/events-auto/discover-by-association', authorize('ADMIN'), async (req, res) => {
   try {
     const { discoverNearAllAssociations } = require('../../services/event-discovery');
     const result = await discoverNearAllAssociations({ triggeredBy: 'manual' });
@@ -748,7 +748,7 @@ router.post('/events-auto/discover-by-association', authorize('ADMIN', 'MANAGER'
 });
 
 // POST /api/tours/events-auto/sync-holidays — jours fériés + vacances scolaires
-router.post('/events-auto/sync-holidays', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/events-auto/sync-holidays', authorize('ADMIN'), async (req, res) => {
   try {
     const { syncAllHolidays } = require('../../services/holidays');
     const result = await syncAllHolidays();
@@ -760,7 +760,7 @@ router.post('/events-auto/sync-holidays', authorize('ADMIN', 'MANAGER'), async (
 });
 
 // POST /api/tours/events-auto/recalc-seasonal — recalcul facteurs saisonniers
-router.post('/events-auto/recalc-seasonal', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/events-auto/recalc-seasonal', authorize('ADMIN'), async (req, res) => {
   try {
     const { recalcSeasonalFactors } = require('../../services/predictive-ai');
     const result = await recalcSeasonalFactors();

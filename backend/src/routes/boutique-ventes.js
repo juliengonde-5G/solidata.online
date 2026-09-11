@@ -329,7 +329,7 @@ async function importCSVContent(boutiqueId, content, filename, userId = null, so
 
 // POST /api/boutique-ventes/import — upload CSV manuel
 router.post('/import',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   upload.single('file'),
   async (req, res) => {
     try {
@@ -402,7 +402,7 @@ router.get('/batches/:id', async (req, res) => {
 // 2. DELETE tickets (référencent batch)
 // 3. DELETE batch
 router.delete('/batches/:id',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     const client = await pool.connect();
     try {

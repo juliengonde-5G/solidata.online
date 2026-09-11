@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
-import { LoadingSpinner, DataTable, StatusBadge, PageHeader } from '../components';
+import { LoadingSpinner, DataTable, StatusBadge, PageHeader, RappelExtranetRefashion } from '../components';
 import { MapPin, Coins, Recycle, Wand2, Save, Plus, History, AlertTriangle, Lock, ShieldCheck, Download, Paperclip } from 'lucide-react';
 import api from '../services/api';
 
@@ -47,6 +47,8 @@ function EcartBadge({ saisi, calc }) {
 
 export default function Refashion() {
   const [dpav, setDpav] = useState(null);
+  // Objet à reporter sur l'extranet Refashion ; `null` = rien en attente.
+  const [rappelRefashion, setRappelRefashion] = useState(null);
   const [dpavSource, setDpavSource] = useState(null); // ligne vw_refashion_dpav_source du trimestre
   const [communes, setCommunes] = useState([]);
   const [subventions, setSubventions] = useState([]);
@@ -73,7 +75,7 @@ export default function Refashion() {
   // (DPAV, communes, subventions, justificatif) est masquée ; la consultation
   // (tableaux, badges d'écart, journal d'audit, attestation, exports) reste.
   const { user } = useAuth();
-  const readOnly = !['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const readOnly = !['ADMIN'].includes(user?.base_role || user?.role);
   const isAdmin = (user?.base_role || user?.role) === 'ADMIN';
 
   // Télécharge la pièce justificative d'un taux via l'instance axios (porte le
@@ -192,6 +194,10 @@ export default function Refashion() {
         notes: dpavForm.notes || null,
       });
       setShowDpavForm(false);
+      // Rappel PERSISTANT : la DPAV est enregistrée ici, pas chez Refashion.
+      // Il ne part qu'au clic — un message qui s'efface tout seul ne peut pas
+      // s'assurer qu'un geste a été fait dans une autre application.
+      setRappelRefashion(`DPAV ${year} T${q}`);
       await loadData();
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Échec de l\'enregistrement de la DPAV');
@@ -290,6 +296,13 @@ export default function Refashion() {
             </>
           }
         />
+
+        {rappelRefashion && (
+          <RappelExtranetRefashion
+            objet={rappelRefashion}
+            onAcquitter={() => setRappelRefashion(null)}
+          />
+        )}
 
         {error && (
           <div className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-lg mb-4 text-sm flex items-start gap-2">

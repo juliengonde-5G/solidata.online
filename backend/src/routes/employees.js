@@ -159,7 +159,7 @@ function maskContractRows(rows, baseRole) {
 }
 
 // GET /api/employees
-router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { team_id, is_active, search } = req.query;
     let query = `SELECT e.*, t.name as team_name FROM employees e LEFT JOIN teams t ON e.team_id = t.id WHERE 1=1`;
@@ -182,7 +182,7 @@ router.get('/', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/employees/:id
-router.get('/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT e.*, t.name as team_name FROM employees e
@@ -285,7 +285,7 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
 // 24 mois). Somme les périodes des contrats CDDI de employee_contracts ; si
 // aucun (base pas encore réimportée après la levée de la coercition CDDI→CDD),
 // replie sur la période de contrat portée par la fiche employé.
-router.get('/:id/cddi-duration', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/cddi-duration', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const empRes = await pool.query(
       'SELECT contract_type, contract_start, contract_end FROM employees WHERE id = $1',
@@ -393,7 +393,7 @@ router.post('/:id/photo', authorize('ADMIN', 'RH'), upload.single('photo'), asyn
 // ══════════════════════════════════════════
 
 // GET /api/employees/schedule?month=2026-03&team_id=1
-router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/schedule/planning', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { month, team_id, employee_id } = req.query;
     let query = `
@@ -424,7 +424,7 @@ router.get('/schedule/planning', authorize('ADMIN', 'RH', 'MANAGER'), async (req
 });
 
 // POST /api/employees/schedule
-router.post('/schedule', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.post('/schedule', authorize('ADMIN', 'RH'), [
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('date').notEmpty().withMessage('Date requise'),
   body('status').notEmpty().withMessage('Statut requis'),
@@ -470,7 +470,7 @@ router.put('/schedule/:id/confirm', authorize('ADMIN', 'RH'), async (req, res) =
 });
 
 // POST /api/employees/schedule/bulk — Planification en masse
-router.post('/schedule/bulk', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.post('/schedule/bulk', authorize('ADMIN', 'RH'), [
   body('entries').isArray({ min: 1 }).withMessage('Liste d\'entrées requise'),
 ], validate, async (req, res) => {
   try {
@@ -527,7 +527,7 @@ function computeHoursFromSlots(start_time, end_time, break_minutes) {
 }
 
 // GET /api/employees/:id/hours?month=YYYY-MM
-router.get('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+router.get('/:id/hours', authorize('ADMIN', 'RH', 'COLLABORATEUR'), async (req, res) => {
   try {
     const { month } = req.query;
     if (!/^\d+$/.test(String(req.params.id))) return res.status(400).json({ error: 'ID employé invalide' });
@@ -555,7 +555,7 @@ router.get('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORATEUR'), a
 });
 
 // GET /api/employees/:id/hours/summary?month=YYYY-MM
-router.get('/:id/hours/summary', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORATEUR'), async (req, res) => {
+router.get('/:id/hours/summary', authorize('ADMIN', 'RH', 'COLLABORATEUR'), async (req, res) => {
   try {
     const { month } = req.query;
     if (!month || !/^\d{4}-\d{2}$/.test(month)) {
@@ -582,7 +582,7 @@ router.get('/:id/hours/summary', authorize('ADMIN', 'RH', 'MANAGER', 'COLLABORAT
 });
 
 // POST /api/employees/:id/hours — accepte start_time/end_time/break_minutes
-router.post('/:id/hours', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/:id/hours', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const empId = req.params.id;
     const { date, start_time, end_time, break_minutes, type, notes, hours_worked: hw, overtime_hours: oh } = req.body;
@@ -633,7 +633,7 @@ router.put('/:id/hours/:entryId/validate', authorize('ADMIN', 'RH'), async (req,
 });
 
 // GET /api/employees/work-hours?month=2026-03&employee_id=1
-router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/work-hours/list', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { month, employee_id, team_id } = req.query;
     let query = `
@@ -665,7 +665,7 @@ router.get('/work-hours/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
 });
 
 // POST /api/employees/work-hours
-router.post('/work-hours', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.post('/work-hours', authorize('ADMIN', 'RH'), [
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('date').notEmpty().withMessage('Date requise'),
   body('hours_worked').isFloat({ min: 0 }).withMessage('Heures travaillées requises (valeur numérique)'),
@@ -712,7 +712,7 @@ router.put('/work-hours/:id/validate', authorize('ADMIN', 'RH'), async (req, res
 });
 
 // GET /api/employees/work-hours/summary?month=2026-03
-router.get('/work-hours/summary', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/work-hours/summary', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { month } = req.query;
     if (!month) return res.status(400).json({ error: 'Paramètre month requis (YYYY-MM)' });
@@ -745,7 +745,7 @@ router.get('/work-hours/summary', authorize('ADMIN', 'RH', 'MANAGER'), async (re
 // GET /api/employees/absenteeism?months=12
 // Comparaison planning prévu (schedule) vs réel (work_hours) sur N derniers mois
 // → utilisé par le reporting RH pour le graphique d'absentéisme
-router.get('/absenteeism/monthly', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/absenteeism/monthly', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const months = Math.max(1, Math.min(24, parseInt(req.query.months) || 12));
     const result = await pool.query(
@@ -856,7 +856,7 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 // CONTRATS
 // ══════════════════════════════════════════
 
-router.get('/:id/contracts', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/contracts', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT ec.*, t.name as team_name,
@@ -960,7 +960,7 @@ router.delete('/:id/contracts/:contractId', authorize('ADMIN'), async (req, res)
 // INDISPONIBILITÉS HEBDOMADAIRES
 // ══════════════════════════════════════════
 
-router.get('/:id/availability', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/availability', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query('SELECT day_off FROM employee_availability WHERE employee_id = $1', [req.params.id]);
     res.json(result.rows.map(r => r.day_off));
@@ -1139,7 +1139,7 @@ router.post('/import/dedupe-ghosts', authorize('ADMIN', 'RH'), async (req, res) 
 
 // GET /api/employees/visite-medicale/alertes
 // Liste les visites en retard ou à venir dans les 30 jours
-router.get('/visite-medicale/alertes', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/visite-medicale/alertes', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT e.id, e.first_name, e.last_name, e.contract_start, e.contract_type,
@@ -1213,7 +1213,7 @@ router.put('/:id/visite-medicale/programmer', authorize('ADMIN', 'RH'), async (r
 
 // ══════ KPI RH P1-D — formation, ETP, absentéisme ══════
 
-router.get('/kpi/formation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/kpi/formation', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const { rows } = await pool.query(`
@@ -1232,7 +1232,7 @@ router.get('/kpi/formation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/kpi/etp', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/kpi/etp', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const heuresPleinTemps = 1607;
@@ -1256,7 +1256,7 @@ router.get('/kpi/etp', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/kpi/absenteisme', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/kpi/absenteisme', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const mois = req.query.mois ? parseInt(req.query.mois) : null;
@@ -1290,7 +1290,7 @@ router.get('/kpi/absenteisme', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
 // base ne stocke pas de champ « sexe » ; l'indicateur est donc une estimation
 // documentée, jamais présentée comme une donnée déclarative. Alimente B8/B10.
 // ══════════════════════════════════════════════════════════════════════════
-router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/kpi/egalite-fh', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     // Classification du sexe (miroir du bilan RSE gather3Volets). Revue Codex PR#82 :
@@ -1402,7 +1402,7 @@ const FORMATION_STATUTS = ['identifie', 'planifie', 'realise', 'annule'];
 // NB : routes en 2 segments sous /formation/* — la route `GET /:id` (plus haut)
 // capterait un `/formation` mono-segment (id = "formation"). Même convention que
 // les KPI (/kpi/formation…).
-router.get('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/formation/actions', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const params = [];
     const where = [];
@@ -1418,7 +1418,7 @@ router.get('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (req
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/formation/bilan', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/formation/bilan', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee, 10) || new Date().getFullYear();
     const r = await pool.query(
@@ -1444,7 +1444,7 @@ router.get('/formation/bilan', authorize('ADMIN', 'RH', 'MANAGER'), async (req, 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/formation/actions', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.intitule || !String(b.intitule).trim()) return res.status(400).json({ error: "L'intitulé est obligatoire" });
@@ -1474,7 +1474,7 @@ router.post('/formation/actions', authorize('ADMIN', 'RH', 'MANAGER'), async (re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.patch('/formation/actions/:id', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.patch('/formation/actions/:id', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const allowed = {
       annee: (v) => Number.isInteger(parseInt(v, 10)),

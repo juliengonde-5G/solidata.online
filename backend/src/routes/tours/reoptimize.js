@@ -21,7 +21,7 @@ const {
 // n'atteignaient personne : elles partaient dans la salle Socket.IO du
 // chauffeur et dans une notification, mais l'écran « Collecte en direct » ne
 // les listait pas. Le gestionnaire décide, il faut donc qu'il les voie.
-router.get('/reoptimizations/pending', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/reoptimizations/pending', authorize('ADMIN'), async (req, res) => {
   try {
     const date = req.query.date || null;
     const result = await pool.query(
@@ -62,7 +62,7 @@ router.get('/:id/reoptimizations', async (req, res) => {
 
 // POST /api/tours/:id/reoptimize — Déclencher (manager)
 router.post('/:id/reoptimize',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   [
     body('current_lat').optional().isFloat(),
     body('current_lng').optional().isFloat(),
@@ -90,7 +90,7 @@ router.post('/:id/reoptimize',
 
 // POST /api/tours/:id/reoptimize/:reoptId/accept — Accepter (manager)
 router.post('/:id/reoptimize/:reoptId/accept',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const result = await applyReoptimization(parseInt(req.params.reoptId, 10), req.user?.id);
@@ -109,7 +109,7 @@ router.post('/:id/reoptimize/:reoptId/accept',
 
 // POST /api/tours/:id/reoptimize/:reoptId/reject — Refuser (manager)
 router.post('/:id/reoptimize/:reoptId/reject',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const result = await rejectReoptimization(parseInt(req.params.reoptId, 10), req.user?.id);

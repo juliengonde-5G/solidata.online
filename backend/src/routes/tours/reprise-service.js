@@ -71,66 +71,14 @@ function lireInstantParis(brut, { champ = 'La date et l\'heure' } = {}) {
   return { valeur: `${a}-${mo}-${j} ${h}:${mi}`, jour: `${a}-${mo}-${j}` };
 }
 
-/**
- * LES PALIERS DE REMPLISSAGE d'une borne, tels que le chauffeur les voit.
- *
- * Le mobile ne stocke pas un pourcentage libre : il présente sept paliers
- * nommés et en déduit DEUX colonnes — `fill_level` sur l'échelle 0-4 que lit le
- * moteur historique, et `fill_percent`, plus fidèle (« un fond » vaut 10 % et
- * non 0 ; « plein » vaut 100 % et non 80 %, que donnait 4 × 20).
- *
- * Corriger un volume déclaré, c'est donc choisir le palier que le chauffeur
- * aurait dû cocher — jamais taper deux nombres qui pourraient se contredire.
- * Cette table est la référence côté serveur ; un test de garde
- * (`tests/unit/reprise-paliers.test.js`) échoue si elle cesse de correspondre à
- * celle du mobile, pour que les deux ne dérivent pas en silence.
- */
-const PALIERS_REMPLISSAGE = Object.freeze([
-  { code: 'vide', libelle: 'vide', fill_level: 0, fill_percent: 0 },
-  { code: 'fond', libelle: 'un fond', fill_level: 0, fill_percent: 10 },
-  { code: 'peu', libelle: 'un peu', fill_level: 1, fill_percent: 25 },
-  { code: 'moitie', libelle: 'à moitié', fill_level: 2, fill_percent: 50 },
-  { code: 'presque_plein', libelle: 'presque plein', fill_level: 3, fill_percent: 75 },
-  { code: 'plein', libelle: 'plein', fill_level: 4, fill_percent: 100 },
-  { code: 'au_dela', libelle: 'au-delà (débordement)', fill_level: 4, fill_percent: 110 },
-].map(Object.freeze));
-
-/** Palier par son code. `null` si le code n'existe pas — jamais de repli. PURE. */
-function lirePalier(code) {
-  return PALIERS_REMPLISSAGE.find((p) => p.code === String(code ?? '')) || null;
-}
-
-/**
- * Retrouve le palier correspondant à un couple déjà stocké, pour que l'écran
- * puisse présenter la valeur actuelle comme un choix et non comme deux nombres.
- *
- * Le pourcentage prime quand il est renseigné : c'est la valeur fine, et c'est
- * elle qui distingue « un fond » de « vide », ou « au-delà » de « plein » —
- * distinctions que l'échelle 0-4 ne sait pas porter. Sans pourcentage (points
- * saisis avant 2026, ou par un mobile ancien), on retombe sur le premier palier
- * du niveau, et l'appelant sait que la correspondance est approchée. PURE.
- */
-function palierDepuisStockage(fillLevel, fillPercent) {
-  // `Number(null)` vaut 0, et 0 est un pourcentage PARFAITEMENT valide ici :
-  // sans ce filtre, une borne dont le pourcentage n'a jamais été relevé serait
-  // présentée comme « vide », avec certitude. Le piège a déjà coûté un point de
-  // départ dans le golfe de Guinée (2.42.0) et une tolérance de rendez-vous à
-  // zéro minute (2.38.0) — l'absence se teste avant la conversion, jamais après.
-  const absent = (v) => v === null || v === undefined || v === '';
-
-  if (!absent(fillPercent)) {
-    const pct = Number(fillPercent);
-    if (Number.isFinite(pct)) {
-      const exact = PALIERS_REMPLISSAGE.find((p) => p.fill_percent === pct);
-      if (exact) return { palier: exact, exact: true };
-    }
-  }
-  if (absent(fillLevel)) return { palier: null, exact: false };
-  const niv = Number(fillLevel);
-  if (!Number.isFinite(niv)) return { palier: null, exact: false };
-  const parNiveau = PALIERS_REMPLISSAGE.find((p) => p.fill_level === niv);
-  return { palier: parNiveau || null, exact: false };
-}
+// Paliers de remplissage : la table et sa relecture vivent désormais dans
+// `utils/remplissage.js`. Elles servent AUSSI à restituer un passage (fiche du
+// point, historique du chauffeur), pas seulement à corriger une tournée close :
+// les laisser ici en aurait fait une deuxième source de vérité le jour où un
+// autre écran en a eu besoin. Réexportées pour ne rien casser des appelants.
+const {
+  PALIERS_REMPLISSAGE, lirePalier, palierDepuisStockage, remplissageEffectif,
+} = require('../../utils/remplissage');
 
 /**
  * Reconstruit le tonnage dérivé d'une tournée depuis ses pesées et ses points.
@@ -214,6 +162,7 @@ async function lireEcartStock(tourId, totalPeseKg, db = pool) {
 
 module.exports = {
   SQL_INSTANT_PARIS,
+  remplissageEffectif,
   SQL_LIRE_HEURE_PARIS,
   lireInstantParis,
   PALIERS_REMPLISSAGE,

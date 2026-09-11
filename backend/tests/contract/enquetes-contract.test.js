@@ -34,8 +34,7 @@ const request = require('supertest');
 const enquetes = require('../../src/routes/enquetes');
 const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
-  QHSE: tokenFor('QHSE'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
 let app;
@@ -227,7 +226,7 @@ describe('CONTRAT surface publique /public/:token (SANS auth)', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /enquetes/modeles (habilitations)', () => {
   it('GET /modeles : lecture ADMIN/MANAGER/RH/QHSE, refusée COLLABORATEUR (403)', async () => {
-    for (const role of ['ADMIN', 'MANAGER', 'RH', 'QHSE']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/enquetes/modeles', role)).status).toBe(200);
     }
     expect((await get('/api/enquetes/modeles', 'COLLABORATEUR')).status).toBe(403);
@@ -235,14 +234,14 @@ describe('CONTRAT /enquetes/modeles (habilitations)', () => {
 
   it('POST /modeles : QHSE (QVCT) → 201 ; COLLABORATEUR → 403 ; catégorie hors enum → 400', async () => {
     expect((await post('/api/enquetes/modeles', 'COLLABORATEUR', { titre: 'X' })).status).toBe(403);
-    expect((await post('/api/enquetes/modeles', 'QHSE', { titre: 'X', categorie: 'inconnu' })).status).toBe(400);
+    expect((await post('/api/enquetes/modeles', 'ADMIN', { titre: 'X', categorie: 'inconnu' })).status).toBe(400);
     mockQuery.mockImplementation((sql, params) => {
       if (/INSERT INTO enquete_modeles/.test(String(sql))) {
         return Promise.resolve({ rows: [{ id: 1, titre: params[0], categorie: params[2], anonyme: params[3] }] });
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/enquetes/modeles', 'QHSE', { titre: 'Conditions de travail', categorie: 'qvct' });
+    const res = await post('/api/enquetes/modeles', 'ADMIN', { titre: 'Conditions de travail', categorie: 'qvct' });
     expect(res.status).toBe(201);
     expect(res.body.categorie).toBe('qvct');
     expect(res.body.anonyme).toBe(true); // défaut
@@ -281,7 +280,7 @@ describe('CONTRAT /enquetes/campagnes', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/enquetes/campagnes', 'MANAGER', { modele_id: 7, titre: 'QVCT 2027' });
+    const res = await post('/api/enquetes/campagnes', 'ADMIN', { modele_id: 7, titre: 'QVCT 2027' });
     expect(res.status).toBe(201);
     expect(res.body.token).toMatch(/^[a-f0-9]{32}$/); // 128 bits, imprévisible
     expect(res.body.statut).toBe('brouillon'); // défaut
@@ -302,8 +301,8 @@ describe('CONTRAT /enquetes/campagnes', () => {
       if (/UPDATE enquete_campagnes SET/.test(String(sql))) return Promise.resolve({ rowCount: 1, rows: [{ id: 9, statut: 'ouverte', token: TOKEN }] });
       return Promise.resolve({ rows: [] });
     });
-    expect((await put('/api/enquetes/campagnes/9', 'MANAGER', { statut: 'close' })).status).toBe(409);
-    const ok = await put('/api/enquetes/campagnes/9', 'MANAGER', { statut: 'ouverte' });
+    expect((await put('/api/enquetes/campagnes/9', 'ADMIN', { statut: 'close' })).status).toBe(409);
+    const ok = await put('/api/enquetes/campagnes/9', 'ADMIN', { statut: 'ouverte' });
     expect(ok.status).toBe(200);
     expect(ok.body.statut).toBe('ouverte');
   });
@@ -337,7 +336,7 @@ describe('CONTRAT GET /enquetes/campagnes/:id/resultats (seuil n ≥ 5)', () => 
 
   it('< 5 réponses → sous_seuil:true SANS distribution (anonymat protégé)', async () => {
     mockQuery.mockImplementation(wire(3));
-    const res = await get('/api/enquetes/campagnes/1/resultats', 'QHSE');
+    const res = await get('/api/enquetes/campagnes/1/resultats', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body.n).toBe(3);
     expect(res.body.sous_seuil).toBe(true);

@@ -1337,7 +1337,7 @@ export default function InsertionParcours() {
                 {activeTab === 'competences' && (
                   <div className="bg-white rounded-lg border p-4">
                     <CompetencesETI employeeId={selectedEmployee.id} employee={emp}
-                      canEdit={['ADMIN', 'RH', 'MANAGER'].includes(user?.base_role || user?.role)} />
+                      canEdit={['ADMIN', 'RH'].includes(user?.base_role || user?.role)} />
                   </div>
                 )}
 

@@ -570,7 +570,7 @@ async function arretsPourAffichage(tourId, statut, db = pool) {
  * Déclarée AVANT `/:id/...` : « analyse-gps » serait sinon lu comme un
  * identifiant de tournée par les routeurs à paramètre.
  */
-router.get('/analyse-gps/cav-durees', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/analyse-gps/cav-durees', authorize('ADMIN'), async (req, res) => {
   try {
     const moisBrut = parseInt(req.query.mois, 10);
     const mois = Number.isInteger(moisBrut) && moisBrut >= 1 && moisBrut <= 24 ? moisBrut : 6;
@@ -655,7 +655,7 @@ function invaliderCacheArrets(tourId) {
 }
 
 /** GET /api/tours/:id/arrets-gps — les arrêts d'une tournée. */
-router.get('/:id/arrets-gps', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/arrets-gps', authorize('ADMIN'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     if (!Number.isInteger(tourId) || tourId <= 0) {
@@ -689,7 +689,7 @@ router.get('/:id/arrets-gps', authorize('ADMIN', 'MANAGER'), async (req, res) =>
  * pas encore de fin, et le figer donnerait une durée fausse qui ne serait
  * jamais corrigée.
  */
-router.post('/:id/arrets-gps/recalcul', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/:id/arrets-gps/recalcul', authorize('ADMIN'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     if (!Number.isInteger(tourId) || tourId <= 0) {

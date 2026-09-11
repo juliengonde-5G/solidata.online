@@ -42,7 +42,7 @@ const effectifs = require('../../src/routes/effectifs');
 
 const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U', mfa: true, mfa_at: Math.floor(Date.now() / 1000) }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
   COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
@@ -120,7 +120,7 @@ const CONTRATS_2024 = [
 describe('HABILITATIONS', () => {
   it('lecture (grille/parametres/ecarts/synthese) : ADMIN/RH/MANAGER 200, COLLABORATEUR 403', async () => {
     installMocks();
-    for (const role of ['ADMIN', 'RH', 'MANAGER']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/effectifs/parametres?annee=2026', role)).status).toBe(200);
       expect((await get('/api/effectifs/grille?annee=2026', role)).status).toBe(200);
       expect((await get('/api/effectifs/ecarts?annee=2026', role)).status).toBe(200);
@@ -133,14 +133,14 @@ describe('HABILITATIONS', () => {
 
   it('PUT /parametres : MANAGER/COLLABORATEUR 403 ; RH 200', async () => {
     installMocks();
-    expect((await put('/api/effectifs/parametres', 'MANAGER', { annee: 2026 })).status).toBe(403);
+    expect((await put('/api/effectifs/parametres', 'COLLABORATEUR', { annee: 2026 })).status).toBe(403);
     expect((await put('/api/effectifs/parametres', 'COLLABORATEUR', { annee: 2026 })).status).toBe(403);
     expect((await put('/api/effectifs/parametres', 'RH', { annee: 2026, etp_conventionnes: 25.17 })).status).toBe(200);
   });
 
   it('POST /asp : MANAGER 403 ; RH 200 — DELETE /asp : RH 403, ADMIN passe', async () => {
     installMocks({ asp: [{ mois: 1, etp_asp: 24.5 }] });
-    expect((await post('/api/effectifs/asp/2026/1', 'MANAGER', { etp_asp: 24.5 })).status).toBe(403);
+    expect((await post('/api/effectifs/asp/2026/1', 'COLLABORATEUR', { etp_asp: 24.5 })).status).toBe(403);
     expect((await post('/api/effectifs/asp/2026/1', 'RH', { etp_asp: 24.5 })).status).toBe(200);
     expect((await del('/api/effectifs/asp/2026/1', 'RH')).status).toBe(403);
     expect((await del('/api/effectifs/asp/2026/1', 'ADMIN')).status).toBe(200);
@@ -496,7 +496,7 @@ describe('CONTRAT /effectifs/asp', () => {
 describe('CONTRAT /effectifs/export', () => {
   it('renvoie un classeur .xlsx (Content-Type + Content-Disposition)', async () => {
     installMocks({ employees: EMP_2024, contracts: CONTRATS_2024 });
-    const res = await get('/api/effectifs/export?annee=2024', 'MANAGER');
+    const res = await get('/api/effectifs/export?annee=2024', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('spreadsheetml');
     expect(res.headers['content-disposition']).toContain('effectifs_etp_2024.xlsx');

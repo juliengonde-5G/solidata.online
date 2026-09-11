@@ -13,8 +13,8 @@
 // qui ferme trop est un incident aussi sûrement qu'une garde qui ne ferme pas :
 //   • un rôle SOUMIS non enrôlé est refusé (403 MFA_REQUIRED) ;
 //   • un rôle soumis ENRÔLÉ passe ;
-//   • un rôle HORS PÉRIMÈTRE passe SANS AVOIR BESOIN du claim — MANAGER, QHSE,
-//     FINANCE, RESP_BTQ, AUTORITE, et surtout les JETONS CHAUFFEUR, dont le rôle
+//   • un rôle HORS PÉRIMÈTRE passe SANS AVOIR BESOIN du claim — RESP_BTQ,
+//     AUTORITE, COLLABORATEUR, et surtout les JETONS CHAUFFEUR, dont le rôle
 //     est COLLABORATEUR en dur et dont le mobile est la surface qu'il ne faut
 //     surtout pas fermer.
 //
@@ -50,8 +50,8 @@ const ADMIN_JETON_HERITE = jeton({ role: 'ADMIN' }); // émis avant 2.43.0 : pas
 const RH_NON_ENROLE = jeton({ role: 'RH', mfa: false });
 const DPO_NON_ENROLE = jeton({ role: 'DPO', mfa: false });
 // Rôles HORS périmètre : aucun claim `mfa`, et c'est le cas nominal.
-const MANAGER = jeton({ role: 'MANAGER' });
-const QHSE = jeton({ role: 'QHSE' });
+const RESP_BTQ = jeton({ role: 'RESP_BTQ' });
+const AUTORITE = jeton({ role: 'AUTORITE' });
 const COLLABORATEUR = jeton({ id: 3, role: 'COLLABORATEUR' });
 // Jeton chauffeur : compte générique PARTAGÉ, identité réelle = le véhicule.
 const CHAUFFEUR = jwt.sign(
@@ -80,7 +80,7 @@ const get = (t, url) => request(app).get(url).set('Authorization', `Bearer ${t}`
 describe('/api/chat — la double authentification est exigée des rôles soumis', () => {
   it('le défaut en code est bien ADMIN/RH/DPO', () => {
     expect(DEFAULT_MFA_ROLES).toEqual(expect.arrayContaining(['ADMIN', 'RH', 'DPO']));
-    expect(DEFAULT_MFA_ROLES).not.toContain('MANAGER');
+    expect(DEFAULT_MFA_ROLES).not.toContain('RESP_BTQ');
     expect(DEFAULT_MFA_ROLES).not.toContain('COLLABORATEUR');
   });
 
@@ -125,8 +125,8 @@ describe('/api/chat — la double authentification est exigée des rôles soumis
 
 describe('/api/chat — NON-RÉGRESSION des rôles hors périmètre (sans claim mfa)', () => {
   it.each([
-    ['MANAGER', MANAGER],
-    ['QHSE', QHSE],
+    ['RESP_BTQ', RESP_BTQ],
+    ['AUTORITE', AUTORITE],
     ['COLLABORATEUR', COLLABORATEUR],
   ])('%s passe la garde sans avoir enrôlé quoi que ce soit', async (_role, token) => {
     const res = await post(token, '/api/chat', { message: 'Quel est le stock ?' });
@@ -143,7 +143,7 @@ describe('/api/chat — NON-RÉGRESSION des rôles hors périmètre (sans claim 
   });
 
   it('un rôle non soumis conserve ses suggestions', async () => {
-    const res = await get(MANAGER, '/api/chat/suggestions');
+    const res = await get(RESP_BTQ, '/api/chat/suggestions');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.suggestions)).toBe(true);
   });
@@ -174,9 +174,9 @@ describe('/api/messages — même garde (le bot y passe par le même chemin)', (
     expect(res.status).not.toBe(403);
   });
 
-  it('MANAGER continue de messager sans claim mfa', async () => {
+  it('un rôle hors périmètre continue de messager sans claim mfa', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
-    const res = await get(MANAGER, '/api/messages/non-lus');
+    const res = await get(RESP_BTQ, '/api/messages/non-lus');
     expect(res.status).not.toBe(403);
   });
 });

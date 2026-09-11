@@ -1,4 +1,19 @@
-# Documentation technique — Module Pointage / Badgeage
+# Documentation technique — Module Pointage / Badgeage (ARCHIVE)
+
+> ## ⚠️ MODULE RETIRÉ (version 2.54.0, 10 septembre 2026)
+>
+> Le module « Pointage » décrit ci-dessous **n'existe plus dans l'application** : il est
+> **remplacé par le module 33 « Temps & Présence » (badgeuse RFID)**, dont la
+> documentation est le dossier `docs/badgeuse/`. Le routeur `backend/src/routes/pointage.js`
+> et la page `frontend/src/pages/Pointage.jsx` ont été supprimés ; l'adresse `/pointage`
+> redirige vers `/badgeuse`.
+>
+> **Les tables `pointage_events`, `pointage_terminals` et `badges` sont CONSERVÉES** : elles
+> portent l'historique réel des pointages d'une période où la paie s'est faite avec eux.
+> Plus rien n'y écrit.
+>
+> **Ce document est conservé à titre d'ARCHIVE** — il décrit un dispositif hors service.
+> Pour le poste de badgeage en vigueur, voir `docs/badgeuse/SPEC_TECHNIQUE.md`.
 
 ## Vue d'ensemble
 

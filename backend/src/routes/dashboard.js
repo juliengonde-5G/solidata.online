@@ -499,7 +499,7 @@ function pctVariation(current, previous) {
   return Math.round(((current - previous) / previous) * 1000) / 10;
 }
 
-router.get('/executive', authorize('ADMIN', 'MANAGER'), cacheMiddleware(dashboardKey('executive'), 300), async (req, res) => {
+router.get('/executive', authorize('ADMIN'), cacheMiddleware(dashboardKey('executive'), 300), async (req, res) => {
   try {
     const now = new Date();
     const year = now.getFullYear();
@@ -827,7 +827,7 @@ router.get('/activite-periode', cacheMiddleware(activitePeriodeKey, 60), async (
 // Réservé ADMIN/MANAGER (cohérent avec /executive). Non nominatif : compteurs
 // + libellés, pas de liste de personnes (le détail se consulte sur l'écran cible).
 // ══════════════════════════════════════════
-router.get('/alertes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/alertes', authorize('ADMIN'), async (req, res) => {
   const alertes = [];
   const soft = async (label, fn) => {
     try { await fn(); }
