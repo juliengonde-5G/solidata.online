@@ -33,58 +33,16 @@ const SUMUP_REDIRECT_URI = process.env.SUMUP_REDIRECT_URI
 const SUMUP_SCOPES = (process.env.SUMUP_OAUTH_SCOPES || 'transactions.history')
   .split(/[\s,]+/).filter(Boolean);
 
-// ── Chiffrement secrets (réutilise PCM_ENCRYPTION_KEY, fallback JWT_SECRET) ──
-function getEncryptionKey() {
-  const raw = process.env.SUMUP_ENCRYPTION_KEY
-    || process.env.PCM_ENCRYPTION_KEY
-    || process.env.JWT_SECRET;
-  if (!raw) throw new Error('Aucune clé de chiffrement disponible (SUMUP_ENCRYPTION_KEY / PCM_ENCRYPTION_KEY / JWT_SECRET)');
-  return crypto.createHash('sha256').update(raw).digest();
-}
-
-function encrypt(plaintext) {
-  if (plaintext == null || plaintext === '') return null;
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
-  const enc = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `v1:${iv.toString('base64')}:${tag.toString('base64')}:${enc.toString('base64')}`;
-}
-
-function decrypt(payload) {
-  if (!payload || !payload.startsWith('v1:')) return payload || null;
-  try {
-    const [, ivB64, tagB64, encB64] = payload.split(':');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), Buffer.from(ivB64, 'base64'));
-    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-    return Buffer.concat([decipher.update(Buffer.from(encB64, 'base64')), decipher.final()]).toString('utf8');
-  } catch (err) {
-    logger.error('Décryptage secret SumUp impossible', { error: err.message });
-    return null;
-  }
-}
-
-// ── Stockage settings (clé/valeur, schéma déjà en place) ──
-async function getSetting(key) {
-  const r = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
-  return r.rows[0]?.value ?? null;
-}
-
-async function setSetting(key, value) {
-  await pool.query(`
-    INSERT INTO settings (key, value, updated_at)
-    VALUES ($1, $2, NOW())
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-  `, [key, value == null ? null : String(value)]);
-}
-
-async function getEncryptedSetting(key) {
-  return decrypt(await getSetting(key));
-}
-
-async function setEncryptedSetting(key, value) {
-  await setSetting(key, value == null ? null : encrypt(value));
-}
+// ── Chiffrement secrets + stockage settings ──
+// Mécanique PARTAGÉE depuis `utils/secret-settings.js` (10/09/2026) : ces
+// trente lignes vivaient ici et ont été extraites au moment de brancher un
+// second service à clé (Malibou). Le format stocké est INCHANGÉ
+// (`v1:iv:tag:chiffré`) et la cascade de clés conserve son premier cran
+// `SUMUP_ENCRYPTION_KEY` — sans lui, les jetons déjà en base sur une
+// installation qui a renseigné cette variable deviendraient illisibles.
+const { secretStore } = require('../utils/secret-settings');
+const store = secretStore({ envVar: 'SUMUP_ENCRYPTION_KEY', libelle: 'secret SumUp' });
+const { encrypt, decrypt, getSetting, setSetting, getEncryptedSetting, setEncryptedSetting } = store;
 
 // ── Statut connexion ──
 async function getConnectionStatus() {
