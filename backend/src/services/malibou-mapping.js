@@ -39,6 +39,8 @@
  * source. Un test le prouve sur une charge qui les contient.
  */
 
+const { categoriserAbsence } = require('../utils/absences');
+
 /**
  * `natureContrat` (Malibou) → `contract_type` (SOLIDATA).
  *
@@ -64,47 +66,90 @@ const NATURE_VERS_TYPE = {
 };
 
 /**
- * Code d'absence Malibou → catégorie SOLIDATA.
+ * Code d'absence Malibou → LIBELLÉ français, tel que Malibou l'écrit lui-même.
  *
- * CETTE TABLE A DES CONSÉQUENCES CHIFFRÉES : le réalisé du calcul ETP déduit
- * les catégories `sick` et `absence`, et ne déduit JAMAIS `holiday`. Classer
- * un congé payé en « absence » sous-estimerait nos ETP ; classer une absence
- * non rémunérée en « congé » les surestimerait face à un financeur. Les codes
- * viennent de la liste fermée publiée par Malibou ; les types propres à
- * l'organisation sont préfixés `custom_` et ne peuvent pas y figurer.
+ * POURQUOI CONVERTIR PLUTÔT QUE GARDER LE CODE : la clé naturelle de
+ * `employee_leaves` est (salarié, LIBELLÉ, date de début). L'export de paie y
+ * écrit le libellé de sa colonne « Type » (« Congés Payés ») ; une
+ * synchronisation qui écrirait le code (« conge_paye ») créerait une SECONDE
+ * ligne pour la même absence. Or le réalisé du calcul ETP additionne les jours
+ * de chaque ligne — l'absence serait comptée deux fois, et nos ETP
+ * sous-estimés d'autant devant le financeur.
+ *
+ * Ces libellés ne sont pas devinés : ils figurent dans la documentation
+ * Malibou, en regard de chaque code. Un type propre à l'organisation
+ * (préfixé `custom_`) n'y figure pas et garde son code — il n'a pas d'autre
+ * nom connu, et en inventer un ne ferait que déplacer le problème.
  */
-const CATEGORIE_PAR_CODE = {
-  conge_paye: 'holiday',
-  rtt: 'holiday',
-  rcr: 'holiday',
-  rco: 'holiday',
-  recuperation: 'holiday',
-  repos: 'holiday',
-
-  maladie_non_professionnelle: 'sick',
-  enfant_malade: 'sick',
-  maternite: 'sick',
-  conge_patho_prenatal_maternite: 'sick',
-  conge_patho_postnatal: 'sick',
-  paternite: 'sick',
-  accident_du_travail: 'sick',
-  maladie_professionnelle: 'sick',
-
-  conge_sans_solde: 'absence',
-  conge_supplementaire_naissance: 'absence',
-  conge_parental: 'absence',
-  presence_parentale: 'absence',
-  evenement_familial: 'absence',
-  jour_ecole: 'absence',
-  revision: 'absence',
-  absence_non_remuneree_autorisee: 'absence',
-  absence_non_remuneree_non_autorisee: 'absence',
-  absence_remuneree: 'absence',
-  mise_a_pied_conservatoire: 'absence',
-  mise_a_pied_disciplinaire: 'absence',
-  representation_des_salaries: 'absence',
-  autre: 'absence',
+const LIBELLE_PAR_CODE = {
+  conge_paye: 'Congés Payés',
+  rtt: 'RTT',
+  rcr: 'Repos compensateur (h. sup.)',
+  rco: 'Repos compensateur obligatoire',
+  conge_sans_solde: 'Congés sans solde',
+  maladie_non_professionnelle: 'Maladie',
+  enfant_malade: 'Enfant malade',
+  maternite: 'Maternité',
+  conge_patho_prenatal_maternite: 'Congé pathologique pré-natal',
+  conge_patho_postnatal: 'Congé pathologique post-natal',
+  paternite: 'Paternité',
+  conge_supplementaire_naissance: 'Congé supplémentaire de naissance',
+  conge_parental: 'Congé parental',
+  presence_parentale: 'Présence parentale',
+  evenement_familial: 'Événement familial',
+  accident_du_travail: 'Accident de travail',
+  maladie_professionnelle: 'Maladie professionnelle',
+  jour_ecole: 'Jour école',
+  revision: 'Révisions',
+  recuperation: 'Jour de récupération',
+  repos: 'Jour de repos',
+  absence_non_remuneree_autorisee: 'Absence non rémunérée autorisée',
+  absence_non_remuneree_non_autorisee: 'Absence non rémunérée non autorisée',
+  absence_remuneree: 'Autre absence rémunérée',
+  mise_a_pied_conservatoire: 'Mise à pied conservatoire',
+  mise_a_pied_disciplinaire: 'Mise à pied disciplinaire',
+  representation_des_salaries: 'Représentation des salariés',
+  autre: 'Autre',
 };
+
+/**
+ * Libellé d'une absence : celui de Malibou quand il est connu, le code sinon.
+ *
+ * RÉSERVE DITE : la convergence suppose que l'export de paie emploie bien ces
+ * libellés dans sa colonne « Type ». S'ils venaient à différer (une casse, un
+ * accent), la même absence produirait deux lignes — c'est le risque que porte
+ * une clé naturelle fondée sur du texte. La synchronisation SIGNALE donc les
+ * libellés qu'elle a créés et qui ne correspondaient à rien d'existant.
+ */
+function libelleAbsence(code) {
+  if (!code) return 'inconnu';
+  const c = String(code).trim().toLowerCase();
+  return LIBELLE_PAR_CODE[c] || String(code).trim();
+}
+
+/**
+ * Code d'absence Malibou → catégorie SOLIDATA, DÉRIVÉE de la règle partagée.
+ *
+ * CETTE CLASSIFICATION A DES CONSÉQUENCES CHIFFRÉES : le réalisé du calcul ETP
+ * déduit les catégories `sick` et `absence`, et ne déduit JAMAIS `holiday`.
+ *
+ * La table n'énonce donc AUCUNE règle propre : elle applique celle de
+ * `utils/absences.js` au libellé de chaque code. C'est la même règle qui
+ * catégorise l'import du classeur de paie, et ce n'est pas un raffinement
+ * d'architecture : les deux voies écrivent la MÊME ligne (clé naturelle
+ * salarié + libellé + date de début). Deux tables tenues en parallèle
+ * auraient fini par diverger, et l'absence aurait alors changé de nature —
+ * donc le réalisé ETP avec elle — selon l'import qui a tourné en dernier.
+ *
+ * Elle reste exposée parce qu'elle se lit d'un coup d'œil, et qu'un test la
+ * confronte à la liste publiée par Malibou : un type ajouté chez eux fait
+ * tomber la suite au lieu de passer inaperçu.
+ */
+const CATEGORIE_PAR_CODE = Object.freeze(
+  Object.fromEntries(
+    Object.entries(LIBELLE_PAR_CODE).map(([code, libelle]) => [code, categoriserAbsence(libelle)]),
+  ),
+);
 
 /**
  * Catégorie d'une absence d'après son code.
@@ -117,13 +162,12 @@ const CATEGORIE_PAR_CODE = {
  * SIGNALÉS par la synchronisation pour qu'on les classe explicitement.
  */
 function categorieAbsence(code) {
-  if (!code) return 'absence';
-  return CATEGORIE_PAR_CODE[String(code).trim().toLowerCase()] || 'absence';
+  return categoriserAbsence(libelleAbsence(code));
 }
 
 /** Un code d'absence est-il connu de la table ? (sert au signalement) */
 function codeAbsenceConnu(code) {
-  return Boolean(code) && Object.hasOwn(CATEGORIE_PAR_CODE, String(code).trim().toLowerCase());
+  return Boolean(code) && Object.hasOwn(LIBELLE_PAR_CODE, String(code).trim().toLowerCase());
 }
 
 /**
@@ -252,7 +296,10 @@ function mapperAbsence(brut) {
   return {
     collaborator_id_malibou: texte(brut.collaboratorId),
     absence_id_malibou: texte(brut.id),
-    leave_type: texte(brut.type) || 'inconnu',
+    // Libellé (clé naturelle partagée avec l'export), et code conservé à côté
+    // pour le diagnostic — il ne participe à aucune clé.
+    leave_type: libelleAbsence(brut.type),
+    code_malibou: texte(brut.type),
     type_category: categorieAbsence(brut.type),
     type_connu: codeAbsenceConnu(brut.type),
     start_date: debut,
@@ -277,6 +324,8 @@ function indexerMatricules(collaborateursBruts) {
 module.exports = {
   NATURE_VERS_TYPE,
   CATEGORIE_PAR_CODE,
+  LIBELLE_PAR_CODE,
+  libelleAbsence,
   categorieAbsence,
   codeAbsenceConnu,
   jourIso,

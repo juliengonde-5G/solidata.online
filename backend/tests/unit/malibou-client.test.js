@@ -2,14 +2,19 @@
  * Client Malibou — la pagination et la temporisation, éprouvées contre un faux
  * serveur qui se comporte comme le vrai.
  *
- * POURQUOI CES TESTS EXISTENT : la pagination de Malibou ne ressemble à aucune
- * convention courante. L'API ne renvoie NI curseur, NI total, NI drapeau
- * « page suivante » ; sa documentation dit d'incrémenter `page` jusqu'à ce
- * qu'une page rende moins d'éléments que `limit`. La première version du
- * client s'arrêtait faute de méta-données — elle aurait donc importé la
- * PREMIÈRE PAGE et annoncé un succès. Un import tronqué qui ressemble à un
+ * POURQUOI CES TESTS EXISTENT : la pagination de Malibou n'a pas de curseur.
+ * Chaque réponse de liste déclare `total`, `page` et `limit` (obligatoires
+ * dans la spécification v1.11.0), et la documentation dit par ailleurs
+ * d'incrémenter `page` jusqu'à ce qu'une page rende moins d'éléments que
+ * `limit`. La première version du client cherchait un curseur ou un drapeau
+ * « page suivante », n'en trouvait pas, et s'arrêtait : elle aurait importé la
+ * PREMIÈRE PAGE en annonçant un succès. Un import tronqué qui ressemble à un
  * import complet ne se découvre qu'en comptant les salariés manquants, des
  * mois plus tard.
+ *
+ * Le faux serveur ci-dessous se comporte donc comme le vrai — enveloppe
+ * `{data, total, page, limit}` comprise — et chaque condition d'arrêt est
+ * éprouvée séparément, y compris le cas où l'enveloppe ne porterait rien.
  */
 const http = require('http');
 
@@ -18,8 +23,15 @@ jest.mock('../../src/config/logger', () => ({ warn: jest.fn(), error: jest.fn(),
 
 const malibou = require('../../src/services/malibou');
 
-/** Faux serveur Malibou : pagination page/limit, sans aucune méta-donnée. */
-function fauxMalibou({ total = 0, exigeBearer = true, limiteDebit = 0 } = {}) {
+/**
+ * Faux serveur Malibou : pagination page/limit, enveloppe conforme à la
+ * spécification. `enveloppe: false` simule une API qui n'annoncerait plus son
+ * total — on veut que le client survive à ce changement.
+ * `totalMenteur` annonce un total FAUX, pour éprouver le signalement d'écart.
+ */
+function fauxMalibou({
+  total = 0, exigeBearer = true, limiteDebit = 0, enveloppe = true, totalMenteur = null,
+} = {}) {
   let appels = 0;
   let restantesLimite = limiteDebit;
   const serveur = http.createServer((req, rep) => {
@@ -49,9 +61,11 @@ function fauxMalibou({ total = 0, exigeBearer = true, limiteDebit = 0 } = {}) {
     const debut = (page - 1) * limit;
     const lot = [];
     for (let i = debut; i < Math.min(debut + limit, total); i += 1) lot.push({ id: `c${i}` });
-    // Aucune enveloppe de pagination : c'est le point du test.
+    const charge = enveloppe
+      ? { data: lot, total: totalMenteur === null ? total : totalMenteur, page, limit }
+      : { data: lot };
     rep.writeHead(200, { 'content-type': 'application/json' });
-    rep.end(JSON.stringify({ data: lot }));
+    rep.end(JSON.stringify(charge));
   });
   return { serveur, appels: () => appels };
 }
@@ -94,12 +108,13 @@ beforeEach(() => {
 
 afterEach(() => jest.restoreAllMocks());
 
-describe('pagination — la règle est « page pleine, on continue »', () => {
+describe('pagination — deux conditions d\'arrêt, et rien de perdu', () => {
   it.each([
     [0, 1],    // rien : une seule page, vide
     [7, 1],    // moins d'une page
-    [10, 2],   // page EXACTEMENT pleine → il faut demander la suivante
+    [10, 1],   // page EXACTEMENT pleine, mais le total dit que c'est fini
     [25, 3],
+    [56, 6],
   ])('%i collaborateurs → %i appel(s), et tous sont rendus', async (total, appelsAttendus) => {
     const { serveur, appels } = fauxMalibou({ total });
     const port = await demarrer(serveur);
@@ -120,6 +135,51 @@ describe('pagination — la règle est « page pleine, on continue »', () => {
     try {
       const lignes = await malibou.listerCollaborateurs({ limit: 10 });
       expect(lignes.map((l) => l.id)).toContain('c55');
+    } finally { serveur.close(); }
+  });
+
+  it.each([[10, 2], [25, 3], [56, 6]])(
+    'sans enveloppe annoncée, la règle « page incomplète » suffit (%i → %i appels)',
+    async (total, appelsAttendus) => {
+      // Si Malibou cessait un jour d'annoncer son total, l'import doit rester
+      // complet — c'est toute la raison de garder les DEUX conditions d'arrêt.
+      const { serveur, appels } = fauxMalibou({ total, enveloppe: false });
+      const port = await demarrer(serveur);
+      brancher(port);
+      try {
+        const lignes = await malibou.listerCollaborateurs({ limit: 10 });
+        expect(lignes).toHaveLength(total);
+        expect(appels()).toBe(appelsAttendus);
+      } finally { serveur.close(); }
+    },
+  );
+
+  it('SIGNALE l\'écart quand le compte ne tombe pas sur le total annoncé', async () => {
+    // Le pire défaut d'un import n'est pas d'échouer, c'est de réussir à
+    // moitié sans le dire. Ici le serveur annonce 40 et n'en livre que 25.
+    const logger = require('../../src/config/logger');
+    logger.warn.mockClear();
+    const { serveur } = fauxMalibou({ total: 25, totalMenteur: 40 });
+    const port = await demarrer(serveur);
+    brancher(port);
+    try {
+      const lignes = await malibou.listerCollaborateurs({ limit: 10 });
+      expect(lignes).toHaveLength(25);
+      const alerte = logger.warn.mock.calls.find(([msg]) => /total annoncé/.test(msg));
+      expect(alerte).toBeDefined();
+      expect(alerte[1]).toMatchObject({ recu: 25, annonce: 40 });
+    } finally { serveur.close(); }
+  });
+
+  it('ne crie pas quand tout concorde', async () => {
+    const logger = require('../../src/config/logger');
+    logger.warn.mockClear();
+    const { serveur } = fauxMalibou({ total: 25 });
+    const port = await demarrer(serveur);
+    brancher(port);
+    try {
+      await malibou.listerCollaborateurs({ limit: 10 });
+      expect(logger.warn.mock.calls.filter(([m]) => /total annoncé/.test(m))).toHaveLength(0);
     } finally { serveur.close(); }
   });
 

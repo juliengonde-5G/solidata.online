@@ -235,31 +235,36 @@ function extraireListe(charge) {
   return [];
 }
 
-/** Curseur/page suivante, quelle que soit la convention employée. */
-function pageSuivante(charge, pageCourante) {
+/**
+ * Nombre total d'éléments annoncé par l'enveloppe, ou `null`.
+ *
+ * Les trois listes de l'API (collaborateurs, absences, lieux de travail)
+ * déclarent `total`, `page` et `limit` comme OBLIGATOIRES dans leur réponse.
+ * On s'en sert, mais on ne s'y fie pas aveuglément : une enveloppe inattendue
+ * rend `null`, et la pagination retombe alors sur la seule règle documentée.
+ */
+function totalAnnonce(charge) {
   if (!charge || typeof charge !== 'object') return null;
-  const meta = charge.meta || charge.pagination || charge;
-  if (meta.next_cursor) return { cursor: meta.next_cursor };
-  if (meta.nextCursor) return { cursor: meta.nextCursor };
-  if (meta.next_page) return { page: meta.next_page };
-  if (typeof meta.has_more === 'boolean' && meta.has_more) return { page: pageCourante + 1 };
-  if (typeof meta.hasMore === 'boolean' && meta.hasMore) return { page: pageCourante + 1 };
-  if (Number.isFinite(meta.total_pages) && pageCourante < meta.total_pages) return { page: pageCourante + 1 };
-  return null;
+  const t = Number(charge.total);
+  return Number.isFinite(t) && t >= 0 ? t : null;
 }
 
-/** Parcourt toutes les pages d'une ressource et rend la liste complète. */
 /**
- * Parcourt toutes les pages d'une ressource.
+ * Parcourt toutes les pages d'une ressource et rend la liste complète.
  *
- * LA RÈGLE EST CELLE DE MALIBOU, ET ELLE N'EST PAS CELLE QU'ON DEVINE :
- * l'API ne renvoie NI curseur, NI total, NI drapeau « page suivante ». Sa
- * documentation dit d'incrémenter `page` « jusqu'à ce qu'une page rende moins
- * d'éléments que `limit` ». La première version de cette fonction s'arrêtait
- * faute de méta-données — elle aurait donc importé la PREMIÈRE PAGE et
- * annoncé un succès. C'est le pire genre de défaut : un import tronqué qui
- * ressemble à un import complet, et qu'on ne découvre qu'en comptant les
- * salariés manquants des mois plus tard.
+ * DEUX CONDITIONS D'ARRÊT, ET C'EST VOULU. L'API annonce le `total` dans
+ * chaque réponse ; sa documentation dit par ailleurs d'incrémenter `page`
+ * jusqu'à ce qu'une page rende moins d'éléments que `limit`. On applique les
+ * deux : une page incomplète arrête la boucle, le total l'arrête aussi. Ne
+ * garder que le total ferait boucler si l'enveloppe changeait un jour ; ne
+ * garder que la page incomplète coûterait un appel de plus chaque fois que
+ * l'effectif tombe juste sur un multiple de la taille de page.
+ *
+ * SURTOUT, LE TOTAL SERT À VÉRIFIER. Un import qui perd des salariés en
+ * silence est le pire des défauts : il ressemble trait pour trait à un import
+ * réussi et ne se découvre qu'en comptant les absents, des mois plus tard. Si
+ * le compte final ne tombe pas sur le total annoncé, l'écart est NOMMÉ au
+ * journal plutôt que subi.
  *
  * `page` et `limit` doivent être des entiers STRICTEMENT positifs : l'API
  * refuse le reste en 400.
@@ -267,18 +272,29 @@ function pageSuivante(charge, pageCourante) {
 async function listerTout(chemin, query = {}) {
   const limit = Math.max(1, Number(query.limit) || TAILLE_PAGE);
   const tout = [];
+  let total = null;
 
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const charge = await malibouGet(chemin, { ...query, page, limit });
     const lot = extraireListe(charge);
     tout.push(...lot);
-    // Page incomplète = dernière page. Page vide = terminé aussi.
-    if (lot.length < limit) return tout;
+    if (page === 1) total = totalAnnonce(charge);
+
+    // Page incomplète = dernière page (règle documentée). Page vide aussi.
+    if (lot.length < limit) break;
+    // Total atteint : inutile de demander une page qu'on sait vide.
+    if (total !== null && tout.length >= total) break;
+
+    if (page === MAX_PAGES) {
+      logger.warn('[MALIBOU] pagination interrompue au plafond', { chemin, pages: MAX_PAGES, lignes: tout.length });
+    }
   }
 
-  // On ne boucle pas indéfiniment en silence : la troncature est ANNONCÉE,
-  // sans quoi un import partiel passerait pour un import complet.
-  logger.warn('[MALIBOU] pagination interrompue au plafond', { chemin, pages: MAX_PAGES, lignes: tout.length });
+  if (total !== null && tout.length !== total) {
+    logger.warn('[MALIBOU] le nombre de lignes reçues ne correspond pas au total annoncé', {
+      chemin, recu: tout.length, annonce: total,
+    });
+  }
   return tout;
 }
 
@@ -341,6 +357,6 @@ module.exports = {
   listerAbsences,
   listerLieuxTravail,
   extraireListe,
-  pageSuivante,
+  totalAnnonce,
   construireUrl,
 };

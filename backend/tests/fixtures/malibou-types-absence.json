@@ -1,0 +1,117 @@
+{
+  "_source": "Spécification OpenAPI Malibou v1.11.0 — GET /organizations/{organizationId}/absences, description du champ `type` (relevée le 11/09/2026). Extrait mécaniquement : ne pas éditer à la main.",
+  "types": {
+    "conge_paye": {
+      "libelle": "Congés Payés",
+      "gloss_en": "Paid Leave"
+    },
+    "rtt": {
+      "libelle": "RTT",
+      "gloss_en": "RTT"
+    },
+    "rcr": {
+      "libelle": "Repos compensateur (h. sup.)",
+      "gloss_en": "Compensatory Rest (overtime hours)"
+    },
+    "rco": {
+      "libelle": "Repos compensateur obligatoire",
+      "gloss_en": "Mandatory Compensatory Rest"
+    },
+    "conge_sans_solde": {
+      "libelle": "Congés sans solde",
+      "gloss_en": "Unpaid Leave"
+    },
+    "maladie_non_professionnelle": {
+      "libelle": "Maladie",
+      "gloss_en": "Sick Leave"
+    },
+    "enfant_malade": {
+      "libelle": "Enfant malade",
+      "gloss_en": "Child Sick Leave"
+    },
+    "maternite": {
+      "libelle": "Maternité",
+      "gloss_en": "Maternity Leave"
+    },
+    "conge_patho_prenatal_maternite": {
+      "libelle": "Congé pathologique pré-natal",
+      "gloss_en": "Pre-natal medical leave"
+    },
+    "conge_patho_postnatal": {
+      "libelle": "Congé pathologique post-natal",
+      "gloss_en": "Post-natal medical leave"
+    },
+    "paternite": {
+      "libelle": "Paternité",
+      "gloss_en": "Paternity Leave"
+    },
+    "conge_supplementaire_naissance": {
+      "libelle": "Congé supplémentaire de naissance",
+      "gloss_en": "Supplementary birth leave"
+    },
+    "conge_parental": {
+      "libelle": "Congé parental",
+      "gloss_en": "Parental leave"
+    },
+    "presence_parentale": {
+      "libelle": "Présence parentale",
+      "gloss_en": "Parental care"
+    },
+    "evenement_familial": {
+      "libelle": "Événement familial",
+      "gloss_en": "Family Event"
+    },
+    "accident_du_travail": {
+      "libelle": "Accident de travail",
+      "gloss_en": "Work Accident"
+    },
+    "maladie_professionnelle": {
+      "libelle": "Maladie professionnelle",
+      "gloss_en": "Professional Disease Leave"
+    },
+    "jour_ecole": {
+      "libelle": "Jour école",
+      "gloss_en": "School"
+    },
+    "revision": {
+      "libelle": "Révisions",
+      "gloss_en": "Course review"
+    },
+    "recuperation": {
+      "libelle": "Jour de récupération",
+      "gloss_en": "Recovery day"
+    },
+    "repos": {
+      "libelle": "Jour de repos",
+      "gloss_en": "Time in Lieu"
+    },
+    "absence_non_remuneree_autorisee": {
+      "libelle": "Absence non rémunérée autorisée",
+      "gloss_en": "Allowed not paid leave"
+    },
+    "absence_non_remuneree_non_autorisee": {
+      "libelle": "Absence non rémunérée non autorisée",
+      "gloss_en": "Not allowed and not paid leave"
+    },
+    "absence_remuneree": {
+      "libelle": "Autre absence rémunérée",
+      "gloss_en": "Other paid leave"
+    },
+    "mise_a_pied_conservatoire": {
+      "libelle": "Mise à pied conservatoire",
+      "gloss_en": "Precautionary suspension"
+    },
+    "mise_a_pied_disciplinaire": {
+      "libelle": "Mise à pied disciplinaire",
+      "gloss_en": "Disciplinary suspension"
+    },
+    "representation_des_salaries": {
+      "libelle": "Représentation des salariés",
+      "gloss_en": "Employee representative duties"
+    },
+    "autre": {
+      "libelle": "Autre",
+      "gloss_en": "Other"
+    }
+  }
+}

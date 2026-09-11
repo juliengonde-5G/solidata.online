@@ -9,6 +9,7 @@
 const {
   categorieAbsence, codeAbsenceConnu, jourIso, sexeDepuisTitre,
   mapperCollaborateur, mapperAbsence, indexerMatricules, CATEGORIE_PAR_CODE,
+  LIBELLE_PAR_CODE, libelleAbsence,
 } = require('../../src/services/malibou-mapping');
 
 /** Un collaborateur tel que l'API le rend, scopes détaillés compris. */
@@ -204,15 +205,38 @@ describe('civilité', () => {
 });
 
 describe('absences — la catégorie a des conséquences chiffrées', () => {
-  it('les congés payés ne déduisent pas : ils sont « holiday »', () => {
-    for (const code of ['conge_paye', 'rtt', 'rcr', 'rco', 'recuperation', 'repos']) {
+  const { deduitDuRealise } = require('../../src/utils/absences');
+
+  it('les congés payés et les repos compensateurs ne déduisent PAS du réalisé', () => {
+    // C'est la seule chose que le moteur ETP regarde : holiday ne déduit pas,
+    // sick et absence déduisent. Classer un congé payé en « absence »
+    // sous-estimerait nos ETP devant le financeur.
+    for (const code of ['conge_paye', 'rtt', 'rcr', 'rco']) {
       expect(categorieAbsence(code)).toBe('holiday');
+      expect(deduitDuRealise(categorieAbsence(code))).toBe(false);
     }
   });
 
-  it('la maladie et les accidents du travail sont « sick »', () => {
-    for (const code of ['maladie_non_professionnelle', 'enfant_malade', 'accident_du_travail', 'maladie_professionnelle']) {
-      expect(categorieAbsence(code)).toBe('sick');
+  it('la maladie, les accidents et les absences non rémunérées déduisent', () => {
+    for (const code of [
+      'maladie_non_professionnelle', 'enfant_malade', 'maladie_professionnelle',
+      'accident_du_travail', 'maternite', 'paternite',
+      'absence_non_remuneree_autorisee', 'absence_non_remuneree_non_autorisee',
+      'mise_a_pied_disciplinaire', 'autre',
+    ]) {
+      expect(deduitDuRealise(categorieAbsence(code))).toBe(true);
+    }
+  });
+
+  it('« Jour de récupération » et « Jour de repos » déduisent — À ARBITRER', () => {
+    // Ce test ne dit pas que c'est JUSTE : il dit que c'est le comportement
+    // ACTUEL, et il le fige pour qu'on ne le change pas par inadvertance.
+    // Ces deux types rémunèrent des heures DÉJÀ travaillées, comme le repos
+    // compensateur qui, lui, ne déduit pas. La règle de l'import du classeur
+    // est conservée telle quelle pour ne modifier aucun chiffre déjà déclaré.
+    // Voir la note « À ARBITRER » de `utils/absences.js`.
+    for (const code of ['recuperation', 'repos']) {
+      expect(deduitDuRealise(categorieAbsence(code))).toBe(true);
     }
   });
 
@@ -238,7 +262,9 @@ describe('absences — la catégorie a des conséquences chiffrées', () => {
     });
     expect(a).toMatchObject({
       collaborator_id_malibou: 'clb_9f3',
-      leave_type: 'conge_paye',
+      // Le LIBELLÉ, pas le code : c'est lui qui fait la clé naturelle.
+      leave_type: 'Congés Payés',
+      code_malibou: 'conge_paye',
       type_category: 'holiday',
       start_date: '2026-02-10',
       end_date: '2026-02-14',
@@ -250,6 +276,16 @@ describe('absences — la catégorie a des conséquences chiffrées', () => {
     });
   });
 
+  it('un type propre à l\'organisation garde son code faute de mieux', () => {
+    // Inventer un libellé français pour un `custom_*` ne ferait que déplacer
+    // le problème : il ne correspondrait à rien de ce que l'export écrit.
+    const a = mapperAbsence({
+      id: 'x', collaboratorId: 'c', startDate: '2026-02-10', type: 'custom_journee_solidarite',
+    });
+    expect(a.leave_type).toBe('custom_journee_solidarite');
+    expect(a.type_connu).toBe(false);
+  });
+
   it('écarte une absence sans date de début plutôt que d\'écrire une ligne muette', () => {
     expect(mapperAbsence({ id: 'x', collaboratorId: 'c', endDate: '2026-02-14' })).toBeNull();
   });
@@ -259,6 +295,60 @@ describe('absences — la catégorie a des conséquences chiffrées', () => {
     expect(a.leave_type).toBe('inconnu');
     expect(a.type_connu).toBe(false);
     expect(a.type_category).toBe('absence');
+  });
+});
+
+describe('libellés — la clé naturelle des absences est du TEXTE', () => {
+  /**
+   * POURQUOI CE BLOC EXISTE. `employee_leaves` a pour clé unique
+   * (salarié, leave_type, date de début) — vérifié dans `init-db.js`. L'import
+   * du classeur de paie y écrit le libellé français de sa colonne « Type »
+   * (« Congés Payés ») ; l'API, elle, ne connaît que des codes
+   * (« conge_paye »). Écrire le code créerait donc une SECONDE ligne pour la
+   * MÊME absence, et le réalisé du calcul ETP — qui additionne les jours de
+   * chaque ligne — compterait l'absence deux fois. Nos ETP paraîtraient plus
+   * faibles qu'ils ne sont devant le financeur.
+   *
+   * On converge donc sur les libellés que Malibou publie lui-même. La fixture
+   * est extraite MÉCANIQUEMENT de la spécification, pour que l'ajout d'un type
+   * chez Malibou fasse tomber la suite au lieu de passer inaperçu.
+   */
+  const spec = require('../fixtures/malibou-types-absence.json').types;
+
+  it('connaît exactement les types publiés, ni plus ni moins', () => {
+    expect(Object.keys(LIBELLE_PAR_CODE).sort()).toEqual(Object.keys(spec).sort());
+    expect(Object.keys(CATEGORIE_PAR_CODE).sort()).toEqual(Object.keys(spec).sort());
+  });
+
+  it('rend le libellé EXACT de la spécification pour chaque type', () => {
+    for (const [code, { libelle }] of Object.entries(spec)) {
+      expect(libelleAbsence(code)).toBe(libelle);
+    }
+  });
+
+  it('la catégorie de chaque type reste dans l\'énumération de la base', () => {
+    const valides = new Set(['holiday', 'sick', 'absence']);
+    for (const code of Object.keys(spec)) expect(valides.has(categorieAbsence(code))).toBe(true);
+  });
+
+  it('s\'accorde avec la catégorisation de l\'import du classeur', () => {
+    // Les deux voies écrivent la MÊME ligne : si elles ne s'accordaient pas
+    // sur la catégorie, l'absence changerait de nature selon qui l'a importée
+    // en dernier — un congé payé deviendrait une absence qui déduit.
+    const { categorizeLeaveType } = require('../../src/services/collaborator-import');
+    const desaccords = [];
+    for (const [code, { libelle }] of Object.entries(spec)) {
+      const parCode = categorieAbsence(code);
+      const parLibelle = categorizeLeaveType(libelle);
+      if (parCode !== parLibelle) desaccords.push(`${code} : API=${parCode} / classeur=${parLibelle} (« ${libelle} »)`);
+    }
+    expect(desaccords).toEqual([]);
+  });
+
+  it('un code inconnu ne prend pas le libellé d\'un autre', () => {
+    expect(libelleAbsence('custom_x')).toBe('custom_x');
+    expect(libelleAbsence(null)).toBe('inconnu');
+    expect(libelleAbsence('  CONGE_PAYE ')).toBe('Congés Payés'); // casse et espaces tolérés
   });
 });
 

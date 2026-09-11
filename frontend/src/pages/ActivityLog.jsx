@@ -55,6 +55,7 @@ const ACTION_COLORS = {
   view: 'bg-sky-100 text-sky-700',
 };
 const ENTITY_LABELS = {
+  malibou: 'Synchronisation Malibou (paie)',
   // Collecte & logistique
   vehicle: 'Véhicule', cav: 'CAV', tour: 'Tournée', expedition: 'Expédition',
   bordereau_decheterie: 'Bordereau de collecte en déchèterie',
