@@ -187,3 +187,16 @@ AIPD validée par le DPO et consultation du CSE (RES-01/RES-12 — l'outil fourn
 | 8 | Espace salarié | Défaut : reporté ; PDF « Mon parcours en une page ». | Lot 7. |
 | 9 | Dénominateur des sorties | Défaut : toutes les sorties de la période + « non documentée », deux méthodes imprimées en 2026. | Lot 6. |
 | 10 | Ordre des PR | **A → B → C → D validé.** | — |
+
+## 9. Amendements après la matrice de l'autorité (09)
+
+| Réf. | Amendement retenu | Lot |
+|---|---|---|
+| Lot 1.4 | **Aucun dépôt de justificatif d'éligibilité dans l'outil** (les pièces vivent sur les Emplois de l'inclusion ; une notification de droits porte plus que le critère). L'éligibilité reste **référencée** (`eligibilite_justificatifs_ref` + date de vérification). La table `insertion_pieces` ne reçoit que les pièces **dont la structure est seule dépositaire** : entretien signé (RES-03), convention PMSMP, accusé de remise — servies authentifiées, journalisées, purgées à l'anonymisation. | 1 |
+| A3 | Actualisation FT : `actualisation_ft_derniere_date` + compteur de rappels non honorés, pas un booléen seul. | 3 |
+| A4 | Indicateur = **nombre de semaines sous 15 h** par personne et par période (jamais la moyenne). | 3 |
+| A5 / S5 / S6 | Référentiel partenaires : catégorie **CMS** seedée ; catégories d'action **job dating** et **formation FLE** ajoutées. | 1 / 6 |
+| F2 | Projet OCS : `quotite_affectation` par poste et `taux_forfaitaire_pct` sur le projet. | 2 / 4 |
+| Indicateur 12 | Compteur « ruptures de droits évitées » = actualisations rappelées + motifs légitimes documentés + conciliations tracées. | 6 |
+| Exports | Règles communes : en-tête de traçabilité partout, **zéro ligne → refus motivé (409), jamais de fichier vide**, journalisation qui fait échouer l'export si elle échoue, cellule vide plutôt que zéro. Export (a) FSE+ : 29 colonnes, une par item, avec `Date de saisie de la sortie` et `Délai de saisie (jours)`. Export (f) fiche d'alimentation du référent : contenu limitatif, art. 9/10 exclus **sans mention de leur exclusion**. | 0 / 2 / 3 |
+| Structure d'accueil | Exigences maintenues : référent unique connu à 100 % (« non déterminé » = signalement), alimentation trimestrielle prouvée, assiduité documentée (la structure est le seul témoin des faits). | 1 / 3 |
