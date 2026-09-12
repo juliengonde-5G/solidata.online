@@ -172,3 +172,18 @@ AIPD validée par le DPO et consultation du CSE (RES-01/RES-12 — l'outil fourn
 - Rupture de série sur les taux de sortie (arbitrage 9) — à annoncer au dialogue de gestion.
 - Format MDFSE+ inconnu : tout schéma posé maintenant sera à aligner (d'où un schéma extensible).
 - Migration des données existantes : texte libre d'éligibilité → critères (reprise manuelle par la CIP, assistée par une liste des valeurs rencontrées).
+
+## 8. Décisions de la direction (12 septembre 2026)
+
+| # | Question | Décision | Conséquence sur le plan |
+|---|---|---|---|
+| 1 | Référent unique | **Non — Solidarité Textiles est structure d'accueil.** Le CER est tenu par le référent externe (CMS / France Travail). | Lot 3 renommé « Cadre RSA — alimentation du référent » : pas de rédaction de CER dans l'outil ; **champ « référent unique » par salarié** (type + nom + contact) ; type d'entretien `point_etape_referent` (échange avec le référent) et `conciliation` conservés pour tracer les faits ; **PDF « Fiche d'alimentation du référent »** (situation, heures, freins, actions, assiduité — sans art. 9/10) et **récapitulatif de parcours partageable** (Mon Récap) remplacent le gabarit CER ; actualisation mensuelle FT tracée si le référent est FT. |
+| 2 | Projets FSE+ 2026-2027 | **Les deux** : ASI BRSA (cohorte de participants) **et** postes CIP en OCS. | Deux objets projet seedés (« ASI 2026-2027 », « Postes CIP OCS 2026-2027 ») ; questionnaires entrée / sortie / +6 mois obligatoires pour les participants ASI ; **feuille de temps CIP par projet obligatoire** (lot 4 monte en PR A avec le lot 2 pour la partie « durée d'entretien », l'écran feuille de temps reste en PR B). |
+| 3 | Questions MDFSE+ | Défaut appliqué : à demander à l'autorité ; schéma typé extensible en attendant. | — |
+| 4 | 15-20 h | **Oui, le temps de travail CDDI compte.** | Compteur hebdo = `employee_week_hours.hours_worked` + heures d'accompagnement + PMSMP ; seuil 15/20 paramétrable ; **alerte quand une semaine passe sous 15 h** (absences, temps partiel réduit) ; deux lignes affichées (travail / accompagnement) ; exportable dans la fiche d'alimentation du référent. |
+| 5 | Feuille de temps | Défaut : SOLIDATA compose depuis les saisies CIP, la RH valide. | — |
+| 6 | API Emplois de l'inclusion | Défaut : copier-coller structuré, pas d'API en v1. | — |
+| 7 | Rappels SMS/mail | Défaut : oui, sur consentement tracé. | Lot 7. |
+| 8 | Espace salarié | Défaut : reporté ; PDF « Mon parcours en une page ». | Lot 7. |
+| 9 | Dénominateur des sorties | Défaut : toutes les sorties de la période + « non documentée », deux méthodes imprimées en 2026. | Lot 6. |
+| 10 | Ordre des PR | **A → B → C → D validé.** | — |
