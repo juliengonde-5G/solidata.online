@@ -83,3 +83,25 @@ Un seul « Enregistrer » ; sections : paramètres (existants + `post_sortie_moi
 5. Le compteur 15-20 h avec travail inclus : où l'afficher (en-tête ? Cadre administratif ? fiche d'alimentation ?) et quand alerter ?
 6. La feuille de temps : la ventilation par salarié est-elle réaliste, ou faut-il une ventilation par activité seulement ?
 7. Le report 48 h des risques réglementaires : acceptable ?
+
+## 10. Amendements après l'avis de la CIP (08b) — tous retenus
+
+| Point | Amendement |
+|---|---|
+| Ordre des blocs | Aujourd'hui / Cette semaine → **À traiter cette semaine — obligations** (ex-« Risque réglementaire ») → **Organisation du suivi** → **Rendez-vous réguliers et rappels** (ex-« Échéances périodiques ») → Ma file active. Un bloc vide reste affiché avec une phrase verte. |
+| Lignes rouges | + **« référent unique non renseigné »** (rouge) ; « semaine sous 15 h » **agrégée** (une ligne « N salariés sous 15 h ») ; **catégorie G en orange** (seul le référent peut la changer). |
+| Report | Report 48 h ; motif obligatoire **au 2ᵉ report seulement**, liste fermée. |
+| Onglet Situation | **Freins (radar + deltas) AVANT la note de profil.** « Analyser le profil (IA) » → **« Proposition de synthèse (IA) »**. |
+| Onglet Suivi | Les approfondissements du diagnostic **retournent dans l'onglet Diagnostic** (section repliée sous le socle). |
+| Diagnostic socle | Questionnaire FSE+ en **7ᵉ position** (dernière), **pré-rempli par déduction** des rubriques précédentes (logement → sans domicile stable, famille → foyer monoparental, situation pro → statut avant entrée, durée sans emploi) sur le patron des suggestions de freins : la CIP confirme ou corrige en un clic. |
+| Libellés | « Cadre administratif » → **« Dossier administratif »** ; « Conformité FSE+ » → **« Dossiers FSE+ »** (titre : « Dossiers FSE+ — pièces à compléter ») ; `point_etape_referent` → **« Point avec le référent »** (modalité tripartite / bilatérale, hors compteur d'entretiens B1) ; `conciliation` → **« Entretien de conciliation (protection des droits) »**, formulaire commençant par les motifs légitimes ; « Fiche d'alimentation du référent » → **« Fiche pour le référent »**. `cer_elaboration` supprimé. |
+| Habilitations | **BRSA et catégorie FT : ADMIN/RH strict** (statuts sociaux, jamais en lecture MANAGER, comme les notes de suivi). |
+| File active | Défaut = **en parcours + terminés depuis < 7 mois** (sortie à saisir, +6 mois). |
+| Jeton ETI | Validité **60 j** (le bloc renouvellements anticipe à 42 j). |
+| Assiduité | Motif d'absence **facultatif** ; une absence sans motif ne s'imprime **jamais** « injustifiée » sur un document destiné au référent. |
+| Fiche pour le référent | 9 rubriques, liste blanche serveur (judiciaire et détail santé exclus sans mention), produite **à la demande en un clic** + à 3 moments (entrée, renouvellement, sortie) — jamais par échéance automatique. |
+| Compteur 15-20 h | En-tête de fiche (discret) + Dossier administratif ; alerte à **2 semaines consécutives** sous 15 h, jamais pendant un arrêt déclaré ; **jamais présenté au salarié comme un seuil**. |
+| Feuille de temps | Ventilation salarié ET activité ; durée par **rangée de boutons** (5 s) à la clôture, jamais début + fin ; durées déclaratives annoncées telles quelles sur le PDF signé. |
+| Maquettes à produire (§ G) | 1 Mes échéances chargé (1366 px) · 2 jour calme · 3 fiche milieu de parcours · 4 Dossier administratif complet / vide · 5 diagnostic rubrique 7 pré-remplie · 6 Fiche pour le référent + relevé d'assiduité (PDF, dossier avec judiciaire + santé) · 7 clôture de bilan avec durée · 8 feuille de temps avec incohérence congés · 9 ETI sur téléphone · 10 menu PDF par destinataire. |
+
+**Validation CIP : « je valide sous réserve de quatre points » — les quatre sont retenus ci-dessus.**
