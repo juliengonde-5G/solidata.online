@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { LoadingSpinner, DataTable, StatusBadge, Modal, PageHeader, Section, ErrorState } from '../components';
 import { Users } from 'lucide-react';
@@ -7,17 +7,7 @@ import useAsyncData from '../hooks/useAsyncData';
 import api from '../services/api';
 import { formatEmployeeName, formatLastName } from '../utils/names';
 import AlertesBloc from '../components/insertion/AlertesBloc';
-import ObjectifsPanel from '../components/insertion/ObjectifsPanel';
-import ActionsPanel from '../components/insertion/ActionsPanel';
-import NotesSuiviPanel from '../components/insertion/NotesSuiviPanel';
-import FriseParcours from '../components/insertion/FriseParcours';
-import CompetencesETI from '../components/insertion/CompetencesETI';
-import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
-import NoteProfilInitial from '../components/insertion/NoteProfilInitial';
-import {
-  ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS, frDate as frDateIns, isAdminRh,
-} from '../components/insertion/freins';
-import { useAuth } from '../contexts/AuthContext';
+import { frDate as frDateIns } from '../components/insertion/freins';
 import {
   PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE,
   motifProfilPcmIndisponible,
@@ -61,6 +51,9 @@ export default function Employees() {
 
   // Liaison fiche de recrutement (candidat) ↔ ce collaborateur
   const [linkCandidateOpen, setLinkCandidateOpen] = useState(false);
+  // Erreur de liaison candidat↔collaborateur, affichée en bandeau (PR C lot 5 :
+  // fin des boîtes natives sur cette page).
+  const [liaisonErreur, setLiaisonErreur] = useState(null);
 
   // Detail tabs
   const [detailTab, setDetailTab] = useState('info');
@@ -203,18 +196,22 @@ export default function Employees() {
   // Rattache CE collaborateur à une fiche de recrutement (candidat) existante.
   // Réutilise l'endpoint candidat (POST /candidates/:candidateId/link-employee).
   const linkCandidate = async (candidateId) => {
+    setLiaisonErreur(null);
     try {
       await api.post(`/candidates/${candidateId}/link-employee`, { employee_id: selected.id });
       setLinkCandidateOpen(false);
       setSelected(prev => ({ ...prev, candidate_id: candidateId }));
       loadData();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erreur lors de la liaison');
+      // Bandeau, jamais une boîte native : celle du navigateur n'est ni traduite, ni à la
+      // charte, et il fige l'onglet du navigateur sur un poste partagé.
+      setLiaisonErreur(err.response?.data?.error || 'Erreur lors de la liaison');
     }
   };
 
   const unlinkCandidate = async () => {
     if (!selected?.candidate_id) return;
+    setLiaisonErreur(null);
     try {
       await api.post(`/candidates/${selected.candidate_id}/unlink-employee`);
       setSelected(prev => ({ ...prev, candidate_id: null }));
@@ -223,7 +220,7 @@ export default function Employees() {
       setCandidateData(null);
       loadData();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erreur lors du retrait du lien');
+      setLiaisonErreur(err.response?.data?.error || 'Erreur lors du retrait du lien');
     }
   };
 
@@ -904,6 +901,14 @@ export default function Employees() {
           </div>
         )}
 
+        {/* Erreur de liaison candidat↔collaborateur — bandeau, jamais une boîte native. */}
+        {liaisonErreur && (
+          <div className="mt-3 bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm flex items-start gap-2">
+            <span aria-hidden="true">⚠</span><span>{liaisonErreur}</span>
+            <button onClick={() => setLiaisonErreur(null)} className="ml-auto text-red-500 hover:text-red-700" aria-label="Fermer">×</button>
+          </div>
+        )}
+
         {/* Liaison à une fiche de recrutement (candidat) */}
         {linkCandidateOpen && selected && (
           <LinkCandidateModal
@@ -986,132 +991,114 @@ function Field({ label, value }) {
   );
 }
 
-// Onglet « Parcours insertion » de la fiche collaborateur — CONSULTATION
-// uniquement (points d'attention + historique + objectifs/actions en lecture).
-// Toute saisie passe par l'espace CIP (« Ouvrir dans l'espace CIP »).
+/**
+ * Onglet « Parcours insertion » de la fiche collaborateur — RÉSUMÉ SEUL
+ * (PR C lot 5, contrat § 5.4 ; REC-UX-12 « un seul chemin »).
+ *
+ * ═══ POURQUOI CET ONGLET A MAIGRI ═════════════════════════════════════════
+ * Il rendait, en lecture seule, presque tout l'espace CIP : frise, check-list,
+ * note de profil, objectifs, actions, notes de suivi, compétences. Deux écrans
+ * montraient donc la même chose, l'un modifiable et l'autre non — et c'est
+ * toujours celui qu'on a sous les yeux qu'on croit à jour. Ce qui reste ici
+ * répond à la seule question que se pose quelqu'un ouvrant une fiche RH :
+ * « où en est cette personne, et qui la suit ? ». Le reste est à un clic.
+ */
 function InsertionReadOnlyTab({ employee }) {
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const adminRh = isAdminRh(user);
-  const [parcours, setParcours] = useState(null); // réponse GET /insertion/:id (timeline, milestones, objectifs, pmsmp…)
-  const [contracts, setContracts] = useState([]);
+  const [parcours, setParcours] = useState(null);
+  const [cadre, setCadre] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([
-      api.get(`/insertion/${employee.id}`),
-      api.get(`/employees/${employee.id}/contracts`).catch(() => ({ data: [] })),
-    ])
-      .then(([pRes, cRes]) => {
-        if (!alive) return;
-        setParcours(pRes.data);
-        setContracts(Array.isArray(cRes.data) ? cRes.data : []);
-        setError(null);
-      })
+    api.get(`/insertion/${employee.id}`)
+      .then((r) => { if (alive) { setParcours(r.data); setError(null); } })
       .catch((err) => { if (alive) setError(err.response?.data?.error || err.message); })
       .finally(() => { if (alive) setLoading(false); });
+    // Le référent unique vit dans le dossier administratif : son absence n'est
+    // pas une panne, c'est une habilitation (403 pour certains rôles).
+    api.get(`/insertion/cadre/${employee.id}`)
+      .then((r) => { if (alive) setCadre(r.data); })
+      .catch(() => { if (alive) setCadre(null); });
     return () => { alive = false; };
   }, [employee.id]);
 
-  const timeline = parcours?.timeline || null;
-  // Lecture seule (REC-UX-12) : tout clic sur la frise ouvre l'espace CIP,
-  // seul chemin d'édition.
-  const openCip = () => navigate(`/insertion?employee=${employee.id}`);
+  const emp = parcours?.employee || {};
+  const milestones = parcours?.milestones || [];
+  const prochain = milestones
+    .filter((m) => m.status !== 'realise' && m.interview_date)
+    .sort((a, b) => new Date(a.interview_date) - new Date(b.interview_date))[0] || null;
+  const dernier = milestones
+    .filter((m) => m.status === 'realise' && m.completed_date)
+    .sort((a, b) => new Date(b.completed_date) - new Date(a.completed_date))[0] || null;
+
+  const STATUTS = { en_parcours: 'En parcours', termine: 'Parcours terminé', none: 'Hors parcours d’insertion' };
+  const REFERENTS = {
+    structure: 'structure', france_travail: 'France Travail', cms: 'CMS',
+    autre: 'autre', non_determine: 'non déterminé',
+  };
+  const ru = cadre?.orientation?.referent_unique?.type || null;
+
+  const Ligne = ({ label, children }) => (
+    <div className="flex gap-2 py-1 border-b border-gray-100 last:border-0">
+      <dt className="text-xs text-gray-500 w-40 flex-shrink-0">{label}</dt>
+      <dd className="text-sm text-gray-800">{children}</dd>
+    </div>
+  );
 
   return (
     <div className="space-y-4 text-sm">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs text-gray-400">Consultation — la saisie (diagnostic, bilans, actions) se fait dans l'espace CIP.</p>
+        <p className="text-xs text-gray-400">
+          Résumé. Le diagnostic, les entretiens, les objectifs et le dossier administratif
+          se consultent et se saisissent dans l'espace CIP.
+        </p>
         <Link to={`/insertion?employee=${employee.id}`}
           className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 whitespace-nowrap">
           Ouvrir dans l'espace CIP
         </Link>
       </div>
 
+      {/* Le bandeau d'alertes reste : c'est le signal de risque, et il ne
+          duplique aucune saisie. */}
       <AlertesBloc employeeId={employee.id} />
-
-      <ChecklistEmbauche employeeId={employee.id} canEdit={false} />
-
-      {/* Note de profil initial (2.43.0) — LECTURE SEULE ici : la génération,
-          la régénération et la prise de connaissance se font dans l'espace CIP
-          (REC-UX-12 : un seul chemin d'édition). ADMIN/RH uniquement — le
-          serveur refuse la lecture aux autres rôles. */}
-      {adminRh && (
-        <NoteProfilInitial employeeId={employee.id} employee={employee} canGenerate={false} />
-      )}
 
       {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">Parcours indisponible : {error}</div>}
       {loading && <p className="text-xs text-gray-400">Chargement du parcours…</p>}
 
       {!loading && !error && parcours && (
-        <div>
-          <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Frise du parcours</h4>
-          <FriseParcours
-            employee={parcours.employee || employee}
-            contracts={contracts}
-            milestones={parcours.milestones || []}
-            objectifs={parcours.objectifs || []}
-            pmsmp={parcours.pmsmp || []}
-            hasCandidate={!!parcours.has_candidate_data}
-            hasPcm={!!parcours.has_pcm}
-            onSelect={openCip}
-          />
-        </div>
+        emp.insertion_status && emp.insertion_status !== 'none' ? (
+          <dl className="bg-white rounded-lg border p-3">
+            <Ligne label="Statut">{STATUTS[emp.insertion_status] || emp.insertion_status}</Ligne>
+            <Ligne label="Parcours n°">{emp.parcours_num || 1}</Ligne>
+            <Ligne label="Début / fin">
+              {emp.insertion_start_date ? frDateIns(emp.insertion_start_date) : 'non renseigné'}
+              {emp.insertion_end_date ? ` → ${frDateIns(emp.insertion_end_date)}` : ''}
+            </Ligne>
+            <Ligne label="CIP référent">{emp.cip_referent_nom || <span className="text-gray-400">non affecté</span>}</Ligne>
+            <Ligne label="Référent unique">
+              {ru && ru !== 'non_determine'
+                ? `${REFERENTS[ru] || ru}${cadre?.orientation?.referent_unique?.nom ? ` — ${cadre.orientation.referent_unique.nom}` : ''}`
+                : <span className="text-red-600">non déterminé</span>}
+            </Ligne>
+            <Ligne label="Prochain rendez-vous">
+              {prochain
+                ? `${frDateIns(prochain.interview_date)}${prochain.titre ? ` — ${prochain.titre}` : ''}`
+                : <span className="text-gray-400">aucun rendez-vous planifié</span>}
+            </Ligne>
+            <Ligne label="Dernier entretien">
+              {dernier
+                ? `${frDateIns(dernier.completed_date)}${dernier.titre ? ` — ${dernier.titre}` : ''}`
+                : <span className="text-gray-400">aucun entretien réalisé</span>}
+            </Ligne>
+          </dl>
+        ) : (
+          <p className="text-xs text-gray-400 border border-dashed rounded-lg p-3 text-center">
+            Aucun parcours d'insertion démarré pour ce collaborateur.
+          </p>
+        )
       )}
-
-      {timeline?.events?.length > 0 && (
-        <div>
-          <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Historique du parcours</h4>
-          <div className="relative">
-            <div className="absolute left-2.5 top-0 bottom-0 w-0.5 bg-gray-200" />
-            {timeline.events.map((ev, i) => (
-              <div key={i} className="relative flex items-start mb-3 pl-8">
-                <div className={`absolute left-1.5 w-2.5 h-2.5 rounded-full border-2 ${
-                  ev.status === 'realise' ? 'bg-green-500 border-green-500' :
-                  ev.status === 'planifie' ? 'bg-blue-500 border-blue-500' : 'bg-white border-gray-300'
-                }`} />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-sm ${ev.status === 'realise' ? 'text-green-700 font-medium' : 'text-gray-600'}`}>{ev.label}</span>
-                    {ev.type === 'milestone' && ev.status && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${ENTRETIEN_STATUS_COLORS[ev.status] || ''}`}>
-                        {ENTRETIEN_STATUS_LABELS[ev.status] || ev.status}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-gray-400">{ev.date ? frDateIns(ev.date) : 'Date non définie'}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {!loading && !error && (!timeline || !timeline.events?.length) && (
-        <p className="text-xs text-gray-400 border border-dashed rounded-lg p-3 text-center">
-          Aucun parcours d'insertion démarré pour ce collaborateur.
-        </p>
-      )}
-
-      <div className="border-t pt-3">
-        <ObjectifsPanel employeeId={employee.id} canEdit={false} />
-      </div>
-      <div className="border-t pt-3">
-        <ActionsPanel employeeId={employee.id} readOnly compact />
-      </div>
-      {/* Journal de suivi en lecture — monté seulement pour ADMIN/RH : la
-          surface est refusée (403) aux autres rôles, afficher une section vide
-          laisserait croire qu'il n'y a rien à lire. */}
-      {adminRh && (
-        <div className="border-t pt-3">
-          <NotesSuiviPanel employeeId={employee.id} readOnly />
-        </div>
-      )}
-      <div className="border-t pt-3">
-        <CompetencesETI employeeId={employee.id} employee={employee} canEdit={false} />
-      </div>
     </div>
   );
 }

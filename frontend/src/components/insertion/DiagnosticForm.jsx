@@ -6,6 +6,16 @@ import {
 import { exportDiagnosticPDF } from './pdf-insertion';
 import PortefeuilleCompetences from './PortefeuilleCompetences';
 import StyleApprentissage from './StyleApprentissage';
+// SOURCE PARTAGÉE des champs du socle. Copie À L'IDENTIQUE de
+// `backend/src/data/diagnostic-socle-champs.json` : le front ne peut pas
+// importer le dossier du backend (le contexte de build Docker du frontend est
+// `./frontend` et ne le contient pas), et un test Jest compare les deux
+// fichiers — s'ils divergent, la suite tombe. C'est cette liste qui décide
+// AUSSI, côté serveur, de la colonne `diagnostic_socle_complet` de la file
+// active et de l'obligation « socle incomplet » de l'écran d'échéances : deux
+// listes différentes, et l'écran dirait « socle terminé » pendant que la file
+// le nierait.
+import SOCLE_CHAMPS from './diagnostic-socle-champs.json';
 
 /**
  * Diagnostic d'accueil — STEPPER une rubrique à la fois (REC-UX-01) :
@@ -181,27 +191,73 @@ function computeSuggestions(d) {
 }
 
 // ── Définition des rubriques (étapes) — champs = whitelist du PUT backend ──
-const STEPS = [
-  { id: 'parcours', label: 'Parcours & famille', fields: ['parcours_anterieur', 'situation_familiale', 'nb_enfants', 'enfants_a_charge'] },
-  { id: 'logement', label: 'Logement', fields: ['logement_statut', 'logement_satisfaction', 'commentaire_logement'] },
-  { id: 'droits', label: 'Droits & administratif', fields: ['piece_identite_validite', 'allocataire_caf', 'ressources', 'commentaire_droits'] },
-  { id: 'sante', label: 'Santé', fields: ['mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante', 'commentaire_sante'], sensible: true },
-  { id: 'budget', label: 'Budget', fields: ['difficultes_financieres', 'credits_en_cours', 'commentaire_budget'] },
-  { id: 'mobilite', label: 'Mobilité', fields: ['permis_b_statut', 'vehicule', 'moyen_transport', 'commentaire_mobilite'] },
-  { id: 'linguistique', label: 'Français & langues', fields: ['cecrl_niveau', 'commentaire_linguistique'] },
-  { id: 'situation_pro', label: 'Situation professionnelle', fields: ['autre_employeur', 'autre_employeur_heures', 'souhait_complement_heures'] },
-  { id: 'projet', label: 'Projet professionnel', fields: ['niveau_formation', 'metiers_souhaites', 'pret_a_se_former', 'cpf_accessible', 'projet_formation', 'emploi_vise', 'commentaire_projet'] },
-  { id: 'portefeuille', label: 'Portefeuille & AFOM', fields: ['portefeuille_interets', 'portefeuille_competences', 'savoir_faire', 'savoir_etre', 'swot_atouts', 'swot_faiblesses', 'swot_opportunites', 'swot_menaces', 'besoins_exprimes', 'coa_texte'] },
-  { id: 'style', label: "Style d'apprentissage", fields: ['style_apprentissage_reponses', 'style_apprentissage'] },
-  { id: 'expression', label: 'Expression du salarié', fields: ['attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee'] },
-  { id: 'fse', label: 'Données FSE+ (entrée)', fields: ['fse_entree'] },
-  { id: 'freins', label: 'Freins & synthèse', fields: [] }, // complétude calculée sur les scores
+// ═══════════════════════════════════════════════════════════════════════════
+// SOCLE J+30 et APPROFONDISSEMENTS (PR C lot 5, contrat § 5.5)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Le diagnostic comptait QUATORZE rubriques. Rien n'y était inutile — mais
+// rien n'y disait ce qui devait être tenu à J+30 et ce qui pouvait attendre.
+// Résultat mesuré par le persona CIP : des diagnostics laissés « en cours »
+// pendant des mois, parce qu'on ne savait pas quand ils étaient finis.
+//
+// Le SOCLE, ce sont les SEPT rubriques qui doivent exister trente jours après
+// l'entrée : le cadre administratif, le logement, la santé au minimum, la
+// mobilité, la situation professionnelle, l'expression de la personne avec ses
+// neuf freins, et le questionnaire FSE+ — en DERNIER, pré-rempli par déduction
+// des rubriques précédentes (amendement CIP § 10 : on ne commence pas un
+// entretien d'accueil par un formulaire européen).
+//
+// Les APPROFONDISSEMENTS restent accessibles, dépliés d'un clic sous le socle,
+// et n'entrent JAMAIS dans la complétude : le portefeuille de compétences et le
+// style d'apprentissage se construisent au fil du parcours, pas au premier
+// rendez-vous. Aucune rubrique n'a été supprimée — elles ont été rangées.
+//
+// `blocs` nomme les blocs de saisie rendus par l'étape : une rubrique du socle
+// peut en réunir plusieurs (« Situation & projet professionnels » réunit
+// l'emploi parallèle, le projet et le niveau de français).
+const SOCLE = [
+  {
+    id: 'cadre',
+    label: 'Cadre administratif & éligibilité',
+    blocs: ['cadre', 'droits'],
+    fields: ['piece_identite_validite', 'allocataire_caf', 'ressources', 'commentaire_droits'],
+  },
+  { id: 'logement', label: 'Logement', blocs: ['logement'], fields: ['logement_statut', 'logement_satisfaction', 'commentaire_logement'] },
+  { id: 'sante', label: 'Santé', blocs: ['sante'], fields: ['mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante', 'commentaire_sante'], sensible: true },
+  { id: 'mobilite', label: 'Mobilité', blocs: ['mobilite'], fields: ['permis_b_statut', 'vehicule', 'moyen_transport', 'commentaire_mobilite'] },
+  {
+    id: 'pro',
+    label: 'Situation & projet professionnels',
+    blocs: ['situation_pro', 'projet_socle', 'linguistique'],
+    fields: ['autre_employeur', 'autre_employeur_heures', 'souhait_complement_heures',
+      'niveau_formation', 'metiers_souhaites', 'emploi_vise', 'pret_a_se_former',
+      'commentaire_projet', 'cecrl_niveau', 'commentaire_linguistique'],
+  },
+  {
+    id: 'expression',
+    label: 'Expression du salarié & freins',
+    blocs: ['expression', 'freins'],
+    fields: ['attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee'],
+    avecFreins: true,
+  },
+  { id: 'fse', label: 'Questionnaire FSE+ (entrée)', blocs: ['fse'], fields: ['fse_entree'] },
 ];
+
+const APPROFONDISSEMENTS = [
+  { id: 'parcours', label: 'Parcours & famille', blocs: ['parcours'], fields: ['parcours_anterieur', 'situation_familiale', 'nb_enfants', 'enfants_a_charge'] },
+  { id: 'budget', label: 'Budget', blocs: ['budget'], fields: ['difficultes_financieres', 'credits_en_cours', 'commentaire_budget'] },
+  { id: 'portefeuille', label: 'Portefeuille & AFOM', blocs: ['portefeuille'], fields: ['portefeuille_interets', 'portefeuille_competences', 'savoir_faire', 'savoir_etre', 'swot_atouts', 'swot_faiblesses', 'swot_opportunites', 'swot_menaces', 'besoins_exprimes', 'coa_texte'] },
+  { id: 'style', label: "Style d'apprentissage", blocs: ['style'], fields: ['style_apprentissage_reponses', 'style_apprentissage'] },
+  { id: 'formation', label: 'Projet de formation', blocs: ['formation_coa'], fields: ['projet_formation', 'cpf_accessible'] },
+];
+
+const STEPS = [...SOCLE, ...APPROFONDISSEMENTS];
+const EST_SOCLE = new Set(SOCLE.map((s) => s.id));
 
 const isFilled = (v) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0)
   && !(typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((x) => x == null || x === ''));
 
-export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, freinsDefinitions, baseRole, onSaved, onDirtyChange }) {
+export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, freinsDefinitions, baseRole, cadre = null, onSaved, onDirtyChange }) {
   // Correctif de sécurité du 13/09 (M-01) : le questionnaire FSE+ d'entrée est
   // ADMIN/RH STRICT en lecture COMME en écriture. Le serveur ne l'envoie plus à
   // l'encadrement technique et refuse son écriture en 403 ; lui proposer
@@ -230,10 +286,16 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   // L'étape FSE+ disparaît du stepper pour l'encadrement technique — les index
   // d'étapes se recalent d'eux-mêmes, rien n'est « grisé » : une rubrique grisée
   // dirait qu'il y a quelque chose à voir.
-  const ETAPES = useMemo(
-    () => (baseRole === 'MANAGER' ? STEPS.filter((st) => st.id !== 'fse') : STEPS),
+  // Le socle d'abord, les approfondissements ensuite. La rubrique FSE+ sort du
+  // stepper pour un encadrant technique : le serveur refuse ce questionnaire en
+  // lecture COMME en écriture (correctif M-01), lui proposer l'étape
+  // reviendrait à lui montrer un formulaire vide puis un refus.
+  const [approfOuverts, setApprofOuverts] = useState(false);
+  const SOCLE_VISIBLE = useMemo(
+    () => (baseRole === 'MANAGER' ? SOCLE.filter((st) => st.id !== 'fse') : SOCLE),
     [baseRole]
   );
+  const ETAPES = useMemo(() => [...SOCLE_VISIBLE, ...APPROFONDISSEMENTS], [SOCLE_VISIBLE]);
 
   // Reprise : première rubrique sans aucune réponse (après la dernière remplie).
   useEffect(() => {
@@ -312,15 +374,32 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
     [draft, serverSuggestions]
   );
 
-  const filledCount = (st) => st.id === 'freins'
-    ? freins.filter((f) => draft[f.column] != null).length
-    : st.fields.filter((f) => canSeeField(f, baseRole)).filter((f) => isFilled(draft[f])).length;
-  const totalCount = (st) => st.id === 'freins'
-    ? freins.length
-    : st.fields.filter((f) => canSeeField(f, baseRole)).length;
+  // Une rubrique qui porte les freins compte ses champs ET ses neuf axes : le
+  // bloc « Expression & freins » réunit les deux, et n'afficher que l'un des
+  // deux compteurs laisserait croire la rubrique finie alors qu'aucun frein
+  // n'est évalué.
+  const filledCount = (st) => st.fields.filter((f) => canSeeField(f, baseRole)).filter((f) => isFilled(draft[f])).length
+    + (st.avecFreins ? freins.filter((f) => draft[f.column] != null).length : 0);
+  const totalCount = (st) => st.fields.filter((f) => canSeeField(f, baseRole)).length
+    + (st.avecFreins ? freins.length : 0);
+  // La progression porte sur le SOCLE seul : les approfondissements ne sont pas
+  // du retard, et les compter ferait stagner la barre d'un diagnostic terminé.
   const progressPct = Math.round(
-    (ETAPES.reduce((a, st) => a + (filledCount(st) > 0 ? 1 : 0), 0) / ETAPES.length) * 100
+    (SOCLE_VISIBLE.reduce((a, st) => a + (filledCount(st) > 0 ? 1 : 0), 0) / SOCLE_VISIBLE.length) * 100
   );
+
+  // Complétude du SOCLE, calculée sur le fichier PARTAGÉ avec le serveur.
+  // `false` d'un booléen est une RÉPONSE, pas une absence : « pas de RQTH » est
+  // un renseignement.
+  const socleManquants = SOCLE_CHAMPS.champs.filter((c) => {
+    if (!canSeeField(c.colonne, baseRole)) return false;
+    const v = draft[c.colonne];
+    if (v === null || v === undefined) return true;
+    if (c.type === 'liste') return !(Array.isArray(v) && v.length > 0);
+    if (c.type === 'texte') return String(v).trim() === '';
+    return false;
+  });
+  const socleComplet = socleManquants.length === 0;
 
   const cur = ETAPES[step];
   const fse = draft.fse_entree || {};
@@ -380,15 +459,24 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
 
       <div className="flex flex-col md:flex-row">
         {/* Sommaire latéral */}
-        <nav className="md:w-56 border-b md:border-b-0 md:border-r p-2 flex md:flex-col gap-1 overflow-x-auto flex-shrink-0">
+        <nav className="md:w-60 border-b md:border-b-0 md:border-r p-2 flex md:flex-col gap-1 overflow-x-auto flex-shrink-0">
+          <p className="hidden md:block text-[10px] uppercase tracking-wide text-gray-400 px-2.5 pt-1">
+            Socle — à tenir sous 30 jours
+          </p>
           {ETAPES.map((st, i) => {
             const n = filledCount(st), t = totalCount(st);
+            const socle = EST_SOCLE.has(st.id);
+            // Les approfondissements ne s'affichent que dépliés : les laisser
+            // visibles en permanence remettrait quatorze rubriques à l'écran,
+            // c'est-à-dire le problème qu'on corrige.
+            if (!socle && !approfOuverts) return null;
+            const rang = socle ? i + 1 : null;
             return (
               <button key={st.id} type="button" onClick={() => goTo(i)}
                 className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs whitespace-nowrap md:whitespace-normal transition ${
-                  i === step ? 'bg-teal-600 text-white' : 'text-gray-600 hover:bg-gray-100'
+                  i === step ? 'bg-teal-600 text-white' : socle ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-500 hover:bg-gray-100 italic'
                 }`}>
-                <span>{i + 1}. {st.label}</span>
+                <span>{rang ? `${rang}. ` : ''}{st.label}</span>
                 {st.id === 'fse' && participantAsi && fseIncomplet && i !== step ? (
                   <span className="text-[10px] px-1.5 rounded-full bg-red-100 text-red-700 font-semibold" title="Participant d'une opération cofinancée : ce questionnaire est obligatoire">
                     {fseRenseignes}/{FSE_QUESTIONS.length}
@@ -401,16 +489,45 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
               </button>
             );
           })}
+          <button type="button" onClick={() => setApprofOuverts((o) => !o)}
+            className="mt-1 px-2.5 py-1.5 rounded-lg text-left text-[11px] text-teal-700 hover:bg-teal-50 whitespace-nowrap md:whitespace-normal">
+            {approfOuverts ? '− Masquer les approfondissements' : `+ Approfondissements (${APPROFONDISSEMENTS.length})`}
+          </button>
+          {!approfOuverts && (
+            <p className="hidden md:block text-[10px] text-gray-400 px-2.5 leading-snug">
+              Portefeuille, AFOM, style d'apprentissage, budget détaillé, projet de formation —
+              ils se construisent au fil du parcours et n'entrent pas dans la complétude du socle.
+            </p>
+          )}
         </nav>
 
         {/* Rubrique courante */}
         <div className="flex-1 p-4 space-y-4 min-w-0">
-          <div className="flex items-baseline justify-between">
-            <h4 className="font-semibold text-gray-700">Étape {step + 1}/{ETAPES.length} — {cur.label}</h4>
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <h4 className="font-semibold text-gray-700">
+              {EST_SOCLE.has(cur.id)
+                ? `Socle ${step + 1}/${SOCLE_VISIBLE.length} — ${cur.label}`
+                : `Approfondissement — ${cur.label}`}
+            </h4>
             <span className="text-[11px] text-gray-400">Le diagnostic peut se faire en 2 séances (fenêtre de 30 j).</span>
           </div>
 
-          {cur.id === 'parcours' && (
+          {/* Complétude du SOCLE — jamais bloquante, toujours dite. Elle porte
+              sur les mêmes champs que le serveur (fichier partagé) : c'est ce
+              qui évite qu'un écran annonce « terminé » quand la file active
+              signale un socle incomplet. */}
+          {socleComplet ? (
+            <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+              Socle complet — les sept rubriques attendues à J+30 sont renseignées.
+            </p>
+          ) : (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+              Socle incomplet : {socleManquants.length} champ(s) attendu(s) à J+30 restent à renseigner.
+              Rien n'est bloquant — vous pouvez enregistrer et reprendre.
+            </p>
+          )}
+
+          {cur.blocs.includes('parcours') && (
             <div className="space-y-3">
               <FieldRow label="Ce que la personne a fait avant d'arriver (parcours antérieur)">
                 <textarea value={draft.parcours_anterieur || ''} onChange={(e) => setField('parcours_anterieur', e.target.value)} rows={3} className="input-modern py-1 w-full" />
@@ -430,7 +547,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'logement' && (
+          {cur.blocs.includes('logement') && (
             <div className="space-y-3">
               <FieldRow label="Statut du logement">
                 <ChoicePicker value={draft.logement_statut} onChange={(v) => setField('logement_statut', v)}
@@ -445,7 +562,61 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'droits' && (
+          {/* Rubrique 1 du socle — RÉSUMÉ EN LECTURE du dossier administratif.
+              Il est ici parce que la CIP ouvre le diagnostic avec la personne
+              en face d'elle : lui faire changer d'onglet pour vérifier un Pass
+              IAE, c'est interrompre l'entretien. Rien ne s'y SAISIT — la
+              saisie de ces champs vit dans l'onglet « Dossier administratif »,
+              un seul chemin d'écriture (REC-UX-12). */}
+          {cur.blocs.includes('cadre') && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                <h5 className="text-sm font-semibold text-slate-700">Cadre administratif (lecture)</h5>
+                <span className="text-[11px] text-slate-400">Se saisit dans l'onglet « Dossier administratif »</span>
+              </div>
+              {!cadre ? (
+                <p className="text-xs text-slate-500">
+                  Dossier administratif non chargé — impossible d'afficher le Pass IAE, l'orientation
+                  ni l'éligibilité. Ce n'est pas « rien à signaler » : ouvrez l'onglet pour vérifier.
+                </p>
+              ) : (
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <div className="flex gap-1">
+                    <dt className="text-slate-500">Pass IAE :</dt>
+                    <dd className="text-slate-800 font-medium">
+                      {cadre.pass_iae?.numero
+                        ? `n° ${cadre.pass_iae.numero}${cadre.pass_iae.fin ? ` · fin ${String(cadre.pass_iae.fin).slice(0, 10).split('-').reverse().join('/')}` : ''}`
+                        : 'non renseigné'}
+                    </dd>
+                  </div>
+                  <div className="flex gap-1">
+                    <dt className="text-slate-500">Référent unique :</dt>
+                    <dd className="text-slate-800 font-medium">
+                      {cadre.orientation?.referent_unique?.type && cadre.orientation.referent_unique.type !== 'non_determine'
+                        ? `${cadre.orientation.referent_unique.type}${cadre.orientation.referent_unique.nom ? ` — ${cadre.orientation.referent_unique.nom}` : ''}`
+                        : 'non déterminé'}
+                    </dd>
+                  </div>
+                  <div className="flex gap-1">
+                    <dt className="text-slate-500">Orienteur / prescripteur :</dt>
+                    <dd className="text-slate-800 font-medium">
+                      {cadre.orientation?.orienteur?.nom || cadre.orientation?.prescripteur?.nom || 'non renseigné'}
+                    </dd>
+                  </div>
+                  <div className="flex gap-1">
+                    <dt className="text-slate-500">Éligibilité IAE :</dt>
+                    <dd className="text-slate-800 font-medium">
+                      {Array.isArray(cadre.eligibilite?.criteres) && cadre.eligibilite.criteres.length > 0
+                        ? `${cadre.eligibilite.criteres.length} critère(s) constaté(s)`
+                        : 'aucun critère constaté'}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+            </div>
+          )}
+
+          {cur.blocs.includes('droits') && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <FieldRow label="Pièce d'identité valide jusqu'au">
@@ -465,7 +636,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'sante' && (
+          {cur.blocs.includes('sante') && (
             <div className="space-y-3">
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
                 Données de santé (article 9 RGPD) : ne consigner que ce qui est utile à l'accompagnement. Les commentaires sont chiffrés en base.
@@ -498,7 +669,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'budget' && (
+          {cur.blocs.includes('budget') && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <FieldRow label="Difficultés financières">
@@ -516,7 +687,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'mobilite' && (
+          {cur.blocs.includes('mobilite') && (
             <div className="space-y-3">
               <FieldRow label="Permis B">
                 <ChoicePicker value={draft.permis_b_statut} onChange={(v) => setField('permis_b_statut', v)}
@@ -535,7 +706,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'linguistique' && (
+          {cur.blocs.includes('linguistique') && (
             <div className="space-y-3">
               <FieldRow label="Niveau de français (CECRL)" hint="A1 = grand débutant … C2 = maîtrise complète.">
                 <ChoicePicker value={draft.cecrl_niveau} onChange={(v) => setField('cecrl_niveau', v)}
@@ -547,7 +718,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'situation_pro' && (
+          {cur.blocs.includes('situation_pro') && (
             <div className="space-y-3">
               <FieldRow label="Autre employeur en parallèle">
                 <BoolPicker value={draft.autre_employeur} onChange={(v) => setField('autre_employeur', v)} />
@@ -563,7 +734,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'projet' && (
+          {cur.blocs.includes('projet_socle') && (
             <div className="space-y-3">
               <FieldRow label="Niveau de formation atteint">
                 <ChoicePicker value={draft.niveau_formation} onChange={(v) => setField('niveau_formation', v)}
@@ -577,33 +748,44 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                   <input value={draft.emploi_vise || ''} onChange={(e) => setField('emploi_vise', e.target.value)} className="input-modern py-1 w-full" />
                 </FieldRow>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <FieldRow label="Prêt·e à se former">
-                  <ChoicePicker value={draft.pret_a_se_former} onChange={(v) => setField('pret_a_se_former', v)}
-                    options={[['oui', 'Oui'], ['non', 'Non'], ['a_discuter', 'À discuter']]} />
-                </FieldRow>
-                <FieldRow label="CPF mobilisable">
-                  <BoolPicker value={draft.cpf_accessible} onChange={(v) => setField('cpf_accessible', v)} />
-                </FieldRow>
-              </div>
-              <FieldRow label="Projet de formation">
-                <textarea value={draft.projet_formation || ''} onChange={(e) => setField('projet_formation', e.target.value)} rows={2} className="input-modern py-1 w-full" />
+              <FieldRow label="Prêt·e à se former">
+                <ChoicePicker value={draft.pret_a_se_former} onChange={(v) => setField('pret_a_se_former', v)}
+                  options={[['oui', 'Oui'], ['non', 'Non'], ['a_discuter', 'À discuter']]} />
               </FieldRow>
               <FieldRow label="Commentaire CIP — projet professionnel">
                 <textarea value={draft.commentaire_projet || ''} onChange={(e) => setField('commentaire_projet', e.target.value)} rows={2} className="input-modern py-1 w-full" />
               </FieldRow>
+              <p className="text-[11px] text-gray-400">
+                Le projet de FORMATION (contenu, CPF) se détaille dans les approfondissements — il se
+                construit au fil du parcours, rarement au premier rendez-vous.
+              </p>
             </div>
           )}
 
-          {cur.id === 'portefeuille' && (
+          {cur.blocs.includes('formation_coa') && (
+            <div className="space-y-3">
+              <FieldRow label="CPF mobilisable">
+                <BoolPicker value={draft.cpf_accessible} onChange={(v) => setField('cpf_accessible', v)} />
+              </FieldRow>
+              <FieldRow label="Projet de formation">
+                <textarea value={draft.projet_formation || ''} onChange={(e) => setField('projet_formation', e.target.value)} rows={3} className="input-modern py-1 w-full" />
+              </FieldRow>
+              <p className="text-[11px] text-gray-400">
+                Le choix d'orientation (COA) et l'AFOM se saisissent dans la rubrique
+                « Portefeuille &amp; AFOM ».
+              </p>
+            </div>
+          )}
+
+          {cur.blocs.includes('portefeuille') && (
             <PortefeuilleCompetences draft={draft} setField={setField} />
           )}
 
-          {cur.id === 'style' && (
+          {cur.blocs.includes('style') && (
             <StyleApprentissage draft={draft} setField={setField} relecture={relecture} />
           )}
 
-          {cur.id === 'expression' && (
+          {cur.blocs.includes('expression') && (
             <div className="space-y-3">
               <p className="text-[11px] text-sky-700 bg-sky-50 border border-sky-200 rounded-lg p-2">
                 Avec les mots du salarié — ces réponses alimentent ses objectifs de parcours (« origine salarié »).
@@ -619,7 +801,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             </div>
           )}
 
-          {cur.id === 'fse' && (
+          {cur.blocs.includes('fse') && (
             <div className="space-y-3">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2 flex-1 min-w-[240px]">
@@ -680,10 +862,24 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                 Ces réponses alimentent le dossier européen de l'opération (piste d'audit d'au moins 5 ans).
                 Une fausse déclaration engage la personne : relisez-les avec elle avant d'enregistrer.
               </p>
+
+              {/* Le questionnaire FSE+ est la DERNIÈRE rubrique du socle : le
+                  bouton de clôture est donc ici aussi. Il l'était uniquement
+                  sous les freins, qui ne sont plus la fin du parcours de
+                  saisie — la CIP serait repartie en arrière pour terminer. */}
+              <div className="flex items-center justify-between border-t pt-3">
+                <p className="text-xs text-gray-400">
+                  {socleComplet ? 'Socle complet.' : `${socleManquants.length} champ(s) du socle à renseigner.`}
+                </p>
+                <button type="button" onClick={terminer} disabled={saving}
+                  className="px-4 py-2 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-50">
+                  {draft.statut_saisie === 'complet' ? 'Diagnostic terminé ✓ (réenregistrer)' : 'Terminer le diagnostic'}
+                </button>
+              </div>
             </div>
           )}
 
-          {cur.id === 'freins' && (
+          {cur.blocs.includes('freins') && (
             <div className="space-y-3">
               <p className="text-xs text-gray-500">
                 Évaluez chaque frein de 1 (pas de difficulté) à 5 (bloquant). Laissez « Non évalué » si le sujet n'a pas été abordé —
