@@ -241,14 +241,16 @@ async function heuresAccompagnement({ annee = null, employeeId = null, projetId 
   try {
     const faits = await chargerFaits({ userId: null, annee: an, mois: null, db });
 
-    // Un intervenant = un jeu de lignes. On compose par intervenant parce que
-    // le rattachement OCS dépend de SON poste : composer tout le monde d'un
-    // bloc attribuerait à chacun les postes des autres.
-    const intervenants = new Set();
-    for (const m of faits.milestones) if (m.interviewer_id != null) intervenants.add(Number(m.interviewer_id));
-    for (const a of faits.actions) if (a.created_by != null) intervenants.add(Number(a.created_by));
-    for (const s of faits.saisies) if (s.user_id != null) intervenants.add(Number(s.user_id));
-
+    // Les feuilles FIGÉES sont lues EN PREMIER (correctif D-04). Elles ne sont
+    // pas un complément de la composition vivante : ce sont des pièces signées,
+    // et une pièce signée ne peut pas sortir de l'agrégat parce que le fait qui
+    // l'a produite a été corrigé depuis — ce que la réouverture ADMIN autorise
+    // explicitement. L'ensemble des intervenants était construit à partir des
+    // seuls faits VIVANTS : un intervenant dont le dernier entretien de l'année
+    // était supprimé disparaissait entièrement du calcul, feuille signée
+    // comprise, alors que l'en-tête de cette fonction promet que « l'agrégat
+    // annoncé au dialogue de gestion et les feuilles signées ne peuvent pas se
+    // contredire ».
     const figees = await db.query(
       `SELECT user_id, annee, mois, lignes FROM insertion_feuilles_temps
         WHERE annee = $1 AND statut <> 'brouillon' AND lignes IS NOT NULL`,
@@ -259,6 +261,17 @@ async function heuresAccompagnement({ annee = null, employeeId = null, projetId 
     for (const f of figees.rows) {
       if (Array.isArray(f.lignes)) parFeuilleFigee.set(cleFigee(Number(f.user_id), Number(f.mois)), f.lignes);
     }
+
+    // Un intervenant = un jeu de lignes. On compose par intervenant parce que
+    // le rattachement OCS dépend de SON poste : composer tout le monde d'un
+    // bloc attribuerait à chacun les postes des autres.
+    const intervenants = new Set();
+    for (const m of faits.milestones) if (m.interviewer_id != null) intervenants.add(Number(m.interviewer_id));
+    for (const a of faits.actions) if (a.created_by != null) intervenants.add(Number(a.created_by));
+    for (const s of faits.saisies) if (s.user_id != null) intervenants.add(Number(s.user_id));
+    // …et tout intervenant qui a une feuille SIGNÉE dans l'année, même s'il n'a
+    // plus un seul fait vivant.
+    for (const f of figees.rows) if (f.user_id != null) intervenants.add(Number(f.user_id));
 
     let toutes = [];
     for (const uid of intervenants) {

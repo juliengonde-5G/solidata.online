@@ -1130,11 +1130,21 @@ export default function InsertionParcours() {
     return d.toISOString().slice(0, 10);
   };
 
+  // ══ M-03 — le raccourci d'en-tête ENREGISTRE avant d'imprimer ═══════════
+  // Il GETtait l'aperçu puis imprimait : le document sortait vers le référent
+  // sans qu'aucun snapshot n'en garde la preuve, alors qu'il portait le bloc de
+  // signature et le pied de remise qui lui donnent sa valeur probante. Une
+  // fiche imprimée EST une fiche transmise — le POST en garde la trace, avec
+  // son destinataire recopié et son inscription au registre RGPD (dans la même
+  // transaction que le snapshot). Le moment `demande` est celui du geste :
+  // c'est une fiche produite à la demande, hors des trois moments jalonnés.
   const exporterFicheReferent = async (employeeId) => {
     setReferentLoading('fiche'); setPanelError(null);
     try {
-      const r = await api.get(`/insertion/rsa/${employeeId}/fiche-referent?du=${ilYAUnAn()}&au=${new Date().toISOString().slice(0, 10)}`);
-      exportFicheReferentPDF(r.data.contenu);
+      const r = await api.post(`/insertion/rsa/${employeeId}/fiche-referent`, {
+        moment: 'demande', du: ilYAUnAn(), au: new Date().toISOString().slice(0, 10),
+      });
+      exportFicheReferentPDF(r.data.contenu, { moment: 'demande' });
     } catch (err) {
       const d = err.response?.data;
       // Le 409 « référent non déterminé » n'est pas une panne : c'est une
@@ -1383,9 +1393,9 @@ export default function InsertionParcours() {
                             geste le plus fréquent, pas un second écran de saisie. */}
                         {adminRh && (
                           <button onClick={() => exporterFicheReferent(selectedEmployee.id)} disabled={referentLoading}
-                            title="Point de situation transmis au référent unique externe (CMS, France Travail) — sans aucune donnée de santé ni judiciaire"
+                            title="Point de situation transmis au référent unique externe (CMS, France Travail) — sans aucune donnée de santé ni judiciaire. La fiche est enregistrée au registre des transmissions avant d'être imprimée."
                             className="px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 text-xs font-medium hover:bg-blue-50 whitespace-nowrap disabled:opacity-50">
-                            {referentLoading === 'fiche' ? 'Génération…' : 'Fiche pour le référent'}
+                            {referentLoading === 'fiche' ? 'Génération…' : 'Fiche pour le référent (enregistrée)'}
                           </button>
                         )}
                         {adminRh && (

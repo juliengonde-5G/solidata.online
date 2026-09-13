@@ -49,6 +49,11 @@ const { validate } = require('../../middleware/validate');
 const { activiteHebdo } = require('../../services/activite-hebdo');
 const { composerFicheReferent, composerReleveAssiduite } = require('../../services/fiche-referent');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
+// Dates civiles : une seule conversion pour tout le module. `String(uneDate)`
+// sur une colonne `DATE` rend « Sun Mar 02 » — quatre défauts de cette PR en
+// sont venus (rapport 18, D-01 à D-03). Voir l'en-tête de `utils/date-iso.js`.
+const { isoDate, moisDe, aujourdhuiParis, decalerJours, ecartJours } = require('../../utils/date-iso');
+const { activiteHebdoCohorte } = require('../../services/activite-hebdo');
 
 const router = express.Router();
 router.use(authorize('ADMIN', 'RH'));
@@ -65,16 +70,43 @@ const MOIS_RE = /^\d{4}-\d{2}$/;
  * jamais ce que le document raconte. Un journal d'audit qui recopierait le
  * contenu deviendrait une seconde copie de ce qu'il protège.
  */
+async function ecrireJournal(db, req, action, employeeId, details) {
+  await db.query(
+    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+    [req.user && req.user.id != null ? req.user.id : null, action, 'insertion_rsa', employeeId,
+      JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
+  );
+}
+
+/**
+ * Journal TOLÉRANT — réservé aux consultations d'écran interne (le compteur
+ * d'activité). Perdre la trace d'une lecture d'écran est regrettable ; empêcher
+ * la CIP d'ouvrir un compteur parce que le journal est indisponible serait pire.
+ */
 async function journaliser(req, action, employeeId, details) {
   try {
-    await pool.query(
-      'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
-      [req.user && req.user.id != null ? req.user.id : null, action, 'insertion_rsa', employeeId,
-        JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
-    );
+    await ecrireJournal(pool, req, action, employeeId, details);
   } catch (e) {
     console.error(`[INSERTION][RSA] Journalisation ${action} impossible :`, e.message);
   }
+}
+
+/**
+ * Journal BLOQUANT — pour tout geste qui FAIT SORTIR un document vers le
+ * référent unique (correctifs M-02 et D-06).
+ *
+ * La fiche pour le référent et le relevé d'assiduité peuvent fonder une
+ * suspension de droits : leur trace n'est pas un confort d'exploitation, c'est
+ * la **preuve de la transmission**. Le lot 4 tenait déjà cette règle sur son
+ * export (« le journal est écrit AVANT l'envoi, son échec fait échouer
+ * l'acte », `temps.js`) ; les deux surfaces de la même PR se comportaient
+ * différemment devant le même risque.
+ *
+ * Aucun try/catch ici : l'erreur remonte au `catch` de la route, qui rend 500
+ * — le document ne part pas sans sa trace.
+ */
+async function journaliserDocument(db, req, action, employeeId, details) {
+  await ecrireJournal(db, req, action, employeeId, details);
 }
 
 /** Parcours courant du salarié (repli 1), comme `cadre.js`. */
@@ -85,10 +117,23 @@ async function parcoursNum(employeeId) {
   } catch (_) { return 1; }
 }
 
-/** Aujourd'hui au format 'AAAA-MM-JJ' (jour civil local du serveur). */
+/**
+ * Aujourd'hui au format 'AAAA-MM-JJ', **jour civil de Paris** (correctif m-07).
+ *
+ * Les conteneurs tournent en UTC : un jour civil lu sur l'horloge du serveur
+ * bascule deux heures trop tôt en été. Une remise saisie le 1er à 01 h du matin
+ * serait alors refusée comme « future ». Piège déjà corrigé deux fois dans le
+ * dépôt (2.24.1 jour civil des tournées, 2.47.0 horloge du moteur de tournée).
+ */
 function aujourdhui() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return aujourdhuiParis();
+}
+
+/** Le même jour, un an plus tôt — arithmétique UTC pure, aucun fuseau en jeu. */
+function ilYaUnAn(au) {
+  const d = new Date(`${au}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -100,11 +145,7 @@ function aujourdhui() {
 function lirePeriode(req) {
   const au = JOUR_RE.test(String(req.query.au || '')) ? String(req.query.au) : aujourdhui();
   let du = JOUR_RE.test(String(req.query.du || '')) ? String(req.query.du) : null;
-  if (!du) {
-    const d = new Date(`${au}T00:00:00Z`);
-    d.setUTCFullYear(d.getUTCFullYear() - 1);
-    du = d.toISOString().slice(0, 10);
-  }
+  if (!du) du = ilYaUnAn(au);
   if (du > au) return { erreur: 'La date de début est postérieure à la date de fin.' };
   return { du, au };
 }
@@ -127,8 +168,11 @@ router.get('/echeances-periodiques', async (req, res) => {
   };
   try {
     const moisMin = Math.max(1, Math.round(Number(await readInsertionSetting('insertion.point_etape_referent_mois')) || 3));
-    const now = new Date();
-    const mois = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    // Tout le bloc se date sur le JOUR CIVIL DE PARIS (m-07) : le conteneur
+    // tourne en UTC, et « le mois courant » lu sur son horloge bascule deux
+    // heures trop tôt le 1er du mois.
+    const jour = aujourdhui();
+    const mois = `${jour.slice(0, 7)}-01`;
 
     const [actualisations, points, referentsNd] = await Promise.all([
       // Actualisations du mois : toutes les personnes concernées, qu'une ligne
@@ -146,12 +190,20 @@ router.get('/echeances-periodiques', async (req, res) => {
       // référent » RÉALISÉ et d'une fiche effectivement REMISE. Les deux valent
       // alimentation — ne compter que les entretiens ferait apparaître « jamais
       // de point » sur un dossier où une fiche part chaque trimestre.
+      // CORRECTIF D-03 — plus de sentinelle '1900-01-01'. Elle était reconnue
+      // côté JS en comparant `String(uneDate).slice(0, 10)` à la chaîne
+      // '1900-01-01' : le pilote rendant « Mon Jan 01 », et les lettres passant
+      // après les chiffres en ASCII, la sentinelle était prise pour une vraie
+      // date. La branche « jamais de contact tracé » était donc MORTE et le
+      // tableau de bord affichait « dernier contact il y a null j ».
+      //
+      // `GREATEST` de PostgreSQL IGNORE les NULL (à la différence d'autres
+      // moteurs) : il ne rend NULL que si les deux le sont — exactement la
+      // sémantique voulue. Et la date est convertie **par PostgreSQL**
+      // (`to_char`), ce qui retire la conversion du chemin JS.
       soft('points_referent', `
         SELECT e.id AS employee_id, e.first_name, e.last_name,
-               GREATEST(
-                 COALESCE(MAX(m.completed_date), '1900-01-01'::date),
-                 COALESCE(MAX(a.remis_referent_le), '1900-01-01'::date)
-               ) AS dernier_brut
+               to_char(GREATEST(MAX(m.completed_date), MAX(a.remis_referent_le)), 'YYYY-MM-DD') AS dernier_le
           FROM employees e
           LEFT JOIN insertion_milestones m
                  ON m.employee_id = e.id AND m.milestone_type = 'point_etape_referent' AND m.status = 'realise'
@@ -172,13 +224,10 @@ router.get('/echeances-periodiques', async (req, res) => {
     // aucun contact ne rend PAS un nombre de jours géant (qui trierait la liste
     // de façon absurde) mais `dernier_le: null` — c'est une autre situation,
     // elle se lit autrement.
-    const jourMs = 86400000;
-    const aujourd = new Date(aujourdhui() + 'T00:00:00Z').getTime();
     const pointsDus = [];
     for (const p of points) {
-      const brut = p.dernier_brut ? String(p.dernier_brut).slice(0, 10) : null;
-      const dernier = brut && brut > '1900-01-01' ? brut : null;
-      const depuis = dernier ? Math.round((aujourd - new Date(`${dernier}T00:00:00Z`).getTime()) / jourMs) : null;
+      const dernier = isoDate(p.dernier_le);
+      const depuis = dernier ? ecartJours(dernier, jour) : null;
       if (dernier && depuis < moisMin * 30) continue; // dans les clous
       pointsDus.push({
         employee_id: p.employee_id,
@@ -196,38 +245,55 @@ router.get('/echeances-periodiques', async (req, res) => {
       SELECT id, first_name, last_name FROM employees
        WHERE insertion_status = 'en_parcours' AND is_active = true
        ORDER BY UPPER(last_name), UPPER(first_name)`);
-    const annee = new Date().getFullYear();
+    // CORRECTIF D-07 — un seul chargement pour toute la cohorte. La boucle
+    // appelait `activiteHebdo` dossier par dossier : 3 lectures de réglage +
+    // 5 requêtes CHACUN, soit 325 requêtes pour 40 dossiers (mesuré), à chaque
+    // ouverture du tableau de bord. `activiteHebdoCohorte` lit les réglages une
+    // fois et charge les cinq sources d'un coup (`= ANY($1::int[])`) : le coût
+    // devient CONSTANT, 8 requêtes quelle que soit la taille de la cohorte.
+    const annee = Number(jour.slice(0, 4));
     const employesSousSeuil = [];
-    for (const c of cohorte) {
-      try {
-        const a = await activiteHebdo({ employeeId: c.id, annee });
-        if (a.alerte && a.alerte.active) {
+    try {
+      const activites = await activiteHebdoCohorte({ employeeIds: cohorte.map((c) => c.id), annee });
+      for (const c of cohorte) {
+        const a = activites.get(Number(c.id));
+        if (a && a.alerte && a.alerte.active) {
           employesSousSeuil.push({
             employee_id: c.id,
             nom: `${(c.last_name || '').toUpperCase()} ${c.first_name || ''}`.trim(),
             nb_semaines: a.nb_semaines_sous_seuil,
           });
         }
-      } catch (err) {
-        console.error(`[INSERTION][RSA] Activité du salarié ${c.id} illisible : ${err.message}`);
       }
+    } catch (err) {
+      // Dégradation NOMMÉE : le bloc affiche zéro salarié signalé, jamais une
+      // panne — mais le journal serveur dit pourquoi.
+      console.error(`[INSERTION][RSA] Activité de la cohorte illisible : ${err.message}`);
     }
 
     // Déclaration trimestrielle de ressources : l'échéance est une règle de
     // calendrier, pas une donnée du dossier — elle se dit telle quelle.
-    const trimestre = Math.floor(now.getMonth() / 3) + 1;
-    const finTrimestre = new Date(Date.UTC(now.getFullYear(), trimestre * 3, 0));
+    // Le trimestre se lit sur le jour civil de PARIS : au 1er janvier à 00 h 30,
+    // l'horloge UTC du conteneur est encore au 31 décembre — donc au T4 de
+    // l'année précédente.
+    const anneeJour = Number(jour.slice(0, 4));
+    const trimestre = Math.floor((Number(jour.slice(5, 7)) - 1) / 3) + 1;
+    const finTrimestre = new Date(Date.UTC(anneeJour, trimestre * 3, 0));
 
     res.json({
       actualisations_ft_du_mois: actualisations.map((a) => ({
         employee_id: a.employee_id,
         nom: `${(a.last_name || '').toUpperCase()} ${a.first_name || ''}`.trim(),
-        rappel_le: a.rappel_le ? String(a.rappel_le).slice(0, 10) : null,
+        // CORRECTIF D-02 bis — `String(uneDate).slice(0, 10)` rendait
+        // « Sun Mar 02 », que le front re-datait SILENCIEUSEMENT de l'an 2001
+        // (V8 parse cette forme sans erreur). Un « Invalid Date » aurait été
+        // moins dangereux qu'une date plausible et fausse de vingt-quatre ans.
+        rappel_le: isoDate(a.rappel_le),
         honoree: a.honoree == null ? null : a.honoree === true,
       })),
       points_referent_dus: pointsDus,
       semaines_sous_seuil: { nb_salaries: employesSousSeuil.length, employes: employesSousSeuil },
-      dtr: { trimestre: `T${trimestre} ${now.getFullYear()}`, echeance: finTrimestre.toISOString().slice(0, 10) },
+      dtr: { trimestre: `T${trimestre} ${anneeJour}`, echeance: finTrimestre.toISOString().slice(0, 10) },
       referents_non_determines: referentsNd.map((r) => ({
         employee_id: r.employee_id,
         nom: `${(r.last_name || '').toUpperCase()} ${r.first_name || ''}`.trim(),
@@ -279,7 +345,9 @@ router.get('/:employeeId/assiduite', ID, validate, async (req, res) => {
   try {
     const releve = await composerReleveAssiduite({ employeeId, du: p.du, au: p.au, variante });
     if (!releve) return res.status(404).json({ error: 'Salarié non trouvé' });
-    await journaliser(req, 'INSERTION_ASSIDUITE_CONSULTATION', employeeId, { du: p.du, au: p.au, variante });
+    // BLOQUANT (M-02) : cette réponse EST le relevé qui sera imprimé et remis
+    // au référent. Elle ne part pas sans sa trace.
+    await journaliserDocument(pool, req, 'INSERTION_ASSIDUITE_CONSULTATION', employeeId, { du: p.du, au: p.au, variante });
     res.json(releve);
   } catch (err) {
     console.error('[INSERTION][RSA] Erreur assiduité :', err.message);
@@ -325,7 +393,7 @@ router.get('/:employeeId/fiche-referent', ID, validate, async (req, res) => {
     }
     const contenu = await composerFicheReferent({ employeeId, du: p.du, au: p.au, userId: req.user.id });
     if (!contenu) return res.status(404).json({ error: 'Salarié non trouvé' });
-    await journaliser(req, 'INSERTION_FICHE_REFERENT_APERCU', employeeId, { du: p.du, au: p.au });
+    await journaliserDocument(pool, req, 'INSERTION_FICHE_REFERENT_APERCU', employeeId, { du: p.du, au: p.au });
     res.json({ employee_id: employeeId, apercu: true, contenu });
   } catch (err) {
     console.error('[INSERTION][RSA] Erreur aperçu fiche référent :', err.message);
@@ -342,11 +410,7 @@ router.post('/:employeeId/fiche-referent', ID, validate, async (req, res) => {
   }
   const au = JOUR_RE.test(String(b.au || '')) ? String(b.au) : aujourdhui();
   let du = JOUR_RE.test(String(b.du || '')) ? String(b.du) : null;
-  if (!du) {
-    const d = new Date(`${au}T00:00:00Z`);
-    d.setUTCFullYear(d.getUTCFullYear() - 1);
-    du = d.toISOString().slice(0, 10);
-  }
+  if (!du) du = ilYaUnAn(au);
   if (du > au) return res.status(400).json({ error: 'La date de début est postérieure à la date de fin.' });
 
   try {
@@ -362,25 +426,47 @@ router.post('/:employeeId/fiche-referent', ID, validate, async (req, res) => {
 
     const contenu = await composerFicheReferent({ employeeId, du, au, userId: req.user.id });
     if (!contenu) return res.status(404).json({ error: 'Salarié non trouvé' });
+    const parcours = await parcoursNum(employeeId);
 
-    // Le destinataire est RECOPIÉ au moment de la génération : rattacher la
-    // fiche au référent actuel ferait mentir l'historique le jour où il change.
-    const ins = await pool.query(
-      `INSERT INTO insertion_alimentations_referent
-         (employee_id, parcours_num, moment, periode_debut, periode_fin,
-          destinataire_type, destinataire_nom, contenu, genere_par)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, genere_le`,
-      [employeeId, await parcoursNum(employeeId), moment, du, au,
-        ref.type, ref.nom || null, JSON.stringify(contenu), req.user.id]
-    );
-    await journaliser(req, 'INSERTION_FICHE_REFERENT_GENERATION', employeeId, {
-      alimentation_id: ins.rows[0].id, moment, du, au, destinataire_type: ref.type,
-    });
-    res.status(201).json({ id: ins.rows[0].id, genere_le: ins.rows[0].genere_le, contenu });
+    // CORRECTIFS M-02 et D-06 — le snapshot ET sa trace au registre sont écrits
+    // dans la MÊME transaction. Ils étaient indépendants : un snapshot pouvait
+    // exister sans trace (et réciproquement), et l'échec du journal était avalé
+    // — la fiche partait en 201, la preuve de sa transmission manquait, et rien
+    // ne le disait. Sur le document que la matrice de l'autorité appelle « le
+    // plus sensible de la liste », la trace n'est pas un confort : c'est la
+    // preuve. Les deux réussissent ensemble, ou rien n'est écrit.
+    //
+    // `pool.connect()` est DANS le `try` (doctrine PR A, constat M-04) :
+    // au-dehors, son rejet laisserait la requête sans réponse.
+    let client;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      // Le destinataire est RECOPIÉ au moment de la génération : rattacher la
+      // fiche au référent actuel ferait mentir l'historique le jour où il change.
+      const ins = await client.query(
+        `INSERT INTO insertion_alimentations_referent
+           (employee_id, parcours_num, moment, periode_debut, periode_fin,
+            destinataire_type, destinataire_nom, contenu, genere_par)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, genere_le`,
+        [employeeId, parcours, moment, du, au,
+          ref.type, ref.nom || null, JSON.stringify(contenu), req.user.id]
+      );
+      await journaliserDocument(client, req, 'INSERTION_FICHE_REFERENT_GENERATION', employeeId, {
+        alimentation_id: ins.rows[0].id, moment, du, au, destinataire_type: ref.type,
+      });
+      await client.query('COMMIT');
+      res.status(201).json({ id: ins.rows[0].id, genere_le: ins.rows[0].genere_le, contenu });
+    } catch (err) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      if (client) client.release();
+    }
   } catch (err) {
     if (err.code === '42P01') return res.status(503).json({ error: 'Fiches pour le référent indisponibles : base non migrée.' });
-    console.error('[INSERTION][RSA] Erreur génération fiche référent :', err.message);
+    console.error('[INSERTION][RSA] Erreur génération fiche référent :', err.message, err.code || '');
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -426,7 +512,7 @@ router.get('/:employeeId/alimentations/:id', [
       [parseInt(req.params.id, 10), employeeId]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Fiche non trouvée' });
-    await journaliser(req, 'INSERTION_FICHE_REFERENT_CONSULTATION', employeeId, { alimentation_id: r.rows[0].id });
+    await journaliserDocument(pool, req, 'INSERTION_FICHE_REFERENT_CONSULTATION', employeeId, { alimentation_id: r.rows[0].id });
     res.json(r.rows[0]);
   } catch (err) {
     if (err.code === '42P01') return res.status(404).json({ error: 'Fiche non trouvée' });
@@ -446,7 +532,10 @@ router.put('/:employeeId/alimentations/:id/remise', [
   const sets = [];
   const vals = [];
   const erreurs = [];
-  const demain = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); })();
+  // Jour civil de PARIS + 1 (m-07). L'ancien calcul mêlait un incrément LOCAL
+  // et une lecture UTC : passé 23 h à Paris en hiver, « demain » valait le jour
+  // MÊME, et une remise saisie le jour de sa remise était refusée « future ».
+  const demain = decalerJours(aujourdhui(), 1);
 
   const dateOuNull = (v, libelle) => {
     if (v === '' || v === null) return null;
@@ -480,12 +569,18 @@ router.put('/:employeeId/alimentations/:id/remise', [
       vals
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Fiche non trouvée' });
-    await journaliser(req, 'INSERTION_FICHE_REFERENT_REMISE', employeeId, {
+    await journaliserDocument(pool, req, 'INSERTION_FICHE_REFERENT_REMISE', employeeId, {
       alimentation_id: r.rows[0].id,
       referent: r.rows[0].remis_referent_le != null,
       salarie: r.rows[0].remis_salarie_le != null,
     });
-    res.json(r.rows[0]);
+    res.json({
+      ...r.rows[0],
+      // Dates rendues 'AAAA-MM-JJ' (famille D-02) : elles alimentent
+      // directement l'écran de traçabilité de remise.
+      remis_referent_le: isoDate(r.rows[0].remis_referent_le),
+      remis_salarie_le: isoDate(r.rows[0].remis_salarie_le),
+    });
   } catch (err) {
     console.error('[INSERTION][RSA] Erreur remise fiche :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -510,8 +605,17 @@ router.get('/:employeeId/actualisations-ft', [
   try {
     let lignes = [];
     try {
+      // CORRECTIF D-01 (bloquant) — le numéro de mois est désormais calculé
+      // PAR POSTGRESQL (`EXTRACT`). Il l'était auparavant par
+      // `Number(String(l.mois).slice(5, 7))` : `l.mois` étant un objet `Date`,
+      // `String(...)` rendait « Sat Mar 01 2025 … » et `slice(5, 7)` « ar »,
+      // donc `Number('ar')` = **NaN**. La Map était indexée par NaN et aucun
+      // des douze mois ne retrouvait sa ligne : l'écran affichait douze mois
+      // vides quoi qu'on enregistre, et la CIP recliquait sur « Faite ».
       const r = await pool.query(
-        `SELECT mois, rappel_le, honoree, constat_le
+        `SELECT EXTRACT(MONTH FROM mois)::int AS mois_num,
+                to_char(mois, 'YYYY-MM-DD') AS mois,
+                rappel_le, honoree, constat_le
            FROM insertion_actualisations_ft
           WHERE employee_id = $1 AND EXTRACT(YEAR FROM mois) = $2
           ORDER BY mois`,
@@ -520,15 +624,18 @@ router.get('/:employeeId/actualisations-ft', [
       lignes = r.rows;
     } catch (err) { if (err.code !== '42P01') throw err; }
 
-    const parMois = new Map(lignes.map((l) => [Number(String(l.mois).slice(5, 7)), l]));
+    // Ceinture et bretelles : le numéro vient de PostgreSQL (`mois_num`), et à
+    // défaut du helper partagé — qui, lui, sait lire un objet `Date`. Aucun
+    // chemin ne peut plus produire un NaN silencieux.
+    const parMois = new Map(lignes.map((l) => [l.mois_num != null ? Number(l.mois_num) : moisDe(l.mois), l]));
     const mois = [];
     for (let m = 1; m <= 12; m += 1) {
       const l = parMois.get(m);
       mois.push({
         mois: `${annee}-${String(m).padStart(2, '0')}`,
-        rappel_le: l && l.rappel_le ? String(l.rappel_le).slice(0, 10) : null,
+        rappel_le: l ? isoDate(l.rappel_le) : null,
         honoree: l && l.honoree != null ? l.honoree === true : null,
-        constat_le: l && l.constat_le ? String(l.constat_le).slice(0, 10) : null,
+        constat_le: l ? isoDate(l.constat_le) : null,
       });
     }
     res.json({ employee_id: employeeId, annee, mois });
@@ -635,12 +742,14 @@ router.put('/:employeeId/actualisations-ft/:mois', ID, validate, async (req, res
       [employeeId, moisDate]
     );
     const l = r.rows[0] || {};
+    // CORRECTIF D-02 — même conversion partagée que partout ailleurs. Ces deux
+    // dates repartaient en « Sun Mar 02 », que le front affichait 02/03/2001.
     res.json({
       employee_id: employeeId,
       mois: moisParam,
-      rappel_le: l.rappel_le ? String(l.rappel_le).slice(0, 10) : null,
+      rappel_le: isoDate(l.rappel_le),
       honoree: l.honoree == null ? null : l.honoree === true,
-      constat_le: l.constat_le ? String(l.constat_le).slice(0, 10) : null,
+      constat_le: isoDate(l.constat_le),
     });
   } catch (err) {
     if (err.code === '42P01') return res.status(503).json({ error: 'Registre d\'actualisation indisponible : base non migrée.' });

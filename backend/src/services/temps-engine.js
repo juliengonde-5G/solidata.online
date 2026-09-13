@@ -25,6 +25,8 @@
 
 'use strict';
 
+const { isoDate } = require('../utils/date-iso');
+
 /** Code de projet des lignes qui ne se rattachent à aucune opération. */
 const HORS_PROJET = 'HORS_PROJET';
 
@@ -41,15 +43,16 @@ const HEURES_HEBDO_DEFAUT = 35;
 /**
  * Normalise une date (chaîne ISO, Date, timestamp Postgres) en 'YYYY-MM-DD'.
  * Une valeur illisible rend `null` — jamais la date du jour en remplacement.
+ *
+ * DÉLÈGUE au helper partagé `utils/date-iso.js` depuis le correctif D-05 : sa
+ * branche `Date` lisait l'objet en **UTC** (`toISOString()`) alors que le
+ * pilote construit une colonne `DATE` à minuit **LOCAL**. Sous Europe/Paris,
+ * toutes les dates de la feuille glissaient donc d'un jour — donc dans le
+ * mauvais mois, donc dans le mauvais bilan d'exécution. Le moteur reste PUR :
+ * le helper n'a aucune E/S.
  */
 function jourISO(v) {
-  if (!v) return null;
-  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
-  const s = String(v).trim();
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  return isoDate(v);
 }
 
 /** Nombre de jours du mois (mois 1-12). */
@@ -295,7 +298,17 @@ function verifierCoherence({ lignes = [], leaves = [], weeklyHours = null, annee
     anomalies.push({
       date: l.date,
       type: 'jour_absence',
-      detail: `Temps déclaré un jour d'absence de l'intervenant (${LIBELLES_ABSENCE[abs.categorie] || 'absence déclarée'}).`,
+      // CE DÉTAIL PART VERS LE FINANCEUR (CSV de l'export (c) et PDF, tous deux
+      // en-tête au NOM de l'intervenant). Il dit donc QU'IL Y A absence, jamais
+      // laquelle : `type_category = 'sick'` est une donnée de santé (art. 9), et
+      // la traduire en clair (« arrêt de travail ») la rendait lisible par la
+      // DDETS sur une pièce nominative. La spécification (c) ne demande que le
+      // JOUR en anomalie — constat B-03 de la revue de sécurité.
+      //
+      // La catégorie n'est pas non plus rangée dans un champ voisin : elle
+      // serait FIGÉE dans `coherence` pour la durée de conservation de la pièce
+      // (≥ 5 ans) sans qu'aucun écran ne la demande.
+      detail: "Temps déclaré un jour d'absence déclarée de l'intervenant.",
     });
   }
 
@@ -324,16 +337,18 @@ function verifierCoherence({ lignes = [], leaves = [], weeklyHours = null, annee
   return { conforme: anomalies.length === 0, anomalies };
 }
 
-/** Catégories de congé, en clair et SANS jamais reprendre le libellé de paie. */
-const LIBELLES_ABSENCE = {
-  holiday: 'congés payés', sick: 'arrêt de travail', absence: 'absence',
-};
+// La table `LIBELLES_ABSENCE` (« congés payés » / « arrêt de travail » /
+// « absence ») a été RETIRÉE par le correctif B-03 : elle ne servait qu'à
+// composer le détail d'anomalie, c'est-à-dire à faire sortir une catégorie
+// d'absence de l'article 9 sur une pièce nominative destinée au financeur. La
+// laisser en place aurait été laisser à portée de main exactement le geste
+// qu'on vient d'interdire.
 
 const arrondi1 = (x) => Math.round(x * 10) / 10;
 const arrondi2 = (x) => Math.round(x * 100) / 100;
 
 module.exports = {
-  HORS_PROJET, ACTIVITES, HEURES_HEBDO_DEFAUT, LIBELLES_ABSENCE,
+  HORS_PROJET, ACTIVITES, HEURES_HEBDO_DEFAUT,
   jourISO, joursDuMois, dansPeriode, couvre, projetDeLigne,
   composerLignes, calculerTotaux, verifierCoherence,
 };

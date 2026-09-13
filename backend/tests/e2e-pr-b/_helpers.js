@@ -116,9 +116,13 @@ async function creerSalarie(pool, matricule, champs = {}) {
 
 /** Décalage de jours en date ISO (AAAA-MM-JJ), horloge locale du test. */
 function jourDecale(n) {
+  // Incrément et lecture dans LE MÊME repère (le jour civil local) : mélanger
+  // un `setDate` local et un `toISOString()` UTC fait sauter un jour dès que
+  // l'heure locale tombe avant l'offset — le piège même que ces suites
+  // éprouvent.
   const d = new Date();
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return isoDate(d);
 }
 
 /**
@@ -149,13 +153,18 @@ function plusJours(iso, n) {
  * comparerait donc deux chaînes fausses de la même façon — et ne verrait pas le
  * défaut. (C'est exactement ce raccourci qui a été trouvé dans le code de
  * production : voir le rapport 18, défauts D-01 et D-02.)
+ *
+ * SECOND DÉFAUT DU HARNAIS, corrigé au moment des correctifs (rapport 19 § 6) :
+ * cette fonction lisait l'objet en **UTC** (`getUTC*`). Or le pilote construit
+ * une colonne `DATE` à minuit **LOCAL** : sous `TZ=Europe/Paris`, elle rendait
+ * donc la VEILLE, et sept assertions tombaient sur une faute du harnais et non
+ * du code. Elle délègue désormais au helper de production `utils/date-iso.js`
+ * — ce qui a le mérite supplémentaire de l'éprouver.
  */
+const { isoDate } = require('../../src/utils/date-iso');
+
 function iso(v) {
-  if (v == null) return null;
-  if (v instanceof Date) {
-    return `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, '0')}-${String(v.getUTCDate()).padStart(2, '0')}`;
-  }
-  return String(v).slice(0, 10);
+  return isoDate(v);
 }
 
 /**

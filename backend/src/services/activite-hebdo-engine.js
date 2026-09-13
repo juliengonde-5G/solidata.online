@@ -228,7 +228,11 @@ function calculerSemaines({
       if (arretDeclare) categorie = 'arret';
       else if (heuresContrat != null && heuresContrat < min) categorie = 'temps_partiel';
       else if (congeHoliday) categorie = 'absence';
-      raisons.push({ iso_week: w.num, categorie });
+      // `iso_year` accompagne la semaine (correctif m-01) : la fiche pour le
+      // référent concatène les raisons de DEUX années civiles quand la période
+      // est à cheval, et un appariement sur le seul numéro de semaine recopiait
+      // la raison de la S3 2025 sur la S3 2026.
+      raisons.push({ iso_year: an, iso_week: w.num, categorie });
     }
   }
 

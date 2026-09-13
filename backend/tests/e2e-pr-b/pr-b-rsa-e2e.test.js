@@ -701,17 +701,32 @@ async function poserSemaine(employeeId, num, heuresTravaillees, heuresContrat = 
     // Panne injectée en BASE (et non dans le code) : un CHECK temporaire qui
     // refuse cette seule action.
     test('DÉFAUT D-06 — une fiche transmise sans sa trace ne doit pas partir en 201', async () => {
+      // `NOT VALID` : la contrainte s'applique aux écritures À VENIR sans être
+      // vérifiée sur l'existant. Sans lui, l'ALTER échoue — les tests de la
+      // section 5 ont déjà écrit des lignes portant cette action, et c'est
+      // l'ALTER qui tombait, pas le comportement mesuré. (Défaut du harnais
+      // relevé par l'agent de correctifs, § 6 du rapport 19.)
       await pool.query(`ALTER TABLE rgpd_audit_log ADD CONSTRAINT probe_ko_rsa CHECK
-        (action <> 'INSERTION_FICHE_REFERENT_GENERATION')`);
+        (action <> 'INSERTION_FICHE_REFERENT_GENERATION') NOT VALID`);
       try {
         const r = await auth(request(app).post(`/api/insertion/rsa/${salarie}/fiche-referent`), 'ADMIN')
           .send({ moment: 'demande', du: `${ANNEE}-01-01`, au: `${ANNEE}-12-31` });
         const trace = await pool.query(
           `SELECT count(*)::int n FROM rgpd_audit_log
             WHERE action = 'INSERTION_FICHE_REFERENT_GENERATION' AND entity_id = $1`, [salarie]);
-        // Ce qui est constaté aujourd'hui : 201 rendu, fiche écrite, trace nulle.
-        // Ce qui est attendu : soit l'acte échoue, soit la trace existe.
+        // Ce qui était constaté avant le correctif : 201 rendu, fiche écrite,
+        // trace nulle. Ce qui est attendu : soit l'acte échoue, soit la trace
+        // existe.
         expect({ statut: r.status, trace: trace.rows[0].n }).not.toEqual({ statut: 201, trace: 0 });
+        // CORRECTIF M-02 / D-06 — le journal est écrit DANS LA MÊME transaction
+        // que le snapshot : ni l'un ni l'autre ne subsiste. Une fiche ne part
+        // pas sans sa preuve de transmission, et aucun snapshot orphelin ne
+        // reste pour laisser croire qu'elle est partie.
+        expect(r.status).toBe(500);
+        const snapshots = await pool.query(
+          `SELECT count(*)::int n FROM insertion_alimentations_referent
+            WHERE employee_id = $1 AND moment = 'demande'`, [salarie]);
+        expect(snapshots.rows[0].n).toBe(0);
       } finally {
         await pool.query('ALTER TABLE rgpd_audit_log DROP CONSTRAINT IF EXISTS probe_ko_rsa');
       }

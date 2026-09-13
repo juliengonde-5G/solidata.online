@@ -117,6 +117,18 @@ export default function FeuilleTemps({ feuille, projets = [], estAdmin, estRh, m
     telecharger(r.data, `temps_${annee}-${String(mois).padStart(2, '0')}.csv`);
   }, 'Export téléchargé.');
 
+  // ══ M-05 — l'impression passe par une route DÉDIÉE et JOURNALISÉE ═══════
+  // Le PDF est composé ici, à partir d'une réponse du serveur. Tant que cette
+  // réponse était celle du GET ordinaire, la feuille sortait sans aucune trace
+  // — alors que le CSV, qui porte le même contenu, la même mention « pièce de
+  // justification d'une dépense cofinancée » et va au même destinataire, était
+  // journalisé. La question « qui a sorti la feuille de septembre ? » n'avait
+  // pas de réponse si elle était sortie en PDF.
+  const imprimer = () => appel('pdf', async () => {
+    const r = await api.get(`/insertion/temps/${userId}/${annee}/${mois}/export.pdf`);
+    exportFeuilleTempsPDF({ feuille: r.data, intervenant: r.data.intervenant });
+  }, null);
+
   return (
     <Section
       title={`Feuille de temps — ${String(mois).padStart(2, '0')}/${annee}`}
@@ -139,10 +151,9 @@ export default function FeuilleTemps({ feuille, projets = [], estAdmin, estRh, m
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <Download className="w-4 h-4" aria-hidden="true" /> {enCours === 'csv' ? 'Export…' : 'Exporter CSV'}
           </button>
-          <button type="button"
-            onClick={() => exportFeuilleTempsPDF({ feuille, intervenant: feuille.intervenant })}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-            <Printer className="w-4 h-4" aria-hidden="true" /> Imprimer
+          <button type="button" onClick={imprimer} disabled={enCours === 'pdf'}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <Printer className="w-4 h-4" aria-hidden="true" /> {enCours === 'pdf' ? 'Préparation…' : 'Imprimer'}
           </button>
         </div>
       )}

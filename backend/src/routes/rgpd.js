@@ -487,6 +487,39 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             source: 'code',
             reference: 'backend/src/routes/exports.js (fetchFreinsRows, GET /insertion-freins)',
           },
+          // ── Correctif m-08 — les trois documents sortants de la PR B ──────
+          // Un DPO qui lit cet écran doit y voir TOUS les flux qui quittent la
+          // structure. Ces trois-là n'y figuraient pas : deux partent vers un
+          // tiers qui peut décider d'une suspension de droits, le troisième
+          // vers le financeur.
+          {
+            titre: 'Fiche pour le référent unique (RSA)',
+            description: "Le point de situation transmis au référent unique externe (centre médico-social, France Travail) est composé en LISTE BLANCHE côté serveur : neuf rubriques, et les axes santé et judiciaire n'ont AUCUNE clé — ils sont écartés à la source du registre des freins, pas masqués à l'affichage. Les actions rattachées à ces deux axes sont retirées ligne entière, en SQL. Le titre libre d'un entretien et le libellé libre d'une action ne sortent jamais : le document ne connaît que le vocabulaire fermé des types d'entretien et des catégories d'action. Chaque fiche produite est ENREGISTRÉE en snapshot (preuve de ce qui a été transmis, indépendante de l'état actuel du dossier), et aucune fiche n'est produite quand aucun référent n'est déterminé.",
+            valeur: `durée du parcours + ${retentionInsertionMois || 24} mois`,
+            source: 'insertion.retention_months',
+            reference: 'backend/src/services/fiche-referent.js, backend/src/routes/insertion/rsa.js, table insertion_alimentations_referent',
+          },
+          {
+            titre: "Relevé d'assiduité (document tiers)",
+            description: "Rendez-vous proposés, honorés et absences par motif CATÉGORISÉ. Le libellé de paie d'un congé (`leave_type`) ne quitte jamais le module : seule la catégorie est lue. Une absence dont le motif n'a pas été renseigné est portée « motif non renseigné » et JAMAIS « injustifiée » — la structure constate qu'elle ne dispose pas de l'information, elle ne se prononce pas. La référence d'une pièce justificative (qui peut nommer un praticien) n'est lue que pour la variante interne, demandée explicitement.",
+            valeur: 'composé à la demande, chaque édition journalisée',
+            source: 'code',
+            reference: 'backend/src/services/fiche-referent.js (composerReleveAssiduite)',
+          },
+          {
+            titre: "Feuille de temps d'accompagnement (pièce de financement)",
+            description: "La feuille mensuelle d'un intervenant transmise à l'autorité de gestion ne porte AUCUN nom de bénéficiaire — pas par masquage : les lignes ne portent que l'identifiant interne depuis leur composition. Le détail d'une anomalie de cohérence dit qu'un temps a été déclaré un jour d'absence, jamais la catégorie de cette absence. Les exports CSV et PDF sont journalisés AVANT envoi et leur échec fait échouer l'acte. Conservée cinq ans après la clôture de l'opération (piste d'audit) : elle survit à l'anonymisation d'un salarié accompagné, dont seul le lien nominatif disparaît.",
+            valeur: "5 ans après clôture de l'opération",
+            source: 'code',
+            reference: 'backend/src/routes/insertion/temps.js, backend/src/services/temps-engine.js, table insertion_feuilles_temps',
+          },
+          {
+            titre: 'Documents destinés à un tiers — journal bloquant',
+            description: "Aperçu, génération, réimpression et traçage de remise d'une fiche pour le référent, édition d'un relevé d'assiduité, export d'une feuille de temps : chacun de ces gestes écrit sa trace au registre AVANT que le document ne parte, et l'échec de cette écriture fait échouer le geste. Pour la génération d'une fiche, le snapshot et sa trace sont écrits dans la MÊME transaction : il ne peut pas rester de preuve sans trace, ni de trace sans preuve.",
+            valeur: 'avant envoi, bloquant',
+            source: 'code',
+            reference: 'backend/src/routes/insertion/rsa.js (journaliserDocument), backend/src/routes/insertion/temps.js (journaliser)',
+          },
         ],
       },
       {

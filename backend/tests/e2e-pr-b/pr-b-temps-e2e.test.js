@@ -232,9 +232,12 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
       const a = r.body.coherence.anomalies.find((x) => x.type === 'jour_absence');
       expect(a).toBeTruthy();
       expect(a.date).toBe(`${ANNEE}-${M}-17`);
-      // La catégorie est traduite, JAMAIS le libellé de paie.
-      expect(a.detail).toMatch(/congés payés/);
+      // CORRECTIF B-03 — ni le libellé de paie, ni la CATÉGORIE : le détail
+      // part au financeur sur une pièce nominative, il dit qu'il y a absence
+      // et rien de plus.
       expect(a.detail).not.toMatch(/Congés payés été/);
+      expect(a.detail).not.toMatch(/congés|arrêt|maladie/i);
+      expect(a.detail).toBe("Temps déclaré un jour d'absence déclarée de l'intervenant.");
       // Et surtout : rien n'est bloqué — l'anomalie s'imprime, elle ne refuse pas.
       expect(r.status).toBe(200);
     });
@@ -535,15 +538,23 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
       expect(reste.rows[0].n).toBe(0);
     });
 
-    test('une saisie inconnue rend 404, une saisie d\'un autre intervenant 403', async () => {
+    // CORRECTIF m-04 — pour un MANAGER, la saisie d'un autre et une saisie
+    // inexistante sont INDISCERNABLES (404 dans les deux cas) : le couple
+    // 404/403 énumérait les identifiants de saisie des collègues.
+    test('pour un MANAGER, saisie inconnue et saisie d\'un autre rendent le MÊME 404', async () => {
       const q404 = await auth(request(app).delete('/api/insertion/temps/saisies/999999999'), 'ADMIN');
       expect(q404.status).toBe(404);
 
       const s = await auth(request(app).post(`/api/insertion/temps/${U.RH.id}/${ANNEE}/8/saisies`), 'ADMIN')
         .send({ date: `${ANNEE}-08-04`, activite: 'autre', duree_minutes: 45 });
       expect(s.status).toBe(201);
-      const q403 = await auth(request(app).delete(`/api/insertion/temps/saisies/${s.body.id}`), 'MANAGER');
-      expect(q403.status).toBe(403);
+      const autre = await auth(request(app).delete(`/api/insertion/temps/saisies/${s.body.id}`), 'MANAGER');
+      const inconnue = await auth(request(app).delete('/api/insertion/temps/saisies/999999998'), 'MANAGER');
+      expect(autre.status).toBe(404);
+      expect(autre.body).toEqual(inconnue.body);
+      // Et la saisie est TOUJOURS là : refuser ne veut pas dire supprimer.
+      const reste = await pool.query('SELECT count(*)::int n FROM insertion_temps_saisies WHERE id = $1', [s.body.id]);
+      expect(reste.rows[0].n).toBe(1);
       await pool.query('DELETE FROM insertion_temps_saisies WHERE id = $1', [s.body.id]);
     });
 

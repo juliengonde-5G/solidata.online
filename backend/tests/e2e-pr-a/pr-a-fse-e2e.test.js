@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 'use strict';
 
-const { RUN, creerComptes, purger, creerSalarie, jourDecale } = require('./_helpers');
+const { RUN, creerComptes, purger, creerSalarie, jourDecale, iso } = require('./_helpers');
 
 jest.mock('../../src/middleware/activity-logger', () => ({
   autoLogActivity: () => (req, res, next) => next(),
@@ -501,7 +501,7 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
     test('createPostSortieFollowups : jalon à +6 mois, idempotent', async () => {
       // Un bilan de sortie réalisé il y a 5 mois et 20 jours tombe dans la fenêtre.
       const d = new Date(); d.setMonth(d.getMonth() - 5); d.setDate(d.getDate() - 20);
-      const dIso = d.toISOString().slice(0, 10);
+      const dIso = iso(d);
       await pool.query(
         `INSERT INTO insertion_milestones (employee_id, parcours_num, milestone_type, titre, due_date, completed_date, status, sortie_classification)
          VALUES ($1, 1, 'bilan_sortie', 'Bilan de sortie (job)', $2, $2, 'realise', 'emploi_durable')`,
@@ -513,8 +513,9 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       expect(n1.rows[0].n).toBe(1);
       expect(r1.crees).toBeGreaterThanOrEqual(1);
       // Échéance = sortie + 6 mois (réglage par défaut).
-      const attendu = new Date(dIso); attendu.setMonth(attendu.getMonth() + 6);
-      expect(n1.rows[0].d.toISOString().slice(0, 10)).toBe(attendu.toISOString().slice(0, 10));
+      const [ay, am, aj] = dIso.split('-').map(Number);
+      const attendu = new Date(Date.UTC(ay, am - 1, aj)); attendu.setUTCMonth(attendu.getUTCMonth() + 6);
+      expect(iso(n1.rows[0].d)).toBe(attendu.toISOString().slice(0, 10));
 
       const r2 = await scheduler.createPostSortieFollowups();
       const n2 = await pool.query(

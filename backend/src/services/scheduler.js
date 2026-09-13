@@ -8,6 +8,7 @@
  * - Veille sectorielle auto-feed news
  */
 const pool = require('../config/database');
+const { ajouterMois } = require('../utils/date-iso');
 // Messagerie interne (lot L1) : canal qui S'AJOUTE aux notifications existantes
 // (Brevo, push, driver_messages) — aucune de ces fonctions ne lève (§2.1).
 // Require PARESSEUX obligatoire : services/messagerie charge middleware/auth,
@@ -585,14 +586,18 @@ async function createPostSortieFollowups() {
     verifies = rows.rows.length;
     const titre = `Suivi post-sortie (+${mois} mois)`;
     for (const r of rows.rows) {
-      const due = new Date(r.completed_date);
-      due.setMonth(due.getMonth() + mois);
+      // Famille D-05 : `new Date(colonneDATE)` puis `toISOString()` rendait LA
+      // VEILLE sous tout fuseau positif (le pilote construit une colonne DATE à
+      // minuit LOCAL) — le jalon de suivi post-sortie était donc daté d'un jour
+      // trop tôt hors UTC. `ajouterMois` travaille en UTC pur sur le jour civil,
+      // débordement de fin de mois inchangé.
+      const dueIso = ajouterMois(r.completed_date, mois);
       try {
         await pool.query(
           `INSERT INTO insertion_milestones
              (employee_id, parcours_num, milestone_type, titre, due_date, status, previous_milestone_id)
            VALUES ($1, $2, 'suivi_post_sortie', $3, $4, 'a_planifier', $5)`,
-          [r.employee_id, r.parcours_num, titre, due.toISOString().split('T')[0], r.id]
+          [r.employee_id, r.parcours_num, titre, dueIso, r.id]
         );
         crees++;
         console.log(`[SCHEDULER] Suivi post-sortie (+${mois} mois) cree pour ${r.first_name} ${r.last_name}`);

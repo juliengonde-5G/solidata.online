@@ -241,14 +241,30 @@ describe('verifierCoherence', () => {
     expect(c.anomalies.map((a) => a.date)).toEqual(['2026-09-04']);
   });
 
-  test('le libellé de paie n’est JAMAIS repris dans l’anomalie (seule la catégorie)', () => {
+  // CORRECTIF B-03 — le détail dit QU'IL Y A absence, jamais laquelle. Ce
+  // détail est imprimé tel quel dans le CSV et le PDF transmis au financeur,
+  // tous deux en-tête au NOM de l'intervenant : y traduire `type_category` en
+  // clair y faisait figurer une donnée de santé (art. 9) que la spécification
+  // (c) ne demande pas.
+  test('l’anomalie ne nomme NI le libellé de paie NI la catégorie d’absence', () => {
     const c = verifierCoherence({
       lignes,
       leaves: [{ type_category: 'sick', leave_type: 'Arrêt maladie — affection longue durée', start_date: '2026-09-04', end_date: '2026-09-04' }],
       weeklyHours: 35, annee: 2026, mois: 9,
     });
     expect(c.anomalies[0].detail).not.toMatch(/affection longue durée/i);
-    expect(c.anomalies[0].detail).toMatch(/arrêt de travail/);
+    expect(c.anomalies[0].detail).not.toMatch(/arrêt|maladie|congé|sick|holiday/i);
+    expect(c.anomalies[0].detail).toBe("Temps déclaré un jour d'absence déclarée de l'intervenant.");
+  });
+
+  // Et la preuve que le canal est fermé pour les TROIS catégories, pas
+  // seulement pour celle du test précédent : le même détail, mot pour mot.
+  test('les trois catégories produisent le MÊME détail, indiscernable', () => {
+    const details = ['sick', 'holiday', 'absence'].map((cat) => verifierCoherence({
+      lignes, leaves: [{ type_category: cat, start_date: '2026-09-04', end_date: '2026-09-04' }],
+      weeklyHours: 35, annee: 2026, mois: 9,
+    }).anomalies[0].detail);
+    expect(new Set(details).size).toBe(1);
   });
 
   test('un même jour n’est signalé qu’une fois même avec plusieurs lignes', () => {

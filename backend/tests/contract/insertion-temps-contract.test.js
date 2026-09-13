@@ -296,11 +296,31 @@ describe('Saisies — la feuille figée ne bouge plus', () => {
     expect(mockQuery.mock.calls.some(([t]) => /DELETE FROM insertion_temps_saisies/.test(String(t)))).toBe(false);
   });
 
-  it('suppression de la saisie d’un AUTRE intervenant refusée (403)', async () => {
+  // CORRECTIF m-04 — anti-énumération. La saisie d'un AUTRE intervenant et une
+  // saisie INEXISTANTE rendent le MÊME 404 pour qui n'est ni ADMIN ni RH : le
+  // couple 404/403 permettait à un MANAGER de découvrir quels identifiants
+  // existent chez ses collègues. Aucune donnée n'était rendue — c'est bien
+  // l'existence, et elle seule, qui fuyait.
+  it('suppression de la saisie d’un AUTRE intervenant : 404 INDISCERNABLE d’une saisie inexistante', async () => {
     brancher();
     mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [{ ...SAISIES[0], user_id: 42 }] }));
-    const res = await del('/api/insertion/temps/saisies/31', 'MANAGER');
-    expect(res.status).toBe(403);
+    const autre = await del('/api/insertion/temps/saisies/31', 'MANAGER');
+
+    brancher();
+    mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [] }));
+    const inexistante = await del('/api/insertion/temps/saisies/31', 'MANAGER');
+
+    expect(autre.status).toBe(404);
+    expect({ statut: autre.status, corps: autre.body }).toEqual({ statut: inexistante.status, corps: inexistante.body });
+    // Et la suppression n'a évidemment pas eu lieu.
+    expect(mockQuery.mock.calls.some(([t]) => /DELETE FROM insertion_temps_saisies/.test(String(t)))).toBe(false);
+  });
+
+  it('un ADMIN, lui, distingue encore une saisie inexistante (404) de la suppression d’une autre (200)', async () => {
+    brancher();
+    mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [{ ...SAISIES[0], user_id: 42 }] }));
+    const res = await del('/api/insertion/temps/saisies/31', 'ADMIN');
+    expect(res.status).toBe(200);
   });
 });
 
@@ -578,5 +598,53 @@ describe('Synthèse — indicateur n° 14 (ADMIN/RH)', () => {
     expect(res.status).toBe(200);
     expect(res.body.global_minutes).toBe(0);
     expect(res.body.moyenne_minutes_par_salarie).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CORRECTIF M-04 — `pool.connect()` DANS le `try`
+// ───────────────────────────────────────────────────────────────────────────
+// Les deux routes transactionnelles prenaient leur connexion AVANT le `try`.
+// Si `pool.connect()` rejette — pool saturé, base momentanément injoignable —
+// la promesse du handler est rejetée hors de tout try/catch. Express 4 ne
+// capture pas le rejet d'un handler `async` : AUCUNE réponse n'est envoyée, la
+// requête reste ouverte jusqu'au délai du client, et le rejet remonte en
+// `unhandledRejection`. C'est le défaut déjà trouvé et corrigé en PR A, qui
+// était revenu ici.
+//
+// Ce que ces deux tests mesurent : une réponse ARRIVE, et elle dit 500. Sans le
+// correctif, `supertest` attend jusqu'à son propre délai puis échoue sur un
+// socket fermé — et aucun `release()` n'est possible, puisqu'il n'y a pas de
+// connexion à rendre.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('M-04 — une connexion indisponible rend 500, elle ne laisse pas la requête sans réponse', () => {
+  const panne = () => {
+    mockConnect.mockImplementationOnce(() => Promise.reject(
+      Object.assign(new Error('timeout exceeded when trying to connect'), { code: '53300' })
+    ));
+  };
+
+  it('POST /valider', async () => {
+    brancher();
+    panne();
+    const res = await post('/api/insertion/temps/7/2026/9/valider', 'ADMIN');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('Erreur serveur');
+  });
+
+  it('POST /rouvrir', async () => {
+    brancher();
+    panne();
+    const res = await post('/api/insertion/temps/7/2026/9/rouvrir', 'ADMIN', { motif: 'Erreur de saisie constatée' });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('Erreur serveur');
+  });
+
+  it('aucune connexion n’est demandée deux fois, ni rendue sans avoir été prise', async () => {
+    brancher();
+    mockConnect.mockClear();
+    panne();
+    await post('/api/insertion/temps/7/2026/9/valider', 'ADMIN');
+    expect(mockConnect).toHaveBeenCalledTimes(1);
   });
 });

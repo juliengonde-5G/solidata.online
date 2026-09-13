@@ -3581,12 +3581,41 @@ async function gatherAuditKpis(year) {
     methode: "Taux calculés sur les sorties constatées de l'année civile (dénominateur = bilans de sortie réalisés portant une classification — changement de méthode 2026). Cible null = objectif non paramétré.",
   };
 
-  // PR B (4.2) — heures d'accompagnement de l'année (par projet / intervenant /
-  // salarié), composées par le service du temps d'accompagnement. `soft` :
-  // null si le service échoue ou si la base n'est pas migrée — jamais 0.
+  // PR B (4.2) — heures d'accompagnement de l'année. `soft` : null si le
+  // service échoue ou si la base n'est pas migrée — jamais 0.
+  //
+  // ═══ CORRECTIF B-02 (bloquant) — PROJECTION À LA SOURCE ══════════════════
+  //
+  // `heuresAccompagnement` compose aussi `par_salarie` — la liste NOMINATIVE de
+  // toutes les personnes accompagnées de l'année (« NOM Prénom ») avec le
+  // volume d'heures consacré à chacune — et `par_intervenant`, la même chose
+  // pour le personnel. Le lot 4 le SAIT et réserve cette ventilation :
+  // `GET /temps/synthese` porte `authorize('ADMIN','RH')` et son test de
+  // contrat s'intitule « MANAGER refusé sur la synthèse (agrégats nominatifs
+  // par salarié) ».
+  //
+  // Or ces indicateurs partent vers DEUX surfaces plus larges :
+  //   · `GET /api/insertion/audit`            → ADMIN / RH / **MANAGER** ;
+  //   · `GET /api/exports/insertion-synthese` → spread intégral sous la
+  //     bannière « Document agrégé non nominatif — comité de pilotage ».
+  // Un document qui s'annonce non nominatif et transporte une liste de
+  // personnes est une non-conformité en soi, indépendamment de qui le lit.
+  //
+  // La projection est posée ICI, à la source, et non à chaque frontière : une
+  // projection par route se réintroduit à la troisième route. Ne survivent que
+  // les agrégats que l'autorité demande (indicateur n° 14 : volume total,
+  // ventilation par opération, moyenne par personne) ; la ventilation
+  // nominative reste sur `/temps/synthese`, gardée ADMIN/RH.
   let heuresAccompagnement = null;
   try {
-    heuresAccompagnement = await require('../../services/temps-accompagnement').heuresAccompagnement({ annee: year });
+    const brut = await require('../../services/temps-accompagnement').heuresAccompagnement({ annee: year });
+    heuresAccompagnement = brut && {
+      annee: brut.annee,
+      global_minutes: brut.global_minutes,
+      par_projet: brut.par_projet,
+      nb_salaries_concernes: brut.nb_salaries_concernes,
+      moyenne_minutes_par_salarie: brut.moyenne_minutes_par_salarie,
+    };
   } catch (err) {
     console.error(`[INSERTION][AUDIT] « heures_accompagnement » ignorée : ${err.message}`);
   }

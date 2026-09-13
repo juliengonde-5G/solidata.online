@@ -84,6 +84,40 @@ async function run(client) {
   `);
   await client.query('CREATE INDEX IF NOT EXISTS idx_feuilles_temps_periode ON insertion_feuilles_temps(annee, mois);');
 
+  // ── (c) Registre des traitements, article 30 (correctif m-09) ─────────────
+  //
+  // La feuille de temps traite des données du PERSONNEL — temps de travail
+  // quotidien, jours d'absence de l'intervenant, signatures nominatives — et
+  // elle est TRANSMISE à l'autorité de gestion comme pièce de justification
+  // d'une dépense cofinancée. Deux raisons d'avoir sa propre entrée plutôt que
+  // d'être rangée sous l'accompagnement : la finalité est le contrôle de
+  // service fait (pas l'accompagnement), et le destinataire est extérieur.
+  //
+  // La durée de conservation suit la PISTE D'AUDIT du FSE+ et non la rétention
+  // des dossiers d'insertion : une pièce de financement se conserve tant que
+  // l'autorité peut la contrôler. C'est pourquoi l'anonymisation d'un salarié
+  // vide l'`employee_id` du JSONB sans supprimer la feuille (contrat § 8).
+  //
+  // Le NOM DU SIGNATAIRE est figé dans la pièce et n'est pas anonymisé : il est
+  // NÉCESSAIRE à sa valeur probante (une feuille sans signataire ne justifie
+  // rien). C'est un choix, il est écrit ici plutôt que subi (constat m-11).
+  await client.query(
+    `INSERT INTO rgpd_registre
+      (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
+     SELECT
+      'Justification du temps d''accompagnement cofinancé (feuilles de temps)',
+      'Composition, signature et transmission des feuilles de temps mensuelles des intervenants (CIP, encadrants) affectés à une opération cofinancée : justification du service fait auprès de l''autorité de gestion (bilans d''exécution FSE+, contrôles de service fait, options de coûts simplifiés).',
+      'Obligation légale et conventionnelle (règlement (UE) 2021/1060, conventions de cofinancement FSE+ et conventionnement IAE)',
+      'Personnel de la structure affecté à une opération cofinancée (conseillères en insertion professionnelle, encadrants techniques, personnel d''appui)',
+      'Identité de l''intervenant (nom, prénom, identifiant interne), date et durée de chaque temps d''accompagnement, opération de rattachement, quotité d''affectation, jours d''absence signalés en anomalie de cohérence SANS leur motif ni leur catégorie, horodatage et identité des deux signataires. AUCUN nom de bénéficiaire : les lignes ne portent que l''identifiant interne du salarié accompagné.',
+      'Autorité de gestion FSE+ et service instructeur (DDETS), organismes de contrôle et d''audit, commissaire aux comptes. En interne : ADMIN et RH ; l''intervenant lui-même pour sa propre feuille.',
+      'Cinq ans après la clôture de l''opération cofinancée (piste d''audit). La feuille survit à l''anonymisation du dossier d''un salarié accompagné : seul le lien nominatif vers lui disparaît (identifiants remplacés par NULL dans le détail), la pièce de financement reste justifiable.',
+      'Périmètre serveur : ADMIN/RH sur tout, un intervenant uniquement sur sa propre feuille (comparaison numérique posée avant toute requête). Feuille FIGÉE au moment de la signature (snapshot des lignes, totaux et cohérence) : un fait ajouté ou corrigé après coup ne déplace plus un total signé. Double signature obligatoire, auto-validation refusée, réouverture réservée à un administrateur avec motif journalisé. Exports CSV et PDF journalisés au registre RGPD AVANT envoi, leur échec faisant échouer l''acte ; neutralisation des formules dans le CSV ; refus explicite d''un export sans aucune ligne.'
+     WHERE NOT EXISTS (
+      SELECT 1 FROM rgpd_registre WHERE nom_traitement ILIKE 'Justification du temps d''accompagnement cofinancé%'
+     )`
+  );
+
   console.log('[INIT-DB] Migration PR B lot 4 (temps d’accompagnement : saisies, feuilles de temps) ✓');
 }
 

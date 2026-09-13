@@ -269,6 +269,108 @@ describe('5. relevé d’assiduité — variantes tiers et dossier', () => {
     expect(r.entretiens[0].absence_piece_ref).toBe('Certificat du Dr Durand — 10/04');
   });
 
+  // ═══ CORRECTIF B-01 (bloquant) ═════════════════════════════════════════
+  // `insertion_milestones.titre` est un VARCHAR(120) LIBREMENT saisi par la
+  // CIP : ni contrainte de contenu, ni chiffrement, ni masquage. Il primait sur
+  // le libellé de type dans le relevé destiné au référent — donc un titre comme
+  // « Bilan après hospitalisation », naturel dans un dossier interne, sortait
+  // vers le CMS ou France Travail sur un document qui peut fonder une
+  // suspension de droits.
+  describe('B-01 — le TITRE libre d’un entretien ne sort jamais vers le tiers', () => {
+    const titreParlant = [{
+      id: 3, milestone_type: 'bilan_intermediaire', titre: 'Bilan après hospitalisation — suite convocation au tribunal',
+      status: 'realise', completed_date: '2026-04-10', presence: 'present', absence_motif: null,
+    }];
+
+    test('variante tiers : le libellé est celui du TYPE, la table fermée', async () => {
+      branche({ entretiens: titreParlant });
+      const r = await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30' });
+      expect(r.entretiens[0].type_libelle).toBe(TYPE_LABELS.bilan_intermediaire);
+      expect(JSON.stringify(r)).not.toMatch(/hospitalisation|tribunal/i);
+    });
+
+    test('variante dossier : le titre que la CIP a écrit lui reste utile', async () => {
+      branche({ entretiens: titreParlant });
+      const r = await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30', variante: 'dossier' });
+      expect(r.entretiens[0].type_libelle).toBe('Bilan après hospitalisation — suite convocation au tribunal');
+    });
+
+    test('un type inconnu retombe sur son code, jamais sur le titre', async () => {
+      branche({ entretiens: [{ ...titreParlant[0], milestone_type: 'type_futur' }] });
+      const r = await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30' });
+      expect(r.entretiens[0].type_libelle).toBe('type_futur');
+      expect(JSON.stringify(r)).not.toMatch(/hospitalisation/i);
+    });
+  });
+
+  // ═══ CORRECTIF M-01 ════════════════════════════════════════════════════
+  // `cip_action_plans.action_label` est une colonne TEXT librement saisie. Les
+  // actions rattachées aux freins `sante` et `judiciaire` sont écartées en SQL,
+  // mais `frein_type` est FACULTATIF et sans CHECK : « Accompagnement au
+  // rendez-vous CMP » sous la catégorie « insertion » passait intégralement.
+  // La FICHE avait déjà tranché (elle n'imprime que `category`) ; le RELEVÉ part
+  // au même destinataire et tient désormais la même règle.
+  describe('M-01 — le libellé libre d’une action ne sort pas vers le tiers', () => {
+    const actionParlante = [{
+      action_label: 'Accompagnement au rendez-vous CMP — dossier MDPH',
+      category: 'frein', status: 'realise', date_realisation: '2026-04-12',
+      echeance: null, frein_type: 'administratif', partenaire_nom: 'Mission locale',
+    }];
+
+    test('variante tiers : catégorie fermée + partenaire, jamais le libellé', async () => {
+      branche({ actions: actionParlante });
+      const r = await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30' });
+      expect(r.actions[0]).toEqual({
+        date: '2026-04-12', nature: 'frein', partenaire: 'Mission locale', statut: 'realise',
+      });
+      expect(Object.keys(r.actions[0])).not.toContain('libelle');
+      expect(JSON.stringify(r)).not.toMatch(/CMP|MDPH/);
+    });
+
+    test('variante dossier : le libellé revient, pour la CIP', async () => {
+      branche({ actions: actionParlante });
+      const r = await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30', variante: 'dossier' });
+      expect(r.actions[0].libelle).toBe('Accompagnement au rendez-vous CMP — dossier MDPH');
+    });
+
+    test('`notes` n’est jamais demandé à la base, dans aucune variante', async () => {
+      branche({ actions: actionParlante });
+      await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30', variante: 'dossier' });
+      const sql = mockQuery.mock.calls.map(([q]) => String(q)).find((q) => /FROM cip_action_plans/.test(q));
+      expect(sql).not.toMatch(/\bnotes\b/);
+    });
+  });
+
+  // ═══ CORRECTIF m-05 ════════════════════════════════════════════════════
+  describe('m-05 — une source tombée est NOMMÉE, jamais tue', () => {
+    test('la fiche dit quelle rubrique manque', async () => {
+      branche();
+      const base = mockQuery.getMockImplementation();
+      mockQuery.mockImplementation((sql) => (/FROM cip_action_plans/.test(String(sql))
+        ? Promise.reject(Object.assign(new Error('relation "cip_action_plans" does not exist'), { code: '42P01' }))
+        : base(sql)));
+      const f = await composerFicheReferent(PERIODE);
+      expect(f.actions).toEqual([]);
+      expect(f.mentions.sources_indisponibles).toEqual(['Actions d’accompagnement']);
+    });
+
+    test('quand tout répond, la mention est un tableau VIDE (pas une alerte de confort)', async () => {
+      branche();
+      const f = await composerFicheReferent(PERIODE);
+      expect(f.mentions.sources_indisponibles).toEqual([]);
+    });
+
+    test('le relevé porte la même mention', async () => {
+      branche();
+      const base = mockQuery.getMockImplementation();
+      mockQuery.mockImplementation((sql) => (/FROM employee_leaves/.test(String(sql))
+        ? Promise.reject(Object.assign(new Error('boom'), { code: '42P01' }))
+        : base(sql)));
+      const r = await composerReleveAssiduite({ employeeId: 5, du: '2026-03-01', au: '2026-06-30' });
+      expect(r.sources_indisponibles).toEqual(['Absences enregistrées par la paie']);
+    });
+  });
+
   test('les deux nouveaux types d’entretien ont un libellé français', () => {
     expect(TYPE_LABELS.point_etape_referent).toBe('Point avec le référent');
     expect(TYPE_LABELS.conciliation).toBe('Entretien de conciliation (protection des droits)');

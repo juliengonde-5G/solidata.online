@@ -32,6 +32,10 @@ const { authorize, resolveBaseRole } = require('../../middleware/auth');
 const { body, param, query } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
+// Jour civil : cf. `utils/date-iso.js`. Les colonnes DATE reviennent en objets
+// `Date` construits à minuit LOCAL — les lire en UTC les décale d'un jour dès
+// que le fuseau est positif (correctif D-05).
+const { isoDate, moisDe, anneeDe, aujourdhuiParis } = require('../../utils/date-iso');
 const { escCsv, nomGenerateur } = require('../../utils/export-csv');
 const { lireFeuille, composerFeuille, heuresAccompagnement } = require('../../services/temps-accompagnement');
 const { ACTIVITES_SAISIES } = require('../../scripts/migrations/insertion-temps');
@@ -212,14 +216,25 @@ router.delete('/saisies/:id', [
     const saisie = r.rows[0];
     if (!saisie) return res.status(404).json({ error: 'Saisie non trouvée' });
 
+    // CORRECTIF m-04 — anti-énumération. Il faut LIRE la ligne pour connaître
+    // son propriétaire ; on ne peut donc pas poser la garde avant la requête.
+    // Mais distinguer 404 (« n'existe pas ») de 403 (« existe, pas à vous »)
+    // laissait un MANAGER énumérer les identifiants de saisie des autres. Pour
+    // qui n'est ni ADMIN ni RH, les deux situations rendent désormais le MÊME
+    // 404 — même doctrine que l'anti-énumération du parcours chauffeur (2.40.0).
     const base = resolveBaseRole(req.user.role);
     if (base !== 'ADMIN' && base !== 'RH' && Number(saisie.user_id) !== Number(req.user.id)) {
-      return res.status(403).json({ error: 'Cette saisie appartient à un autre intervenant.', code: 'FEUILLE_HORS_PERIMETRE' });
+      return res.status(404).json({ error: 'Saisie non trouvée' });
     }
 
-    const d = new Date(saisie.date);
-    const annee = d.getUTCFullYear();
-    const mois = d.getUTCMonth() + 1;
+    // CORRECTIF D-05 — le mois était déduit par `new Date(saisie.date).getUTC*()`
+    // alors que le pilote construit la colonne DATE à minuit LOCAL : sous
+    // Europe/Paris, une saisie du 1er juillet était rattachée à la feuille de
+    // JUIN, donc la garde de gel interrogeait la mauvaise feuille (et refusait
+    // en 409 la suppression d'une saisie parfaitement modifiable).
+    const jourSaisie = isoDate(saisie.date);
+    const annee = anneeDe(jourSaisie);
+    const mois = moisDe(jourSaisie);
     const feuille = await etatFeuille(saisie.user_id, annee, mois);
     if (feuille && feuille.statut !== 'brouillon') {
       return res.status(409).json({
@@ -246,7 +261,9 @@ router.get('/:userId/:annee/:mois', gardeProprietaire, PERIODE, validate, async 
     const feuille = await lireFeuille({ userId: parseInt(userId, 10), annee: parseInt(annee, 10), mois: parseInt(mois, 10) });
     const jour = await jourCloture();
     const limite = dateCloture(annee, mois, jour);
-    const aujourdhui = new Date().toISOString().slice(0, 10);
+    // Jour civil de PARIS : `cloture_depassee` bascule sinon deux heures trop
+    // tôt en été, et une feuille du 10 serait annoncée en retard le 9 au soir.
+    const aujourdhui = aujourdhuiParis();
 
     const u = await pool.query('SELECT first_name, last_name FROM users WHERE id = $1', [userId]);
     res.json({
@@ -322,8 +339,15 @@ router.post('/:userId/:annee/:mois/saisies', gardeProprietaire, [
 // POST /:userId/:annee/:mois/valider — transitions forward-only
 // ═══════════════════════════════════════════════════════════════════════════
 router.post('/:userId/:annee/:mois/valider', gardeProprietaire, PERIODE, validate, async (req, res) => {
-  const client = await pool.connect();
+  // CORRECTIF M-04 — `pool.connect()` est DANS le `try`. Au-dehors, son rejet
+  // (pool saturé, base momentanément injoignable) rejetait la promesse du
+  // handler HORS de tout try/catch : Express 4 ne capture pas le rejet d'un
+  // handler `async`, donc AUCUNE réponse n'était envoyée, la requête restait
+  // ouverte jusqu'au délai du client et le rejet remontait en
+  // `unhandledRejection`. Défaut déjà trouvé et corrigé en PR A (rapport 13).
+  let client;
   try {
+    client = await pool.connect();
     const userId = parseInt(req.params.userId, 10);
     const annee = parseInt(req.params.annee, 10);
     const mois = parseInt(req.params.mois, 10);
@@ -419,11 +443,11 @@ router.post('/:userId/:annee/:mois/valider', gardeProprietaire, PERIODE, validat
       hint: 'Un administrateur peut la rouvrir, avec un motif.',
     });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION][TEMPS] valider :', err.message, err.code || '');
     res.status(500).json({ error: 'Erreur serveur', code: err.code });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -438,8 +462,10 @@ router.post('/:userId/:annee/:mois/rouvrir', authorize('ADMIN'), [
   ...PERIODE,
   body('motif').isString().trim().isLength({ min: 3, max: 500 }).withMessage('Motif obligatoire (3 à 500 caractères)'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // CORRECTIF M-04 — voir `valider` : la connexion se prend DANS le `try`.
+  let client;
   try {
+    client = await pool.connect();
     const userId = parseInt(req.params.userId, 10);
     const annee = parseInt(req.params.annee, 10);
     const mois = parseInt(req.params.mois, 10);
@@ -480,11 +506,74 @@ router.post('/:userId/:annee/:mois/rouvrir', authorize('ADMIN'), [
     await client.query('COMMIT');
     res.json({ ok: true, statut: 'brouillon', feuille: maj.rows[0] });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION][TEMPS] rouvrir :', err.message);
     res.status(500).json({ error: 'Erreur serveur', code: err.code });
   } finally {
-    client.release();
+    if (client) client.release();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /:userId/:annee/:mois/export.pdf — la MÊME pièce, imprimée (M-05)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Le PDF est composé côté navigateur, à partir d'une réponse du serveur. Tant
+// que cette réponse était celle du `GET /:userId/:annee/:mois` ordinaire, la
+// feuille sortait **sans aucune trace** : le CSV était journalisé, le PDF non,
+// alors que les deux portent le même contenu, la même mention « pièce de
+// justification d'une dépense cofinancée » et vont au même destinataire. La
+// question « qui a sorti la feuille de septembre ? » n'avait pas de réponse
+// si elle était sortie en PDF.
+//
+// D'où une route DÉDIÉE plutôt qu'un appel de traçage que le front pourrait
+// omettre : elle ne peut pas être contournée en appelant directement le GET,
+// puisque c'est elle qui rend la feuille que le PDF imprime. Le journal est
+// écrit AVANT la réponse et son échec fait échouer l'acte — même règle que le
+// CSV.
+//
+// Refus sur zéro ligne, comme le CSV : un PDF vide classé dans un dossier
+// affirmerait « aucun temps d'accompagnement ce mois-ci ».
+router.get('/:userId/:annee/:mois/export.pdf', gardeProprietaire, PERIODE, validate, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    const annee = parseInt(req.params.annee, 10);
+    const mois = parseInt(req.params.mois, 10);
+
+    const feuille = await lireFeuille({ userId, annee, mois });
+    if (!feuille.lignes || feuille.lignes.length === 0) {
+      return res.status(409).json({
+        error: `Aucune ligne de temps sur ${String(mois).padStart(2, '0')}/${annee} — aucun document n'est produit.`,
+        code: 'EXPORT_VIDE',
+        hint: "Renseignez la durée des entretiens réalisés, ou ajoutez une saisie (atelier collectif, réunion de projet).",
+      });
+    }
+
+    const u = await pool.query('SELECT first_name, last_name FROM users WHERE id = $1', [userId]);
+    const intervenant = u.rows[0]
+      ? { user_id: userId, nom: `${(u.rows[0].last_name || '').toUpperCase()} ${u.rows[0].first_name || ''}`.trim() }
+      : null;
+
+    const t = feuille.totaux || {};
+    await journaliser(pool, {
+      userId: req.user.id, action: 'EXPORT_FEUILLE_TEMPS', entityId: feuille.feuille_id || null,
+      details: {
+        format: 'pdf', intervenant_id: userId, annee, mois, statut: feuille.statut,
+        lignes: feuille.lignes.length, total_minutes: t.total_minutes == null ? null : t.total_minutes,
+      },
+    });
+
+    const jour = await jourCloture();
+    const limite = dateCloture(annee, mois, jour);
+    res.json({
+      ...feuille,
+      intervenant,
+      date_cloture: limite,
+      cloture_depassee: feuille.statut !== 'validee_rh' && aujourdhuiParis() > limite,
+    });
+  } catch (err) {
+    console.error('[INSERTION][TEMPS] export pdf :', err.message, err.code || '');
+    res.status(500).json({ error: 'Erreur serveur', code: err.code });
   }
 });
 

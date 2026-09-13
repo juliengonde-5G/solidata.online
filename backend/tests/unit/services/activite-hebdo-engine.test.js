@@ -171,8 +171,8 @@ describe('3. l’alerte', () => {
     // ce que l'autorité demande (amendement A4).
     expect(r.nb_semaines_sous_seuil).toBe(2);
     expect(r.raisons).toEqual([
-      { iso_week: 10, categorie: 'arret' },
-      { iso_week: 11, categorie: 'arret' },
+      { iso_year: 2026, iso_week: 10, categorie: 'arret' },
+      { iso_year: 2026, iso_week: 11, categorie: 'arret' },
     ]);
   });
 
@@ -224,7 +224,7 @@ describe('3. l’alerte', () => {
 describe('4. raisons catégorisées — jamais un motif inventé', () => {
   test('temps partiel contractuel : le contrat lui-même est sous le plancher', () => {
     const r = calculerSemaines({ annee: 2026, weekHours: [semaine(10, 10, 12)] });
-    expect(r.raisons).toEqual([{ iso_week: 10, categorie: 'temps_partiel' }]);
+    expect(r.raisons).toEqual([{ iso_year: 2026, iso_week: 10, categorie: 'temps_partiel' }]);
   });
 
   test('congés payés : catégorie « absence », jamais « arrêt »', () => {
@@ -236,12 +236,12 @@ describe('4. raisons catégorisées — jamais un motif inventé', () => {
     // Un congé payé n'est PAS un arrêt : il n'empêche pas l'alerte de sonner…
     expect(r.semaines.find((s) => s.iso_week === 10).arret_declare).toBe(false);
     // … mais il explique la semaine basse.
-    expect(r.raisons).toEqual([{ iso_week: 10, categorie: 'absence' }]);
+    expect(r.raisons).toEqual([{ iso_year: 2026, iso_week: 10, categorie: 'absence' }]);
   });
 
   test('aucune explication trouvée → « inconnue », dit tel quel', () => {
     const r = calculerSemaines({ annee: 2026, weekHours: [semaine(10, 10, 35)] });
-    expect(r.raisons).toEqual([{ iso_week: 10, categorie: 'inconnue' }]);
+    expect(r.raisons).toEqual([{ iso_year: 2026, iso_week: 10, categorie: 'inconnue' }]);
   });
 
   test('l’arrêt prime sur toutes les autres explications', () => {
@@ -250,7 +250,26 @@ describe('4. raisons catégorisées — jamais un motif inventé', () => {
       weekHours: [semaine(10, 2, 12)], // temps partiel ET…
       leaves: [{ type_category: 'sick', start_date: '2026-03-02', end_date: '2026-03-06' }], // … arrêt
     });
-    expect(r.raisons).toEqual([{ iso_week: 10, categorie: 'arret' }]);
+    expect(r.raisons).toEqual([{ iso_year: 2026, iso_week: 10, categorie: 'arret' }]);
+  });
+
+  // CORRECTIF m-01 — chaque raison porte son ANNÉE ISO. La fiche pour le
+  // référent concatène les raisons de deux années civiles quand la période est
+  // à cheval (« du 01/11/2025 au 28/02/2026 », cas courant à l'entrée en
+  // parcours) : appariées sur le seul numéro de semaine, la raison de la S3
+  // 2025 était recopiée sur la S3 2026 — un motif attribué à la mauvaise
+  // semaine, sur un document opposable.
+  test('chaque raison porte son iso_year (appariement par couple année/semaine)', () => {
+    const ligne = (an, num, heures) => ({ iso_year: an, iso_week: num, hours_worked: heures, hours_contract: 26 });
+    const a2025 = calculerSemaines({ annee: 2025, weekHours: [ligne(2025, 3, 5)] });
+    const a2026 = calculerSemaines({ annee: 2026, weekHours: [ligne(2026, 3, 5)] });
+    expect(a2025.raisons[0].iso_year).toBe(2025);
+    expect(a2026.raisons[0].iso_year).toBe(2026);
+    // Concaténées comme le fait `activiteSurPeriode`, les deux restent
+    // discernables — ce qui n'était pas le cas sans l'année.
+    const melange = [...a2025.raisons, ...a2026.raisons];
+    expect(melange.filter((r) => r.iso_week === 3)).toHaveLength(2);
+    expect(new Set(melange.map((r) => `${r.iso_year}-${r.iso_week}`)).size).toBe(2);
   });
 });
 

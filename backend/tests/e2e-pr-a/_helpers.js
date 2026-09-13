@@ -99,11 +99,28 @@ async function creerSalarie(pool, matricule, champs = {}) {
   return r.rows[0].id;
 }
 
-/** Décalage de jours en date ISO (AAAA-MM-JJ), horloge locale du test. */
+const { isoDate } = require('../../src/utils/date-iso');
+
+/**
+ * Décalage de jours en date ISO (AAAA-MM-JJ), horloge locale du test.
+ *
+ * L'incrément et la lecture se font dans LE MÊME repère (le jour civil local).
+ * Mélanger un `setDate` local et un `toISOString()` UTC fait sauter un jour dès
+ * que le fuseau est positif — le piège de la famille D-05, corrigé ici après
+ * l'avoir été côté production (rapport 19).
+ */
 function jourDecale(n) {
   const d = new Date();
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return isoDate(d);
 }
 
-module.exports = { RUN, JWT_SECRET, signer, creerComptes, purger, creerSalarie, jourDecale };
+/**
+ * Date PostgreSQL lue par le pilote → 'AAAA-MM-JJ'.
+ * `node-pg` construit une colonne DATE à minuit LOCAL : la lire en UTC
+ * (`toISOString()`) rend LA VEILLE sous tout fuseau positif, et l'assertion
+ * tombe sur une faute du harnais et non du code.
+ */
+const iso = (v) => isoDate(v);
+
+module.exports = { RUN, JWT_SECRET, signer, creerComptes, purger, creerSalarie, jourDecale, iso };

@@ -22,6 +22,7 @@
  *     elle-même une information de gestion.)
  */
 const express = require('express');
+const { isoDate } = require('../utils/date-iso');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -72,7 +73,13 @@ const COLONNES = [
   'Situation à +6 mois', 'Date du relevé à +6 mois', 'Complétude du dossier participant (%)',
 ];
 
-const jour = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+// CORRECTIF de la famille D-05 (trouvé en exerçant la contrainte de fuseau des
+// correctifs PR B) : `new Date(colonneDATE).toISOString()` rend LA VEILLE sous
+// tout fuseau positif — le pilote construit une colonne `DATE` à minuit LOCAL.
+// Sur cet export, cela décalait d'un jour chaque date transmise à l'autorité de
+// gestion, DATE DE NAISSANCE COMPRISE. Le helper partagé lit les composantes
+// locales, dans le repère où le pilote a construit l'objet.
+const jour = (d) => (isoDate(d) || '');
 const joursEntre = (a, b) => Math.floor((new Date(jour(b)) - new Date(jour(a))) / 86400000);
 /**
  * Échappement CSV **et** neutralisation de formule (correctif du 13/09,

@@ -60,8 +60,33 @@ describe('A. idempotence — analyse textuelle', () => {
     for (const c of idx) expect(c).toMatch(/CREATE INDEX IF NOT EXISTS/);
   });
 
-  test('aucun seed : rien à écraser au redémarrage', () => {
-    expect(sql).not.toMatch(/INSERT INTO/i);
+  // CORRECTIF m-09 — la migration pose désormais UNE écriture : l'entrée au
+  // registre des traitements (art. 30) de la feuille de temps, qui manquait. La
+  // règle que ce test protège n'est pas « aucun INSERT » mais « rien qui écrase
+  // une donnée au redémarrage » : l'entrée est posée sous `WHERE NOT EXISTS`,
+  // comme celle du lot 3 — elle ne s'écrit qu'une fois, et une reformulation
+  // faite à la main en base survit à tous les déploiements suivants.
+  test('la seule écriture est l’entrée au registre, et elle est conditionnelle', () => {
+    const inserts = sql.match(/INSERT INTO \w+/gi) || [];
+    expect(inserts).toEqual(['INSERT INTO rgpd_registre']);
+    expect(sql).toMatch(/INSERT INTO rgpd_registre[\s\S]*WHERE NOT EXISTS/i);
+    // Aucune INSTRUCTION de réécriture : une migration ne touche pas à
+    // l'existant. (Les `ON DELETE CASCADE` des clés étrangères et la colonne
+    // `updated_at` sont des déclarations de schéma, pas des écritures — d'où
+    // l'ancrage sur un début d'instruction.)
+    expect(sql).not.toMatch(/(^|;)\s*UPDATE\s/i);
+    expect(sql).not.toMatch(/(^|;)\s*DELETE\s+FROM/i);
+    expect(sql).not.toMatch(/ON CONFLICT[\s\S]{0,80}DO UPDATE/i);
+  });
+
+  test('l’entrée au registre nomme le destinataire EXTERNE et la durée de piste d’audit', () => {
+    expect(sql).toMatch(/autorité de gestion/i);
+    expect(sql).toMatch(/DDETS/);
+    expect(sql).toMatch(/Cinq ans après la clôture/);
+    // Et elle dit ce qui N'Y FIGURE PAS — c'est la moitié utile d'une entrée
+    // art. 30 sur une pièce transmise.
+    expect(sql).toMatch(/AUCUN nom de bénéficiaire/);
+    expect(sql).toMatch(/SANS leur motif ni leur catégorie/);
   });
 
   test('aucune interpolation d’une valeur venue de l’extérieur du module', () => {

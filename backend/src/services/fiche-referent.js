@@ -74,16 +74,38 @@ const MENTION_DROITS = "Ce document est transmis au référent unique désigné 
   + "rectification, d'effacement, de limitation et d'opposition auprès de la structure (délégué à la protection des "
   + "données : dpo@solidarite-textiles.fr).";
 
-/** Lecture tolérante : une table absente rend [] et le dit au journal serveur. */
-async function soft(label, text, params = []) {
+/**
+ * Lecture tolérante : une table absente rend [] et le dit au journal serveur.
+ *
+ * CORRECTIF m-05 — elle le dit désormais AUSSI dans le document. Une fiche
+ * pouvait partir au référent amputée de ses actions, de ses objectifs ou de ses
+ * freins sans que rien ne le signale : sur ce document-là, une rubrique vide se
+ * lit « rien n'a été fait », ce qui est une affirmation que personne n'a faite.
+ * Le collecteur `panne` reçoit le nom de chaque source tombée ; les
+ * `mentions.sources_indisponibles` le reportent en tête du PDF.
+ */
+async function soft(label, text, params = [], panne = null) {
   try {
     const r = await pool.query(text, params);
     return r.rows;
   } catch (err) {
     console.error(`[INSERTION][REFERENT] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`);
+    if (panne && typeof panne.add === 'function') panne.add(label);
     return [];
   }
 }
+
+/** Libellés français des sources, pour la mention de dégradation du document. */
+const LIBELLE_SOURCE = {
+  entretiens: 'Rendez-vous d’accompagnement',
+  actions: 'Actions d’accompagnement',
+  actions_assiduite: 'Actions d’accompagnement',
+  objectifs: 'Objectifs en cours',
+  prochain_rdv: 'Prochaines échéances',
+  freins: 'Freins périphériques',
+  conges: 'Absences enregistrées par la paie',
+  utilisateur: 'Signataire',
+};
 
 /** 'AAAA-MM-JJ' depuis une Date ou une chaîne ; null sinon (jamais une date inventée). */
 function jour(v) {
@@ -131,7 +153,7 @@ async function lireSalarie(employeeId) {
  * `absence_piece_ref` n'est LU que pour la variante dossier : ce qu'on ne lit
  * pas ne peut pas fuir par une clé oubliée à la composition.
  */
-async function lireEntretiens(employeeId, du, au, { avecPiece = false } = {}) {
+async function lireEntretiens(employeeId, du, au, { avecPiece = false } = {}, panne = null) {
   const colonnePiece = avecPiece ? ', absence_piece_ref' : '';
   return soft('entretiens',
     `SELECT id, milestone_type, titre, status, due_date, interview_date, completed_date,
@@ -140,7 +162,7 @@ async function lireEntretiens(employeeId, du, au, { avecPiece = false } = {}) {
       WHERE employee_id = $1
         AND COALESCE(completed_date, interview_date, due_date) BETWEEN $2::date AND $3::date
       ORDER BY COALESCE(completed_date, interview_date, due_date), id`,
-    [employeeId, du, au]);
+    [employeeId, du, au], panne);
 }
 
 /**
@@ -148,7 +170,7 @@ async function lireEntretiens(employeeId, du, au, { avecPiece = false } = {}) {
  * sensible sont écartées EN SQL autant qu'en JS : le filtre applicatif suffit,
  * mais le prédicat SQL évite de promener la ligne jusqu'ici pour la jeter.
  */
-async function lireActions(employeeId, du, au) {
+async function lireActions(employeeId, du, au, panne = null) {
   return soft('actions',
     `SELECT a.id, a.action_label, a.category, a.frein_type, a.status, a.echeance,
             a.date_realisation, a.resultat, a.created_at,
@@ -159,7 +181,7 @@ async function lireActions(employeeId, du, au) {
         AND (a.frein_type IS NULL OR NOT (a.frein_type = ANY($4::text[])))
         AND COALESCE(a.date_realisation, a.echeance, a.created_at::date) BETWEEN $2::date AND $3::date
       ORDER BY COALESCE(a.date_realisation, a.echeance, a.created_at::date), a.id`,
-    [employeeId, du, au, FREINS_EXCLUS]);
+    [employeeId, du, au, FREINS_EXCLUS], panne);
 }
 
 /**
@@ -178,7 +200,13 @@ async function activiteSurPeriode(employeeId, du, au) {
   const parts = await Promise.all(annees.map((annee) => activiteHebdo({ employeeId, annee })));
   return {
     semaines: parts.flatMap((p) => p.semaines || []),
-    raisons: parts.flatMap((p) => p.raisons || []),
+    // CORRECTIF m-01 — les raisons portent leur `iso_year`. Elles étaient
+    // appariées sur le seul numéro de semaine, et cette fonction CONCATÈNE deux
+    // années pour une période à cheval (« du 01/11/2025 au 28/02/2026 » est un
+    // cas courant à l'entrée en parcours) : la raison de la S3 2025 était donc
+    // recopiée sur la S3 2026. Sur un document opposable, c'est un motif
+    // attribué à la mauvaise semaine.
+    raisons: parts.flatMap((p) => (p.raisons || []).map((r) => ({ iso_year: r.iso_year != null ? r.iso_year : p.annee, ...r }))),
   };
 }
 
@@ -190,29 +218,30 @@ async function activiteSurPeriode(employeeId, du, au) {
  */
 async function composerFicheReferent({ employeeId, du, au, userId }) {
   const id = Number(employeeId);
+  const panne = new Set();              // m-05 : les sources tombées, nommées
   const emp = await lireSalarie(id);
   if (!emp) return null;
 
   const [entretiens, actions, objectifs, activite, prochain, utilisateur] = await Promise.all([
-    lireEntretiens(id, du, au),
-    lireActions(id, du, au),
+    lireEntretiens(id, du, au, {}, panne),
+    lireActions(id, du, au, panne),
     soft('objectifs',
       `SELECT titre, origine, statut, echeance
          FROM insertion_objectifs
         WHERE employee_id = $1 AND statut IN ('a_venir', 'en_cours')
-        ORDER BY COALESCE(echeance, '9999-12-31'::date), id`, [id]),
+        ORDER BY COALESCE(echeance, '9999-12-31'::date), id`, [id], panne),
     activiteSurPeriode(id, du, au),
     soft('prochain_rdv',
       `SELECT milestone_type, COALESCE(interview_date::date, due_date) AS date
          FROM insertion_milestones
         WHERE employee_id = $1 AND status <> 'realise'
           AND COALESCE(interview_date::date, due_date) >= CURRENT_DATE
-        ORDER BY COALESCE(interview_date::date, due_date)`, [id]),
+        ORDER BY COALESCE(interview_date::date, due_date)`, [id], panne),
     // Repli de signature quand le salarié n'a pas de CIP référent désigné : la
     // fiche est signée par l'agent qui la produit, jamais par « la structure ».
     userId ? soft('utilisateur',
       `SELECT NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') AS nom, email FROM users WHERE id = $1`,
-      [userId]) : Promise.resolve([]),
+      [userId], panne) : Promise.resolve([]),
   ]);
 
   // ── 1. Identité et destinataire ─────────────────────────────────────────
@@ -259,8 +288,10 @@ async function composerFicheReferent({ employeeId, du, au, userId }) {
       jours_pmsmp: s.jours_pmsmp,
     })),
     nb_semaines_sous_seuil: semainesPeriode.filter((s) => s.sous_seuil === true).length,
+    // Appariement sur le COUPLE (année ISO, semaine ISO) — cf. m-01.
     raisons_categorisees: (activite.raisons || [])
-      .filter((r) => semainesPeriode.some((s) => s.iso_week === r.iso_week)),
+      .filter((r) => semainesPeriode.some((s) => s.iso_week === r.iso_week
+        && (r.iso_year == null || Number(s.iso_year) === Number(r.iso_year)))),
   };
 
   // ── 4. Assiduité ────────────────────────────────────────────────────────
@@ -275,7 +306,7 @@ async function composerFicheReferent({ employeeId, du, au, userId }) {
   };
 
   // ── 5. Freins — 7 axes, JAMAIS santé ni judiciaire ──────────────────────
-  const freins = composerFreinsPeriode(entretiens, await lireFreinsPeriode(id, du, au));
+  const freins = composerFreinsPeriode(entretiens, await lireFreinsPeriode(id, du, au, panne));
 
   // ── 6. Actions et orientations ──────────────────────────────────────────
   const actionsBloc = actions.map((a) => ({
@@ -315,7 +346,15 @@ async function composerFicheReferent({ employeeId, du, au, userId }) {
     actions: actionsBloc,
     objectifs: objectifsBloc,
     prochaines_echeances: prochainesEcheances,
-    mentions: { droits: MENTION_DROITS, genere_le: new Date().toISOString() },
+    mentions: {
+      droits: MENTION_DROITS,
+      genere_le: new Date().toISOString(),
+      // m-05 — une rubrique absente parce que sa source n'a pas répondu se lit
+      // « rien n'a été fait » sur ce document. Elle est donc NOMMÉE, et le PDF
+      // l'imprime : « Rubrique indisponible au moment de l'édition ». Tableau
+      // vide quand tout va bien.
+      sources_indisponibles: mentionsSources(panne),
+    },
   };
 }
 
@@ -353,7 +392,7 @@ function composerTotauxAssiduite(entretiens) {
 }
 
 /** Niveaux de freins des entretiens réalisés de la période (colonnes transmissibles). */
-async function lireFreinsPeriode(employeeId, du, au) {
+async function lireFreinsPeriode(employeeId, du, au, panne = null) {
   const cols = FREINS_TRANSMISSIBLES.map((f) => f.column).join(', ');
   return soft('freins',
     `SELECT completed_date, ${cols}
@@ -361,7 +400,7 @@ async function lireFreinsPeriode(employeeId, du, au) {
       WHERE employee_id = $1 AND status = 'realise'
         AND completed_date BETWEEN $2::date AND $3::date
       ORDER BY completed_date, id`,
-    [employeeId, du, au]);
+    [employeeId, du, au], panne);
 }
 
 /**
@@ -399,19 +438,25 @@ function composerFreinsPeriode(_entretiens, lignes) {
 async function composerReleveAssiduite({ employeeId, du, au, variante = 'tiers' }) {
   const id = Number(employeeId);
   const dossier = variante === 'dossier';
+  const panne = new Set();              // m-05 : les sources tombées, nommées
   const emp = await lireSalarie(id);
   if (!emp) return null;
 
   const [entretiens, actions, conges] = await Promise.all([
-    lireEntretiens(id, du, au, { avecPiece: dossier }),
+    lireEntretiens(id, du, au, { avecPiece: dossier }, panne),
+    // `notes` n'est JAMAIS sélectionné. `action_label` l'est, mais il ne sort
+    // qu'en variante dossier (M-01) ; la variante tiers travaille sur
+    // `category` — liste FERMÉE de quatre valeurs — et sur le nom du partenaire.
     soft('actions_assiduite',
-      `SELECT action_label, status, date_realisation, echeance, frein_type
-         FROM cip_action_plans
-        WHERE employee_id = $1
-          AND (frein_type IS NULL OR NOT (frein_type = ANY($4::text[])))
-          AND COALESCE(date_realisation, echeance, created_at::date) BETWEEN $2::date AND $3::date
-        ORDER BY COALESCE(date_realisation, echeance, created_at::date), id`,
-      [id, du, au, FREINS_EXCLUS]),
+      `SELECT a.action_label, a.category, a.status, a.date_realisation, a.echeance, a.frein_type,
+              p.nom AS partenaire_nom
+         FROM cip_action_plans a
+         LEFT JOIN insertion_partenaires p ON p.id = a.partenaire_id
+        WHERE a.employee_id = $1
+          AND (a.frein_type IS NULL OR NOT (a.frein_type = ANY($4::text[])))
+          AND COALESCE(a.date_realisation, a.echeance, a.created_at::date) BETWEEN $2::date AND $3::date
+        ORDER BY COALESCE(a.date_realisation, a.echeance, a.created_at::date), a.id`,
+      [id, du, au, FREINS_EXCLUS], panne),
     // `type_category` SEULEMENT. `leave_type` est le libellé brut de la paie :
     // il peut nommer une pathologie, il ne quitte jamais ce module.
     soft('conges',
@@ -420,7 +465,7 @@ async function composerReleveAssiduite({ employeeId, du, au, variante = 'tiers' 
         WHERE employee_id = $1
           AND start_date <= $3::date AND COALESCE(end_date, start_date) >= $2::date
         ORDER BY start_date`,
-      [id, du, au]),
+      [id, du, au], panne),
   ]);
 
   const totaux = composerTotauxAssiduite(entretiens);
@@ -436,18 +481,41 @@ async function composerReleveAssiduite({ employeeId, du, au, variante = 'tiers' 
     entretiens: entretiens.map((m) => {
       const ligne = {
         date: dateTenue(m),
-        type_libelle: m.titre || libelleType(m.milestone_type),
+        // CORRECTIF B-01 (bloquant) — `insertion_milestones.titre` est un
+        // VARCHAR(120) LIBREMENT saisi par la CIP, sans contrainte de contenu,
+        // sans chiffrement, sans masquage. Une CIP qui intitule un entretien
+        // « Bilan après l'hospitalisation » ou « Point suite convocation au
+        // tribunal » — pratique naturelle dans un dossier INTERNE — faisait
+        // sortir ce verbatim vers le CMS ou France Travail, sur un document qui
+        // peut fonder une suspension de droits. La variante tiers ne connaît
+        // donc que le vocabulaire FERMÉ des huit types ; le dossier interne,
+        // lui, garde le titre que la CIP a écrit, qui lui est utile.
+        type_libelle: dossier ? (m.titre || libelleType(m.milestone_type)) : libelleType(m.milestone_type),
         presence: m.presence || null,
         absence_motif: m.absence_motif || null,
       };
       if (dossier) ligne.absence_piece_ref = m.absence_piece_ref || null;
       return ligne;
     }),
-    actions: actions.map((a) => ({
-      date: jour(a.date_realisation) || jour(a.echeance),
-      libelle: a.action_label || null,
-      statut: a.status || null,
-    })),
+    // CORRECTIF M-01 — même raisonnement sur `cip_action_plans.action_label`,
+    // colonne TEXT librement saisie. Les actions rattachées aux freins `sante`
+    // et `judiciaire` sont bien écartées en SQL, mais `frein_type` est
+    // FACULTATIF et sans CHECK : une action saisie sans frein, ou rattachée à
+    // « administratif », peut parfaitement s'intituler « Accompagnement au
+    // rendez-vous CMP » ou « Dossier MDPH ». La fiche pour le référent avait
+    // déjà tranché correctement (elle n'imprime que `category`) ; les deux
+    // documents partent au même destinataire, ils tiennent désormais la même
+    // règle. Arbitrage retenu : catégorie fermée + nom du partenaire.
+    actions: actions.map((a) => {
+      const ligne = {
+        date: jour(a.date_realisation) || jour(a.echeance),
+        nature: a.category || null,
+        partenaire: a.partenaire_nom || null,
+        statut: a.status || null,
+      };
+      if (dossier) ligne.libelle = a.action_label || null;
+      return ligne;
+    }),
     absences_paie: conges.map((c) => ({
       du: jour(c.start_date),
       au: jour(c.end_date) || jour(c.start_date),
@@ -460,7 +528,15 @@ async function composerReleveAssiduite({ employeeId, du, au, variante = 'tiers' 
       excuses: totaux.excuses,
       sans_motif: totaux.absences_par_motif.sans_motif,
     },
+    // m-05 : une rubrique tombée est NOMMÉE. Vide quand tout va bien.
+    sources_indisponibles: mentionsSources(panne),
   };
+}
+
+/** Liste ordonnée des sources tombées, en français (m-05). */
+function mentionsSources(panne) {
+  if (!panne || panne.size === 0) return [];
+  return [...new Set([...panne].map((k) => LIBELLE_SOURCE[k] || k))].sort();
 }
 
 /** Clés de premier niveau de la fiche — la liste blanche, sous forme vérifiable. */

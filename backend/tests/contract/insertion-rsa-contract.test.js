@@ -171,9 +171,13 @@ describe('2. compteur d’activité', () => {
     expect(res.body.alerte.active).toBe(false);
     // … mais les semaines sont comptées (indicateur de volume, amendement A4).
     expect(res.body.nb_semaines_sous_seuil).toBe(2);
+    // `iso_year` accompagne chaque raison depuis le correctif m-01 : la fiche
+    // pour le référent apparie les raisons aux semaines sur le COUPLE
+    // (année, semaine), une période à cheval sur deux années civiles ayant
+    // sinon recopié la raison de la S3 2025 sur la S3 2026.
     expect(res.body.raisons).toEqual([
-      { iso_week: 10, categorie: 'arret' },
-      { iso_week: 11, categorie: 'arret' },
+      { iso_year: 2026, iso_week: 10, categorie: 'arret' },
+      { iso_year: 2026, iso_week: 11, categorie: 'arret' },
     ]);
   });
 
@@ -360,6 +364,34 @@ describe('5. actualisation France Travail', () => {
     expect(res.body.mois[3]).toEqual({ mois: '2026-04', rappel_le: null, honoree: null, constat_le: null });
   });
 
+  // CORRECTIF D-01 (bloquant) — le pilote rend une colonne `DATE` sous forme
+  // d'OBJET `Date`, pas de chaîne. Le rangement par
+  // `Number(String(l.mois).slice(5, 7))` valait donc NaN et AUCUN des douze
+  // mois ne retrouvait sa ligne : l'écran restait vide quoi qu'on enregistre.
+  // Ce test rejoue la forme réelle du pilote (objets `Date`), que le `pg`
+  // simulé des autres tests ne produit pas — c'est précisément ce qui avait
+  // laissé passer le défaut.
+  test('D-01 — les lignes sont retrouvées même rendues en objets Date par le pilote', async () => {
+    branche({
+      actualisations: [{
+        mois_num: 3,
+        mois: new Date(2026, 2, 1),
+        rappel_le: new Date(2026, 2, 5),
+        honoree: true,
+        constat_le: new Date(2026, 2, 8),
+      }],
+    });
+    const res = await get('/api/insertion/rsa/5/actualisations-ft?annee=2026');
+    expect(res.body.mois[2]).toEqual({ mois: '2026-03', rappel_le: '2026-03-05', honoree: true, constat_le: '2026-03-08' });
+    expect(res.body.mois.filter((m) => m.honoree === true)).toHaveLength(1);
+  });
+
+  test('D-01 — sans `mois_num`, le repli du helper partagé range quand même la ligne', async () => {
+    branche({ actualisations: [{ mois: new Date(2026, 6, 1), rappel_le: null, honoree: false, constat_le: null }] });
+    const res = await get('/api/insertion/rsa/5/actualisations-ft?annee=2026');
+    expect(res.body.mois[6]).toEqual({ mois: '2026-07', rappel_le: null, honoree: false, constat_le: null });
+  });
+
   test('personne non soumise → 409 ACTUALISATION_FT_NON_REQUISE, aucune écriture', async () => {
     branche({ soumission: [{ type: 'cms', requise: false }] });
     const res = await put('/api/insertion/rsa/5/actualisations-ft/2026-04', 'ADMIN', { honoree: true });
@@ -448,11 +480,17 @@ describe('7. échéances périodiques (bloc « Rendez-vous réguliers et rappels
     expect(res.body.semaines_sous_seuil).toEqual({ nb_salaries: 0, employes: [] });
   });
 
+  // CORRECTIF D-03 — la sentinelle '1900-01-01' a disparu du SQL : `GREATEST`
+  // de PostgreSQL ignore les NULL et n'en rend un que si les deux membres le
+  // sont. La reconnaître côté JS supposait de comparer `String(uneDate)` à une
+  // chaîne, ce que le pilote rendait impossible (« Mon Jan 01 » > '1900-01-01'
+  // est VRAI en ASCII) : la branche « jamais de contact tracé » était morte et
+  // l'écran affichait « dernier contact il y a null j ».
   test('un dossier sans AUCUN contact rend `dernier_le: null` (jamais un nombre de jours absurde)', async () => {
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
-      if (/dernier_brut/.test(s)) {
-        return Promise.resolve({ rows: [{ employee_id: 8, first_name: 'Sonia', last_name: 'REY', dernier_brut: '1900-01-01' }] });
+      if (/points_referent|remis_referent_le\)/.test(s) && /GREATEST/.test(s)) {
+        return Promise.resolve({ rows: [{ employee_id: 8, first_name: 'Sonia', last_name: 'REY', dernier_le: null }] });
       }
       if (/FROM settings/.test(s)) return Promise.resolve({ rows: [] });
       return Promise.resolve({ rows: [] });
@@ -460,6 +498,32 @@ describe('7. échéances périodiques (bloc « Rendez-vous réguliers et rappels
     const res = await get('/api/insertion/rsa/echeances-periodiques');
     expect(res.body.points_referent_dus).toEqual([
       { employee_id: 8, nom: 'REY Sonia', dernier_le: null, du_depuis_jours: null },
+    ]);
+  });
+
+  test('la requête ne porte PLUS de sentinelle de date (D-03)', async () => {
+    await get('/api/insertion/rsa/echeances-periodiques');
+    const sqls = mockQuery.mock.calls.map((c) => String(c[0]));
+    expect(sqls.some((s) => /1900-01-01/.test(s))).toBe(false);
+    expect(sqls.some((s) => /GREATEST\(MAX\(m\.completed_date\), MAX\(a\.remis_referent_le\)\)/.test(s))).toBe(true);
+  });
+
+  // Et le cas vivant : une date réelle ressort en 'AAAA-MM-JJ' avec son
+  // ancienneté en jours, jamais « Sun Mar 02 » (famille D-02).
+  test('un dossier AVEC contact rend une date ISO et un nombre de jours', async () => {
+    const { decalerJours, aujourdhuiParis } = require('../../src/utils/date-iso');
+    const ilY100Jours = decalerJours(aujourdhuiParis(), -100);
+    mockQuery.mockImplementation((sql) => {
+      const s = String(sql);
+      if (/GREATEST/.test(s)) {
+        return Promise.resolve({ rows: [{ employee_id: 9, first_name: 'Amel', last_name: 'NASRI', dernier_le: ilY100Jours }] });
+      }
+      if (/FROM settings/.test(s)) return Promise.resolve({ rows: [] });
+      return Promise.resolve({ rows: [] });
+    });
+    const res = await get('/api/insertion/rsa/echeances-periodiques');
+    expect(res.body.points_referent_dus).toEqual([
+      { employee_id: 9, nom: 'NASRI Amel', dernier_le: ilY100Jours, du_depuis_jours: 100 },
     ]);
   });
 

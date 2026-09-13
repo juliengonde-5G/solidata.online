@@ -26,6 +26,7 @@
  *    `complet`, `partiel`, `a_faire`, `sans_objet`.
  */
 const pool = require('../config/database');
+const { isoDate } = require('../utils/date-iso');
 const { readInsertionSetting } = require('../utils/insertion-settings');
 const {
   FSE_ENTREE_ITEMS, FSE_SORTIE_ITEMS, SITUATIONS_SORTIE, SITUATIONS_6MOIS,
@@ -48,7 +49,13 @@ const SOCLE_RUBRIQUES = 7;
 // Utilitaires
 // ───────────────────────────────────────────────────────────────────────────
 
-const jour = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+// CORRECTIF de la famille D-05 (trouvé en exerçant la contrainte de fuseau des
+// correctifs PR B) : `new Date(colonneDATE).toISOString()` rend LA VEILLE sous
+// tout fuseau positif — le pilote construit une colonne `DATE` à minuit LOCAL.
+// Sur cet export, cela décalait d'un jour chaque date transmise à l'autorité de
+// gestion, DATE DE NAISSANCE COMPRISE. Le helper partagé lit les composantes
+// locales, dans le repère où le pilote a construit l'objet.
+const jour = (d) => isoDate(d);
 const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '');
 const joursEntre = (a, b) => Math.floor((new Date(jour(b)) - new Date(jour(a))) / 86400000);
 

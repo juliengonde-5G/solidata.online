@@ -252,10 +252,22 @@ export default function FicheReferentPanel({ employeeId, cadre, adminRh }) {
       {/* Aperçu — ce qui partirait, avant de décider */}
       <Modal isOpen={!!apercu} onClose={() => setApercu(null)} title="Ce qui serait transmis au référent" size="lg">
         {apercu && <ApercuFiche contenu={apercu} />}
-        <div className="flex justify-end gap-2 mt-4">
+        {/* ══ M-03 — « Imprimer sans enregistrer » a été RETIRÉ ══════════════
+            Le PDF produit par ce chemin était rigoureusement identique à celui
+            d'une fiche enregistrée : même bloc de signature de la conseillère,
+            même pied « Exemplaire remis à la personne concernée le … ». Rien,
+            sur le papier, ne distinguait un document tracé d'un document qui ne
+            l'était pas — pendant que la table des transmissions restait vide et
+            que l'indicateur « points d'étape tenus / dus » de l'autorité
+            comptait zéro sur un dossier correctement alimenté.
+            L'aperçu reste un aperçu À L'ÉCRAN : « ce qui serait transmis »,
+            avant de décider. L'impression, elle, passe par l'enregistrement. */}
+        <p className="mt-4 text-xs text-slate-500">
+          Cet aperçu n’est pas imprimable : une fiche remise au référent est une fiche transmise,
+          et une transmission se trace. Utilisez « Générer et enregistrer » — la fiche s’imprime aussitôt.
+        </p>
+        <div className="flex justify-end gap-2 mt-2">
           <button type="button" className="btn-secondary text-sm" onClick={() => setApercu(null)}>Fermer</button>
-          <button type="button" className="btn-secondary text-sm"
-            onClick={() => exportFicheReferentPDF(apercu, { moment })}>Imprimer sans enregistrer</button>
           <button type="button" className="btn-primary text-sm" disabled={!adminRh} onClick={generer}>Générer et enregistrer</button>
         </div>
       </Modal>
