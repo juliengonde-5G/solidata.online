@@ -1489,6 +1489,7 @@ const {
   purgeOldGpsPositions,
   purgeArretsGps,
   purgeBordereauxDecheterie,
+  purgeRappelsRdv,
   purgeExpiredRefreshTokens,
 } = require('./rgpd-purges');
 
@@ -1847,6 +1848,26 @@ async function hourlyTick() {
       });
     }
 
+    // ── PR C lot 7 — rappels de rendez-vous J-1 aux salariés ────────────────
+    //
+    // Heure MURALE DE PARIS (défaut 18 h, réglable `insertion.rappel_rdv_heure_envoi`)
+    // et non `now.getHours()` : le conteneur tourne en UTC, le rappel partirait
+    // à 20 h l'été et 19 h l'hiver — deux heures après la fermeture des
+    // boutiques un soir de juillet. Même patron que `shouldRunAutoBackup`
+    // (fonction pure `doitEnvoyerRappels`, testée sous TZ=UTC et TZ=Europe/Paris).
+    //
+    // Le job est un no-op complet tant qu'aucune personne n'a consenti : le
+    // consentement est dans le WHERE de la sélection, pas dans un filtre après
+    // lecture.
+    {
+      const { doitEnvoyerRappels, lireHeureEnvoi, envoyerRappelsRdvSalaries } = require('./rappels-rdv');
+      const heureEnvoi = await lireHeureEnvoi();
+      if (doitEnvoyerRappels(now, heureEnvoi)) {
+        console.log(`[SCHEDULER] Rappels de rendez-vous J-1 (${heureEnvoi}h heure de Paris)...`);
+        await runInstrumented('envoyerRappelsRdvSalaries', envoyerRappelsRdvSalaries);
+      }
+    }
+
     // Annuel : 1er janvier à 02h00 → sync jours fériés + vacances scolaires
     if (now.getMonth() === 0 && now.getDate() === 1 && now.getHours() === 2) {
       console.log('[SCHEDULER] 1er janvier 02h : sync jours fériés + vacances scolaires');
@@ -2118,6 +2139,11 @@ async function runAllJobs() {
     // purges de collecte : c'est une pièce produite par une tournée, et elle
     // porte deux signatures manuscrites dont celle d'un tiers.
     await runInstrumented('purgeBordereauxDecheterie', purgeBordereauxDecheterie);
+    // PR C lot 7 — trace des rappels de rendez-vous envoyés aux salariés
+    // (365 j). Rangée avec les purges d'insertion : c'est une trace produite par
+    // l'accompagnement, et elle repose sur un CONSENTEMENT que la personne peut
+    // retirer — raison de plus pour que sa conservation soit bornée et visible.
+    await runInstrumented('purgeRappelsRdv', purgeRappelsRdv);
     await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
     await runInstrumented('purgeMessagerieRetention', () => messagerie().purgeMessagerieRetention());
     // `notifier: true` — c'est le SEUL chemin réellement automatique : une
@@ -2187,6 +2213,7 @@ module.exports = {
   // service directement (routes/rgpd.js), jamais par ce module.
   purgeArretsGps,
   purgeBordereauxDecheterie,
+  purgeRappelsRdv,
   purgePcmNonRecrute,
   purgeExpiredCandidates,
   purgeInsertionDossiers,

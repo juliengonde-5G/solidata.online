@@ -322,6 +322,73 @@ async function anonymizeEmployee(client, id) {
     await client.query('DELETE FROM insertion_actualisations_ft WHERE employee_id = $1', [id]);
   }
 
+  // ── PR C lot 7 — le salarié : documents remis, rappels, reports d'échéance ──
+  //
+  // DOCUMENTS COMPOSÉS POUR LA PERSONNE : purge INTÉGRALE. Chaque ligne porte un
+  // SNAPSHOT de ce qui lui a été remis — ses engagements, ses heures, son
+  // référent, les étapes de son parcours. Ces documents appartiennent à la
+  // personne, qui en détient l'exemplaire ; la structure n'a aucune raison d'en
+  // garder une copie après l'exercice du droit à l'effacement. Ce qui SUBSISTE,
+  // et qui suffit à prouver qu'un document a bien été remis, c'est la ligne
+  // correspondante du registre RGPD (`INSERTION_DOC_SALARIE_REMISE`) — elle dit
+  // qui a remis quoi et quand, jamais ce que le document racontait.
+  if (await tableExists(client, 'insertion_documents_salarie')) {
+    await client.query('DELETE FROM insertion_documents_salarie WHERE employee_id = $1', [id]);
+  }
+
+  // RAPPELS DE RENDEZ-VOUS ENVOYÉS : purge intégrale également. La trace repose
+  // sur un CONSENTEMENT ; une fois celui-ci devenu sans objet, la conserver
+  // n'aurait plus aucun fondement — et elle porte, même masqué, un fragment du
+  // contact personnel de la personne.
+  if (await tableExists(client, 'insertion_rappels_rdv')) {
+    await client.query('DELETE FROM insertion_rappels_rdv WHERE employee_id = $1', [id]);
+  }
+
+  // REPORTS D'ÉCHÉANCE (table du lot 5, purgée ici parce qu'un seul fichier est
+  // propriétaire de l'anonymisation) : « obligation reportée trois fois, motif
+  // personne absente » est un constat individuel sans valeur d'agrégat, exactement
+  // ce qu'on ne garde pas après un effacement. Le `tableExists` couvre le cas
+  // d'une base où la migration du lot 5 n'est pas encore passée.
+  if (await tableExists(client, 'insertion_echeance_reports')) {
+    await client.query('DELETE FROM insertion_echeance_reports WHERE employee_id = $1', [id]);
+  }
+
+  // JETON PUBLIC DE L'ENCADRANT (lot 5) : un lien qui ouvre un formulaire nominatif
+  // ne doit pas survivre à l'anonymisation du dossier qu'il concerne. Requête
+  // gardée : sur une base où la migration du lot 5 n'est pas passée, la colonne
+  // n'existe pas et l'anonymisation ne doit pas échouer pour autant.
+  try {
+    await client.query('UPDATE insertion_milestones SET eti_token = NULL WHERE employee_id = $1 AND eti_token IS NOT NULL', [id]);
+  } catch (err) {
+    if (err.code !== '42703') throw err;
+  }
+
+  // CONSENTEMENT AUX RAPPELS. On efface le CONTACT choisi par la personne
+  // (numéro personnel ou adresse personnelle) et on ramène l'accord à « jamais
+  // demandé » — conserver « a refusé » après un effacement serait encore une
+  // information sur elle. Requête gardée pour la même raison que ci-dessus.
+  //
+  // CONSTAT DU LOT 7, à signaler : l'anonymisation existante ne touchait PAS
+  // `rgpd_consents`. Le lot supprime la seule entrée dont il est l'auteur
+  // (`rappel_rdv`) ; les autres types de consentement survivent à
+  // l'anonymisation du dossier — cela dépasse son périmètre et relève d'un
+  // arbitrage (rapport 21-realisation-lot7.md, « limites »).
+  try {
+    await client.query(
+      `UPDATE employees SET rappel_rdv_consent = NULL, rappel_rdv_destinataire = NULL,
+              rappel_rdv_canal = NULL, rappel_rdv_consent_at = NULL, rappel_rdv_consent_by = NULL
+        WHERE id = $1`, [id]
+    );
+  } catch (err) {
+    if (err.code !== '42703') throw err;
+  }
+  if (await tableExists(client, 'rgpd_consents')) {
+    await client.query(
+      "DELETE FROM rgpd_consents WHERE entity_type = 'employee' AND entity_id = $1 AND consent_type = 'rappel_rdv'",
+      [id]
+    );
+  }
+
   // FEUILLES DE TEMPS DES INTERVENANTS (lot 4) : la feuille elle-même est une
   // PIÈCE DE FINANCEMENT conservée au moins 5 ans au titre de la piste d'audit
   // FSE+ — la supprimer priverait la structure de sa capacité à justifier une

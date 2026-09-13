@@ -42,6 +42,8 @@ export const RGPD_ACTION_LABELS = {
   PURGE_ARRETS_GPS: 'Purge manuelle — arrêts GPS de collecte',
   PURGE_BORDEREAUX_DECHETERIE: 'Purge manuelle — bordereaux de collecte en déchèterie (signatures)',
   PURGE_MESSAGERIE: 'Purge manuelle — messagerie interne',
+  // PR C lot 7 — 10ᵉ purge : trace des rappels de rendez-vous envoyés aux salariés.
+  PURGE_RAPPELS_RDV: 'Purge manuelle — rappels de rendez-vous envoyés aux salariés',
   PURGE_REFRESH_TOKENS: 'Purge manuelle — jetons de connexion expirés',
 
   // ── Purges — job planifié (préfixe AUTO_ = déclenchement automatique) ────
@@ -53,6 +55,7 @@ export const RGPD_ACTION_LABELS = {
   AUTO_PURGE_ARRETS_GPS: 'Purge automatique — arrêts GPS de collecte',
   AUTO_PURGE_BORDEREAUX_DECHETERIE: 'Purge automatique — bordereaux de collecte en déchèterie (signatures)',
   AUTO_PURGE_MESSAGERIE: 'Purge automatique — messagerie interne',
+  AUTO_PURGE_RAPPELS_RDV: 'Purge automatique — rappels de rendez-vous envoyés aux salariés',
   AUTO_PURGE_REFRESH_TOKENS: 'Purge automatique — jetons de connexion expirés',
   AUTO_PURGE_BADGEUSE: 'Purge automatique — module Temps & Présence (badgeuse)',
 
