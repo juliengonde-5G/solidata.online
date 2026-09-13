@@ -25,6 +25,23 @@ const MILESTONE_TYPE_LABELS = {
   periode_essai: "Entretien de période d'essai",
 };
 
+/**
+ * Libellés de TOUS les types d'entretien, y compris les deux du cadre RSA
+ * (PR B). Source UNIQUE : trois fichiers en tenaient chacun une copie
+ * (`routes.js`, `services/fiche-referent.js`, `services/mon-parcours.js`), et
+ * le moteur d'échéances de la PR C, faute d'en avoir une, affichait le TITRE
+ * LIBRE de l'entretien à tous les rôles du module (constat M-01 de la revue de
+ * sécurité — « Bilan après l'hospitalisation en retard de 43 jours »).
+ *
+ * Un libellé qui manque ici, c'est un écran qui retombe sur le code brut ou,
+ * pire, sur le texte saisi : la liste doit rester complète.
+ */
+const MILESTONE_TYPE_LABELS_ALL = {
+  ...MILESTONE_TYPE_LABELS,
+  point_etape_referent: 'Point avec le référent',
+  conciliation: 'Entretien de conciliation (protection des droits)',
+};
+
 // Libellé d'affichage d'un entretien : titre saisi > label du type > type brut.
 function milestoneLabel(ms) {
   if (!ms) return '';
@@ -1810,6 +1827,7 @@ async function generateMilestones(db, employeeId, userId) {
 }
 
 module.exports = {
+  MILESTONE_TYPE_LABELS_ALL,
   PCM_KNOWLEDGE,
   METIERS_CIBLES,
   FREINS_DEFINITIONS,

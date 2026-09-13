@@ -50,9 +50,10 @@ const { activiteHebdoCohorte } = require('./activite-hebdo');
 // est déjà consommé par `routes/employees.js` et l'import de paie. Le RECOPIER
 // ici pour « avoir un helper du lot » produirait exactement ce que cet en-tête
 // interdit : deux règles pour un seul plafond légal.
-const { computeCddiCumulativeMonths } = require('../routes/insertion/engine');
+const { computeCddiCumulativeMonths, MILESTONE_TYPE_LABELS_ALL } = require('../routes/insertion/engine');
 const SOCLE = require('../data/diagnostic-socle-champs.json');
 const { MOTIFS_REPORT } = require('../scripts/migrations/insertion-echeances');
+const { peutVoirLienEti } = require('../utils/insertion-appartenance');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Liste FERMÉE des types d'obligation (contrat § 5.1.2)
@@ -142,6 +143,43 @@ function sqlPerimetreFileActive({ alias = 'e', moisTermines = 7, tous = false } 
         AND ${alias}.insertion_end_date IS NOT NULL
         AND ${alias}.insertion_end_date >= CURRENT_DATE - make_interval(months => ${mois}))
   )`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3 bis. Sortie FSE+ — LA règle de délai, écrite une seule fois
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Elle existait en DEUX exemplaires qui se contredisaient à l'écran (constat
+// D-06 du debug) : l'écran des échéances datait le délai depuis la SORTIE DE
+// L'OPÉRATION — correctif « défaut D » de la PR A, parce que sur une rupture
+// anticipée compter depuis la fin de contrat prévue imprimait 12 jours pour 43
+// réels — pendant que l'alerte de la FICHE le datait depuis `contract_end` et
+// ne vérifiait même pas que la personne soit participante d'un projet
+// cofinancé. Sur le même dossier, l'un disait « 26 jours, rouge » et l'autre se
+// taisait ; sur un salarié rattaché à aucun projet, l'un se taisait à juste
+// titre et l'autre réclamait une sortie qui n'existe pas.
+//
+// FONCTION PURE : aucune E/S, les deux appelants lui passent ce qu'ils ont lu.
+/**
+ * @param {object} o
+ * @param {string|Date|null} o.dateSortieOperation sortie du projet cofinancé (fait le plus juste)
+ * @param {string|Date|null} o.insertionEndDate    fin de parcours
+ * @param {string|Date|null} o.contratFin          fin du contrat courant
+ * @param {string|Date|null} o.contractEnd         fin de contrat portée par la fiche
+ * @param {string} o.jour   jour civil de Paris
+ * @param {number} o.seuilJ1 premier rappel (orange)
+ * @param {number} o.seuilJ2 second rappel (rouge)
+ * @returns {{reference:string, jours:number, niveau:'orange'|'rouge'}|null}
+ */
+function evaluerSortieFse({ dateSortieOperation, insertionEndDate, contratFin, contractEnd, jour, seuilJ1 = 15, seuilJ2 = 25 }) {
+  const reference = isoDate(dateSortieOperation)
+    || isoDate(insertionEndDate)
+    || isoDate(contratFin)
+    || isoDate(contractEnd);
+  if (!reference || !jour || reference > jour) return null;
+  const jours = ecartJours(reference, jour);
+  if (jours == null || jours < seuilJ1) return null;
+  return { reference, jours, niveau: jours >= seuilJ2 ? 'rouge' : 'orange' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -393,20 +431,19 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
     //     prévue imprimait 12 jours pour 43 réels (défaut D de la PR A).
     if (autorises.has('sortie_fse_a_saisir') && estAsi && !sortieFse) {
       const asi = asiParEmp.get(id);
-      const reference = isoDate(asi && asi.date_sortie)
-        || isoDate(e.insertion_end_date)
-        || isoDate(e.contrat_fin)
-        || isoDate(e.contract_end);
-      if (reference && reference <= jour) {
-        const jours = ecartJours(reference, jour);
-        if (jours != null && jours >= seuilJ1) {
-          pousser(id, ligne({
-            type: 'sortie_fse_a_saisir', niveau: jours >= seuilJ2 ? 'rouge' : 'orange',
-            employeeId: id, nom,
-            libelle: `Sortie FSE+ non renseignée — ${jours} jour(s) depuis la sortie de l'opération`,
-            echeance: decalerJours(reference, seuilJ2), jours,
-          }));
-        }
+      const due = evaluerSortieFse({
+        dateSortieOperation: asi && asi.date_sortie,
+        insertionEndDate: e.insertion_end_date,
+        contratFin: e.contrat_fin,
+        contractEnd: e.contract_end,
+        jour, seuilJ1, seuilJ2,
+      });
+      if (due) {
+        pousser(id, ligne({
+          type: 'sortie_fse_a_saisir', niveau: due.niveau, employeeId: id, nom,
+          libelle: `Sortie FSE+ non renseignée — ${due.jours} jour(s) depuis la sortie de l'opération`,
+          echeance: decalerJours(due.reference, seuilJ2), jours: due.jours,
+        }));
       }
     }
 
@@ -552,14 +589,19 @@ async function chargerReports(db, ids) {
 // 6. Bloc « Organisation du suivi » (acquittable 7 j — l'ack existant)
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function chargerOrganisation({ db, mine, userId, soft, anticipationJours }) {
+async function chargerOrganisation({ db, mine, userId, soft, anticipationJours, baseRole = 'ADMIN' }) {
   const params = [];
   let filtreMine = '';
   if (mine && userId != null) { params.push(userId); filtreMine = ` AND e.cip_referent_user_id = $${params.length}`; }
 
   const [retards, aPlanifier, renouvellements, actions] = await Promise.all([
+    // Le TITRE n'est pas lu (correctif M-01) : il est LIBRE, non masqué, et ce
+    // bloc s'affiche à TOUS les rôles du module — « Bilan après
+    // l'hospitalisation en retard de 43 jours » disait à un encadrant ce que le
+    // masquage des freins lui refuse. La règle était déjà appliquée aux actions
+    // critiques, quarante lignes plus bas ; elle vaut à l'identique ici.
     soft('bilans_en_retard', `
-      SELECT im.id, im.employee_id, im.milestone_type, im.titre, im.due_date,
+      SELECT im.id, im.employee_id, im.milestone_type, im.due_date,
              (CURRENT_DATE - im.due_date) AS jours, e.first_name, e.last_name
         FROM insertion_milestones im
         JOIN employees e ON e.id = im.employee_id
@@ -568,7 +610,7 @@ async function chargerOrganisation({ db, mine, userId, soft, anticipationJours }
          AND im.status <> 'realise' AND im.due_date < CURRENT_DATE${filtreMine}
        ORDER BY im.due_date`, params),
     soft('rdv_non_planifie', `
-      SELECT im.id, im.employee_id, im.milestone_type, im.titre, im.due_date,
+      SELECT im.id, im.employee_id, im.milestone_type, im.due_date,
              (im.due_date - CURRENT_DATE) AS jours, e.first_name, e.last_name
         FROM insertion_milestones im
         JOIN employees e ON e.id = im.employee_id
@@ -582,9 +624,11 @@ async function chargerOrganisation({ db, mine, userId, soft, anticipationJours }
              ec.end_date AS contract_end, (ec.end_date - CURRENT_DATE) AS jours,
              m.id AS milestone_id, m.eti_token, m.eti_token_expires_at,
              (m.renouvellement_form IS NOT NULL) AS formulaire_rempli,
-             (m.locked_at IS NOT NULL) AS verrouille
+             (m.locked_at IS NOT NULL) AS verrouille,
+             e.cip_referent_user_id, mgr.user_id AS manager_user_id
         FROM employees e
         JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+        LEFT JOIN employees mgr ON mgr.id = e.manager_id
         LEFT JOIN LATERAL (
           SELECT im.* FROM insertion_milestones im
            WHERE im.employee_id = e.id AND im.milestone_type = 'renouvellement'
@@ -613,7 +657,7 @@ async function chargerOrganisation({ db, mine, userId, soft, anticipationJours }
     items.push({
       id: `bilan_en_retard:${r.id}`, sous_type: 'bilan_en_retard', niveau: 'rouge',
       employee_id: r.employee_id, nom: nomDe(r), milestone_id: r.id,
-      libelle: `${r.titre || r.milestone_type} en retard de ${r.jours} jour(s)`,
+      libelle: `${MILESTONE_TYPE_LABELS_ALL[r.milestone_type] || r.milestone_type} en retard de ${r.jours} jour(s)`,
       echeance: isoDate(r.due_date), jours: Number(r.jours),
       cible: { onglet: 'suivi', champ: null },
     });
@@ -622,7 +666,7 @@ async function chargerOrganisation({ db, mine, userId, soft, anticipationJours }
     items.push({
       id: `rdv_non_planifie:${r.id}`, sous_type: 'rdv_non_planifie', niveau: 'orange',
       employee_id: r.employee_id, nom: nomDe(r), milestone_id: r.id,
-      libelle: `${r.titre || r.milestone_type} : aucune date planifiée`,
+      libelle: `${MILESTONE_TYPE_LABELS_ALL[r.milestone_type] || r.milestone_type} : aucune date planifiée`,
       echeance: isoDate(r.due_date), jours: Number(r.jours),
       cible: { onglet: 'suivi', champ: null },
     });
@@ -631,7 +675,12 @@ async function chargerOrganisation({ db, mine, userId, soft, anticipationJours }
     // Le lien public n'est rendu que s'il EXISTE ET n'est pas expiré : afficher
     // une adresse qui répondra 410 vaudrait moins que ne rien afficher.
     const expire = r.eti_token_expires_at ? new Date(r.eti_token_expires_at) : null;
-    const vivant = !!r.eti_token && expire instanceof Date && !Number.isNaN(expire.getTime()) && expire > new Date();
+    // Le lien public n'est rendu qu'à qui a le droit d'écrire ce formulaire
+    // (correctif B-01) : servi sans garde d'appartenance, il donnait à tout
+    // encadrant du module un accès SANS COMPTE — et donc non attribuable — au
+    // renouvellement d'un salarié dont il n'est pas le référent.
+    const vivant = !!r.eti_token && expire instanceof Date && !Number.isNaN(expire.getTime()) && expire > new Date()
+      && peutVoirLienEti(baseRole, r, userId);
     items.push({
       id: `renouvellement:${r.employee_id}`, sous_type: 'renouvellement',
       niveau: Number(r.jours) <= 15 ? 'rouge' : 'orange',
@@ -861,7 +910,7 @@ async function composerEcheances({ db = pool, baseRole = 'ADMIN', userId = null,
 
   const [charge, organisation, periodiques] = await Promise.all([
     chargerObligations({ db, baseRole, userId, mine }),
-    chargerOrganisation({ db, mine, userId, soft, anticipationJours: anticipation }),
+    chargerOrganisation({ db, mine, userId, soft, anticipationJours: anticipation, baseRole }),
     // Le bloc RSA est ADMIN/RH strict côté route dédiée : un MANAGER ne le
     // reçoit pas du tout — il vaut mieux ne rien montrer qu'annoncer une panne
     // là où il n'y a qu'une habilitation.
@@ -955,6 +1004,7 @@ async function compteurRouges({ db = pool, baseRole = 'ADMIN', userId = null, mi
 function viderCacheCompteur() { cacheCompteur.clear(); }
 
 module.exports = {
+  evaluerSortieFse,
   TYPES_OBLIGATIONS,
   TYPES_OBLIGATIONS_CLES,
   MOTIFS_REPORT,

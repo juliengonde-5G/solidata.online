@@ -229,7 +229,7 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
     });
     await pool.query(
       `INSERT INTO insertion_milestones (employee_id, milestone_type, due_date, status, titre, interview_date)
-       VALUES ($1, 'bilan_intermediaire', $2::date, 'planifie', 'Bilan', $3::timestamp)`,
+       VALUES ($1, 'bilan_intermediaire', $2::date, 'planifie', 'SECRET_TITRE_LIBRE', $3::timestamp)`,
       [E.rdv, jourParisDecale(3), `${jourParisDecale(3)} 14:00:00`]
     );
   });
@@ -323,7 +323,16 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
       const l = liste.find((x) => x.id === E.rdv);
       expect(l.prochain_rdv).not.toBeNull();
       expect(l.prochain_rdv.date).toBe(jourParisDecale(3));
-      expect(l.prochain_rdv.type).toBe('Bilan');
+    });
+
+    // CORRECTIF M-01 (revue de sécurité) — le TITRE d'un entretien est un
+    // VARCHAR(120) libre et non masqué (« Bilan après l'hospitalisation ») :
+    // cette liste s'affiche à tous les rôles du module. Le type rendu vient
+    // désormais de la liste FERMÉE, et le titre saisi n'apparaît nulle part.
+    test('V-11bis `prochain_rdv.type` est le libellé du TYPE, jamais le titre saisi', () => {
+      const l = liste.find((x) => x.id === E.rdv);
+      expect(l.prochain_rdv.type).toBe('bilan_intermediaire');
+      expect(JSON.stringify(liste)).not.toContain('SECRET_TITRE_LIBRE');
     });
 
     test('DÉFAUT D-01 — l\'heure du prochain rendez-vous doit être l\'heure de Paris (14:00)', () => {

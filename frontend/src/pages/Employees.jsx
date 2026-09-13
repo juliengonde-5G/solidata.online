@@ -8,6 +8,10 @@ import api from '../services/api';
 import { formatEmployeeName, formatLastName } from '../utils/names';
 import AlertesBloc from '../components/insertion/AlertesBloc';
 import { frDate as frDateIns } from '../components/insertion/freins';
+// Le TITRE d'un entretien est LIBRE (« Bilan après l'hospitalisation ») : ce
+// résumé, lisible par un encadrant, n'affiche que le libellé du TYPE — liste
+// fermée (constat M-01 de la revue de sécurité PR C).
+import { TYPE_LABELS_RSA } from '../components/insertion/entretiens-rsa';
 import {
   PCM_MENTION_METHODE, PCM_LIBELLE_COHERENCE, PCM_MENTION_COHERENCE,
   motifProfilPcmIndisponible,
@@ -1084,12 +1088,12 @@ function InsertionReadOnlyTab({ employee }) {
             </Ligne>
             <Ligne label="Prochain rendez-vous">
               {prochain
-                ? `${frDateIns(prochain.interview_date)}${prochain.titre ? ` — ${prochain.titre}` : ''}`
+                ? `${frDateIns(prochain.interview_date)} — ${TYPE_LABELS_RSA[prochain.milestone_type] || prochain.milestone_type}`
                 : <span className="text-gray-400">aucun rendez-vous planifié</span>}
             </Ligne>
             <Ligne label="Dernier entretien">
               {dernier
-                ? `${frDateIns(dernier.completed_date)}${dernier.titre ? ` — ${dernier.titre}` : ''}`
+                ? `${frDateIns(dernier.completed_date)} — ${TYPE_LABELS_RSA[dernier.milestone_type] || dernier.milestone_type}`
                 : <span className="text-gray-400">aucun entretien réalisé</span>}
             </Ligne>
           </dl>

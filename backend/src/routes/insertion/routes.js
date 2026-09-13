@@ -10,7 +10,7 @@ const { body, param, query } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const CryptoJS = require('crypto-js');
 const {
-  FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, MILESTONE_TYPES, MILESTONE_TYPE_LABELS,
+  FREINS_DEFINITIONS, CIP_QUESTIONNAIRES, MILESTONE_TYPES, MILESTONE_TYPE_LABELS, MILESTONE_TYPE_LABELS_ALL,
   milestoneLabel, analyzeInsertion, buildTimeline,
   computeCddiCumulativeMonths, resyncMilestones, generateMilestones,
   LEARNING_STYLES, computeLearningStyle, competenceAverage,
@@ -30,11 +30,9 @@ const { FREINS, freinColumns, RADAR_AXES } = require('./freins-registry');
 // qui empêche les deux de diverger sans qu'un enregistrement échoue bruyamment.
 const MILESTONE_TYPES_RSA = ['point_etape_referent', 'conciliation'];
 const MILESTONE_TYPES_ALL = [...MILESTONE_TYPES, ...MILESTONE_TYPES_RSA];
-const MILESTONE_TYPE_LABELS_ALL = {
-  ...MILESTONE_TYPE_LABELS,
-  point_etape_referent: 'Point avec le référent',
-  conciliation: 'Entretien de conciliation (protection des droits)',
-};
+// Libellés de tous les types : source UNIQUE dans `engine.js` (les copies
+// locales de ce fichier, de `fiche-referent.js` et de `mon-parcours.js` ont été
+// fondues — constat M-01).
 // Motifs LÉGITIMES d'une conciliation — liste fermée de codes, miroir de la
 // migration. Jamais de texte libre : un motif rédigé porterait par nature de la
 // santé (art. 9) sans qu'aucune colonne ne l'annonce, dans un champ que rien
@@ -44,15 +42,22 @@ const CONCILIATION_MOTIFS = ['sante', 'garde_enfant', 'transport',
 const CONCILIATION_ISSUES = ['maintien', 'reprise', 'orientation', 'sans_suite'];
 const REFERENT_MODALITES = ['tripartite', 'bilaterale'];
 const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../utils/field-crypto');
-const { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS } = require('./masking');
+const { maskInsertionRow, maskInsertionRows, stripSecrets, MANAGER_HIDDEN_FIELDS } = require('./masking');
+const { estProprietaireEncadrant, peutVoirLienEti } = require('../../utils/insertion-appartenance');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
 // PR C lot 5 — la file active, la pastille de risque et la complétude du socle
 // viennent TOUTES du moteur d'échéances : une seconde règle ici et la liste
 // contredirait l'écran « Mes échéances » (contrat 20 § 5.2 / 5.5).
 const {
-  sqlSocleComplet, sqlPerimetreFileActive, niveauxRisqueCohorte, lienEti,
+  sqlSocleComplet, sqlPerimetreFileActive, niveauxRisqueCohorte, lienEti, evaluerSortieFse,
 } = require('../../services/echeances-cip');
-const { isoDate } = require('../../utils/date-iso');
+const { isoDate, aujourdhuiParis } = require('../../utils/date-iso');
+
+/** Jour civil 'AAAA-MM-JJ' → 'JJ/MM/AAAA' pour un message d'alerte. */
+const frJour = (v) => {
+  const j = isoDate(v);
+  return j ? `${j.slice(8, 10)}/${j.slice(5, 7)}/${j.slice(0, 4)}` : '—';
+};
 const { journalPour } = require('../../utils/insertion-journal');
 const { autoLogActivity } = require('../../middleware/activity-logger');
 const { PMSMP_MAX_JOURS_CONVENTION, PMSMP_MAX_CUMUL_12M, pmsmpDays, computeCumul12MoisGlissants } = require('./pmsmp-rules');
@@ -88,10 +93,15 @@ async function currentParcoursNum(db, employeeId) {
 // Snapshot probant d'un entretien dans insertion_milestones_history
 // (RES-02 : verrouillage probant, pattern refashion_dpav_history).
 async function snapshotMilestone(db, row, action, userId, motif = null) {
+  // Le snapshot est une PHOTOGRAPHIE de l'entretien, pas un trousseau : le
+  // jeton public y était recopié VIVANT (constat m-02), et l'historique part
+  // dans les sauvegardes. On copie la ligne avant d'en retirer le secret —
+  // muter l'original priverait l'appelant d'une valeur qu'il utilise encore.
+  const photo = stripSecrets({ ...row });
   await db.query(
     `INSERT INTO insertion_milestones_history (milestone_id, snapshot, action, changed_by, motif)
      VALUES ($1, $2, $3, $4, $5)`,
-    [row.id, JSON.stringify(row), action, userId || null, motif]
+    [row.id, JSON.stringify(photo), action, userId || null, motif]
   );
 }
 
@@ -238,15 +248,25 @@ router.get('/', async (req, res) => {
         NULLIF(TRIM(CONCAT(UPPER(u.last_name), ' ', u.first_name)), '') AS cip_referent_nom,
         e.pass_iae_statut, e.pass_iae_end, e.referent_unique_type,
         ${adminRh ? 'e.brsa' : 'NULL::boolean AS brsa'},
-        rdv.interview_date AS prochain_rdv_date, rdv.milestone_type AS prochain_rdv_type,
-        rdv.titre AS prochain_rdv_titre,
+        rdv.jour AS prochain_rdv_jour, rdv.heure AS prochain_rdv_heure,
+        rdv.milestone_type AS prochain_rdv_type,
         der.completed_date AS dernier_entretien
         ${subqueries}
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN users u ON u.id = e.cip_referent_user_id
       LEFT JOIN LATERAL (
-        SELECT im.interview_date, im.milestone_type, im.titre
+        -- Le jour et l'heure sont lus PAR POSTGRESQL sur la valeur telle
+        -- qu'elle est stockée (heure MURALE de Paris — cf. utils/date-iso.js,
+        -- « heureMurale ») : toISOString() rendait 12:00 pour un rendez-vous
+        -- saisi à 14:00, et faisait reculer d'un jour ceux d'avant 02 h
+        -- (constat M-08 / D-01). Le TITRE n'est plus lu : il est LIBRE
+        -- (« Bilan après l'hospitalisation ») et cet écran s'affiche à tous les
+        -- rôles du module — ce qu'on ne lit pas ne peut pas fuir par un libellé
+        -- oublié (constat M-01, doctrine de services/fiche-referent.js).
+        SELECT im.milestone_type,
+               to_char(im.interview_date, 'YYYY-MM-DD') AS jour,
+               to_char(im.interview_date, 'HH24:MI') AS heure
           FROM insertion_milestones im
          WHERE im.employee_id = e.id AND im.status = 'planifie'
            AND im.interview_date IS NOT NULL AND im.interview_date >= NOW() - INTERVAL '1 day'
@@ -274,25 +294,38 @@ router.get('/', async (req, res) => {
         if (days <= 30) urgency = 'critique';
         else if (days <= 60) urgency = 'attention';
       }
-      const heure = e.prochain_rdv_date
-        ? new Date(e.prochain_rdv_date).toISOString().slice(11, 16)
-        : null;
+      const heure = e.prochain_rdv_heure || null;
       const ligne = {
         ...e,
         urgency,
+        // Dates CIVILES normalisées : le pilote construit une colonne `DATE` à
+        // minuit LOCAL, que `JSON.stringify` rend en UTC — sous Europe/Paris,
+        // `2027-07-10` partait « 2027-07-09T22:00:00Z » et l'écran affichait la
+        // veille (constat D-04, même famille que D-05 de la PR B).
+        insertion_start_date: isoDate(e.insertion_start_date),
+        insertion_end_date: isoDate(e.insertion_end_date),
+        pass_iae_end: isoDate(e.pass_iae_end),
+        contract_start: isoDate(e.contract_start),
+        contract_end: isoDate(e.contract_end),
+        contract_end_date: isoDate(e.contract_end_date),
         has_pcm: e.has_pcm > 0,
         has_diagnostic: e.has_diagnostic > 0,
         diagnostic_socle_complet: e.diagnostic_socle_complet === true,
         projets: Array.isArray(e.projets) ? e.projets.filter(Boolean) : [],
-        prochain_rdv: e.prochain_rdv_date ? {
-          date: isoDate(e.prochain_rdv_date),
+        prochain_rdv: e.prochain_rdv_jour ? {
+          date: e.prochain_rdv_jour,
+          // Minuit = aucune heure fixée (l'entretien n'a qu'une date) : le
+          // test porte sur la valeur STOCKÉE, plus sur une valeur convertie —
+          // l'ancienne règle effaçait une heure réelle de 02 h du matin et
+          // laissait passer minuit.
           heure: heure === '00:00' ? null : heure,
-          type: e.prochain_rdv_titre || e.prochain_rdv_type || null,
+          // Jamais le titre saisi : la liste FERMÉE des types (constat M-01).
+          type: e.prochain_rdv_type || null,
         } : null,
         dernier_entretien: isoDate(e.dernier_entretien),
         risque: risques.get(Number(e.id)) || null,
       };
-      delete ligne.prochain_rdv_date; delete ligne.prochain_rdv_type; delete ligne.prochain_rdv_titre;
+      delete ligne.prochain_rdv_jour; delete ligne.prochain_rdv_heure; delete ligne.prochain_rdv_type;
       return ligne;
     });
 
@@ -738,7 +771,7 @@ router.post('/milestones', [
            WHERE id = $2 RETURNING *`,
           [due_date || null, ex.rows[0].id]
         );
-        return res.status(200).json(upd.rows[0]);
+        return res.status(200).json(stripSecrets(upd.rows[0]));
       }
     }
 
@@ -767,7 +800,7 @@ router.post('/milestones', [
        RETURNING *`,
       [employee_id, pn, milestone_type, titre, due, contractId, previous_milestone_id || null, req.user.id]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(stripSecrets(result.rows[0]));
   } catch (err) {
     if (err.code === '23505') {
       return res.status(409).json({ error: 'Un entretien de ce type existe déjà pour ce parcours.' });
@@ -793,9 +826,10 @@ async function managerOwnsEmployee(db, employeeId, userId) {
     [employeeId]
   );
   if (r.rows.length === 0) return false;
-  const row = r.rows[0];
-  return (row.cip_referent_user_id != null && row.cip_referent_user_id === userId)
-    || (row.manager_user_id != null && row.manager_user_id === userId);
+  // Le prédicat vit dans `utils/insertion-appartenance.js` : les surfaces de
+  // cohorte (renouvellements, échéances) doivent trancher la MÊME chose que
+  // cette garde, sans en écrire une seconde version en SQL (constat B-01).
+  return estProprietaireEncadrant(r.rows[0], userId);
 }
 
 // Fusion des validations PAR RÔLE (traçabilité — P1 revue Codex PR#74) : une
@@ -1223,7 +1257,7 @@ router.post('/milestones/:id/close', [
         saisie_at: sortieFse.saisie_at,
       }
       : null;
-    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: createdNext, resync, sortie_fse: sortieFseProjetee });
+    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: stripSecrets(createdNext), resync, sortie_fse: sortieFseProjetee });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur close milestone :', err);
@@ -2290,10 +2324,23 @@ router.get('/alertes/:employeeId', [
       }
     }
 
-    // 9. Sortie FSE+ à saisir : le contrat est terminé et aucune sortie n'est
-    // enregistrée. La donnée se recueille AUPRÈS DE LA PERSONNE et la fenêtre
-    // se referme — d'où deux seuils, et un niveau critique dès le premier.
-    if (emp.contract_end && new Date(emp.contract_end) < today) {
+    // 9. Sortie FSE+ à saisir. UNE SEULE RÈGLE, partagée avec l'écran des
+    // échéances (`services/echeances-cip.js › evaluerSortieFse`) — correctif
+    // D-06. Deux défauts tombent avec elle :
+    //  - le délai était compté depuis la FIN DE CONTRAT ; sur une rupture
+    //    anticipée (sortie de l'opération il y a 26 jours, contrat qui devait
+    //    finir il y a 2 jours), la fiche se taisait pendant que l'écran d'à
+    //    côté affichait une ligne ROUGE. C'est la sortie de l'OPÉRATION qui
+    //    fait courir le délai (correctif « défaut D » de la PR A) ;
+    //  - l'alerte ne vérifiait PAS la participation à un projet cofinancé : un
+    //    salarié rattaché à aucun projet recevait une obligation FSE+ qui ne le
+    //    concerne pas. La sortie FSE+ n'est due QUE pour un participant.
+    const participationsAsi = await soft('participation_asi', `
+      SELECT pp.date_sortie FROM insertion_projet_participants pp
+      JOIN insertion_projets pr ON pr.id = pp.projet_id AND pr.type = 'asi'
+      WHERE pp.employee_id = $1
+      ORDER BY pp.date_sortie DESC NULLS LAST LIMIT 1`, [empId]);
+    if (participationsAsi.length > 0) {
       const sortie = await soft('fse_sortie', `
         SELECT id FROM insertion_fse_sorties WHERE employee_id = $1 AND parcours_num = $2`,
       [empId, emp.parcours_num]);
@@ -2302,13 +2349,20 @@ router.get('/alertes/:employeeId', [
           readInsertionSetting('insertion.alerte_sortie_fse_j1'),
           readInsertionSetting('insertion.alerte_sortie_fse_j2'),
         ]);
-        const jours = Math.floor((today - new Date(emp.contract_end)) / 86400000);
-        if (jours >= Number(j1)) {
+        const due = evaluerSortieFse({
+          dateSortieOperation: participationsAsi[0].date_sortie,
+          insertionEndDate: emp.insertion_end_date,
+          contractEnd: emp.contract_end,
+          jour: aujourdhuiParis(),
+          seuilJ1: Number(j1) > 0 ? Number(j1) : 15,
+          seuilJ2: Number(j2) > 0 ? Number(j2) : 25,
+        });
+        if (due) {
           alertes.push({
-            type: 'fse_sortie_a_saisir', niveau: 'critique',
-            message: `Sortie FSE+ non renseignée ${jours} jour(s) après la fin de contrat du ${new Date(emp.contract_end).toLocaleDateString('fr-FR')}`
-              + (jours >= Number(j2) ? ' — au-delà du second rappel : la situation ne se recueille plus auprès de la personne.' : '.'),
-            jours,
+            type: 'fse_sortie_a_saisir', niveau: due.niveau === 'rouge' ? 'critique' : 'attention',
+            message: `Sortie FSE+ non renseignée — ${due.jours} jour(s) depuis la sortie de l'opération (${frJour(due.reference)})`
+              + (due.niveau === 'rouge' ? ' — au-delà du second rappel : la situation ne se recueille plus auprès de la personne.' : '.'),
+            jours: due.jours,
           });
         }
       }
@@ -2809,9 +2863,11 @@ router.get('/renouvellements', async (req, res) => {
               m.due_date AS milestone_due_date, m.renouvellement_avis, m.renouvellement_duree_mois,
               (m.renouvellement_form IS NOT NULL) AS formulaire_rempli,
               (m.locked_at IS NOT NULL) AS verrouille,
-              m.eti_token, m.eti_token_expires_at
+              m.eti_token, m.eti_token_expires_at,
+              e.cip_referent_user_id, mgr.user_id AS manager_user_id
        FROM employees e
        JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
+       LEFT JOIN employees mgr ON mgr.id = e.manager_id
        LEFT JOIN LATERAL (
          SELECT im.* FROM insertion_milestones im
          WHERE im.employee_id = e.id AND im.milestone_type = 'renouvellement'
@@ -2828,12 +2884,18 @@ router.get('/renouvellements', async (req, res) => {
       [jours]
     );
     const maintenant = new Date();
+    const baseRole = baseRoleOf(req);
     const renouvellements = rows.rows.map((r) => {
       // Le lien public n'est exposé que s'il EXISTE ET n'est pas expiré :
       // afficher une adresse qui répondra 410 vaut moins que ne rien afficher —
       // la CIP l'enverrait, et l'encadrant se heurterait au refus.
       const exp = r.eti_token_expires_at ? new Date(r.eti_token_expires_at) : null;
-      const vivant = !!r.eti_token && exp instanceof Date && !Number.isNaN(exp.getTime()) && exp > maintenant;
+      // CORRECTIF PR C (B-01) : le lien n'est pas une donnée de la ligne, c'est
+      // un accès SANS COMPTE au formulaire. Un encadrant qui n'a pas le droit
+      // d'écrire ce renouvellement (garde `managerOwnsEmployee` du PUT) ne doit
+      // pas le recevoir : il écrirait par le lien, et sans être identifié.
+      const vivant = !!r.eti_token && exp instanceof Date && !Number.isNaN(exp.getTime()) && exp > maintenant
+        && peutVoirLienEti(baseRole, r, req.user && req.user.id);
       return {
         employee_id: r.employee_id,
         first_name: r.first_name,
@@ -3300,11 +3362,18 @@ router.get('/cohorte/stats', async (req, res) => {
     const jalonsParams = [];
     let jalonsFilter = '';
     if (mine) { jalonsParams.push(refId); jalonsFilter = ` AND e.cip_referent_user_id = $${jalonsParams.length}`; }
-    // titre / interview_date / ia_preparation_ready (phase D — écart 1a) :
-    // l'agenda affiche le libellé réel de l'entretien, l'heure du rendez-vous
-    // quand elle est posée, et signale qu'une note de préparation IA existe.
+    // interview_date / ia_preparation_ready (phase D — écart 1a) : l'agenda
+    // affiche l'heure du rendez-vous quand elle est posée et signale qu'une note
+    // de préparation IA existe.
+    //
+    // Le TITRE SAISI n'est plus lu (correctif M-01, dans la foulée du même
+    // constat sur l'écran des échéances) : il est libre, non masqué, et cet
+    // agrégat est servi à TOUS les rôles du module pour la cohorte entière. Le
+    // libellé rendu vient de la liste FERMÉE des types — le front continue de
+    // lire la clé `titre`, elle dit simplement autre chose que le texte d'une
+    // conseillère.
     const jalons = await pool.query(`
-      SELECT im.id, im.employee_id, im.milestone_type, im.titre, im.due_date,
+      SELECT im.id, im.employee_id, im.milestone_type, im.due_date,
              im.interview_date, im.status,
              (im.ia_preparation IS NOT NULL) AS ia_preparation_ready,
              e.first_name, e.last_name,
@@ -3316,11 +3385,14 @@ router.get('/cohorte/stats', async (req, res) => {
         AND im.status <> 'realise'${jalonsFilter}
       ORDER BY im.due_date
     `, jalonsParams);
-    const enRetard = jalons.rows.filter((j) => j.days_until < 0);
-    const aVenir7 = jalons.rows.filter((j) => j.days_until >= 0 && j.days_until <= 7);
+    const jalonsLignes = jalons.rows.map((j) => ({
+      ...j, titre: MILESTONE_TYPE_LABELS_ALL[j.milestone_type] || j.milestone_type,
+    }));
+    const enRetard = jalonsLignes.filter((j) => j.days_until < 0);
+    const aVenir7 = jalonsLignes.filter((j) => j.days_until >= 0 && j.days_until <= 7);
     // Agenda « Mes prochains entretiens » : jalons non réalisés à échéance dans
     // les 30 prochains jours, triés par date (item 61a).
-    const agenda30 = jalons.rows.filter((j) => j.days_until >= 0 && j.days_until <= 30);
+    const agenda30 = jalonsLignes.filter((j) => j.days_until >= 0 && j.days_until <= 30);
 
     // Salariés à risque : fin de contrat dans 60 jours
     const now = Date.now();

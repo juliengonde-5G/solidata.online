@@ -63,8 +63,11 @@ const LIGNE = {
   cip_referent_user_id: 7, cip_referent_nom: 'MARTIN Claire',
   pass_iae_statut: 'actif', pass_iae_end: '2028-02-29', referent_unique_type: 'cms',
   brsa: true,
-  prochain_rdv_date: '2026-10-12T09:30:00.000Z', prochain_rdv_type: 'bilan_intermediaire',
-  prochain_rdv_titre: 'Bilan n° 3',
+  // Le jour et l'heure sont désormais rendus PAR POSTGRESQL (`to_char`) sur la
+  // valeur stockée — heure MURALE de Paris, jamais reconvertie (correctif
+  // M-08 / D-01). Le TITRE n'est plus lu du tout (correctif M-01).
+  prochain_rdv_jour: '2026-10-12', prochain_rdv_heure: '09:30',
+  prochain_rdv_type: 'bilan_intermediaire',
   dernier_entretien: '2026-08-20',
   nb_contracts: 2, current_contract_type: 'CDDI', contract_end_date: '2026-09-30',
   has_pcm: 1, has_diagnostic: 1, diagnostic_socle_complet: true,
@@ -174,13 +177,33 @@ describe('champs ajoutés (§ 5.2)', () => {
 
   test('`prochain_rdv` est un OBJET {date, heure, type} ou null — jamais des champs plats', async () => {
     const r = await get('/api/insertion');
-    expect(r.body[0].prochain_rdv).toEqual({ date: '2026-10-12', heure: '09:30', type: 'Bilan n° 3' });
-    expect(r.body[0]).not.toHaveProperty('prochain_rdv_date');
-    expect(r.body[0]).not.toHaveProperty('prochain_rdv_titre');
+    expect(r.body[0].prochain_rdv).toEqual({ date: '2026-10-12', heure: '09:30', type: 'bilan_intermediaire' });
+    expect(r.body[0]).not.toHaveProperty('prochain_rdv_jour');
+    expect(r.body[0]).not.toHaveProperty('prochain_rdv_heure');
+  });
+
+  // CORRECTIF M-01 — le titre d'un entretien est LIBRE (« Bilan après
+  // l'hospitalisation ») et cette liste s'affiche à tous les rôles du module :
+  // il n'est même plus SÉLECTIONNÉ, et le type rendu vient de la liste fermée.
+  test('le TITRE saisi n’est ni lu ni rendu', async () => {
+    const r = await get('/api/insertion');
+    expect(sqlListe()).not.toMatch(/im\.titre/);
+    expect(JSON.stringify(r.body)).not.toContain('titre');
+  });
+
+  // CORRECTIF M-08 / D-01 — l'heure et le jour sont demandés à PostgreSQL sur
+  // la valeur STOCKÉE : `toISOString()` rendait l'heure UTC (12:00 pour un
+  // rendez-vous de 14:00) et faisait reculer d'un jour ceux d'avant 02 h.
+  test('l’heure et le jour du rendez-vous sont lus par PostgreSQL, sans conversion', async () => {
+    await get('/api/insertion');
+    const q = sqlListe();
+    expect(q).toContain("to_char(im.interview_date, 'HH24:MI')");
+    expect(q).toContain("to_char(im.interview_date, 'YYYY-MM-DD')");
+    expect(q).not.toMatch(/interview_date AT TIME ZONE/);
   });
 
   test('aucun rendez-vous planifié → `prochain_rdv: null` (jamais un objet vide)', async () => {
-    branche({ 'LEFT JOIN LATERAL': [{ ...LIGNE, prochain_rdv_date: null, prochain_rdv_type: null, prochain_rdv_titre: null }] });
+    branche({ 'LEFT JOIN LATERAL': [{ ...LIGNE, prochain_rdv_jour: null, prochain_rdv_heure: null, prochain_rdv_type: null }] });
     const r = await get('/api/insertion');
     expect(r.body[0].prochain_rdv).toBeNull();
   });
@@ -188,7 +211,7 @@ describe('champs ajoutés (§ 5.2)', () => {
   test('une heure de rendez-vous à minuit vaut « heure non posée », pas « 00:00 »', async () => {
     // Le module date les entretiens à J 00:00 tant que l'heure n'est pas saisie :
     // afficher « 00 h 00 » ferait croire à un rendez-vous à minuit.
-    branche({ 'LEFT JOIN LATERAL': [{ ...LIGNE, prochain_rdv_date: '2026-10-12T00:00:00.000Z' }] });
+    branche({ 'LEFT JOIN LATERAL': [{ ...LIGNE, prochain_rdv_heure: '00:00' }] });
     const r = await get('/api/insertion');
     expect(r.body[0].prochain_rdv.heure).toBeNull();
     expect(r.body[0].prochain_rdv.date).toBe('2026-10-12');

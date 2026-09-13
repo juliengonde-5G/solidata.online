@@ -41,22 +41,15 @@
 
 const pool = require('../config/database');
 const { FREINS } = require('../routes/insertion/freins-registry');
-const { MILESTONE_TYPE_LABELS } = require('../routes/insertion/engine');
+const { MILESTONE_TYPE_LABELS_ALL } = require('../routes/insertion/engine');
 const { activiteHebdo } = require('./activite-hebdo');
 
 /**
- * Libellés d'entretien pour un document destiné à un tiers.
- *
- * Les deux types de la PR B ne sont pas dans `MILESTONE_TYPE_LABELS`
- * (`routes/insertion/engine.js` appartient à un autre périmètre — voir le
- * rapport 16 § « ce qui reste ») : ils sont complétés ici, la table d'origine
- * restant la source pour les six types historiques.
+ * Libellés d'entretien pour un document destiné à un tiers — la table COMPLÈTE
+ * de `engine.js` (les deux types de la PR B y sont désormais ; la copie locale
+ * qui vivait ici a été fondue à la source, correctif M-01).
  */
-const TYPE_LABELS = {
-  ...MILESTONE_TYPE_LABELS,
-  point_etape_referent: 'Point avec le référent',
-  conciliation: 'Entretien de conciliation (protection des droits)',
-};
+const TYPE_LABELS = { ...MILESTONE_TYPE_LABELS_ALL };
 
 /** Axes de freins transmissibles : les 9 du registre MOINS art. 9 et art. 10. */
 const FREINS_TRANSMISSIBLES = FREINS.filter((f) => f.sensible == null);
