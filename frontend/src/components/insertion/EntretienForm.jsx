@@ -996,8 +996,20 @@ export default function EntretienForm({
                 </div>
               ))}
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Motifs / commentaires</label>
-                <textarea value={renou.commentaires || ''} onChange={(e) => setRenou('commentaires', e.target.value)} disabled={readOnly} rows={2} className="input-modern py-1 w-full" />
+                <label className="block text-xs font-medium text-gray-500 mb-1">Motifs / commentaires (interne)</label>
+                {/*
+                  Ce texte est celui de la CIP, pas celui de l'encadrant. Il
+                  s'écrit dans une clé DISTINCTE (`commentaires_cip`) de celle
+                  du formulaire ETI (`commentaires`) : les deux partageaient la
+                  même, si bien qu'un avis d'encadrant écrasait le commentaire
+                  interne — et qu'un commentaire interne pouvait réapparaître sur
+                  l'écran public au rechargement (correctif B-02). La lecture
+                  garde le repli sur l'ancienne clé pour les entretiens saisis
+                  avant ce correctif.
+                */}
+                <textarea value={renou.commentaires_cip ?? renou.commentaires ?? ''}
+                  onChange={(e) => setRenou('commentaires_cip', e.target.value)}
+                  disabled={readOnly} rows={2} className="input-modern py-1 w-full" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-amber-200 pt-3">
                 <div>

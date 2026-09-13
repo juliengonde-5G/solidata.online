@@ -249,7 +249,10 @@ const tokenDe = async (id) => (await pool.query('SELECT eti_token, eti_token_exp
       const ms = await pool.query(
         'SELECT renouvellement_form, renouvellement_avis, renouvellement_duree_mois, validations FROM insertion_milestones WHERE id = $1', [msA]
       );
-      expect(ms.rows[0].renouvellement_form).toEqual({ assiduite: 4, motivation: 5, autonomie: 3 });
+      // `rempli_par: 'eti'` est posé PAR LE SERVEUR (correctif B-02) : c'est
+      // lui qui autorise la relecture publique de ces réponses, et il ne doit
+      // pas dépendre de ce que le client envoie.
+      expect(ms.rows[0].renouvellement_form).toEqual({ assiduite: 4, motivation: 5, autonomie: 3, rempli_par: 'eti' });
       expect(ms.rows[0].renouvellement_avis).toBe('favorable_reserves');
       expect(ms.rows[0].renouvellement_duree_mois).toBe(4);
       const v = ms.rows[0].validations;

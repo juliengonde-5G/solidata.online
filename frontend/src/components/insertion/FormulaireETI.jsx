@@ -42,6 +42,23 @@ const VIDE = {
   motifs: [], commentaires: '',
 };
 
+/**
+ * Les SEULES clés que ce formulaire écrit — miroir de la liste blanche du
+ * serveur (`routes/insertion/eti-public.js › CLES_FORMULAIRE_ETI`).
+ *
+ * Le même blob `renouvellement_form` porte aussi la trame INTERNE que la CIP
+ * remplit dans la fiche : la projeter ici évite qu'un champ libre de la
+ * conseillère soit affiché à l'encadrant, puis renvoyé comme s'il était le sien
+ * (correctif B-02).
+ */
+export const CLES_FORMULAIRE_ETI = ['assiduite', 'motivation', 'autonomie', 'participation_actions',
+  'competences_acquises', 'projet_professionnel', 'motifs', 'commentaires', 'rempli_par'];
+
+export function projeterFormulaireEti(f) {
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return {};
+  return Object.fromEntries(Object.entries(f).filter(([k]) => CLES_FORMULAIRE_ETI.includes(k)));
+}
+
 /** Bouton radio LARGE (≥ 44 px — utilisateur peu à l'aise au clavier/à l'écran). */
 export function BigChoice({ selected, onClick, disabled, children, activeClass = 'bg-teal-600 border-teal-600', hoverClass = 'hover:border-teal-400' }) {
   return (

@@ -3,7 +3,7 @@ import { useParams, useSearchParams, Link } from 'react-router-dom';
 import api from '../services/api';
 import { frDate } from '../components/insertion/freins';
 import { formatEmployeeName } from '../utils/names';
-import FormulaireETI from '../components/insertion/FormulaireETI';
+import FormulaireETI, { projeterFormulaireEti } from '../components/insertion/FormulaireETI';
 
 /**
  * Écran ETI de renouvellement — VOIE AUTHENTIFIÉE
@@ -81,11 +81,19 @@ export default function RenouvellementETI() {
       setLienPublic(entry?.entretien?.lien_eti || null);
       setLienExpire(entry?.entretien?.eti_expire_le || null);
 
+      // Le blob `renouvellement_form` est écrit par DEUX formulaires : celui-ci
+      // et la trame INTERNE de renouvellement que la CIP remplit dans la fiche
+      // (dont « Motifs / commentaires » est un texte libre). Pré-remplir cet
+      // écran avec le blob entier montrait le commentaire de la conseillère à
+      // l'encadrant — et le lui faisait RENVOYER comme s'il était le sien. Même
+      // règle que l'écran public, qui projette côté serveur (correctif B-02).
+      const brut = (milestone?.renouvellement_form && typeof milestone.renouvellement_form === 'object')
+        ? milestone.renouvellement_form : {};
+      const deLEti = brut.rempli_par === 'eti';
       setInitial({
-        formulaire: (milestone?.renouvellement_form && typeof milestone.renouvellement_form === 'object')
-          ? milestone.renouvellement_form : {},
-        avis: milestone?.renouvellement_avis ?? entry?.entretien?.renouvellement_avis ?? null,
-        duree_mois: milestone?.renouvellement_duree_mois ?? entry?.entretien?.renouvellement_duree_mois ?? null,
+        formulaire: deLEti ? projeterFormulaireEti(brut) : {},
+        avis: deLEti ? (milestone?.renouvellement_avis ?? entry?.entretien?.renouvellement_avis ?? null) : null,
+        duree_mois: deLEti ? (milestone?.renouvellement_duree_mois ?? entry?.entretien?.renouvellement_duree_mois ?? null) : null,
       });
     } catch (err) {
       setLoadError(err.response?.data?.error || err.message);

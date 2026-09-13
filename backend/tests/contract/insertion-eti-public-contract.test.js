@@ -32,9 +32,13 @@ process.env.PCM_ENCRYPTION_KEY = process.env.PCM_ENCRYPTION_KEY || 'test-pcm-key
 process.env.PUBLIC_BASE_URL = 'https://solidata.online';
 
 const mockQuery = jest.fn();
+const releases = [];
 jest.mock('../../src/config/database', () => ({
   query: (...a) => mockQuery(...a),
-  connect: async () => ({ query: (...a) => mockQuery(...a), release: () => {} }),
+  connect: async () => {
+    if (global.__CONNECT_KO__) throw new Error('pool épuisé');
+    return { query: (...a) => mockQuery(...a), release: () => releases.push(1) };
+  },
 }));
 jest.mock('../../src/middleware/activity-logger', () => ({
   autoLogActivity: () => (req, res, next) => next(),
@@ -53,7 +57,10 @@ const TOKENS = { ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor
 
 beforeAll(() => {
   app = express();
-  app.use(express.json());
+  // La MÊME limite qu'en production (`src/index.js`) : sans elle, un corps de
+  // 2 Mo serait refusé par le parseur (413) et la borne applicative qu'on
+  // vérifie ici ne serait jamais exercée.
+  app.use(express.json({ limit: '10mb' }));
   app.use('/api/eti', require('../../src/routes/insertion/eti-public'));
   app.use('/api/insertion', require('../../src/routes/insertion'));
 });
@@ -65,7 +72,9 @@ const hier = () => new Date(Date.now() - 86400000).toISOString();
 const ENTRETIEN = {
   id: 42, employee_id: 5, milestone_type: 'renouvellement', status: 'planifie',
   locked_at: null, eti_token_expires_at: demain(),
-  renouvellement_form: { assiduite: 'bonne' }, renouvellement_avis: null,
+  // Le formulaire tel que l'ENCADRANT l'a commencé — `rempli_par: 'eti'` est
+  // posé par le serveur à l'écriture, et c'est lui qui autorise la relecture.
+  renouvellement_form: { assiduite: 'bonne', rempli_par: 'eti' }, renouvellement_avis: null,
   renouvellement_duree_mois: null, validations: [{ role: 'cip', at: '2026-01-01T00:00:00Z' }],
   first_name: 'Amine', last_name: 'BENALI', position: 'Agent de tri',
   contract_end: '2026-12-31',
@@ -105,8 +114,54 @@ describe('GET /api/eti/renouvellement/:token', () => {
       'avis', 'contract_end', 'duree_mois', 'expire_le', 'formulaire', 'lecture_seule', 'nom', 'poste', 'prenom',
     ]);
     expect(r.body.prenom).toBe('Amine');
-    expect(r.body.formulaire).toEqual({ assiduite: 'bonne' });
+    expect(r.body.formulaire).toEqual({ assiduite: 'bonne', rempli_par: 'eti' });
     expect(r.body.lecture_seule).toBe(false);
+  });
+
+  // ═══ CORRECTIF B-02 ═════════════════════════════════════════════════════
+  // `renouvellement_form` est écrit par DEUX formulaires : celui-ci et la trame
+  // INTERNE de renouvellement que la CIP remplit dans la fiche, dont le champ
+  // « Motifs / commentaires » est un texte libre. Le GET public rendait le blob
+  // ENTIER — et l'écran public le pré-remplissait — à qui détient un lien de
+  // 60 jours, transmissible, sans session.
+  test('le texte libre de la CIP ne sort JAMAIS, ni son avis', async () => {
+    branche({
+      'WHERE m.eti_token = $1': [{
+        ...ENTRETIEN,
+        renouvellement_form: {
+          assiduite: 'moyenne',
+          commentaires: "Arrêts maladie répétés depuis janvier ; suivi psy en cours. Ne pas renouveler.",
+        },
+        renouvellement_avis: 'defavorable',
+        renouvellement_duree_mois: 2,
+      }],
+    });
+    const r = await request(app).get(`/api/eti/renouvellement/${JETON}`);
+    expect(r.status).toBe(200);
+    const brut = JSON.stringify(r.body);
+    expect(brut).not.toContain('hospitalisation');
+    expect(brut).not.toContain('Arrêts maladie');
+    expect(brut).not.toContain('suivi psy');
+    // Trame interne non commencée par l'encadrant → écran VIERGE, et ni l'avis
+    // de la structure ni la durée qu'elle propose ne sont montrés avant qu'il
+    // ait donné le sien.
+    expect(r.body.formulaire).toEqual({});
+    expect(r.body.avis).toBeNull();
+    expect(r.body.duree_mois).toBeNull();
+  });
+
+  test('une clé étrangère glissée dans le blob n’est pas relayée (liste BLANCHE)', async () => {
+    branche({
+      'WHERE m.eti_token = $1': [{
+        ...ENTRETIEN,
+        renouvellement_form: { assiduite: 'bonne', rempli_par: 'eti', commentaire_cip_interne: 'SECRET', frein_sante: 5 },
+      }],
+    });
+    const r = await request(app).get(`/api/eti/renouvellement/${JETON}`);
+    const brut = JSON.stringify(r.body);
+    expect(brut).not.toContain('SECRET');
+    expect(brut).not.toContain('frein_sante');
+    expect(r.body.formulaire).toEqual({ assiduite: 'bonne', rempli_par: 'eti' });
   });
 
   test('aucun identifiant de salarié ni d’entretien ne sort', async () => {
@@ -176,6 +231,80 @@ describe('PUT /api/eti/renouvellement/:token', () => {
     expect(maj).toBeDefined();
     expect(String(maj[0])).toContain('renouvellement_form = $1');
     expect(String(maj[0])).toContain('validations = $4');
+  });
+
+  // ═══ CORRECTIF M-02 — la VALEUR est bornée, pas seulement le nom du champ ══
+  // Mesuré sur le routeur réel, sans authentification : 2 Mo écrits dans une
+  // colonne JSONB, et 20 000 niveaux d'imbrication faisant tomber le
+  // sérialiseur. Le rate limit borne le débit, jamais la taille.
+  test('un formulaire de 2 Mo est REFUSÉ — avant toute requête', async () => {
+    const r = await put({ renouvellement_form: { commentaires: 'x'.repeat(2 * 1024 * 1024) } });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('FORMULAIRE_INVALIDE');
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  test('un formulaire profondément imbriqué est REFUSÉ (aucune pile épuisée)', async () => {
+    let profond = {};
+    for (let i = 0; i < 2000; i += 1) profond = { a: profond };
+    const r = await put({ renouvellement_form: { commentaires: profond } });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('FORMULAIRE_INVALIDE');
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  test('une clé inconnue, un tableau trop long, un objet imbriqué → 400', async () => {
+    expect((await put({ renouvellement_form: { frein_sante: 5 } })).status).toBe(400);
+    expect((await put({ renouvellement_form: { motifs: Array(21).fill('x') } })).status).toBe(400);
+    expect((await put({ renouvellement_form: { commentaires: { a: 1 } } })).status).toBe(400);
+    expect((await put({ renouvellement_form: [] })).status).toBe(400);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  // ═══ CORRECTIF M-09 — l'écriture ANONYME est transactionnelle et tracée ═══
+  // Snapshot, UPDATE et journal RGPD étaient trois gestes indépendants dont
+  // deux avalaient leurs erreurs : une écriture faite SANS COMPTE pouvait
+  // aboutir sans une seule ligne au registre. La trace est ici la seule chose
+  // qui reste.
+  test('BEGIN / COMMIT encadrent l’écriture, et le journal est DANS la transaction', async () => {
+    const r = await put({ renouvellement_avis: 'favorable' });
+    expect(r.status).toBe(200);
+    const ordre = mockQuery.mock.calls.map(([q]) => String(q).trim().split(/\s+/).slice(0, 3).join(' '));
+    expect(ordre).toContain('BEGIN');
+    expect(ordre).toContain('COMMIT');
+    const iJournal = mockQuery.mock.calls.findIndex(([q]) => /INSERT INTO rgpd_audit_log/.test(String(q)));
+    const iCommit = ordre.indexOf('COMMIT');
+    expect(iJournal).toBeGreaterThan(-1);
+    expect(iJournal).toBeLessThan(iCommit);
+  });
+
+  test('journal RGPD en échec → 500, ROLLBACK, et AUCUNE écriture conservée', async () => {
+    mockQuery.mockImplementation((sql) => {
+      const q = String(sql);
+      if (/INSERT INTO rgpd_audit_log/.test(q)) return Promise.reject(new Error('registre indisponible'));
+      if (/WHERE m\.eti_token = \$1/.test(q)) return Promise.resolve({ rows: [ENTRETIEN] });
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await put({ renouvellement_avis: 'favorable' });
+    expect(r.status).toBe(500);
+    const ordre = mockQuery.mock.calls.map(([q]) => String(q).trim().split(/\s+/)[0]);
+    expect(ordre).toContain('ROLLBACK');
+    expect(ordre).not.toContain('COMMIT');
+  });
+
+  test('`pool.connect()` en échec → 500 sans fuite et sans message technique', async () => {
+    global.__CONNECT_KO__ = true;
+    const r = await put({ renouvellement_avis: 'favorable' });
+    global.__CONNECT_KO__ = false;
+    expect(r.status).toBe(500);
+    expect(JSON.stringify(r.body)).not.toContain('pool épuisé');
+  });
+
+  test('le serveur POSE `rempli_par: eti` — un client ne décide pas de ce qui sera relu', async () => {
+    const r = await put({ renouvellement_form: { assiduite: 'bonne', rempli_par: 'cip' } });
+    expect(r.status).toBe(200);
+    const maj = mockQuery.mock.calls.find(([s]) => String(s).includes('UPDATE insertion_milestones SET'));
+    expect(JSON.parse(maj[1][0]).rempli_par).toBe('eti');
   });
 
   test('un champ hors liste blanche → 400 `champs_refuses`, AVANT toute requête', async () => {
