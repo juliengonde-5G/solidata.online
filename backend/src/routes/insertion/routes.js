@@ -3581,10 +3581,21 @@ async function gatherAuditKpis(year) {
     methode: "Taux calculés sur les sorties constatées de l'année civile (dénominateur = bilans de sortie réalisés portant une classification — changement de méthode 2026). Cible null = objectif non paramétré.",
   };
 
+  // PR B (4.2) — heures d'accompagnement de l'année (par projet / intervenant /
+  // salarié), composées par le service du temps d'accompagnement. `soft` :
+  // null si le service échoue ou si la base n'est pas migrée — jamais 0.
+  let heuresAccompagnement = null;
+  try {
+    heuresAccompagnement = await require('../../services/temps-accompagnement').heuresAccompagnement({ annee: year });
+  } catch (err) {
+    console.error(`[INSERTION][AUDIT] « heures_accompagnement » ignorée : ${err.message}`);
+  }
+
   return {
     annee: year,
     nb_en_parcours: nbEnParcours,
     freins_nb_evalues: nbEvalues,
+    heures_accompagnement: heuresAccompagnement,
     milestones: { par_type: milestonesParType, global: milestonesGlobal },
     freins_moyennes: freinsMoyennes,
     frein_dominant: freinDominant,
