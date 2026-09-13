@@ -70,37 +70,17 @@ const TEL_E164_RE = /^\+[1-9]\d{7,14}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
 
 /**
- * Journal RGPD.
- *
- * NOTE D'INTÉGRATION — à dédoublonner : le lot 5 extrait ce helper (identique)
- * de `routes/insertion/rsa.js` vers `backend/src/utils/insertion-journal.js`.
- * Les deux lots travaillant en parallèle sur des fichiers disjoints, la fonction
- * est recopiée ici en attendant ; l'orchestrateur remplace ces deux fonctions
- * par l'import du helper partagé (contrat § 7).
- *
- * `ecrireJournal` accepte un client : les gestes bloquants l'appellent DANS la
- * transaction du geste qu'ils tracent.
+ * Journal RGPD — helper PARTAGÉ du module (utils/insertion-journal.js, contrat
+ * 20 § 7) : `journaliser` tolérant pour les consultations d'écran,
+ * `ecrireJournal(client, …)` bloquant, appelé DANS la transaction du geste qu'il
+ * trace (génération, remise, consentement). Dédoublonné à l'intégration PR C.
  */
-async function ecrireJournal(db, req, action, employeeId, details) {
-  await db.query(
-    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
-    [req.user && req.user.id != null ? req.user.id : null, action, 'insertion_salarie', employeeId,
-      JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
-  );
-}
-
-/**
- * Journal TOLÉRANT — consultations d'écran. Perdre la trace d'une lecture est
- * regrettable ; empêcher la CIP d'ouvrir un panneau parce que le journal est
- * indisponible serait pire.
- */
-async function journaliser(req, action, employeeId, details) {
-  try {
-    await ecrireJournal(pool, req, action, employeeId, details);
-  } catch (e) {
-    console.error(`[INSERTION][SALARIE] Journalisation ${action} impossible :`, e.message);
-  }
-}
+const { ecrireJournal: ecrireJournalPartage, journalPour } = require('../../utils/insertion-journal');
+const journalSalarie = journalPour('insertion_salarie', '[INSERTION][SALARIE]');
+const ecrireJournal = (db, req, action, employeeId, details) =>
+  ecrireJournalPartage(db, req, action, employeeId, details, 'insertion_salarie');
+const journaliser = (req, action, employeeId, details) =>
+  journalSalarie.journaliser(pool, req, action, employeeId, details);
 
 /** Parcours courant du salarié (repli 1), comme `cadre.js` et `rsa.js`. */
 async function parcoursNum(employeeId) {
