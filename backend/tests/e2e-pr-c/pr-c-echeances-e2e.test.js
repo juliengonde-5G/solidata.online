@@ -279,6 +279,25 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
       expect(r.body.find((l) => l.id === E.permanent)).toBeUndefined();
     });
 
+    // ═══ CORRECTIF M-07 — le périmètre du MANAGER redevient « en cours » ═══
+    // La rémanence de sept mois sert la sortie FSE+ et le relevé à +6 mois,
+    // deux gestes ADMIN/RH STRICT : une personne PARTIE restait pourtant sept
+    // mois dans la liste de son encadrant, avec son poste, son dernier
+    // entretien, son prochain rendez-vous et sa pastille de risque.
+    test('V-06bis un MANAGER ne voit AUCUN parcours terminé, et `?inclure=tous` ne lui donne rien', async () => {
+      const r = await auth(request(app).get('/api/insertion'), 'MANAGER');
+      expect(r.status).toBe(200);
+      expect(r.body.find((l) => l.id === E.termine3)).toBeUndefined();
+      expect(r.body.find((l) => l.id === E.termine9)).toBeUndefined();
+      // …et il garde bien les parcours en cours.
+      expect(r.body.find((l) => l.id === E.ok)).toBeDefined();
+
+      const tous = await auth(request(app).get('/api/insertion?inclure=tous'), 'MANAGER');
+      expect(tous.status).toBe(200);
+      expect(tous.body.find((l) => l.id === E.termine9)).toBeUndefined();
+      expect(tous.body.find((l) => l.id === E.permanent)).toBeUndefined();
+    });
+
     test('V-07 ?mine=1 borne aux salariés dont le compte est CIP référent', async () => {
       const r = await auth(request(app).get('/api/insertion?mine=1'), 'RH');
       expect(r.status).toBe(200);

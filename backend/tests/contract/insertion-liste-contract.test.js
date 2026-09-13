@@ -121,6 +121,32 @@ describe('périmètre (§ 5.2)', () => {
     expect(q).not.toContain('make_interval');
   });
 
+  // ═══ CORRECTIF M-07 — le MANAGER ne voit que les parcours EN COURS ════════
+  // La rémanence de sept mois existe pour la sortie FSE+ et le relevé à
+  // +6 mois : deux gestes ADMIN/RH STRICT. Elle faisait rester une personne
+  // partie dans la liste de son encadrant, avec son poste, son dernier
+  // entretien et sa pastille de risque. `?inclure=tous` allait plus loin —
+  // aucune borne, aucune garde de rôle, un appel HTTP direct suffisait.
+  test('un MANAGER ne reçoit PAS les parcours terminés', async () => {
+    await get('/api/insertion', 'MANAGER');
+    const q = sqlListe();
+    expect(q).toContain("e.insertion_status = 'en_parcours'");
+    expect(q).not.toContain("e.insertion_status = 'termine'");
+    expect(q).not.toContain('make_interval');
+  });
+
+  test('`?inclure=tous` est SANS EFFET pour un MANAGER', async () => {
+    await get('/api/insertion?inclure=tous', 'MANAGER');
+    const q = sqlListe();
+    expect(q).toContain("e.insertion_status = 'en_parcours'");
+    expect(q).not.toContain("insertion_status <> 'none'");
+  });
+
+  test('une CIP, elle, garde les deux (la sortie FSE+ se saisit APRÈS la sortie)', async () => {
+    await get('/api/insertion', 'RH');
+    expect(sqlListe()).toContain("e.insertion_status = 'termine'");
+  });
+
   test('`?mine=1` restreint au CIP référent', async () => {
     await get('/api/insertion?mine=1');
     const appel = mockQuery.mock.calls.find(([s]) => String(s).includes('LEFT JOIN LATERAL'));

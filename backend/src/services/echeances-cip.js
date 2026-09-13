@@ -136,7 +136,14 @@ function socleComplet(diag) {
  */
 function sqlPerimetreFileActive({ alias = 'e', moisTermines = 7, tous = false } = {}) {
   if (tous) return `${alias}.insertion_status IS NOT NULL AND ${alias}.insertion_status <> 'none'`;
-  const mois = Number.isFinite(Number(moisTermines)) && Number(moisTermines) > 0 ? Math.round(Number(moisTermines)) : 7;
+  // `moisTermines: 0` = AUCUNE rémanence : le périmètre se réduit aux parcours
+  // en cours. C'est ce que reçoit un MANAGER depuis le correctif M-07 — la
+  // sortie FSE+ et le relevé à +6 mois, seules raisons de garder une personne
+  // partie dans la liste, sont ADMIN/RH strict. Distinguer 0 de « non
+  // renseigné » : `Number(null)` vaut 0, et 0 est ici une valeur qui décide.
+  const brut = moisTermines == null || moisTermines === '' ? 7 : Number(moisTermines);
+  const mois = Number.isFinite(brut) && brut >= 0 ? Math.round(brut) : 7;
+  if (mois === 0) return `${alias}.insertion_status = 'en_parcours'`;
   return `(
     ${alias}.insertion_status = 'en_parcours'
     OR (${alias}.insertion_status = 'termine'
@@ -239,7 +246,11 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
     readInsertionSetting('insertion.categorie_g_alerte_jours'),
   ]);
 
-  const perimetre = sqlPerimetreFileActive({ alias: 'e', moisTermines, tous });
+  // Même borne que la file active (M-07) : les familles d'obligations qui
+  // portent sur un parcours TERMINÉ sont toutes ADMIN/RH.
+  const perimetre = sqlPerimetreFileActive({
+    alias: 'e', moisTermines: adminRh ? moisTermines : 0, tous: tous && adminRh,
+  });
   const params = [];
   let filtreMine = '';
   if (mine && userId != null) { params.push(userId); filtreMine = ` AND e.cip_referent_user_id = $${params.length}`; }
@@ -310,11 +321,22 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
   const asiParEmp = new Map((participants || []).map((p) => [Number(p.employee_id), p]));
 
   const jour = aujourdhuiParis();
-  const seuilJ1 = Number(j1) > 0 ? Number(j1) : 15;
-  const seuilJ2 = Number(j2) > 0 ? Number(j2) : 25;
-  const seuilDiag = Number(delaiDiag) > 0 ? Number(delaiDiag) : 30;
-  const seuilPass = Number(moisPass) > 0 ? Number(moisPass) : 7;
-  const seuilG = Number(joursG) > 0 ? Number(joursG) : 30;
+  // CORRECTIF m-07 — `Number(x) > 0 ? x : défaut` fait retomber sur le défaut
+  // un réglage VOLONTAIREMENT mis à 0 (« alerter dès le premier jour »), et il
+  // confond ce 0 avec l'absence puisque `Number(null)` vaut 0. On teste
+  // l'ABSENCE avant de convertir, puis on borne — même famille de piège que le
+  // point de départ dans le golfe de Guinée (2.42.0) et la tolérance de
+  // rendez-vous à zéro minute (2.38.0), à l'envers.
+  const seuil = (v, defaut) => {
+    if (v == null || v === '') return defaut;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : defaut;
+  };
+  const seuilJ1 = seuil(j1, 15);
+  const seuilJ2 = seuil(j2, 25);
+  const seuilDiag = seuil(delaiDiag, 30);
+  const seuilPass = seuil(moisPass, 7);
+  const seuilG = seuil(joursG, 30);
 
   const pousser = (empId, l) => { if (parEmploye.has(empId)) parEmploye.get(empId).push(l); };
 

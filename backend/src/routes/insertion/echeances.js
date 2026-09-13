@@ -30,7 +30,7 @@ const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { journalPour } = require('../../utils/insertion-journal');
 const {
-  composerEcheances, compteurRouges, viderCacheCompteur,
+  composerEcheances, compteurRouges, viderCacheCompteur, sqlPerimetreFileActive,
   TYPES_OBLIGATIONS, TYPES_OBLIGATIONS_CLES, MOTIFS_REPORT,
 } = require('../../services/echeances-cip');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
@@ -121,8 +121,23 @@ router.post('/report', authorize('ADMIN', 'RH'), [
       });
     }
 
-    const emp = await pool.query('SELECT id FROM employees WHERE id = $1', [employeeId]);
-    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
+    // CORRECTIF m-04 — le report acceptait N'IMPORTE QUEL salarié existant, y
+    // compris un permanent (qui n'a pas de parcours) ou quelqu'un qui ne porte
+    // pas cette obligation : la ligne était créée, journalisée, et le compteur
+    // de reports s'incrémentait pour rien — le motif devenant obligatoire au
+    // geste suivant sur un dossier où rien n'avait jamais été reporté.
+    const moisTermines = await readInsertionSetting('insertion.file_active_terminees_mois');
+    const emp = await pool.query(
+      `SELECT id FROM employees e
+        WHERE e.id = $1 AND ${sqlPerimetreFileActive({ alias: 'e', moisTermines })}`,
+      [employeeId]
+    );
+    if (emp.rows.length === 0) {
+      return res.status(404).json({
+        error: "Salarié non trouvé dans la file active : un report ne porte que sur un parcours d'insertion.",
+        code: 'HORS_FILE_ACTIVE',
+      });
+    }
 
     // Nombre de reports DÉJÀ posés sur ce couple (salarié, type). C'est lui qui
     // rend le motif obligatoire à partir du deuxième : un premier report est un

@@ -85,7 +85,7 @@ function branche(over = {}) {
     }
     if (/INSERT INTO rgpd_audit_log/.test(s)) return Promise.resolve({ rows: [] });
     if (/FROM employees e WHERE/.test(s)) return Promise.resolve({ rows: [SALARIE] });
-    if (/SELECT id FROM employees WHERE id/.test(s)) return Promise.resolve({ rows: [{ id: 5 }] });
+    if (/SELECT id FROM employees e/.test(s)) return Promise.resolve({ rows: [{ id: 5 }] });
     if (/COUNT\(\*\)::int AS n FROM insertion_echeance_reports/.test(s)) return Promise.resolve({ rows: [{ n: 0 }] });
     if (/FROM insertion_echeance_reports/.test(s)) return Promise.resolve({ rows: [] });
     if (/FROM settings/.test(s)) return Promise.resolve({ rows: [] });
@@ -286,9 +286,22 @@ describe('POST /api/insertion/echeances/report (§ 5.1.3)', () => {
   });
 
   test('salarié inconnu → 404', async () => {
-    branche({ 'SELECT id FROM employees WHERE id': [] });
+    branche({ 'SELECT id FROM employees e': [] });
     const r = await post('/api/insertion/echeances/report', 'ADMIN', { employee_id: 999, type: 'pass_iae' });
     expect(r.status).toBe(404);
+  });
+
+  // CORRECTIF m-04 — le report acceptait n'importe quel salarié existant, y
+  // compris un PERMANENT : la ligne était créée, journalisée, et le compteur de
+  // reports s'incrémentait pour rien (le motif devenant obligatoire au geste
+  // suivant sur un dossier où rien n'avait été reporté).
+  test('un salarié hors file active → 404 `HORS_FILE_ACTIVE`, et la requête le VÉRIFIE', async () => {
+    branche({ 'SELECT id FROM employees e': [] });
+    const r = await post('/api/insertion/echeances/report', 'ADMIN', { employee_id: 5, type: 'pass_iae' });
+    expect(r.status).toBe(404);
+    expect(r.body.code).toBe('HORS_FILE_ACTIVE');
+    const verif = mockQuery.mock.calls.find(([q]) => /SELECT id FROM employees e/.test(String(q)));
+    expect(String(verif[0])).toContain("insertion_status = 'en_parcours'");
   });
 
   test('le report est journalisé DANS la transaction (trace bloquante)', async () => {

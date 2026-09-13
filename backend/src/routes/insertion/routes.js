@@ -231,7 +231,20 @@ router.get('/', async (req, res) => {
     }
 
     const moisTermines = await readInsertionSetting('insertion.file_active_terminees_mois');
-    const perimetre = sqlPerimetreFileActive({ alias: 'e', moisTermines, tous });
+    // CORRECTIF M-07 — la rémanence des parcours TERMINÉS (7 mois) et
+    // `?inclure=tous` sont réservés à ADMIN/RH. Elles existent pour la sortie
+    // FSE+ et le relevé à +6 mois, qui sont deux gestes ADMIN/RH STRICT :
+    // l'encadrant n'a rien à y faire, et jusqu'ici une personne partie restait
+    // sept mois dans sa liste avec son poste, son dernier entretien, son
+    // prochain rendez-vous et sa pastille de risque. `?inclure=tous` allait
+    // plus loin — tous les parcours, sans borne d'ancienneté, sans garde de
+    // rôle (le front ne l'utilise pas ; un appel HTTP direct suffisait).
+    // Le périmètre du MANAGER redevient ce qu'il était : `en_parcours` seul.
+    const perimetre = sqlPerimetreFileActive({
+      alias: 'e',
+      moisTermines: adminRh ? moisTermines : 0,
+      tous: tous && adminRh,
+    });
     const params = [];
     let filtreMine = '';
     if (mine && req.user && req.user.id != null) {
