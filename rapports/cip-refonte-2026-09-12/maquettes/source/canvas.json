@@ -1,0 +1,123 @@
+{
+ "artboards": [
+  {
+   "file": "Main.dc.html",
+   "w": 1366,
+   "h": 2140,
+   "title": "1 · Mes échéances — lundi chargé",
+   "x": 0,
+   "y": 0
+  },
+  {
+   "file": "Echeances_Calme.dc.html",
+   "w": 1366,
+   "h": 1250,
+   "title": "2 · Mes échéances — jour calme",
+   "x": 1466,
+   "y": 0
+  },
+  {
+   "file": "Fiche_Situation.dc.html",
+   "w": 1366,
+   "h": 1720,
+   "title": "3 · Fiche salarié — Situation + menu PDF",
+   "x": 2932,
+   "y": 0
+  },
+  {
+   "file": "Fiche_Suivi_Cloture.dc.html",
+   "w": 1366,
+   "h": 1500,
+   "title": "7 · Fiche — Suivi + clôture de bilan (durée)",
+   "x": 0,
+   "y": 2300
+  },
+  {
+   "file": "Dossier_Complet.dc.html",
+   "w": 1366,
+   "h": 2200,
+   "title": "4a · Dossier administratif — complet",
+   "x": 1466,
+   "y": 2300
+  },
+  {
+   "file": "Dossier_Vide.dc.html",
+   "w": 1366,
+   "h": 2000,
+   "title": "4b · Dossier administratif — vide",
+   "x": 2932,
+   "y": 2300
+  },
+  {
+   "file": "Diagnostic_FSE.dc.html",
+   "w": 1366,
+   "h": 1500,
+   "title": "5 · Diagnostic — rubrique 7 FSE+ pré-remplie",
+   "x": 0,
+   "y": 4660
+  },
+  {
+   "file": "Dossiers_FSE.dc.html",
+   "w": 1366,
+   "h": 1250,
+   "title": "Dossiers FSE+ — vue transversale",
+   "x": 1466,
+   "y": 4660
+  },
+  {
+   "file": "Temps_Accompagnement.dc.html",
+   "w": 1366,
+   "h": 1420,
+   "title": "8 · Feuille de temps — incohérence congés",
+   "x": 2932,
+   "y": 4660
+  },
+  {
+   "file": "ETI_Mobile.dc.html",
+   "w": 390,
+   "h": 844,
+   "title": "9 · Formulaire encadrant — téléphone (lien à jeton)",
+   "x": 0,
+   "y": 6320
+  },
+  {
+   "file": "PDF_Referent.dc.html",
+   "w": 794,
+   "h": 1123,
+   "title": "6a · PDF — Fiche pour le référent",
+   "print": "fixed",
+   "x": 490,
+   "y": 6320
+  },
+  {
+   "file": "PDF_Assiduite.dc.html",
+   "w": 794,
+   "h": 1123,
+   "title": "6b · PDF — Relevé d’assiduité",
+   "print": "fixed",
+   "x": 1384,
+   "y": 6320
+  },
+  {
+   "file": "PDF_MonParcours.dc.html",
+   "w": 794,
+   "h": 1123,
+   "title": "PDF — Mon parcours en une page (salarié)",
+   "print": "fixed",
+   "x": 2278,
+   "y": 6320
+  }
+ ],
+ "annotations": [
+  {
+   "id": "lecture",
+   "x": 0,
+   "y": -150,
+   "w": 900,
+   "text": "Refonte du module CIP — maquettes de la section Insertion (phase 7).\nNumérotation = liste des 10 vues demandées par la CIP (08b § G). Vues statiques, données fictives.\nÀ arbitrer : l’organisation des blocs de « Mes échéances », l’onglet Dossier administratif, le socle de diagnostic, la feuille de temps, les trois PDF."
+  }
+ ],
+ "launch": {
+  "view": "canvas"
+ }
+}

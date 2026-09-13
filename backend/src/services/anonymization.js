@@ -176,6 +176,22 @@ async function anonymizeEmployee(client, id) {
     { col: 'france_travail_id', value: null },
     { col: 'eligibilite_criteres', value: null },
     { col: 'eligibilite_justificatifs_ref', value: null },
+    // PR A lot 1 — dossier administratif d'insertion. On efface ce qui NOMME
+    // (l'orienteur, le référent unique externe et ses coordonnées — données
+    // personnelles de TIERS, même doctrine que les contacts d'urgence) et les
+    // DATES de constat des statuts sociaux (une date de constat BRSA ou de
+    // catégorie France Travail est une information sur la situation de la
+    // personne à un instant donné, sans valeur d'agrégat).
+    // On CONSERVE `brsa`, `ft_categorie`, `referent_unique_type`,
+    // `orienteur_type`, `eligibilite_source` et `pass_iae_statut` : ce sont des
+    // valeurs CATÉGORIELLES non nominatives, qui alimentent les typologies de
+    // cohorte du reporting DREETS/Département — même doctrine que les scores de
+    // freins et la classification de sortie conservés plus bas.
+    { col: 'orienteur_nom', value: null },
+    { col: 'referent_unique_nom', value: null },
+    { col: 'referent_unique_contact', value: null },
+    { col: 'brsa_date_constat', value: null },
+    { col: 'ft_categorie_date', value: null },
     { col: 'is_active', raw: 'false' },
     { col: 'updated_at', raw: 'NOW()' },
   ]);
@@ -400,6 +416,97 @@ async function anonymizeEmployee(client, id) {
       if (sets.length > 0) {
         await client.query(`UPDATE insertion_satisfaction_sortie SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
       }
+    }
+  }
+
+  // ── Dossier administratif d'insertion (PR A, lots 1 et 2) ───────────────
+  //
+  // Ce que l'on SUPPRIME intégralement :
+  //  - `employee_eligibilite` : la liste des critères IAE constatés est le
+  //    portrait social le plus condensé du dossier (RSA, AAH, QPV, sortant de
+  //    détention, sans domicile…). La nullifier laisserait des lignes dont la
+  //    seule information restante serait « cette personne cochait des cases » ;
+  //  - `insertion_pass_iae_evenements` : les motifs de suspension sont du texte
+  //    libre où figure couramment un arrêt maladie (art. 9) ;
+  //  - `insertion_pieces` : entretiens signés, conventions PMSMP et accusés de
+  //    remise numérisés — des IMAGES, sur lesquelles aucun masquage par champ
+  //    ne peut rien (même doctrine que les notes de suivi, 2.47.0).
+  //
+  // Ce que l'on CONSERVE, délibérément :
+  //  - `insertion_fse_sorties` et `insertion_projet_participants` — piste
+  //    d'audit FSE+ ≥ 5 ans après le dernier paiement, exactement comme
+  //    `fse_entree` / `fse_sortie` ci-dessus (addendum plan 05 § 6bis-1). Le
+  //    rattachement à un projet et la situation de sortie sont les deux pièces
+  //    que l'autorité de gestion peut réclamer après l'anonymisation ; elles
+  //    sont inscrites au registre RGPD et à l'AIPD à ce titre.
+  //    ⚠ À une exception près, posée plus bas : le COMMENTAIRE LIBRE de ces
+  //    questionnaires est retiré. Ce qui est conservé, ce sont les réponses
+  //    TYPÉES — elles seules sont la piste d'audit.
+  //
+  // SAVEPOINT : ce bloc s'exécute DANS la transaction de la route RGPD. Sur une
+  // base où la migration PR A n'est pas encore passée, une table absente
+  // avorterait toute la transaction (25P02) et le `catch` ne ferait que
+  // déplacer l'échec — la promesse « on ne fait pas échouer toute
+  // l'anonymisation » serait fausse sans lui (doctrine 2.50.0, constat C-07).
+  // UN SAVEPOINT PAR TABLE (correctif du 13/09, constat m-01). Les trois DELETE
+  // partageaient un seul point de reprise : si `insertion_pieces` manquait
+  // (migration partielle), le rollback emportait aussi les deux autres purges,
+  // qui, elles, auraient parfaitement abouti — deux tables restaient en clair à
+  // cause d'une troisième, et l'incident ne laissait qu'un `console.warn`.
+  for (const t of ['insertion_pieces', 'insertion_pass_iae_evenements', 'employee_eligibilite']) {
+    const sp = `anon_${t}`;
+    await client.query(`SAVEPOINT ${sp}`);
+    try {
+      await deleteBy(client, t, 'employee_id', id);
+      await client.query(`RELEASE SAVEPOINT ${sp}`);
+    } catch (err) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+      console.warn(`[ANONYMISATION] Table « ${t} » non purgée :`, err.message);
+    }
+  }
+
+  // ── Commentaires libres des questionnaires FSE+ ─────────────────────────
+  //
+  // Les DEUX questionnaires portent un `commentaire` de 2 000 caractères, et
+  // les JSONB qui les contiennent sont volontairement CONSERVÉS ci-dessus au
+  // titre de la piste d'audit (≥ 5 ans). Conséquence non voulue (constat
+  // M-03) : une phrase du type « hospitalisation en psychiatrie en mars ;
+  // sursis probatoire jusqu'en 2027 » survivait cinq ans à l'anonymisation, en
+  // clair, dans un traitement dont le registre art. 30 affirme qu'il ne
+  // contient AUCUNE donnée de santé ni judiciaire.
+  //
+  // Un texte libre d'accompagnement porte par nature de l'art. 9 ou de l'art. 10
+  // sans qu'aucune colonne ne l'annonce — c'est le raisonnement qui a fait
+  // chiffrer les notes de suivi de la CIP en 2.47.0. Et ce commentaire n'entre
+  // dans AUCUNE des 29 colonnes de l'export ni dans le bilan : il n'est donc
+  // pas la pièce d'audit que sa conservation prétendait protéger.
+  //
+  // On retire donc la seule clé `commentaire` (`- 'commentaire'` sur le JSONB)
+  // et on conserve les réponses TYPÉES, qui sont, elles, la piste d'audit.
+  const JSONB_FSE = [
+    ['insertion_fse_sorties', 'fse_sortie'],
+    ['insertion_diagnostics', 'fse_entree'],
+    ['insertion_milestones', 'fse_sortie'], // copie historique portée par le jalon
+  ];
+  for (let i = 0; i < JSONB_FSE.length; i += 1) {
+    const [table, colonne] = JSONB_FSE[i];
+    const sp = `anon_fse_commentaire_${i}`;
+    await client.query(`SAVEPOINT ${sp}`);
+    try {
+      if (await tableExists(client, table)) {
+        const cols = await existingColumns(client, table);
+        if (cols.has(colonne) && cols.has('employee_id')) {
+          await client.query(
+            `UPDATE ${table} SET ${colonne} = ${colonne} - 'commentaire'
+              WHERE employee_id = $1 AND ${colonne} IS NOT NULL`,
+            [id]
+          );
+        }
+      }
+      await client.query(`RELEASE SAVEPOINT ${sp}`);
+    } catch (err) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+      console.warn(`[ANONYMISATION] Commentaire FSE+ de « ${table}.${colonne} » non retiré :`, err.message);
     }
   }
 

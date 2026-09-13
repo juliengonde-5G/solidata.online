@@ -875,6 +875,16 @@ describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
       // 2.43.0 — la note de profil initial est SYSTÉMATIQUE par défaut
       // (demande client), contrairement à la préparation d'entretien.
       note_profil_auto: true,
+      // PR A « Conformité immédiate » (2026-09) — volet FSE+ et durée
+      // d'entretien : servis ici pour que l'écran lise la même valeur que le
+      // serveur (fenêtre de clôture, alertes de sortie).
+      post_sortie_mois: 6,
+      alerte_sortie_fse_j1: 15,
+      alerte_sortie_fse_j2: 25,
+      duree_entretien_defaut: {
+        diagnostic_accueil: 90, bilan_intermediaire: 45, periode_essai: 30,
+        renouvellement: 30, bilan_sortie: 60, suivi_post_sortie: 15,
+      },
     });
   });
 

@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <style>
+:root{--p:#0D9488;--pd:#0F766E;--pl:#14B8A6;--pm:#CCFBF1;--ps:#F0FDFA;--bg:#FAFAF9;--sub:#F1F5F9;--txt:#0F172A;--mut:#64748B;--bd:#E2E8F0;--bdl:#F1F5F9;}
+body{margin:0;font-family:'Plus Jakarta Sans',-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.45}
+a{color:var(--pd);text-decoration:none} a:hover{color:var(--p)}
+*{box-sizing:border-box}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px 0 rgb(15 23 42/.05);border:1px solid var(--bdl)}
+.sec{background:#fff;border:1px solid rgb(226 232 240/.7);border-radius:14px;box-shadow:0 1px 3px 0 rgb(15 23 42/.05)}
+.sec-h{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 20px;border-bottom:1px solid var(--bdl)}
+.sec-t{font-size:15px;font-weight:700;color:#0F172A;margin:0}
+.sec-b{padding:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:500;border-radius:10px;padding:8px 14px;font-size:13px;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn-p{background:var(--p);color:#fff}
+.btn-s{background:#fff;border-color:var(--bd);color:var(--txt)}
+.btn-g{color:var(--mut);padding:6px 10px}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:8px}
+.inp{width:100%;padding:8px 12px;border-radius:10px;border:1px solid var(--bd);background:#fff;font-size:13px;color:var(--txt);font-family:inherit}
+.lbl{display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:4px}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;line-height:1.5}
+.b-teal{background:#CCFBF1;color:#0F766E}.b-slate{background:#F1F5F9;color:#475569}.b-red{background:#FEE2E2;color:#B91C1C}.b-amber{background:#FEF3C7;color:#B45309}.b-green{background:#D1FAE5;color:#047857}.b-blue{background:#DBEAFE;color:#1D4ED8}.b-violet{background:#EDE9FE;color:#6D28D9}.b-indigo{background:#E0E7FF;color:#3730A3}
+.kpi{background:#fff;border-radius:12px;border:1px solid var(--bdl);box-shadow:0 1px 3px 0 rgb(15 23 42/.05);padding:18px 20px}
+.kpi .t{font-size:13px;font-weight:500;color:var(--mut)}.kpi .v{font-size:24px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+.mut{color:var(--mut)}.sm{font-size:12.5px}.xs{font-size:11.5px}.b{font-weight:700}.sb{font-weight:600}
+.row{display:flex;align-items:center;gap:10px}.col{display:flex;flex-direction:column;gap:8px}
+.line{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:10px;border:1px solid var(--bdl);background:#fff}
+.line.red{border-color:#FECACA;background:#FEF2F2}.line.amber{border-color:#FDE68A;background:#FFFBEB}.line.gray{background:#F8FAFC}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--bd);margin-bottom:18px}
+.tab{padding:10px 14px;font-size:13.5px;font-weight:600;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--pd);border-color:var(--p)}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}.tbl th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--bd);background:#F8FAFC}.tbl td{padding:9px 10px;border-bottom:1px solid var(--bdl);vertical-align:middle}
+.ic{width:16px;height:16px;flex-shrink:0}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid var(--bd);background:#fff;font-size:13px;font-weight:600;min-height:38px}
+.chip.on{background:var(--p);color:#fff;border-color:var(--p)}
+.bar{height:8px;border-radius:999px;background:#E2E8F0;overflow:hidden}.bar>i{display:block;height:100%;background:var(--p)}
+.pdfh{background:#0D9488;color:#fff;padding:16px 22px;display:flex;justify-content:space-between;align-items:center}
+.pdft{font-size:12px;font-weight:700;color:#0F766E;border-bottom:2px solid #0D9488;padding-bottom:2px;margin:11px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+.tbl.tight td{padding:4px 8px}.tbl.tight th{padding:5px 8px}
+.pdfc{background:#F0FDFA;border:1px solid #99F6E4;border-radius:8px;padding:10px 12px}
+</style>
+</helmet>
+<div style="width:794px;height:1123px;background:#fff;display:flex;flex-direction:column;font-size:11.5px;line-height:1.4"><div class="pdfh"><div><div style="font-size:11px;opacity:.85">SOLIDATA — Solidarité Textiles</div><div style="font-size:18px;font-weight:800">Fiche pour le référent</div><div style="font-size:11px;opacity:.9">Structure d’accueil → référent unique · à la demande · 14 septembre 2026</div></div><img src="logo.png" style="width:44px;height:44px;background:#fff;border-radius:8px;padding:3px" alt=""></div><div style="flex:1;padding:8px 24px 0"><div class="pdft">1 · Identité et cadre</div><div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px dotted #E2E8F0"><span style="width:190px;color:#64748B">Personne</span><span style="flex:1;font-weight:600">BENALI Karim</span></div><div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px dotted #E2E8F0"><span style="width:190px;color:#64748B">Structure d’accueil</span><span style="flex:1;font-weight:600">Solidarité Textiles — ACI, Rouen (CIP : Nadia B.)</span></div><div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px dotted #E2E8F0"><span style="width:190px;color:#64748B">Référent unique destinataire</span><span style="flex:1;font-weight:600">CMS Grand-Quevilly — Mme L.</span></div><div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px dotted #E2E8F0"><span style="width:190px;color:#64748B">Orientation</span><span style="flex:1;font-weight:600">Département · CMS · prescription du 10/07/2025</span></div><div class="pdft">2 · Contrat et Pass IAE</div><div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px dotted #E2E8F0"><span style="width:190px;color:#64748B">Contrat</span><span style="flex:1;font-weight:600">CDDI 26 h/sem · 2ᵉ contrat · 15/01/2026 → 14/07/2026, renouvelé jusqu’au 14/01/2027</span></div><div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px dotted #E2E8F0"><span style="width:190px;color:#64748B">Pass IAE</span><span style="flex:1;font-weight:600">n° 2025-07-0918 · actif · fin 14/03/2027 · prolongé le 15/07/2026</span></div><div class="pdft">3 · Activité hebdomadaire (12 dernières semaines)</div><div class="pdfc">Contrat de travail : 26 h/semaine. Activité moyenne constatée : 27,1 h (travail + accompagnement). Semaines sous 15 h : <b>1</b> (semaine 36, arrêt maladie déclaré). Immersion en entreprise : 10 jours (Renault Ampère, juin 2026), proposition d’intérim à l’issue.</div><div class="pdft">4 · Situation et freins travaillés</div><table class="tbl tight" style="font-size:10.5px"><thead><tr><th>Domaine</th><th>À l’entrée (08/2025)</th><th>Aujourd’hui (06/2026)</th><th>Ce qui a été fait</th></tr></thead><tbody><tr><td>Logement</td><td>Hébergé chez un tiers</td><td>Demande DALO en cours</td><td>Dossier déposé avec SOLIHA (orientation DORA)</td></tr><tr><td>Mobilité</td><td>Sans permis</td><td>Code en cours</td><td>Auto-école sociale de Rouen, 2 séances/sem.</td></tr><tr><td>Administratif</td><td>Pièce d’identité expirée</td><td>À jour</td><td>Renouvellement obtenu 11/2025</td></tr><tr><td>Budget</td><td>Difficultés</td><td>En cours</td><td>Atelier budget CCAS planifié 08/10</td></tr><tr><td>Français</td><td>Écrit difficile (A2)</td><td>Progrès à l’écrit</td><td>Atelier FLE interne, 1 h/sem.</td></tr></tbody></table><div class="pdft">5 · Projet professionnel</div><div>Emploi visé : opérateur logistique (ROME N1103). Formation envisagée : CACES 1-3 (financement CPF vérifié). Souhaite un emploi à temps plein en fin de parcours.</div><div class="pdft">6 · Assiduité et rendez-vous</div><div>7 entretiens réalisés sur 7 planifiés · 1 absence excusée (motif : rendez-vous médical, justifié) · 2 points avec le référent (12/03, 12/06). Aucune absence sans motif connue de la structure.</div><div class="pdft">7 · Prochaines étapes proposées au référent</div><ul style="margin:0;padding-left:18px"><li>Point tripartite avant le 15/12 (préparation de la sortie de parcours, échéance CDDI 14/01/2027).</li><li>Appui du CMS sur la demande DALO (relance du bailleur).</li></ul><div class="pdft">8 · Engagements tenus par la structure</div><div>Accompagnement bimestriel, atelier FLE hebdomadaire, immersion organisée, 3 orientations DORA.</div><div class="pdft">9 · Remise</div><div>Document relu avec la personne le 14/09/2026 ; exemplaire remis. Contenu limité aux informations utiles au référent unique.</div></div><div style="padding:10px 24px;border-top:1px solid #E2E8F0;font-size:9.5px;color:#64748B;display:flex;justify-content:space-between"><span>Document établi par la structure d’accueil · aucune donnée de santé ni judiciaire · confidentiel</span><span>Généré le 14/09/2026 10:42 par Nadia B. · périmètre : 1 personne · page 1/1</span></div></div>
+</x-dc>
+</body>
+</html>

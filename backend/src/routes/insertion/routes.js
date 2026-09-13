@@ -22,6 +22,13 @@ const { readInsertionSetting } = require('../../utils/insertion-settings');
 const { autoLogActivity } = require('../../middleware/activity-logger');
 const { PMSMP_MAX_JOURS_CONVENTION, PMSMP_MAX_CUMUL_12M, pmsmpDays, computeCumul12MoisGlissants } = require('./pmsmp-rules');
 const { ageBracket } = require('../../utils/pii-pseudonymize');
+// PR A lot 2 « FSE+ » — schéma typé du questionnaire participant et service de
+// suivi des sorties. Trois retouches SEULEMENT dans ce fichier (contrat § 6.4) :
+// validation/complétude du questionnaire d'entrée au PUT du diagnostic, durée
+// et assiduité sur les entretiens (+ écriture de la sortie FSE+ à la clôture
+// d'un bilan de sortie), et quatre nouvelles sources d'alerte.
+const { FSE_ENTREE_ITEMS, FSE_SORTIE_ITEMS, valider: validerFse, completude: completudeFse, suggestionsEntree } = require('../../utils/fse-schema');
+const fseParticipants = require('../../services/fse-participants');
 
 const PCM_KEY = process.env.PCM_ENCRYPTION_KEY || process.env.JWT_SECRET;
 if (!PCM_KEY) {
@@ -184,7 +191,12 @@ router.get('/diagnostic/:employeeId', async (req, res) => {
     const baseRole = baseRoleOf(req);
     if (baseRole === 'MANAGER') maskInsertionRow(row, baseRole);
     else decryptDiagRow(row);
-    res.json(row);
+    // PR A lot 2 — le questionnaire FSE+ arrive PRÉ-REMPLI : l'écran affiche
+    // sous chaque item la source de la proposition (« proposé depuis « … » »)
+    // et la conseillère confirme ou corrige d'un clic. Rien n'est enregistré
+    // sans elle : la suggestion voyage à côté de la donnée, jamais dedans.
+    const { suggestions_fse, fse_completude } = await enrichirFse(row, empId, baseRole);
+    res.json({ ...row, suggestions_fse, fse_completude });
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic GET :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -234,6 +246,10 @@ const DIAG_BOOL_FIELDS = [
   'logement_satisfaction', 'allocataire_caf', 'rqth', 'contre_indications', 'suivi_sante',
   'difficultes_financieres', 'credits_en_cours', 'vehicule', 'autre_employeur',
   'souhait_complement_heures', 'cpf_accessible', 'enfants_a_charge',
+  // PR A lot 2 — complétude du questionnaire FSE+ d'entrée. Le client ne la
+  // transmet JAMAIS : elle est recalculée ici depuis les réponses (une
+  // complétude déclarée par l'écran serait une complétude invérifiable).
+  'fse_entree_complet',
 ];
 const DIAG_DATE_FIELDS = ['piece_identite_validite', 'rqth_fin'];
 const DIAG_NUM_FIELDS = ['autre_employeur_heures', 'nb_enfants'];
@@ -301,6 +317,42 @@ function computeSuggestionsFreins(d) {
   return s;
 }
 
+/**
+ * PR A lot 2 — suggestions et complétude du questionnaire FSE+ d'ENTRÉE.
+ * Résilient : l'échec de la lecture du salarié (base ancienne, colonne du lot 1
+ * absente) ne doit pas priver la CIP de son diagnostic — on rend alors les
+ * suggestions déductibles du seul diagnostic, jamais une erreur 500.
+ *
+ * CORRECTIF DE SÉCURITÉ DU 13/09 (constat C-02). Cette fonction relisait
+ * `employees.brsa` et `france_travail_id` APRÈS le masquage de la ligne de
+ * diagnostic, et `suggestionsEntree` en composait une phrase lisible
+ * (« Dossier administratif : bénéficiaire du RSA »). Le masquage par champ ne
+ * pouvait rien : il agit sur la ligne du diagnostic, la fuite venait d'une
+ * SECONDE requête, postérieure, sur une autre table.
+ *
+ * On ne filtre donc pas la sortie du moteur de suggestions : on ne l'ALIMENTE
+ * PAS. C'est le correctif structurel de 2.43.0 appliqué ici — rien de dérivé ne
+ * peut fuir d'une donnée qui n'a pas été lue. Le questionnaire FSE+ étant
+ * ADMIN/RH strict « y compris en lecture » (routes/insertion/fse.js), un
+ * encadrant technique n'a ni le questionnaire, ni ses suggestions, ni sa
+ * complétude.
+ */
+async function enrichirFse(row, employeeId, baseRole) {
+  if (baseRole === 'MANAGER') return { suggestions_fse: {}, fse_completude: null };
+  const fse = (row && row.fse_entree && typeof row.fse_entree === 'object') ? row.fse_entree : {};
+  let emp = {};
+  try {
+    const r = await pool.query('SELECT brsa, france_travail_id FROM employees WHERE id = $1', [employeeId]);
+    emp = r.rows[0] || {};
+  } catch (err) {
+    console.error(`[INSERTION][FSE] statuts du salarié illisibles (${err.code || '?'}) — suggestions partielles :`, err.message);
+  }
+  return {
+    suggestions_fse: suggestionsEntree(row, emp),
+    fse_completude: completudeFse(fse, FSE_ENTREE_ITEMS),
+  };
+}
+
 // PUT /api/insertion/diagnostic/:employeeId — Sauvegarder/mettre a jour le diagnostic
 // Upsert par (employee_id, parcours_num) — contrainte insertion_diagnostics_employee_parcours_key.
 router.put('/diagnostic/:employeeId', [
@@ -315,7 +367,19 @@ router.put('/diagnostic/:employeeId', [
 
     // Un MANAGER ne peut ni lire NI écrire les champs qui lui sont masqués
     // (frein judiciaire, détails santé, commentaire budget).
+    //
+    // Le questionnaire FSE+, lui, est refusé EXPLICITEMENT et non retiré en
+    // silence (correctif du 13/09, constat M-01) : c'est une pièce d'audit
+    // européenne, et un enregistrement qui « passe » sans rien écrire ferait
+    // croire à la personne qui l'a saisi qu'il est en base. L'écran ne propose
+    // pas ce questionnaire à l'encadrement ; y arriver signale un appel direct.
     if (baseRole === 'MANAGER') {
+      if ('fse_entree' in d || 'fse_entree_complet' in d || 'fse_entree_saisie_at' in d) {
+        return res.status(403).json({
+          error: "Le questionnaire FSE+ d'entrée est réservé aux rôles ADMIN et RH.",
+          code: 'FSE_ADMIN_RH_STRICT',
+        });
+      }
       for (const k of Object.keys(d)) {
         if (MANAGER_HIDDEN_FIELDS.includes(k) || k.startsWith('frein_judiciaire')) delete d[k];
       }
@@ -327,6 +391,24 @@ router.put('/diagnostic/:employeeId', [
     if (('style_apprentissage_reponses' in d) && !('style_apprentissage' in d) && d.style_apprentissage_reponses) {
       const st = computeLearningStyle(d.style_apprentissage_reponses);
       if (st) d.style_apprentissage = st;
+    }
+
+    // PR A lot 2 — questionnaire FSE+ d'entrée TYPÉ (item 2.2 du plan). Une clé
+    // inconnue ou une valeur hors liste est REFUSÉE : ce questionnaire part
+    // dans une pièce d'audit européenne, une réponse mal formée y serait
+    // invisible jusqu'au contrôle. La complétude est recalculée ici et jamais
+    // reçue du client.
+    delete d.fse_entree_complet;
+    let fseComplet = false;
+    const fseTouche = 'fse_entree' in d;
+    if (fseTouche) {
+      const v = validerFse(d.fse_entree, FSE_ENTREE_ITEMS);
+      if (!v.ok) {
+        return res.status(400).json({ error: 'Questionnaire FSE+ invalide', erreurs: v.erreurs });
+      }
+      d.fse_entree = v.valeurs;
+      fseComplet = completudeFse(v.valeurs, FSE_ENTREE_ITEMS).complet;
+      d.fse_entree_complet = fseComplet;
     }
 
     const pn = await currentParcoursNum(pool, empId);
@@ -358,11 +440,19 @@ router.put('/diagnostic/:employeeId', [
     // CRÉATION de la ligne uniquement (jamais réécrits à l'update) — neutralise
     // les DEFAULT 1 hérités du schéma historique (« non évalué » = NULL, pas 1).
     const freinNullCols = FREINS.map((f) => f.column).filter((c) => !cols.includes(c));
-    const insertCols = ['employee_id', 'parcours_num', 'created_by', 'updated_by', ...cols, ...freinNullCols];
-    const params = [empId, pn, req.user.id, req.user.id, ...vals, ...freinNullCols.map(() => null)];
+    // Horodatage du PREMIER recueil du questionnaire FSE+ : posé la fois où la
+    // complétude passe à vrai, jamais repoussé ensuite — c'est la date que
+    // l'autorité confronte à la date d'entrée dans l'opération (09 § 2 (a),
+    // colonne 21). Écrit par EXPRESSION à l'UPDATE (COALESCE sur l'existant),
+    // donc hors de la liste indexée des colonnes.
+    const horodatageCols = fseComplet ? ['fse_entree_saisie_at'] : [];
+    const horodatageVals = fseComplet ? [new Date()] : [];
+    const insertCols = ['employee_id', 'parcours_num', 'created_by', 'updated_by', ...cols, ...freinNullCols, ...horodatageCols];
+    const params = [empId, pn, req.user.id, req.user.id, ...vals, ...freinNullCols.map(() => null), ...horodatageVals];
     const placeholders = insertCols.map((_, i) => `$${i + 1}`);
     const updateSets = ['updated_by = $4', 'updated_at = NOW()',
       ...cols.map((c, i) => `${c} = $${i + 5}`)];
+    if (fseComplet) updateSets.push('fse_entree_saisie_at = COALESCE(insertion_diagnostics.fse_entree_saisie_at, NOW())');
 
     const result = await pool.query(`
       INSERT INTO insertion_diagnostics (${insertCols.join(', ')})
@@ -377,7 +467,8 @@ router.put('/diagnostic/:employeeId', [
     // Suggestions de freins recalculées sur la ligne COMPLÈTE après upsert
     // (toutes les réponses stockées, pas seulement celles du body) — le
     // frontend les surligne, la CIP décide (écart 1b).
-    res.json({ ...row, suggestions_freins: computeSuggestionsFreins(row) });
+    const { suggestions_fse, fse_completude } = await enrichirFse(row, empId, baseRole);
+    res.json({ ...row, suggestions_freins: computeSuggestionsFreins(row), suggestions_fse, fse_completude });
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
     // On expose le code SQLSTATE (sans détail sensible) pour rendre l'erreur
@@ -599,7 +690,28 @@ const MILESTONE_EDITABLE_FIELDS = [
   'renouvellement_avis', 'renouvellement_duree_mois',
   'post_sortie_situation', 'post_sortie_commentaire',
   'periode_essai_decision', // Lot 8 (PR3) — décision de période d'essai
+  // PR A lot 2 — durée réelle de l'entretien (alimente l'agrégat d'heures
+  // d'accompagnement promis aux certificateurs, RES-04 / indicateur B5) et
+  // assiduité. Le motif d'absence est FACULTATIF par décision (08 § 10) : une
+  // absence sans motif ne s'imprime JAMAIS « injustifiée » sur un document
+  // destiné au référent externe.
+  'duree_minutes', 'presence', 'absence_motif', 'absence_piece_ref',
   ...MILESTONE_JSONB_FIELDS,
+];
+
+/** Assiduité — listes fermées reproduisant les CHECK de la migration lot 2. */
+const PRESENCES = ['present', 'absent', 'excuse'];
+const ABSENCE_MOTIFS = ['sante', 'administratif', 'garde', 'transport', 'autre'];
+
+/**
+ * Validateurs de la durée et de l'assiduité, partagés par le PUT et la clôture.
+ * 600 minutes = 10 h : au-delà, c'est une erreur de saisie, pas un entretien.
+ */
+const assiduiteValidators = [
+  body('duree_minutes').optional({ nullable: true }).isInt({ min: 0, max: 600 }).withMessage('duree_minutes attendu entre 0 et 600 minutes'),
+  body('presence').optional({ nullable: true }).isIn(PRESENCES).withMessage(`presence invalide (${PRESENCES.join(', ')})`),
+  body('absence_motif').optional({ nullable: true }).isIn(ABSENCE_MOTIFS).withMessage(`absence_motif invalide (${ABSENCE_MOTIFS.join(', ')})`),
+  body('absence_piece_ref').optional({ nullable: true }).isString().isLength({ max: 200 }).withMessage('absence_piece_ref : 200 caractères maximum'),
 ];
 
 // PUT /api/insertion/milestones/:id — Mettre à jour un entretien
@@ -613,6 +725,7 @@ router.put('/milestones/:id', [
   body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide'),
   body('post_sortie_situation').optional({ nullable: true }).isIn(['emploi_durable', 'emploi_transition', 'formation', 'recherche_emploi', 'autre', 'injoignable']).withMessage('post_sortie_situation invalide'),
   body('periode_essai_decision').optional({ nullable: true }).isIn(['confirme', 'rompu', 'a_revoir']).withMessage('periode_essai_decision invalide (confirme, rompu, a_revoir)'),
+  ...assiduiteValidators,
   ...FREINS.map((f) => body(f.column).optional({ nullable: true }).isInt({ min: 1, max: 5 }).withMessage(`${f.column} : niveau attendu entre 1 et 5`)),
 ], validate, async (req, res) => {
   try {
@@ -695,6 +808,7 @@ router.post('/milestones/:id/close', [
   body('completed_date').optional({ nullable: true }).isISO8601().withMessage('completed_date invalide'),
   body('next.milestone_type').optional().isIn(MILESTONE_TYPES).withMessage('next.milestone_type invalide'),
   body('next.due_date').optional().isISO8601().withMessage('next.due_date invalide'),
+  ...assiduiteValidators,
 ], validate, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -708,6 +822,25 @@ router.post('/milestones/:id/close', [
     if (ms.locked_at) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Entretien déjà clôturé (verrouillé).', hint: "Réouvrir d'abord (POST /milestones/:id/reopen)." });
+    }
+
+    // CORRECTIF DE SÉCURITÉ DU 13/09 (constat M-02). Clôturer un BILAN DE
+    // SORTIE écrit `insertion_fse_sorties` — avec `saisie_par` et `saisie_at`,
+    // les deux champs sur lesquels l'autorité de gestion calcule le délai de
+    // saisie. La même écriture passait par deux portes de niveaux
+    // d'habilitation différents : ADMIN/RH par `POST /insertion/fse/:id/sortie`,
+    // ADMIN/RH/MANAGER par ici. Un rôle explicitement écarté du volet FSE+ ne
+    // doit pas pouvoir créer une pièce de contrôle de service fait.
+    //
+    // La garde est posée ICI, après lecture du TYPE de jalon, et non sur la
+    // route : les autres entretiens (bilans intermédiaires, période d'essai)
+    // restent clôturables par l'encadrement technique, qui les conduit.
+    if (ms.milestone_type === 'bilan_sortie' && !['ADMIN', 'RH'].includes(baseRoleOf(req))) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'La clôture du bilan de sortie est réservée aux rôles ADMIN et RH (elle enregistre la sortie FSE+).',
+        code: 'BILAN_SORTIE_ADMIN_RH',
+      });
     }
 
     const problems = [];
@@ -775,6 +908,23 @@ router.post('/milestones/:id/close', [
       }
     }
 
+    // 2quater. PR A lot 2 — questionnaire FSE+ de sortie HORS SCHÉMA. Contrôlé
+    // AVANT la clôture (et non pendant l'écriture en base) pour que la CIP le
+    // corrige dans le formulaire qu'elle a sous les yeux : une erreur de schéma
+    // découverte après le verrouillage serait irréparable sans réouverture.
+    // Un questionnaire ABSENT n'est pas un problème : la situation se déduit
+    // alors de la catégorie de sortie IAE.
+    if (ms.milestone_type === 'bilan_sortie' && ms.fse_sortie != null) {
+      const vfse = validerFse(ms.fse_sortie, FSE_SORTIE_ITEMS);
+      if (!vfse.ok) {
+        problems.push({
+          code: 'fse_sortie_invalide',
+          erreurs: vfse.erreurs,
+          message: `Questionnaire FSE+ de sortie invalide : ${vfse.erreurs.map((e) => e.motif).join(' ')}`,
+        });
+      }
+    }
+
     // 3. Bilan de sortie : catégorie de sortie (nouvelle nomenclature) +
     // check-list des documents remis (EXG-07).
     if (ms.milestone_type === 'bilan_sortie') {
@@ -834,11 +984,20 @@ router.post('/milestones/:id/close', [
 
     // Clôture : réalise + verrouille (probant).
     const completedDate = req.body.completed_date || ms.completed_date || new Date().toISOString().split('T')[0];
+    // PR A lot 2 — durée et assiduité saisies DANS la fenêtre de clôture (une
+    // rangée de boutons, cinq secondes : 08 § 10) plutôt qu'un début et une fin
+    // que personne ne note. COALESCE : un champ non transmis conserve sa valeur.
     const closed = await client.query(
       `UPDATE insertion_milestones
-         SET status = 'realise', completed_date = $1, locked_at = NOW(), updated_at = NOW()
+         SET status = 'realise', completed_date = $1, locked_at = NOW(), updated_at = NOW(),
+             duree_minutes = COALESCE($3, duree_minutes),
+             presence = COALESCE($4, presence),
+             absence_motif = COALESCE($5, absence_motif),
+             absence_piece_ref = COALESCE($6, absence_piece_ref)
        WHERE id = $2 RETURNING *`,
-      [completedDate, ms.id]
+      [completedDate, ms.id,
+        req.body.duree_minutes ?? null, req.body.presence ?? null,
+        req.body.absence_motif ?? null, req.body.absence_piece_ref ?? null]
     );
     // Snapshot de l'état VERROUILLÉ (l'état probant de référence).
     await snapshotMilestone(client, closed.rows[0], 'close', req.user.id);
@@ -848,6 +1007,38 @@ router.post('/milestones/:id/close', [
     // Effet de clôture de la période d'essai (Lot 8) : rupture → abandon.
     await applyPeriodeEssaiEffect(client, closed.rows[0]);
 
+    // PR A lot 2 — la sortie FSE+ entre dans `insertion_fse_sorties`, DANS la
+    // même transaction que la clôture : une sortie constatée à l'entretien et
+    // perdue par un incident réseau serait exactement le trou que cette PR
+    // ferme. `fse_sortie` reste écrit sur le jalon pour compatibilité.
+    let sortieFse = null;
+    if (closed.rows[0].milestone_type === 'bilan_sortie' && closed.rows[0].sortie_classification) {
+      try {
+        const r = await fseParticipants.enregistrerSortie({
+          employeeId: closed.rows[0].employee_id,
+          milestone: closed.rows[0],
+          userId: req.user.id,
+          client,
+        });
+        sortieFse = r.ligne;
+      } catch (e) {
+        // Le questionnaire a déjà été validé plus haut : un échec ici est
+        // structurel (migration absente, contrainte). On refuse la clôture en
+        // NOMMANT la cause plutôt que de verrouiller un bilan dont la sortie
+        // FSE+ n'a pas été enregistrée — l'incohérence serait invisible.
+        await client.query('ROLLBACK');
+        console.error('[INSERTION] Sortie FSE+ non enregistrée à la clôture :', e.message);
+        return res.status(409).json({
+          error: 'Clôture refusée — la sortie FSE+ n\'a pas pu être enregistrée.',
+          code: 'FSE_SORTIE_NON_ENREGISTREE',
+          // `detail: e.message` retiré (constat m-03) : c'était le message SQL
+          // brut. Le code et les erreurs de validation suffisent à l'écran ; la
+          // cause technique reste au journal serveur, juste au-dessus.
+          erreurs: e.erreurs,
+        });
+      }
+    }
+
     await client.query('COMMIT');
 
     // Recalage des jalons après le bilan (EXG-16/22) — post-commit, best effort.
@@ -855,7 +1046,20 @@ router.post('/milestones/:id/close', [
     try { resync = await resyncMilestones(pool, ms.employee_id, { userId: req.user.id }); }
     catch (e) { console.error('[INSERTION] resync post-clôture :', e.message); }
 
-    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: createdNext, resync });
+    // `sortie_fse` PROJETÉ et non renvoyé tel quel : la ligne complète porte le
+    // JSONB `fse_sortie` et son commentaire libre, qui échappaient au masquage
+    // (constat M-02). L'écran n'a besoin que de savoir QUE la sortie est
+    // enregistrée, et de quand elle date.
+    const sortieFseProjetee = sortieFse
+      ? {
+        id: sortieFse.id,
+        date_sortie: sortieFse.date_sortie,
+        situation_sortie: sortieFse.situation_sortie,
+        source: sortieFse.source,
+        saisie_at: sortieFse.saisie_at,
+      }
+      : null;
+    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: createdNext, resync, sortie_fse: sortieFseProjetee });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur close milestone :', err);
@@ -1752,9 +1956,18 @@ router.get('/alertes/:employeeId', [
 ], validate, async (req, res) => {
   try {
     const empId = parseInt(req.params.employeeId, 10);
+    // CORRECTIF DE SÉCURITÉ DU 13/09 (constat C-03) : le statut BRSA n'est même
+    // pas LU pour un encadrant technique. Cette route n'a pas d'`authorize` —
+    // elle hérite d'ADMIN/RH/MANAGER et son bandeau d'alertes s'affiche en tête
+    // de fiche pour tous les rôles ; y rapatrier un statut social, c'était le
+    // rendre à qui la projection du dossier administratif le refuse. Fragment
+    // composé de LITTÉRAUX, jamais d'une entrée utilisateur.
+    const alertesAdminRh = ['ADMIN', 'RH'].includes(baseRoleOf(req));
+    const colonneBrsa = alertesAdminRh ? 'e.brsa,' : 'NULL::boolean AS brsa,';
     const empRes = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.insertion_status, e.insertion_start_date,
-              e.pass_iae_number, e.pass_iae_end, e.cddi_derogation_motif,
+              e.pass_iae_number, e.pass_iae_end, e.cddi_derogation_motif, e.contract_end,
+              ${colonneBrsa} e.referent_unique_type,
               COALESCE(e.parcours_num, 1) AS parcours_num
        FROM employees e WHERE e.id = $1`,
       [empId]
@@ -1862,6 +2075,96 @@ router.get('/alertes/:employeeId', [
         message: `Action critique en retard : « ${a.action_label} » (échéance ${new Date(a.echeance).toLocaleDateString('fr-FR')}).`,
         action_id: a.id, echeance: a.echeance,
       });
+    }
+
+    // ── PR A lot 2 — obligations FSE+ et référent unique (contrat § 6.4.3) ──
+    // Ces quatre alertes portent sur des échéances RÉGLEMENTAIRES : elles
+    // disent ce qui devient irrattrapable, pas ce qui serait souhaitable.
+    // Chacune est `soft` : une colonne du lot 1 absente sur une base ancienne
+    // retire l'alerte, elle ne casse pas l'écran des alertes.
+
+    // 8. Questionnaire FSE+ d'entrée manquant (participant d'un projet ASI).
+    const projetsAsi = await soft('projets_asi', `
+      SELECT pr.code FROM insertion_projet_participants pp
+      JOIN insertion_projets pr ON pr.id = pp.projet_id
+      WHERE pp.employee_id = $1 AND pr.type = 'asi' AND pp.date_sortie IS NULL`, [empId]);
+    if (projetsAsi.length > 0) {
+      const dfse = await soft('fse_entree', `
+        SELECT fse_entree_complet FROM insertion_diagnostics
+        WHERE employee_id = $1 AND COALESCE(parcours_num, 1) = $2`, [empId, emp.parcours_num]);
+      const complet = dfse.length > 0 && dfse[0].fse_entree_complet === true;
+      if (!complet) {
+        const delai = await readInsertionSetting('insertion.delai_diagnostic_jours');
+        const jours = emp.insertion_start_date
+          ? Math.floor((today - new Date(emp.insertion_start_date)) / 86400000)
+          : null;
+        // Critique seulement passé le délai du diagnostic : avant, c'est un
+        // travail en cours, pas un manquement.
+        const critique = jours != null && jours > delai;
+        alertes.push({
+          type: 'fse_entree_manquante',
+          niveau: critique ? 'critique' : 'attention',
+          message: `Questionnaire FSE+ d'entrée incomplet (participant du projet ${projetsAsi.map((p) => p.code).join(', ')})`
+            + (jours != null ? ` — ${jours} jour(s) depuis le début du parcours (délai cible : ${delai} j).` : '.'),
+        });
+      }
+    }
+
+    // 9. Sortie FSE+ à saisir : le contrat est terminé et aucune sortie n'est
+    // enregistrée. La donnée se recueille AUPRÈS DE LA PERSONNE et la fenêtre
+    // se referme — d'où deux seuils, et un niveau critique dès le premier.
+    if (emp.contract_end && new Date(emp.contract_end) < today) {
+      const sortie = await soft('fse_sortie', `
+        SELECT id FROM insertion_fse_sorties WHERE employee_id = $1 AND parcours_num = $2`,
+      [empId, emp.parcours_num]);
+      if (sortie.length === 0) {
+        const [j1, j2] = await Promise.all([
+          readInsertionSetting('insertion.alerte_sortie_fse_j1'),
+          readInsertionSetting('insertion.alerte_sortie_fse_j2'),
+        ]);
+        const jours = Math.floor((today - new Date(emp.contract_end)) / 86400000);
+        if (jours >= Number(j1)) {
+          alertes.push({
+            type: 'fse_sortie_a_saisir', niveau: 'critique',
+            message: `Sortie FSE+ non renseignée ${jours} jour(s) après la fin de contrat du ${new Date(emp.contract_end).toLocaleDateString('fr-FR')}`
+              + (jours >= Number(j2) ? ' — au-delà du second rappel : la situation ne se recueille plus auprès de la personne.' : '.'),
+            jours,
+          });
+        }
+      }
+    }
+
+    // 10. Référent unique non déterminé alors que la personne est BRSA. La
+    // structure n'est PAS référente (décision du 12/09) : ne pas savoir à qui
+    // parler, c'est un signalement à faire au Département, pas un détail.
+    //
+    // L'alerte n'est servie qu'à ADMIN/RH (ce sont eux qui saisissent le
+    // référent) et son message ne NOMME plus le statut : un texte d'alerte est
+    // une donnée comme une autre dès lors qu'il énonce « la personne est
+    // bénéficiaire du RSA » sur l'écran d'un salarié. Ce qu'il faut faire —
+    // signaler au Département — se dit sans cela.
+    if (alertesAdminRh && emp.brsa === true && (!emp.referent_unique_type || emp.referent_unique_type === 'non_determine')) {
+      alertes.push({
+        type: 'referent_non_determine', niveau: 'critique',
+        message: 'Référent unique non déterminé — à signaler au Département.',
+      });
+    }
+
+    // 11. Relevé de situation à +6 mois échu (indicateur de RÉSULTAT du FSE+).
+    const sortieRelevee = await soft('six_mois', `
+      SELECT date_sortie, situation_6mois FROM insertion_fse_sorties
+      WHERE employee_id = $1 AND parcours_num = $2`, [empId, emp.parcours_num]);
+    if (sortieRelevee.length > 0 && !sortieRelevee[0].situation_6mois) {
+      const mois = await readInsertionSetting('insertion.post_sortie_mois');
+      const ech = new Date(sortieRelevee[0].date_sortie);
+      ech.setMonth(ech.getMonth() + (Number(mois) || 6));
+      if (ech <= today) {
+        alertes.push({
+          type: 'suivi_6mois_echu', niveau: 'attention',
+          message: `Situation à +${Number(mois) || 6} mois non relevée (échéance du ${ech.toLocaleDateString('fr-FR')}).`,
+          due_date: ech.toISOString().slice(0, 10),
+        });
+      }
     }
 
     // 7. Alertes récentes du scheduler (30 derniers jours) — la table
@@ -2905,13 +3208,21 @@ router.put('/objectif-sorties', authorize('ADMIN', 'RH'), async (req, res) => {
 router.get('/parametres', async (req, res) => {
   try {
     const [echeanceActionJours, rythmeBilansMois, delaiDiagnosticJours, alertePassIaeMois,
-      iaPreparationAuto, noteProfilAuto] = await Promise.all([
+      iaPreparationAuto, noteProfilAuto, postSortieMois, alerteSortieFseJ1, alerteSortieFseJ2,
+      dureeEntretienDefaut] = await Promise.all([
       readInsertionSetting('insertion.echeance_action_defaut_jours'),
       readInsertionSetting('insertion.rythme_bilans_mois'),
       readInsertionSetting('insertion.delai_diagnostic_jours'),
       readInsertionSetting('insertion.alerte_pass_iae_mois'),
       readInsertionSetting('insertion.ia_preparation_auto'),
       readInsertionSetting('insertion.note_profil_auto'),
+      // PR A « Conformité immédiate » (2026-09) : les quatre réglages du volet
+      // FSE+ / durée d'entretien sont servis ici pour que la fenêtre de clôture
+      // (EntretienForm) et les alertes lisent la MÊME valeur que le serveur.
+      readInsertionSetting('insertion.post_sortie_mois'),
+      readInsertionSetting('insertion.alerte_sortie_fse_j1'),
+      readInsertionSetting('insertion.alerte_sortie_fse_j2'),
+      readInsertionSetting('insertion.duree_entretien_defaut'),
     ]);
     res.json({
       echeance_action_defaut_jours: echeanceActionJours,
@@ -2922,6 +3233,10 @@ router.get('/parametres', async (req, res) => {
       // 2.43.0 — note de profil initial générée d'office à la liaison
       // candidat→collaborateur (défaut true, demande client).
       note_profil_auto: noteProfilAuto,
+      post_sortie_mois: postSortieMois,
+      alerte_sortie_fse_j1: alerteSortieFseJ1,
+      alerte_sortie_fse_j2: alerteSortieFseJ2,
+      duree_entretien_defaut: dureeEntretienDefaut,
     });
   } catch (err) {
     console.error('[INSERTION] Erreur parametres :', err.message);

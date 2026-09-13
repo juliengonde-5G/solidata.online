@@ -45,6 +45,62 @@ const PE_DECISIONS = [
 ];
 const PE_DECISION_LABELS = { confirme: 'Période d\'essai confirmée', rompu: 'Période d\'essai rompue', a_revoir: 'À revoir' };
 
+// ── PR A lot 2 — durée et assiduité de l'entretien ────────────────────────
+// La durée se saisit à la CLÔTURE, par une rangée de boutons (cinq secondes,
+// amendement CIP 08 § 10) et jamais par une heure de début et une heure de fin
+// que personne ne note. Elle alimente l'agrégat d'heures d'accompagnement
+// promis aux certificateurs (indicateur B5).
+const DUREES_PROPOSEES = [15, 30, 45, 60, 90];
+
+// Défaut par type technique — MÊMES valeurs que le réglage serveur
+// `insertion.duree_entretien_defaut` (§ 4 des contrats). Repli local : la clé
+// n'est pas encore servie par GET /insertion/parametres (fichier hors du
+// périmètre de ce lot) ; dès qu'elle le sera, la valeur du serveur primera.
+const DUREE_DEFAUT = {
+  diagnostic_accueil: 90, bilan_intermediaire: 45, periode_essai: 30,
+  renouvellement: 30, bilan_sortie: 60, suivi_post_sortie: 15,
+};
+
+const PRESENCES = [['present', 'Présent'], ['absent', 'Absent'], ['excuse', 'Excusé']];
+// Liste FERMÉE et volontairement grossière : « santé » ne dit RIEN d'un état de
+// santé, et c'est le but — un document destiné au référent externe ne doit
+// jamais porter de nature médicale. Le motif reste FACULTATIF : une absence
+// sans motif ne s'imprime jamais « injustifiée ».
+const ABSENCE_MOTIFS = [
+  ['sante', 'Santé'], ['administratif', 'Démarche administrative'],
+  ['garde', "Garde d'enfant"], ['transport', 'Transport'], ['autre', 'Autre'],
+];
+
+// Questionnaire FSE+ de sortie — valeurs du schéma serveur (fse-schema.js).
+const FSE_SITUATIONS_SORTIE = [
+  ['emploi_durable', 'Emploi durable'], ['emploi_transition', 'Emploi de transition'],
+  ['formation', 'Formation'], ['autre_sortie_positive', 'Autre sortie positive'],
+  ['inactivite', 'Inactivité'], ['chomage', "Chômage"], ['inconnue', 'Non renseignée'],
+];
+const FSE_TYPES_CONTRAT = [
+  ['cdi', 'CDI'], ['cdd_6m_plus', 'CDD ≥ 6 mois'], ['cdd_moins_6m', 'CDD < 6 mois'],
+  ['interim', 'Intérim'], ['creation', "Création d'activité"],
+  ['formation_qualifiante', 'Formation qualifiante'], ['autre', 'Autre'], ['sans_objet', 'Sans objet'],
+];
+
+/** Rangée de boutons de réponse, partagée par la durée, la présence et le FSE+. */
+function Chips({ value, onChange, options, disabled = false, ton = 'teal' }) {
+  const actif = ton === 'purple' ? 'bg-purple-600 border-purple-600 text-white' : 'bg-teal-600 border-teal-600 text-white';
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map(([v, l]) => (
+        <button key={String(v)} type="button" disabled={disabled}
+          onClick={() => onChange(value === v ? null : v)}
+          className={`px-3 py-1.5 rounded-lg border text-sm transition disabled:opacity-60 ${
+            value === v ? actif : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'
+          }`}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function EntretienForm({
   milestone, employeeId, employee = {}, allMilestones = [], onSaved, onClosed, onCloseForm, onDirtyChange,
 }) {
@@ -260,6 +316,23 @@ export default function EntretienForm({
     });
   }, []);
   const [presence, setPresence] = useState(Array.isArray(milestone.validations) && milestone.validations.some((v) => v.mode === 'presence'));
+  // Durée proposée par type, ajustable : la clôture écrit la valeur affichée.
+  const [dureeDefauts, setDureeDefauts] = useState(DUREE_DEFAUT);
+  const [duree, setDuree] = useState(milestone.duree_minutes ?? null);
+  const [dureeLibre, setDureeLibre] = useState(false);
+  const [assiduite, setAssiduite] = useState(milestone.presence || 'present');
+  const [absenceMotif, setAbsenceMotif] = useState(milestone.absence_motif || null);
+  const [absencePiece, setAbsencePiece] = useState(milestone.absence_piece_ref || '');
+  useEffect(() => {
+    getInsertionParametres().then((p) => {
+      // La clé peut ne pas encore être servie : on ne remplace le défaut local
+      // que si le serveur en renvoie un, et jamais par un objet vide (qui
+      // ferait disparaître toute proposition de l'écran de clôture).
+      const d = p && p.duree_entretien_defaut;
+      if (d && typeof d === 'object' && Object.keys(d).length > 0) setDureeDefauts({ ...DUREE_DEFAUT, ...d });
+    });
+  }, []);
+  const dureeProposee = dureeDefauts[type] ?? null;
   // Renouvellement (EXG-04) : la clôture exige la triple validation encadrant/
   // CIP/directeur. L'encadrant ('eti') signe via l'écran ETI ; ici la CIP pose sa
   // validation et atteste celle du directeur. Le serveur fusionne par rôle (les
@@ -292,6 +365,16 @@ export default function EntretienForm({
       // 2. Clôture contrôlée.
       const body = { completed_date: form.completed_date || new Date().toISOString().slice(0, 10) };
       if (assumeFreins) body.assume_freins_non_evalues = true;
+      // Durée et assiduité : envoyées à la clôture, c'est le moment où on les
+      // connaît. Une durée laissée vide reste vide — on n'écrit jamais la
+      // valeur proposée à la place de ce qui s'est réellement passé.
+      const dureeRetenue = duree ?? dureeProposee;
+      if (dureeRetenue != null) body.duree_minutes = dureeRetenue;
+      if (assiduite) body.presence = assiduite;
+      if (assiduite !== 'present') {
+        if (absenceMotif) body.absence_motif = absenceMotif;
+        if (absencePiece.trim()) body.absence_piece_ref = absencePiece.trim();
+      }
       if (!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(type) && nextForm.milestone_type && nextForm.due_date) {
         body.next = { milestone_type: nextForm.milestone_type, due_date: nextForm.due_date };
         if (nextForm.interview_date) body.next.interview_date = nextForm.interview_date;
@@ -356,6 +439,7 @@ export default function EntretienForm({
     previous_review_manquante: 'precedent',
     sortie_classification_manquante: 'sortie',
     sortie_documents_manquants: 'sortie',
+    fse_sortie_invalide: 'sortie',
     prochain_entretien_manquant: 'cloture',
   }[code] || 'situation');
 
@@ -836,6 +920,40 @@ export default function EntretienForm({
                 <label className="block text-xs text-gray-500 mb-1">Commentaires de sortie</label>
                 <textarea value={form.sortie_commentaires || ''} onChange={(e) => setField('sortie_commentaires', e.target.value)} disabled={readOnly} rows={2} className="input-modern py-1 w-full" />
               </div>
+              {/* PR A lot 2 — SORTIE FSE+. Deux réponses, posées pendant le bilan :
+                  elles partent dans le dossier européen à la clôture (table
+                  insertion_fse_sorties, même transaction que le verrouillage).
+                  Laissées vides, la situation se déduit de la catégorie de
+                  sortie ci-dessus — jamais d'une valeur inventée. */}
+              <div className="border-t border-purple-200 pt-3 space-y-2">
+                <p className="text-xs font-semibold text-purple-900">Sortie FSE+</p>
+                <p className="text-[11px] text-purple-800">
+                  Ces réponses partent dans le dossier de l'opération cofinancée. Si vous les laissez vides,
+                  la situation sera déduite de la catégorie de sortie choisie plus haut.
+                </p>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Situation à la sortie (FSE+)</label>
+                  <Chips ton="purple" disabled={readOnly}
+                    value={(form.fse_sortie || {}).situation_sortie || null}
+                    onChange={(v) => setField('fse_sortie', { ...(form.fse_sortie || {}), situation_sortie: v })}
+                    options={FSE_SITUATIONS_SORTIE} />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Type de contrat à la sortie</label>
+                  <Chips ton="purple" disabled={readOnly}
+                    value={(form.fse_sortie || {}).type_contrat || null}
+                    onChange={(v) => setField('fse_sortie', { ...(form.fse_sortie || {}), type_contrat: v })}
+                    options={FSE_TYPES_CONTRAT} />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1" htmlFor="fse-sortie-comm">Commentaire FSE+ (facultatif)</label>
+                  <textarea id="fse-sortie-comm" rows={2} disabled={readOnly}
+                    value={(form.fse_sortie || {}).commentaire || ''}
+                    onChange={(e) => setField('fse_sortie', { ...(form.fse_sortie || {}), commentaire: e.target.value })}
+                    className="input-modern py-1 w-full" />
+                </div>
+              </div>
+
               {/* Questionnaire de satisfaction de sortie (EXG-09) — rempli AVEC le
                   salarié pendant le bilan ; consultable même une fois verrouillé. */}
               <div className="border-t border-purple-200 pt-2 flex items-center justify-between gap-2 flex-wrap">
@@ -899,11 +1017,24 @@ export default function EntretienForm({
                   {saving ? 'Enregistrement…' : 'Enregistrer le brouillon'}
                 </button>
               )}
-              {!readOnly && (
+              {/* Correctif de sécurité du 13/09 (M-02) : la clôture d'un BILAN
+                  DE SORTIE écrit la sortie FSE+, pièce sur laquelle l'autorité
+                  de gestion calcule son délai de saisie. Elle est réservée à
+                  ADMIN/RH côté serveur (403) ; proposer le bouton à
+                  l'encadrement technique le mènerait droit à un refus. Les
+                  AUTRES entretiens, qu'il conduit, restent clôturables. */}
+              {!readOnly && (type !== 'bilan_sortie' || adminRh) && (
                 <button type="button" onClick={() => setCloseModal(true)}
                   className="px-3 py-1.5 rounded-lg bg-green-700 text-white text-sm font-medium hover:bg-green-800">
                   Clôturer {type === 'bilan_sortie' ? 'le bilan de sortie' : "l'entretien"}…
                 </button>
+              )}
+              {!readOnly && type === 'bilan_sortie' && !adminRh && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                  Vos saisies sont enregistrées. La <strong>clôture</strong> du bilan de sortie
+                  revient au service RH : elle enregistre la sortie dans le dossier de
+                  l&apos;opération cofinancée.
+                </p>
               )}
             </div>
             {step < steps.length - 1 ? (
@@ -942,6 +1073,69 @@ export default function EntretienForm({
               <label className="block text-xs text-gray-500 mb-1">Date de réalisation</label>
               <input type="date" value={form.completed_date ? String(form.completed_date).slice(0, 10) : new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setField('completed_date', e.target.value)} className="input-modern py-1" />
+            </div>
+
+            {/* Durée — rangée de boutons (5 s). La valeur proposée dépend du
+                type d'entretien ; elle reste une proposition, jamais un décompte. */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Durée
+                {dureeProposee != null && (
+                  <span className="text-gray-400 font-normal"> (proposée pour ce type : {dureeProposee} min)</span>
+                )}
+              </label>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {DUREES_PROPOSEES.map((v) => {
+                  const actif = (duree ?? dureeProposee) === v && !dureeLibre;
+                  return (
+                    <button key={v} type="button"
+                      onClick={() => { setDuree(actif ? null : v); setDureeLibre(false); }}
+                      className={`px-3 py-1.5 rounded-lg border text-sm ${actif ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'}`}>
+                      {v} min
+                    </button>
+                  );
+                })}
+                <button type="button" onClick={() => setDureeLibre((v) => !v)}
+                  className={`px-3 py-1.5 rounded-lg border text-sm ${dureeLibre ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600'}`}>
+                  autre
+                </button>
+                {dureeLibre && (
+                  <input type="number" min="0" max="600" value={duree ?? ''} placeholder="minutes"
+                    onChange={(e) => setDuree(e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                    className="input-modern py-1 w-24 text-sm" aria-label="Durée en minutes" />
+                )}
+              </div>
+            </div>
+
+            {/* Assiduité — le motif reste FACULTATIF : une absence sans motif
+                ne sera jamais imprimée « injustifiée » (08 § 10). */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Présence</label>
+              <Chips value={assiduite} onChange={(v) => setAssiduite(v || 'present')} options={PRESENCES} />
+              {assiduite !== 'present' && (
+                <div className="mt-2 space-y-2 border-l-2 border-amber-200 pl-3">
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">
+                      Motif (facultatif) <span className="text-gray-400">— jamais la nature médicale, jamais de pièce de santé</span>
+                    </label>
+                    <Chips value={absenceMotif} onChange={setAbsenceMotif} options={ABSENCE_MOTIFS} />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1" htmlFor="ms-piece">Référence de la pièce fournie (facultatif)</label>
+                    <input id="ms-piece" value={absencePiece} onChange={(e) => setAbsencePiece(e.target.value)} maxLength={200}
+                      className="input-modern py-1 w-full text-sm" placeholder="ex. justificatif remis le 12/09, classé au dossier"
+                      aria-describedby="ms-piece-aide" />
+                    {/* Ce champ est du texte libre versé tel quel dans l'export
+                        Excel : la liste fermée des motifs d'absence interdit
+                        précisément d'y nommer une nature médicale, rien
+                        n'empêchait de l'écrire ici (constat m-08). */}
+                    <p id="ms-piece-aide" className="text-[11px] text-gray-500 mt-1">
+                      N'inscrivez aucune information médicale : indiquez seulement la nature
+                      et la date de la pièce (« arrêt de travail » suffit, jamais le motif).
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             {!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(type) && (
               <div className="border rounded-lg p-3 space-y-2 bg-teal-50/40">

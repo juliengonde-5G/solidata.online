@@ -96,7 +96,12 @@ const JOB_SCHEDULE = {
   checkInsertionInterviewAlerts:  { label: 'Alertes entretiens insertion',      cadence: '3×/jour',            maxAgeHours: DAILY },
   checkPassIaeExpiring:           { label: 'Pass IAE à échéance (J-7/J-2 mois)', cadence: '3×/jour',           maxAgeHours: DAILY },
   checkRenouvellementsAPreparer:  { label: 'Renouvellements CDDI à préparer',   cadence: '3×/jour',            maxAgeHours: DAILY },
-  createPostSortieFollowups:      { label: 'Suivis post-sortie (+3 mois)',      cadence: '3×/jour',            maxAgeHours: DAILY },
+  createPostSortieFollowups:      { label: 'Suivis post-sortie (+6 mois)',      cadence: '3×/jour',            maxAgeHours: DAILY },
+  // PR A — conformité FSE+ : la situation de sortie d'un participant ne se
+  // recueille plus passé quelques semaines. Un job d'alerte qui cesse de
+  // tourner sans se signaler, ce sont des dossiers de cofinancement
+  // irrécupérables — d'où sa déclaration ici, comme les purges RGPD.
+  checkFseSortiesNonRenseignees:  { label: 'Sorties FSE+ non renseignées (J+15/J+25)', cadence: '3×/jour',      maxAgeHours: DAILY },
   // 2.43.0 — filet de la note de profil initial CIP. Le chemin nominal est le
   // déclenchement à la liaison candidat→collaborateur ; sans ce job déclaré,
   // un arrêt du rattrapage ne se verrait nulle part (une CIP découvrirait le
