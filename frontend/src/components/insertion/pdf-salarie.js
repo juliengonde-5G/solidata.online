@@ -125,8 +125,17 @@ export function exportMonParcoursPDF(contenu) {
     + bloc('Mon prochain rendez-vous', rdvHtml)
     + bloc('Mon référent', refHtml)
     + bloc('Les documents qui m’ont été remis', liste(documents, 'Aucun document ne vous a encore été remis.'))
-    + '<div class="footer">Ce document est à vous. Il ne contient aucune information de santé, de justice '
-    + 'ni de situation sociale. Vous pouvez demander à le corriger ou à l’effacer auprès de la structure.'
+    // CORRECTIF (arbitrage 6 de la revue de sécurité) — la mention promettait
+    // « aucune information … de situation sociale » sur un document qui nomme
+    // le RÉFÉRENT UNIQUE (« Centre médico-social du Département »). Elle n'est
+    // pas fausse sur le fond — ce document est remis à la personne, pour elle —
+    // mais elle l'est sur la lettre, et il peut être remis par courrier ou par
+    // e-mail. On dit donc exactement ce qu'il contient, et on renvoie au Récap
+    // pour ce qui circule.
+    + '<div class="footer">Ce document est à vous : il est fait pour VOUS, pas pour être remis à un tiers '
+    + '(pour cela, demandez « Mon Récap »). Il ne contient aucune information de santé ni de justice, et il '
+    + 'nomme votre référent pour que vous sachiez à qui vous adresser. Vous pouvez demander à le corriger ou '
+    + 'à l’effacer auprès de la structure.'
     + ' — édité le ' + new Date().toLocaleDateString('fr-FR') + '</div>';
 
   return openPrintWindow('Mon parcours — ' + nom, body, { large: true });
