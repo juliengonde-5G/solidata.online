@@ -372,6 +372,38 @@ const tokenDe = async (id) => (await pool.query('SELECT eti_token, eti_token_exp
       expect(ligne.entretien.eti_expire_le).toBeTruthy();
     });
 
+    // ═══ CORRECTIF B-01 (vecteur 2) ═════════════════════════════════════════
+    // Le lien n'est pas une donnée de la ligne : c'est un accès SANS COMPTE au
+    // formulaire, donc une écriture NON ATTRIBUABLE. Servi à tout rôle du
+    // module, il contournait `managerOwnsEmployee` — la garde posée en P1 après
+    // la revue Codex PR#74 et dont le commentaire dit « sinon tout encadrant
+    // pourrait écrire le renouvellement d'autrui ».
+    test('V-64bis un MANAGER NON encadrant ne reçoit PAS le lien (ni par /renouvellements, ni par /echeances)', async () => {
+      const r = await auth(request(app).get('/api/insertion/renouvellements'), 'MANAGER');
+      expect(r.status).toBe(200);
+      const ligne = r.body.renouvellements.find((x) => x.employee_id === empA);
+      expect(ligne).toBeDefined();          // il voit la ligne : c'est son écran de travail
+      expect(ligne.entretien.lien_eti).toBeNull();   // mais pas la clé
+      expect(JSON.stringify(r.body)).not.toContain('/eti/renouvellement/');
+
+      const e = await auth(request(app).get('/api/insertion/echeances'), 'MANAGER');
+      expect(e.status).toBe(200);
+      expect(JSON.stringify(e.body)).not.toContain('/eti/renouvellement/');
+    });
+
+    test('V-64ter l\'encadrant RÉFÉRENT, lui, reçoit le lien (il a le droit d\'écrire ce formulaire)', async () => {
+      // `managerOwnsEmployee` reconnaît le CIP référent ET l'encadrant : on
+      // rend le compte MANAGER référent de ce salarié, comme en production.
+      await pool.query('UPDATE employees SET cip_referent_user_id = $1 WHERE id = $2', [U.MANAGER.id, empA]);
+      try {
+        const r = await auth(request(app).get('/api/insertion/renouvellements'), 'MANAGER');
+        const ligne = r.body.renouvellements.find((x) => x.employee_id === empA);
+        expect(ligne.entretien.lien_eti).toMatch(/\/eti\/renouvellement\/[0-9a-f]{32}$/);
+      } finally {
+        await pool.query('UPDATE employees SET cip_referent_user_id = NULL WHERE id = $1', [empA]);
+      }
+    });
+
     test('V-65 un lien EXPIRÉ n\'est plus proposé (ni lien, ni échéance)', async () => {
       await pool.query("UPDATE insertion_milestones SET eti_token_expires_at = NOW() - INTERVAL '1 day' WHERE id = $1", [msA]);
       const r = await auth(request(app).get('/api/insertion/renouvellements'), 'ADMIN');
