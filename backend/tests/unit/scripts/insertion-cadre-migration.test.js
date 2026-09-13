@@ -168,13 +168,56 @@ describe('C. exécution simulée de run(client)', () => {
     for (const [texte, params] of seeds) {
       expect(texte).toContain('ON CONFLICT (code) DO NOTHING');
       expect(Array.isArray(params)).toBe(true);
-      expect(params).toHaveLength(3);
+      // 4 paramètres depuis le correctif M-06 : code, libellé, ordre et le
+      // drapeau `sensible_art10` (propriété du référentiel, jamais un code
+      // judiciaire écrit en dur dans une route).
+      expect(params).toHaveLength(4);
+      expect(typeof params[3]).toBe('boolean');
       // Le libellé ne doit JAMAIS être interpolé dans le SQL.
       expect(texte).not.toContain(params[1]);
     }
     const codes = seeds.map(([, p]) => p[0]);
     expect(codes).toEqual(['brsa', 'ass', 'aah', 'deld', 'detld', 'jeune_26', 'senior_50',
       'rqth', 'qpv', 'zrr', 'refugie_bpi', 'sortant_detention', 'parent_isole', 'sans_domicile']);
+  });
+
+  test('M-06 — « sortant de détention » est le SEUL critère marqué art. 10', () => {
+    const seeds = appels.filter(([t]) => t.includes('INSERT INTO insertion_eligibilite_criteres'));
+    const art10 = seeds.filter(([, p]) => p[3] === true).map(([, p]) => p[0]);
+    expect(art10).toEqual(['sortant_detention']);
+  });
+
+  test('M-06 — la colonne du drapeau est ajoutée séparément (bases déjà seedées)', () => {
+    const alter = appels.filter(([t]) => /ALTER TABLE insertion_eligibilite_criteres ADD COLUMN IF NOT EXISTS sensible_art10/.test(t));
+    expect(alter).toHaveLength(1);
+  });
+
+  test('M-06 — le marquage initial est PARAMÉTRÉ et posé sous verrou', () => {
+    // Sans ce marquage, le correctif serait inopérant sur les bases existantes
+    // (`ON CONFLICT DO NOTHING` ne touche pas les lignes déjà présentes) ; sans
+    // le verrou, un décochage par l'ADMIN reviendrait à chaque redémarrage.
+    const maj = appels.filter(([t]) => /UPDATE insertion_eligibilite_criteres SET sensible_art10 = true/.test(t));
+    expect(maj).toHaveLength(1);
+    expect(maj[0][1]).toEqual([['sortant_detention']]);
+    expect(maj[0][0]).toContain('code = ANY($1::text[])');
+    const verrou = appels.filter(([t]) => /INSERT INTO settings/.test(t));
+    expect(verrou).toHaveLength(1);
+    expect(verrou[0][1][0]).toBe('insertion.eligibilite_art10_seed');
+  });
+
+  test('le registre art. 30 est écrit ET repris en paramètres, sans écraser un texte du DPO', () => {
+    const registre = appels.filter(([t]) => /rgpd_registre/.test(t));
+    expect(registre).toHaveLength(2); // création + mise en conformité
+    const [creation, reprise] = registre;
+    // Les textes longs passent par $1/$2 : aucune apostrophe à doubler à la main.
+    expect(creation[1]).toHaveLength(2);
+    expect(reprise[1]).toHaveLength(2);
+    // La promesse corrigée est bien celle qui part en base.
+    expect(creation[1][1]).toContain('sensible art. 10');
+    expect(creation[1][1]).toContain('la LISTE DES CRITÈRES');
+    // Double garde de la reprise : entrée non retouchée ET pas déjà à jour.
+    expect(reprise[0]).toContain("mesures_securite LIKE '%AUCUN justificatif");
+    expect(reprise[0]).toContain("mesures_securite NOT LIKE '%sensible art. 10%'");
   });
 
   test('les 5 CHECK du cadre sont posés par DO-scan', () => {
@@ -188,9 +231,20 @@ describe('C. exécution simulée de run(client)', () => {
   });
 
   test('aucune interpolation de valeur d’entrée dans le SQL généré', () => {
-    // Les seules interpolations `${}` du fichier sont des noms de contrainte et
-    // d'expression, tous écrits en dur dans le module.
-    const interpolations = src.match(/\$\{[^}]+\}/g) || [];
+    // Les seules interpolations `${}` autorisées dans du SQL sont des noms de
+    // contrainte et d'expression, tous écrits en dur dans le module. On exclut
+    // d'abord les lignes de journal (console.log), qui ne partent pas en base.
+    const sansJournal = src.split('\n').filter((l) => !/console\.(log|warn|error)/.test(l)).join('\n');
+    const interpolations = sansJournal.match(/\$\{[^}]+\}/g) || [];
     for (const i of interpolations) expect(i).toMatch(/^\$\{(table|nom|expr)\}$/);
+  });
+
+  test('les VALEURS des critères ne sont jamais interpolées dans le SQL', () => {
+    // Contre-épreuve ciblée du test précédent : aucun code ni libellé du
+    // référentiel ne doit apparaître littéralement dans une requête SQL.
+    for (const [code, libelle] of migration.CRITERES_ELIGIBILITE) {
+      const enDur = appels.filter(([t]) => t.includes(`'${code}'`) || t.includes(libelle));
+      expect(enDur).toHaveLength(0);
+    }
   });
 });

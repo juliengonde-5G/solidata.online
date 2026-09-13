@@ -39,23 +39,42 @@
  * Le référentiel est ADMINISTRABLE : ce seed ne pose que l'état initial, et
  * `ON CONFLICT DO NOTHING` garantit qu'un libellé retouché par l'ADMIN ou un
  * critère désactivé ne revient JAMAIS au redémarrage (doctrine 2.26.4).
+ *
+ * 4e colonne — `sensible_art10` : le critère relève de l'article 10 du RGPD
+ * (condamnations et infractions). C'est une PROPRIÉTÉ DU RÉFÉRENTIEL, jamais
+ * un code écrit en dur dans une route : le jour où la direction ajoute ou
+ * retire un critère judiciaire, elle le fait dans l'écran de réglages et les
+ * trois surfaces protégées (export, projection encadrant, bloc de report) la
+ * suivent sans redéploiement. Un critère ainsi marqué :
+ *   - ne sort JAMAIS dans un export nominatif (colonne 10 du fichier FSE+) ;
+ *   - n'est JAMAIS rendu à un encadrant technique, ni par son libellé ni dans
+ *     le COMPTE de critères qui lui est servi ;
+ *   - est remplacé dans le bloc « Les Emplois de l'inclusion » — qui se copie
+ *     hors de l'outil — par une mention neutre renvoyant à la fiche.
+ * Il reste en revanche saisissable et lisible par ADMIN/RH : il FONDE une
+ * éligibilité IAE, le retirer du référentiel ferait disparaître le motif réel
+ * d'entrée en parcours de certaines personnes (décision de l'orchestrateur du
+ * 13/09, à confirmer par la direction et le DPO — voir le rapport 14 § M-06).
  */
 const CRITERES_ELIGIBILITE = [
-  ['brsa', 'Bénéficiaire du RSA', 1],
-  ['ass', 'Allocataire ASS', 2],
-  ['aah', 'Allocataire AAH', 3],
-  ['deld', "Demandeur d'emploi de longue durée (12-24 mois)", 4],
-  ['detld', "Demandeur d'emploi de très longue durée (> 24 mois)", 5],
-  ['jeune_26', 'Jeune de moins de 26 ans', 6],
-  ['senior_50', 'Senior (50 ans et plus)', 7],
-  ['rqth', 'Reconnaissance RQTH', 8],
-  ['qpv', 'Résident en QPV', 9],
-  ['zrr', 'Résident en ZRR', 10],
-  ['refugie_bpi', 'Réfugié / bénéficiaire de la protection internationale', 11],
-  ['sortant_detention', 'Sortant de détention', 12],
-  ['parent_isole', 'Parent isolé', 13],
-  ['sans_domicile', 'Sans domicile stable', 14],
+  ['brsa', 'Bénéficiaire du RSA', 1, false],
+  ['ass', 'Allocataire ASS', 2, false],
+  ['aah', 'Allocataire AAH', 3, false],
+  ['deld', "Demandeur d'emploi de longue durée (12-24 mois)", 4, false],
+  ['detld', "Demandeur d'emploi de très longue durée (> 24 mois)", 5, false],
+  ['jeune_26', 'Jeune de moins de 26 ans', 6, false],
+  ['senior_50', 'Senior (50 ans et plus)', 7, false],
+  ['rqth', 'Reconnaissance RQTH', 8, false],
+  ['qpv', 'Résident en QPV', 9, false],
+  ['zrr', 'Résident en ZRR', 10, false],
+  ['refugie_bpi', 'Réfugié / bénéficiaire de la protection internationale', 11, false],
+  ['sortant_detention', 'Sortant de détention', 12, true],
+  ['parent_isole', 'Parent isolé', 13, false],
+  ['sans_domicile', 'Sans domicile stable', 14, false],
 ];
+
+/** Verrou du marquage initial art. 10 — voir la section 1 de `run`. */
+const CLE_VERROU_ART10 = 'insertion.eligibilite_art10_seed';
 
 async function run(client) {
   // ── 1. Référentiel des critères d'éligibilité IAE ────────────────────────
@@ -67,15 +86,56 @@ async function run(client) {
       actif BOOLEAN NOT NULL DEFAULT true
     );
   `);
+  // Le drapeau art. 10 est une colonne du RÉFÉRENTIEL et non une liste de codes
+  // dans le code : ajouté séparément pour que les bases déjà migrées le
+  // reçoivent aussi. `NOT NULL DEFAULT false` — un critère dont on n'a rien dit
+  // n'est pas judiciaire, c'est la seule valeur par défaut sûre dans ce sens-là
+  // (le défaut inverse masquerait des critères ordinaires à l'encadrement).
+  await client.query('ALTER TABLE insertion_eligibilite_criteres ADD COLUMN IF NOT EXISTS sensible_art10 BOOLEAN NOT NULL DEFAULT false;');
 
-  // Seed idempotent : un INSERT ... SELECT ... ON CONFLICT DO NOTHING, valeurs
+  // Seed idempotent : un INSERT ... ON CONFLICT DO NOTHING, valeurs
   // paramétrées (les libellés portent des apostrophes typographiques).
-  for (const [code, libelle, ordre] of CRITERES_ELIGIBILITE) {
+  for (const [code, libelle, ordre, art10] of CRITERES_ELIGIBILITE) {
     await client.query(
-      `INSERT INTO insertion_eligibilite_criteres (code, libelle, ordre, actif)
-       VALUES ($1, $2, $3, true) ON CONFLICT (code) DO NOTHING`,
-      [code, libelle, ordre]
+      `INSERT INTO insertion_eligibilite_criteres (code, libelle, ordre, actif, sensible_art10)
+       VALUES ($1, $2, $3, true, $4) ON CONFLICT (code) DO NOTHING`,
+      [code, libelle, ordre, art10 === true]
     );
+  }
+
+  // MARQUAGE INITIAL art. 10 sur une base DÉJÀ SEEDÉE.
+  //
+  // Sans lui, le correctif serait inopérant précisément là où il compte : sur
+  // les bases de recette et de production, `ON CONFLICT DO NOTHING` ne touche
+  // pas les lignes existantes et « Sortant de détention » resterait à `false`,
+  // donc exporté et servi à l'encadrement comme avant.
+  //
+  // Doctrine 2.26.4 (verrou de seed) : on marque UNE fois, puis la clé
+  // `insertion.eligibilite_art10_seed` interdit toute réapparition. Si la
+  // direction décide demain qu'un critère n'est plus traité comme art. 10, elle
+  // le décoche dans l'écran de réglages et un redémarrage ne le recochera pas.
+  try {
+    const verrou = await client.query('SELECT value FROM settings WHERE key = $1', [CLE_VERROU_ART10]);
+    if (verrou.rows.length === 0) {
+      const codesArt10 = CRITERES_ELIGIBILITE.filter(([, , , a]) => a === true).map(([c]) => c);
+      const maj = await client.query(
+        `UPDATE insertion_eligibilite_criteres SET sensible_art10 = true
+          WHERE code = ANY($1::text[]) AND sensible_art10 IS NOT TRUE
+        RETURNING code`,
+        [codesArt10]
+      );
+      await client.query(
+        `INSERT INTO settings (key, value, category) VALUES ($1, $2, 'insertion')
+         ON CONFLICT (key) DO NOTHING`,
+        [CLE_VERROU_ART10, new Date().toISOString()]
+      );
+      console.log(`[INIT-DB] Critères d'éligibilité art. 10 marqués : ${maj.rowCount} (verrou posé) ✓`);
+    }
+  } catch (err) {
+    // Table `settings` absente (base en cours de construction) : on ne pose pas
+    // de verrou — la tentative aura lieu au démarrage suivant. Jamais de
+    // marquage sans verrou : il reviendrait à chaque redémarrage.
+    if (err.code !== '42P01') throw err;
   }
 
   // ── 2. Rattachement daté d'un critère à une personne ─────────────────────
@@ -245,24 +305,57 @@ async function run(client) {
   // France Travail —, critères d'éligibilité, pièces signées), elles ont
   // d'autres destinataires (Département, DDETS via les Emplois de l'inclusion)
   // et une autre base légale (obligation légale du conventionnement IAE et de
-  // la loi Plein Emploi). Garde NOT ILIKE sur le nom : rejouable sans effet,
-  // et un texte retouché par le DPO n'est jamais écrasé.
-  await client.query(`
-    INSERT INTO rgpd_registre
+  // la loi Plein Emploi).
+  //
+  // Les textes sont passés en PARAMÈTRES et non inlinés : ils sont longs, ils
+  // portent des apostrophes, et surtout ils servent DEUX fois — à la création
+  // de l'entrée et à sa mise en conformité sur une base déjà seedée (correctif
+  // de sécurité du 13/09 : le registre promettait une protection que le code ne
+  // tenait pas, ce qui est une non-conformité en soi).
+  const CATEGORIES_DONNEES_CADRE = "Critères d'éligibilité IAE constatés et date de constat — CERTAINS RELÈVENT DE CATÉGORIES PARTICULIÈRES : santé au sens de l'art. 9 (reconnaissance RQTH, allocataire AAH) et infractions au sens de l'art. 10 (sortant de détention, marqué « sensible art. 10 » dans le référentiel administrable) —, référence (localisation) des justificatifs conservés hors de l'outil, numéro et dates du Pass IAE, statut et événements du Pass, orienteur et prescripteur, référent unique (organisme, nom, coordonnées professionnelles), STATUTS SOCIAUX (bénéficiaire du RSA et date de constat, catégorie d'inscription France Travail et date, identifiant France Travail), motif de dérogation à la durée maximale de CDDI, pièces signées numérisées";
+
+  const MESURES_SECURITE_CADRE = "Statuts sociaux (BRSA, catégorie France Travail) réservés aux rôles ADMIN/RH — jamais rendus en lecture à l'encadrement technique, y compris par l'API : la LISTE DES CRITÈRES d'éligibilité elle-même ne lui est pas servie (il reçoit la date de vérification, la source et un NOMBRE de critères, jamais leurs codes ni leurs libellés), et les données qu'il n'a pas le droit de voir ne sont même pas lues en base pour lui. Les critères marqués « sensible art. 10 » dans le référentiel (condamnations et infractions) ne sont ni comptés pour l'encadrement technique, ni exportés dans un fichier nominatif, ni recopiés dans le bloc de report vers « Les Emplois de l'inclusion » (une mention neutre y renvoie à la fiche) ; pièces stockées EN BASE (jamais sous un répertoire servi statiquement), servies authentifiées avec en-têtes « no-store » et « nosniff », type de fichier vérifié par ses octets d'en-tête et non par le type déclaré ; consultation, dépôt et suppression d'une pièce journalisés deux fois (registre RGPD et journal d'activité — une trace indisponible ne doit pas effacer la preuve de la consultation) ; chaque consultation et chaque modification du dossier administratif journalisées (la trace dit quels champs ont changé, jamais leurs valeurs) ; AUCUN justificatif d'éligibilité n'est stocké dans l'outil (principe de minimisation : seule la référence est conservée)";
+
+  // Création (base neuve). Garde NOT EXISTS sur le nom : rejouable sans effet.
+  await client.query(
+    `INSERT INTO rgpd_registre
       (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
-    SELECT
+     SELECT
       'Dossier administratif d''insertion (éligibilité IAE, Pass IAE, référent unique, statuts sociaux, pièces signées)',
       'Tenue du dossier administratif exigé par le conventionnement IAE et la loi pour le plein emploi : constat des critères d''éligibilité (référencés sur la plateforme « Les Emplois de l''inclusion », jamais recopiés dans l''outil), suivi du Pass IAE et de ses événements (suspension, prolongation), identification de l''orienteur, du prescripteur habilité et du RÉFÉRENT UNIQUE externe, suivi de l''actualisation mensuelle France Travail, conservation des pièces dont la structure est SEULE dépositaire (exemplaire signé d''un entretien, convention PMSMP, accusé de remise de document).',
       'Obligation légale (art. L5132-1 s. Code du travail ; loi n° 2023-1196 pour le plein emploi) et mission d''intérêt public',
       'Salariés en parcours d''insertion (CDDI)',
-      'Critères d''éligibilité IAE constatés et date de constat, référence (localisation) des justificatifs conservés hors de l''outil, numéro et dates du Pass IAE, statut et événements du Pass, orienteur et prescripteur, référent unique (organisme, nom, coordonnées professionnelles), STATUTS SOCIAUX (bénéficiaire du RSA et date de constat, catégorie d''inscription France Travail et date, identifiant France Travail), motif de dérogation à la durée maximale de CDDI, pièces signées numérisées',
+      $1,
       'CIP et service RH (nominatif) ; le bloc de report vers « Les Emplois de l''inclusion » est composé à l''écran pour saisie manuelle par l''utilisateur habilité — aucune transmission automatique depuis l''outil',
       'Parcours + 24 mois après dernier contact (anonymisation : suppression des critères d''éligibilité, des événements du Pass et des pièces ; effacement des noms et coordonnées de l''orienteur et du référent)',
-      'Statuts sociaux (BRSA, catégorie France Travail) réservés aux rôles ADMIN/RH — jamais rendus en lecture à l''encadrement technique, y compris par l''API ; pièces stockées EN BASE (jamais sous un répertoire servi statiquement), servies authentifiées avec en-têtes « no-store » et « nosniff », type de fichier vérifié par ses octets d''en-tête et non par le type déclaré ; consultation, dépôt et suppression d''une pièce journalisés (rgpd_audit_log) ; chaque consultation et chaque modification du dossier administratif journalisées (la trace dit quels champs ont changé, jamais leurs valeurs) ; AUCUN justificatif d''éligibilité n''est stocké dans l''outil (principe de minimisation : seule la référence est conservée)'
-    WHERE NOT EXISTS (
+      $2
+     WHERE NOT EXISTS (
       SELECT 1 FROM rgpd_registre WHERE nom_traitement ILIKE 'Dossier administratif d''insertion%'
-    );
-  `);
+     )`,
+    [CATEGORIES_DONNEES_CADRE, MESURES_SECURITE_CADRE]
+  );
+
+  // MISE EN CONFORMITÉ d'une entrée déjà écrite par une version antérieure de
+  // cette migration. Elle affirmait que les statuts sociaux n'étaient « jamais
+  // rendus en lecture à l'encadrement technique » alors que la liste des
+  // critères — qui porte le RSA, la RQTH et le fait d'être sortant de détention
+  // — lui était servie en toutes lettres. Un registre qui promet ce que le code
+  // ne tient pas est une non-conformité : il doit être repris, pas seulement le
+  // code.
+  //
+  // Double garde, pour ne JAMAIS écraser un texte retouché par le DPO :
+  //  - la reprise ne s'applique qu'à une entrée qui porte encore la phrase de
+  //    la version d'origine (donc non retouchée) ;
+  //  - et seulement si elle ne mentionne pas déjà la protection art. 10 (donc
+  //    une seule fois ; une seconde exécution ne fait rien).
+  await client.query(
+    `UPDATE rgpd_registre
+        SET categories_donnees = $1, mesures_securite = $2
+      WHERE nom_traitement ILIKE 'Dossier administratif d''insertion%'
+        AND mesures_securite LIKE '%AUCUN justificatif d''éligibilité n''est stocké dans l''outil%'
+        AND mesures_securite NOT LIKE '%sensible art. 10%'`,
+    [CATEGORIES_DONNEES_CADRE, MESURES_SECURITE_CADRE]
+  );
 
   console.log('[INIT-DB] Migration « Dossier administratif d\'insertion » (PR A lot 1) ✓');
 }

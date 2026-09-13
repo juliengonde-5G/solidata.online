@@ -173,7 +173,11 @@ describe('CONTRAT GET /exports/fse-plus — 29 colonnes dictées par l’autorit
     const meta = res.text.replace(/^﻿/, '').split('\n').filter((l) => l.startsWith('#'));
     expect(meta).toHaveLength(5);
     expect(meta[0]).toMatch(/Participants FSE\+/);
-    expect(meta[1]).toMatch(/Généré par;cip\.test/);
+    // m-04 — l'en-tête porte « Prénom Nom » et JAMAIS l'identifiant de
+    // connexion : ce fichier part hors de la structure, l'autorité veut savoir
+    // qui l'a produit, pas recevoir un compte utilisateur de notre outil.
+    expect(meta[1]).toMatch(/Généré par;T U/);
+    expect(meta[1]).not.toMatch(/cip\.test/);
     expect(meta[2]).toMatch(/Périmètre/);
     expect(meta[3]).toMatch(/Nombre de lignes;1/);
     expect(meta[4]).toMatch(/font foi/);
@@ -230,7 +234,11 @@ describe('CONTRAT GET /exports/fse-plus/bilan — agrégat non nominatif', () =>
       'identification', 'participants', 'indicateurs_entree', 'indicateurs_sortie',
       'indicateurs_six_mois', 'completude', 'moyens', 'methode',
     ]));
-    expect(res.body.identification.nominatif).toBe(false);
+    // m-05 — le drapeau unique `nominatif: false` était FAUX : le § 6 nomme les
+    // intervenants affectés au projet. Deux drapeaux distincts, tous deux vrais.
+    expect(res.body.identification.nominatif).toBeUndefined();
+    expect(res.body.identification.participants_nominatifs).toBe(false);
+    expect(res.body.identification.intervenants_nominatifs).toBe(true);
     expect(JSON.stringify(res.body)).not.toMatch(/Benali|BENALI|Karim/);
     // La ligne « non relevée » est OBLIGATOIRE (elle dit ce qu'on ne sait pas).
     expect(res.body.indicateurs_six_mois.non_relevee).toBe(1);

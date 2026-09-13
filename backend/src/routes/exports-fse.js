@@ -34,6 +34,7 @@ const {
 const { chargerContextes, composerPieces, bornesPeriode } = require('../services/fse-participants');
 const { readInsertionSetting } = require('../utils/insertion-settings');
 const { ageBracket } = require('../utils/pii-pseudonymize');
+const { escCsv, nomGenerateur } = require('../utils/export-csv');
 
 const APP_VERSION = process.env.APP_VERSION || require('../../package.json').version;
 
@@ -73,10 +74,12 @@ const COLONNES = [
 
 const jour = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 const joursEntre = (a, b) => Math.floor((new Date(jour(b)) - new Date(jour(a))) / 86400000);
-const esc = (v) => {
-  const s = String(v === null || v === undefined ? '' : v);
-  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+/**
+ * Échappement CSV **et** neutralisation de formule (correctif du 13/09,
+ * constat M-04). La règle et son argumentaire vivent dans `utils/export-csv.js`
+ * — elle était écrite deux fois, dans deux fichiers, et fausse des deux côtés.
+ */
+const esc = (v) => escCsv(v);
 
 /**
  * Résout le projet demandé. Le paramètre `projet` est facultatif pour ne pas
@@ -143,8 +146,23 @@ async function chargerParticipants(projetId, periode) {
     LEFT JOIN insertion_fse_sorties s
       ON s.employee_id = e.id AND s.parcours_num = COALESCE(e.parcours_num, 1)
     LEFT JOIN LATERAL (
+      -- COLONNE 10 « Critères d'éligibilité IAE ». Les critères marqués
+      -- « sensible art. 10 » dans le référentiel (condamnations et infractions)
+      -- sont ÉCARTÉS ICI, à la composition du fichier, et non masqués à
+      -- l'écran : la règle commune des exports de l'autorité est sans nuance
+      -- (« exclusions absolues dans tout export qui sort de la structure :
+      -- frein judiciaire sous toute forme ») et le registre art. 30 de ce
+      -- traitement promet qu'aucune donnée judiciaire n'y figure. Le critère
+      -- reste saisi, daté et lisible par ADMIN/RH dans la fiche : il FONDE une
+      -- éligibilité IAE. C'est sa SORTIE de la structure qui est interdite.
+      -- Le filtre porte sur la PROPRIÉTÉ du référentiel, jamais sur un code
+      -- écrit en dur : décocher la case dans l'écran de réglages suffit à
+      -- revenir en arrière, sans redéploiement (décision à confirmer par la
+      -- direction et le DPO — rapport 14 § M-06).
       SELECT string_agg(ee.critere_code, ', ' ORDER BY ee.critere_code) AS codes
-      FROM employee_eligibilite ee WHERE ee.employee_id = e.id
+      FROM employee_eligibilite ee
+      JOIN insertion_eligibilite_criteres ec ON ec.code = ee.critere_code
+      WHERE ee.employee_id = e.id AND COALESCE(ec.sensible_art10, false) = false
     ) crit ON true
     WHERE pp.projet_id = $1
       AND pp.date_entree < $2::date
@@ -274,7 +292,7 @@ router.get('/fse-plus', [
     // En-tête de traçabilité — 5 lignes commentées `#`, hors du tableau.
     const meta = [
       `# Export;Participants FSE+;Projet;${projet.nom} (${projet.code})`,
-      `# Généré le;${new Date().toLocaleString('fr-FR')};Généré par;${req.user.username || req.user.id}`,
+      `# Généré le;${new Date().toLocaleString('fr-FR')};Généré par;${esc(nomGenerateur(req.user))}`,
       `# Périmètre;Participants rattachés à l'opération, période ${periode.annee} T${periode.trimestre} (du ${periode.debut} au ${periode.fin} exclu)`,
       `# Nombre de lignes;${rows.length};Version de l'outil;${APP_VERSION}`,
       `# ${MENTION_OFFICIELLE}`,
@@ -415,10 +433,16 @@ router.get('/fse-plus/bilan', [
           taux_forfaitaire_pct: projet.taux_forfaitaire_pct, cofinancement_ue_pct: projet.cofinancement_ue_pct },
         periode: { annee: periode.annee, trimestre: periode.trimestre, debut: periode.debut, fin: periode.fin },
         genere_le: new Date().toISOString(),
-        genere_par: req.user.username || String(req.user.id),
+        genere_par: nomGenerateur(req.user),
         version_outil: APP_VERSION,
         mention: MENTION_OFFICIELLE,
-        nominatif: false,
+        // Le drapeau disait « non nominatif » alors que § 6 nomme les
+        // intervenants affectés au projet — l'autorité demande les deux à la
+        // fois (bilan non nominatif POUR LES PARTICIPANTS, postes affectés
+        // nommés). On le DIT au lieu de promettre ce qui est faux (constat
+        // m-05) : deux drapeaux distincts plutôt qu'un seul qui ment.
+        participants_nominatifs: false,
+        intervenants_nominatifs: true,
       },
       // § 2 Participants
       participants: {

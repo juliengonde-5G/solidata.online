@@ -120,6 +120,26 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       expect(r.body.bloc_emplois_inclusion).toMatch(/PASS-JEST-001/);
     });
 
+    // ── Vérification demandée par le rapport de debug (13 § 7.2) une fois C-01
+    // corrigé : « pour un MANAGER, `eligibilite.criteres` ne doit porter ni code
+    // ni libellé, seulement un compte et la date de vérification ».
+    // Elle s'appuie sur les critères réellement écrits juste au-dessus (brsa +
+    // deld), donc sur des LIGNES en base, pas sur un faux `pg`.
+    test('C-01 — le MANAGER ne reçoit ni code ni libellé de critère, seulement un compte', async () => {
+      const r = await auth(request(app).get(`/api/insertion/cadre/${salarie}`), 'MANAGER');
+      expect(r.status).toBe(200);
+      expect(r.body.eligibilite.criteres).toBeUndefined();
+      expect(r.body.eligibilite.justificatifs_ref).toBeUndefined();
+      expect(r.body.eligibilite.nb_criteres).toBe(2);
+      expect(r.body.eligibilite.verifiee_le).toBeTruthy();
+      const brut = JSON.stringify(r.body);
+      for (const interdit of ['brsa', 'deld', 'Bénéficiaire du RSA', 'Demandeur d\'emploi']) {
+        expect(brut).not.toContain(interdit);
+      }
+      // Le texte libre de référence des justificatifs ne fuit pas non plus.
+      expect(brut).not.toContain('candidature 12345');
+    });
+
     test('le journal de modification dit les CHAMPS, jamais les valeurs', async () => {
       const r = await pool.query(
         `SELECT details FROM rgpd_audit_log WHERE action = 'INSERTION_CADRE_MODIFICATION' AND entity_id = $1
@@ -130,6 +150,27 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       expect(d.champs).toContain('brsa');
       expect(JSON.stringify(d)).not.toContain('PASS-JEST-001');
       expect(JSON.stringify(d)).not.toContain('CMS Rouen Rive Gauche');
+    });
+
+    test('M-06 — un critère art. 10 n’est ni compté pour l’encadrant, ni recopié dans le bloc', async () => {
+      // On ajoute « sortant de détention » aux deux critères déjà posés.
+      const w = await auth(request(app).put(`/api/insertion/cadre/${salarie}`), 'ADMIN')
+        .send({ eligibilite: { criteres: ['brsa', 'deld', 'sortant_detention'] } });
+      expect(w.status).toBe(200);
+      // ADMIN : les trois critères, et le bloc de report qui NOMME les deux
+      // premiers mais remplace le troisième.
+      expect(w.body.eligibilite.criteres.map((c) => c.code).sort()).toEqual(['brsa', 'deld', 'sortant_detention']);
+      expect(w.body.bloc_emplois_inclusion).toContain('Bénéficiaire du RSA');
+      expect(w.body.bloc_emplois_inclusion).not.toContain('Sortant de détention');
+      expect(w.body.bloc_emplois_inclusion).toContain('[critère judiciaire — voir la fiche]');
+      // MANAGER : 3 critères en base, 2 annoncés — le critère judiciaire ne se
+      // déduit pas d'un compte.
+      const m = await auth(request(app).get(`/api/insertion/cadre/${salarie}`), 'MANAGER');
+      expect(m.body.eligibilite.nb_criteres).toBe(2);
+      expect(JSON.stringify(m.body)).not.toContain('detention');
+      // On revient à l'état attendu par les tests suivants.
+      await auth(request(app).put(`/api/insertion/cadre/${salarie}`), 'ADMIN')
+        .send({ eligibilite: { criteres: ['brsa', 'deld'] } });
     });
 
     test('valeur hors liste refusée en 400, rien n\'est écrit', async () => {

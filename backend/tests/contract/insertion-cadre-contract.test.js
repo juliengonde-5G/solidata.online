@@ -119,13 +119,79 @@ describe('1. Matrice de rôles', () => {
     expect(Object.keys(res.body)).not.toContain('statuts');
     expect(Object.keys(res.body)).not.toContain('pieces');
     expect(Object.keys(res.body)).not.toContain('bloc_emplois_inclusion');
-    // Ce qu'il conserve : le Pass, l'orientation, les critères.
+    // Ce qu'il conserve : le Pass et l'orientation.
     expect(res.body.pass_iae).toBeDefined();
     expect(res.body.orientation.referent_unique.type).toBe('cms');
-    expect(res.body.eligibilite.criteres).toHaveLength(2);
   });
 
-  test('la lecture MANAGER n’est PAS journalisée (aucune donnée sensible servie)', async () => {
+  // ── C-01 (correctif du 13/09) ─────────────────────────────────────────────
+  // Cette assertion disait l'inverse : elle EXIGEAIT que le MANAGER reçoive les
+  // deux critères, sur un jeu de données dont le premier est « Bénéficiaire du
+  // RSA » — c'est-à-dire le statut social que la clé `statuts`, retirée trois
+  // lignes plus haut, est censée protéger. Le test verrouillait la fuite.
+  test('C-01 — le MANAGER ne reçoit AUCUN critère d’éligibilité (ni code, ni libellé)', async () => {
+    branche({
+      criteres: [
+        { code: 'brsa', libelle: 'Bénéficiaire du RSA', date_constat: '2025-07-10', sensible_art10: false },
+        { code: 'rqth', libelle: 'Reconnaissance RQTH', date_constat: null, sensible_art10: false },
+        { code: 'sortant_detention', libelle: 'Sortant de détention', date_constat: null, sensible_art10: true },
+      ],
+    });
+    const res = await get('/api/insertion/cadre/5', 'MANAGER');
+    expect(res.status).toBe(200);
+    // Aucune liste, sous aucune forme.
+    expect(res.body.eligibilite.criteres).toBeUndefined();
+    const brut = JSON.stringify(res.body);
+    for (const interdit of ['brsa', 'rqth', 'sortant_detention',
+      'Bénéficiaire du RSA', 'Reconnaissance RQTH', 'Sortant de détention']) {
+      expect(brut).not.toContain(interdit);
+    }
+    // Ce qu'il reçoit : la preuve que la vérification a eu lieu.
+    expect(res.body.eligibilite.verifiee_le).toBe('2025-07-10');
+    expect(res.body.eligibilite.source).toBe('prescripteur_habilite');
+    // M-06 — le critère art. 10 n'est pas COMPTÉ : 3 critères en base, 2 annoncés.
+    expect(res.body.eligibilite.nb_criteres).toBe(2);
+    // La référence des justificatifs est un texte libre : elle ne part pas non plus.
+    expect(res.body.eligibilite.justificatifs_ref).toBeUndefined();
+  });
+
+  test('C-01 — l’ADMIN, lui, reçoit la liste complète (y compris le critère art. 10)', async () => {
+    branche({
+      criteres: [
+        { code: 'brsa', libelle: 'Bénéficiaire du RSA', date_constat: '2025-07-10', sensible_art10: false },
+        { code: 'sortant_detention', libelle: 'Sortant de détention', date_constat: null, sensible_art10: true },
+      ],
+    });
+    const res = await get('/api/insertion/cadre/5', 'ADMIN');
+    expect(res.body.eligibilite.criteres.map((c) => c.code)).toEqual(['brsa', 'sortant_detention']);
+    // M-06 — mais le bloc de report, qui se COPIE hors de l'outil, ne le nomme pas.
+    expect(res.body.bloc_emplois_inclusion).toContain('Bénéficiaire du RSA');
+    expect(res.body.bloc_emplois_inclusion).not.toContain('Sortant de détention');
+    expect(res.body.bloc_emplois_inclusion).toContain('[critère judiciaire — voir la fiche]');
+  });
+
+  // m-10 — « un refus après lecture serait un refus d'affichage, pas d'accès ».
+  test('m-10 — pour un MANAGER, ni les pièces ni les statuts ne sont LUS en base', async () => {
+    await get('/api/insertion/cadre/5', 'MANAGER');
+    const sqls = mockQuery.mock.calls.map(([s]) => String(s));
+    expect(sqls.some((s) => /FROM insertion_pieces/.test(s))).toBe(false);
+    expect(sqls.some((s) => /SELECT rqth FROM insertion_diagnostics/.test(s))).toBe(false);
+    const selectEmp = sqls.find((s) => /FROM employees e\s+LEFT JOIN prescripteur_orgas/.test(s));
+    expect(selectEmp).toBeDefined();
+    for (const col of ['e.brsa', 'e.ft_categorie', 'e.france_travail_id', 'e.eligibilite_justificatifs_ref']) {
+      expect(selectEmp).not.toContain(col);
+    }
+  });
+
+  test('l’ADMIN, lui, LIT bien les pièces et les statuts', async () => {
+    await get('/api/insertion/cadre/5', 'ADMIN');
+    const sqls = mockQuery.mock.calls.map(([s]) => String(s));
+    expect(sqls.some((s) => /FROM insertion_pieces/.test(s))).toBe(true);
+    const selectEmp = sqls.find((s) => /FROM employees e\s+LEFT JOIN prescripteur_orgas/.test(s));
+    expect(selectEmp).toContain('e.brsa');
+  });
+
+  test('la lecture MANAGER n’est PAS journalisée — et elle ne sert désormais aucune donnée sensible', async () => {
     await get('/api/insertion/cadre/5', 'MANAGER');
     expect(journaux()).toHaveLength(0);
   });

@@ -19,7 +19,12 @@
  *   - les STATUTS SOCIAUX (BRSA, catégorie France Travail) sont ADMIN/RH
  *     STRICT. Ce n'est pas un masquage par champ mais une projection : pour un
  *     MANAGER la clé `statuts` est ABSENTE de la réponse — une clé présente à
- *     null dirait déjà « cette personne a un statut social quelque part ».
+ *     null dirait déjà « cette personne a un statut social quelque part » —, et
+ *     la LISTE DES CRITÈRES d'éligibilité ne lui est pas servie davantage : elle
+ *     porte le RSA, la RQTH, l'AAH et le fait d'être sortant de détention, donc
+ *     elle rendrait par la porte d'à côté ce que la projection vient de retirer
+ *     (correctif de sécurité du 13/09, constat C-01). Il reçoit la date de
+ *     vérification, la source et un nombre de critères.
  *
  * Habilitations : le routeur parent impose ADMIN/RH/MANAGER. Toute ÉCRITURE est
  * restreinte ici à ADMIN/RH. Toute lecture ADMIN/RH est journalisée au registre
@@ -90,7 +95,14 @@ function frDate(v) {
  */
 function composerBlocEmploisInclusion({ criteres, prescripteur, pass }) {
   const NR = 'non renseigné';
-  const libelles = (criteres || []).map((c) => c.libelle).filter(Boolean);
+  // Un critère marqué « sensible art. 10 » (condamnations et infractions) n'est
+  // PAS recopié : ce bloc a vocation à être collé dans un formulaire hors de
+  // l'outil, souvent dans un navigateur partagé. La mention neutre dit qu'il y
+  // a quelque chose — sans quoi l'agent croirait à un oubli — et renvoie à la
+  // fiche, où la donnée reste lisible par ADMIN/RH.
+  const libelles = (criteres || [])
+    .map((c) => (c && c.sensible_art10 === true ? '[critère judiciaire — voir la fiche]' : c && c.libelle))
+    .filter(Boolean);
   const presc = prescripteur && prescripteur.nom
     ? `${prescripteur.nom}${prescripteur.type ? ` (${prescripteur.type})` : ''}`
     : NR;
@@ -144,11 +156,18 @@ async function lireEvenementsPass(employeeId) {
   }
 }
 
-/** Critères constatés, joints au référentiel pour porter leur libellé. */
+/**
+ * Critères constatés, joints au référentiel pour porter leur libellé ET leur
+ * drapeau `sensible_art10` — le référentiel est la SOURCE de cette qualité, on
+ * ne réécrit jamais ici une liste de codes judiciaires qui divergerait de lui.
+ * Le drapeau retombe à `false` sur une base dont la colonne n'existe pas encore
+ * (COALESCE) : une base non migrée ne doit pas empêcher d'ouvrir un dossier.
+ */
 async function lireCriteres(employeeId) {
   try {
     const r = await pool.query(
-      `SELECT e.critere_code AS code, c.libelle, e.date_constat
+      `SELECT e.critere_code AS code, c.libelle, e.date_constat,
+              COALESCE(c.sensible_art10, false) AS sensible_art10
          FROM employee_eligibilite e
          JOIN insertion_eligibilite_criteres c ON c.code = e.critere_code
         WHERE e.employee_id = $1
@@ -158,6 +177,18 @@ async function lireCriteres(employeeId) {
     return r.rows;
   } catch (err) {
     if (err.code === '42P01') return [];
+    if (err.code === '42703') {
+      // Colonne `sensible_art10` absente (base non migrée) : repli SANS elle.
+      const r = await pool.query(
+        `SELECT e.critere_code AS code, c.libelle, e.date_constat, false AS sensible_art10
+           FROM employee_eligibilite e
+           JOIN insertion_eligibilite_criteres c ON c.code = e.critere_code
+          WHERE e.employee_id = $1
+          ORDER BY c.ordre, c.code`,
+        [employeeId]
+      );
+      return r.rows;
+    }
     throw err;
   }
 }
@@ -209,15 +240,29 @@ async function recalculerStatutPass(db, employeeId, emp, evenements) {
   return statut;
 }
 
-/** Compose la réponse complète du dossier (projection par rôle appliquée après). */
-async function composerCadre(employeeId) {
+/**
+ * Compose la réponse complète du dossier.
+ *
+ * `adminRh` n'est pas un filtre d'affichage : il décide de ce qui est LU en
+ * base. Pour un encadrant technique, les colonnes de statut social et les
+ * pièces ne sont pas interrogées du tout — un refus posé après la lecture
+ * serait un refus d'affichage, pas un refus d'accès (doctrine 2.51.0). La
+ * projection `projeterPourManager` reste appliquée ensuite : deux garde-fous
+ * valent mieux qu'un sur la donnée la plus sensible du dossier.
+ */
+async function composerCadre(employeeId, { adminRh = true } = {}) {
+  // Liste de colonnes composée depuis des LITTÉRAUX (jamais une entrée
+  // utilisateur) : les statuts sociaux ne sont sélectionnés que pour ADMIN/RH.
+  const colonnesStatuts = adminRh
+    ? 'e.brsa, e.brsa_date_constat, e.ft_categorie, e.ft_categorie_date, e.france_travail_id, e.eligibilite_justificatifs_ref,'
+    : '';
   const empRes = await pool.query(
     `SELECT e.id, e.pass_iae_number, e.pass_iae_start, e.pass_iae_end, e.pass_iae_statut,
             e.orienteur_type, e.orienteur_nom, e.prescripteur_id, e.date_prescription,
             e.referent_unique_type, e.referent_unique_nom, e.referent_unique_contact,
             e.actualisation_ft_requise, e.actualisation_ft_derniere_date, e.actualisation_ft_rappels_non_honores,
-            e.brsa, e.brsa_date_constat, e.ft_categorie, e.ft_categorie_date, e.france_travail_id,
-            e.eligibilite_verifiee_le, e.eligibilite_source, e.eligibilite_justificatifs_ref,
+            ${colonnesStatuts}
+            e.eligibilite_verifiee_le, e.eligibilite_source,
             e.cddi_derogation_motif, e.cddi_derogation_date, e.parcours_num,
             po.nom AS prescripteur_nom, po.type AS prescripteur_type
        FROM employees e
@@ -232,21 +277,28 @@ async function composerCadre(employeeId) {
     lireCriteres(employeeId),
     lireEvenementsPass(employeeId),
     lireProjets(employeeId),
-    lirePieces(employeeId),
+    // Les pièces (entretiens signés numérisés) ne sont pas lues pour un
+    // encadrant technique : elles lui sont interdites, les charger pour les
+    // jeter ensuite n'aurait fait que promener la donnée.
+    adminRh ? lirePieces(employeeId) : Promise.resolve([]),
   ]);
 
   const statut = await recalculerStatutPass(pool, employeeId, emp, evenements);
 
   // RQTH : LECTURE SEULE depuis le diagnostic — la reconnaissance se constate
   // en entretien, elle ne se ressaisit pas ici (deux saisies divergeraient).
+  // C'est une donnée de SANTÉ (art. 9) : elle n'est pas interrogée pour un
+  // encadrant technique, à qui le bloc `statuts` n'est de toute façon pas rendu.
   let rqth = null;
-  try {
-    const d = await pool.query(
-      'SELECT rqth FROM insertion_diagnostics WHERE employee_id = $1 ORDER BY parcours_num DESC LIMIT 1',
-      [employeeId]
-    );
-    rqth = d.rows[0] ? d.rows[0].rqth : null;
-  } catch (err) { if (err.code !== '42P01' && err.code !== '42703') throw err; }
+  if (adminRh) {
+    try {
+      const d = await pool.query(
+        'SELECT rqth FROM insertion_diagnostics WHERE employee_id = $1 ORDER BY parcours_num DESC LIMIT 1',
+        [employeeId]
+      );
+      rqth = d.rows[0] ? d.rows[0].rqth : null;
+    } catch (err) { if (err.code !== '42P01' && err.code !== '42703') throw err; }
+  }
 
   const prescripteur = emp.prescripteur_id
     ? { id: emp.prescripteur_id, nom: emp.prescripteur_nom, type: emp.prescripteur_type }
@@ -304,15 +356,38 @@ async function composerCadre(employeeId) {
 }
 
 /**
- * Projection pour un MANAGER : les trois surfaces interdites sont RETIRÉES,
- * pas nullifiées. Une clé `statuts: null` dirait déjà « il y a un statut social
- * ici que vous n'avez pas le droit de voir » — et le bloc de report contient à
- * lui seul les critères d'éligibilité, qui sont la donnée la plus sensible du
- * dossier.
+ * Projection pour un MANAGER : les surfaces interdites sont RETIRÉES, pas
+ * nullifiées. Une clé `statuts: null` dirait déjà « il y a un statut social ici
+ * que vous n'avez pas le droit de voir ».
+ *
+ * CORRECTIF DE SÉCURITÉ DU 13/09 (constat C-01). Retirer `statuts` ne servait à
+ * rien tant que `eligibilite.criteres` partait intact : les 14 critères du
+ * référentiel comprennent « Bénéficiaire du RSA » — exactement le statut que la
+ * clé `statuts` protège —, « Reconnaissance RQTH » et « Allocataire AAH »
+ * (art. 9) et « Sortant de détention » (art. 10). La liste des critères EST le
+ * portrait social le plus condensé du dossier ; la protection était défaite par
+ * la même réponse HTTP.
+ *
+ * Ce que l'encadrant technique garde, et pourquoi : savoir que l'éligibilité a
+ * été VÉRIFIÉE est une pièce du dossier de conformité qu'il consulte
+ * légitimement — de QUOI elle est faite ne le regarde pas. D'où une date, une
+ * source et un NOMBRE.
+ *
+ * Ce nombre EXCLUT les critères marqués « sensible art. 10 » : les compter
+ * reviendrait, sur un dossier où l'on sait par ailleurs qu'il n'y a qu'un seul
+ * critère, à désigner lequel.
  */
 function projeterPourManager(cadre) {
-  const { statuts, pieces, bloc_emplois_inclusion, ...reste } = cadre; // eslint-disable-line no-unused-vars
-  return reste;
+  const { statuts, pieces, bloc_emplois_inclusion, eligibilite, ...reste } = cadre; // eslint-disable-line no-unused-vars
+  const criteres = (eligibilite && eligibilite.criteres) || [];
+  return {
+    ...reste,
+    eligibilite: {
+      verifiee_le: (eligibilite && eligibilite.verifiee_le) || null,
+      source: (eligibilite && eligibilite.source) || null,
+      nb_criteres: criteres.filter((c) => !(c && c.sensible_art10 === true)).length,
+    },
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -321,10 +396,11 @@ function projeterPourManager(cadre) {
 router.get('/:employeeId', ID, validate, async (req, res) => {
   const employeeId = parseInt(req.params.employeeId, 10);
   try {
-    const cadre = await composerCadre(employeeId);
+    const adminRh = estAdminRh(req);
+    const cadre = await composerCadre(employeeId, { adminRh });
     if (!cadre) return res.status(404).json({ error: 'Salarié non trouvé' });
 
-    if (!estAdminRh(req)) return res.json(projeterPourManager(cadre));
+    if (!adminRh) return res.json(projeterPourManager(cadre));
 
     // Une consultation ADMIN/RH = une ligne au registre. C'est ce que
     // l'autorité demande pour les données de statut social (§ 6.1).

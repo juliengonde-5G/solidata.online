@@ -7,7 +7,16 @@
  *    dans les diagnostics COMME dans les entretiens (insertion_milestones) ;
  *  - détails santé (SENSITIVE_DIAG_FIELDS de utils/field-crypto : commentaire
  *    santé, détail/causes du frein santé — art. 9) retirés ;
- *  - commentaire_budget retiré.
+ *  - commentaire_budget retiré ;
+ *  - QUESTIONNAIRES FSE+ retirés (correctif de sécurité du 13/09, constat
+ *    M-01). `routes/insertion/fse.js` est ADMIN/RH strict et son en-tête dit
+ *    pourquoi : le questionnaire d'entrée porte la composition du foyer, la
+ *    stabilité du logement et la nature des ressources — des statuts sociaux —
+ *    plus un commentaire libre de 2 000 caractères. Cette décision était
+ *    intégralement contournable tant que `GET /insertion/diagnostic/:id`
+ *    rendait la colonne `fse_entree` telle quelle et que `GET /milestones/:id`
+ *    rendait `fse_sortie` avec `im.*`. Le masquage la rend effective partout où
+ *    ces colonnes passent.
  *
  * ADMIN/RH voient tout (déchiffrement en couche route). AUTORITE/DPO n'entrent
  * jamais ici (le module insertion est réservé ADMIN/RH/MANAGER).
@@ -26,6 +35,14 @@ const MANAGER_HIDDEN_FIELDS = Array.from(new Set([
   'frein_judiciaire_detail',
   'frein_judiciaire_causes',
   'commentaire_budget',
+  // Questionnaires FSE+ (art. 30 « Cofinancement FSE+ » : ADMIN/RH strict).
+  // `fse_entree_complet` et `fse_entree_saisie_at` partent avec : une date de
+  // recueil sans le questionnaire ne sert à rien à l'encadrement, et un
+  // pourcentage de complétude dirait combien de réponses ont été données.
+  'fse_entree',
+  'fse_entree_complet',
+  'fse_entree_saisie_at',
+  'fse_sortie',
 ]));
 
 const MANAGER_HIDDEN_PREFIX = 'frein_judiciaire';

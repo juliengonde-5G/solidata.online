@@ -202,6 +202,11 @@ const isFilled = (v) => v != null && v !== '' && !(Array.isArray(v) && v.length 
   && !(typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((x) => x == null || x === ''));
 
 export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, freinsDefinitions, baseRole, onSaved, onDirtyChange }) {
+  // Correctif de sécurité du 13/09 (M-01) : le questionnaire FSE+ d'entrée est
+  // ADMIN/RH STRICT en lecture COMME en écriture. Le serveur ne l'envoie plus à
+  // l'encadrement technique et refuse son écriture en 403 ; lui proposer
+  // l'étape reviendrait à lui montrer un questionnaire vide et à lui faire
+  // heurter un refus au moment d'enregistrer.
   const [draft, setDraft] = useState(() => ({ ...(diagnostic || {}) }));
   const [step, setStep] = useState(0);
   const [savedAt, setSavedAt] = useState(null);
@@ -222,6 +227,13 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   const pendingRef = useRef({});
   const timerRef = useRef(null);
   const freins = visibleFreins(baseRole);
+  // L'étape FSE+ disparaît du stepper pour l'encadrement technique — les index
+  // d'étapes se recalent d'eux-mêmes, rien n'est « grisé » : une rubrique grisée
+  // dirait qu'il y a quelque chose à voir.
+  const ETAPES = useMemo(
+    () => (baseRole === 'MANAGER' ? STEPS.filter((st) => st.id !== 'fse') : STEPS),
+    [baseRole]
+  );
 
   // Reprise : première rubrique sans aucune réponse (après la dernière remplie).
   useEffect(() => {
@@ -232,9 +244,9 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
     setFseEcartees({});
     pendingRef.current = {};
     let resume = 0;
-    for (let i = 0; i < STEPS.length - 1; i++) {
-      const filled = STEPS[i].fields.some((f) => isFilled(d[f]));
-      if (filled) resume = Math.min(i + 1, STEPS.length - 1);
+    for (let i = 0; i < ETAPES.length - 1; i++) {
+      const filled = ETAPES[i].fields.some((f) => isFilled(d[f]));
+      if (filled) resume = Math.min(i + 1, ETAPES.length - 1);
     }
     setStep(d.statut_saisie === 'complet' ? 0 : resume);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,7 +297,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   };
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  const goTo = async (i) => { await flush(); setStep(Math.max(0, Math.min(STEPS.length - 1, i))); };
+  const goTo = async (i) => { await flush(); setStep(Math.max(0, Math.min(ETAPES.length - 1, i))); };
 
   const terminer = async () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -307,10 +319,10 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
     ? freins.length
     : st.fields.filter((f) => canSeeField(f, baseRole)).length;
   const progressPct = Math.round(
-    (STEPS.reduce((a, st) => a + (filledCount(st) > 0 ? 1 : 0), 0) / STEPS.length) * 100
+    (ETAPES.reduce((a, st) => a + (filledCount(st) > 0 ? 1 : 0), 0) / ETAPES.length) * 100
   );
 
-  const cur = STEPS[step];
+  const cur = ETAPES[step];
   const fse = draft.fse_entree || {};
   const setFse = (k, v) => setField('fse_entree', { ...fse, [k]: v });
   // Complétude sur les 5 items OBLIGATOIRES (le commentaire est une aide, pas
@@ -369,7 +381,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
       <div className="flex flex-col md:flex-row">
         {/* Sommaire latéral */}
         <nav className="md:w-56 border-b md:border-b-0 md:border-r p-2 flex md:flex-col gap-1 overflow-x-auto flex-shrink-0">
-          {STEPS.map((st, i) => {
+          {ETAPES.map((st, i) => {
             const n = filledCount(st), t = totalCount(st);
             return (
               <button key={st.id} type="button" onClick={() => goTo(i)}
@@ -394,7 +406,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
         {/* Rubrique courante */}
         <div className="flex-1 p-4 space-y-4 min-w-0">
           <div className="flex items-baseline justify-between">
-            <h4 className="font-semibold text-gray-700">Étape {step + 1}/{STEPS.length} — {cur.label}</h4>
+            <h4 className="font-semibold text-gray-700">Étape {step + 1}/{ETAPES.length} — {cur.label}</h4>
             <span className="text-[11px] text-gray-400">Le diagnostic peut se faire en 2 séances (fenêtre de 30 j).</span>
           </div>
 
@@ -750,7 +762,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
               className="px-3 py-1.5 rounded-lg border border-teal-300 text-teal-700 text-sm font-medium hover:bg-teal-50 disabled:opacity-50">
               {saving ? 'Enregistrement…' : 'Enregistrer le brouillon'}
             </button>
-            {step < STEPS.length - 1 ? (
+            {step < ETAPES.length - 1 ? (
               <button type="button" onClick={() => goTo(step + 1)}
                 className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700">
                 Étape suivante ►

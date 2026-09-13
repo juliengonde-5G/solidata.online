@@ -439,21 +439,75 @@ async function anonymizeEmployee(client, id) {
   //    rattachement à un projet et la situation de sortie sont les deux pièces
   //    que l'autorité de gestion peut réclamer après l'anonymisation ; elles
   //    sont inscrites au registre RGPD et à l'AIPD à ce titre.
+  //    ⚠ À une exception près, posée plus bas : le COMMENTAIRE LIBRE de ces
+  //    questionnaires est retiré. Ce qui est conservé, ce sont les réponses
+  //    TYPÉES — elles seules sont la piste d'audit.
   //
   // SAVEPOINT : ce bloc s'exécute DANS la transaction de la route RGPD. Sur une
   // base où la migration PR A n'est pas encore passée, une table absente
   // avorterait toute la transaction (25P02) et le `catch` ne ferait que
   // déplacer l'échec — la promesse « on ne fait pas échouer toute
   // l'anonymisation » serait fausse sans lui (doctrine 2.50.0, constat C-07).
-  await client.query('SAVEPOINT dossier_administratif_insertion');
-  try {
-    for (const t of ['insertion_pieces', 'insertion_pass_iae_evenements', 'employee_eligibilite']) {
+  // UN SAVEPOINT PAR TABLE (correctif du 13/09, constat m-01). Les trois DELETE
+  // partageaient un seul point de reprise : si `insertion_pieces` manquait
+  // (migration partielle), le rollback emportait aussi les deux autres purges,
+  // qui, elles, auraient parfaitement abouti — deux tables restaient en clair à
+  // cause d'une troisième, et l'incident ne laissait qu'un `console.warn`.
+  for (const t of ['insertion_pieces', 'insertion_pass_iae_evenements', 'employee_eligibilite']) {
+    const sp = `anon_${t}`;
+    await client.query(`SAVEPOINT ${sp}`);
+    try {
       await deleteBy(client, t, 'employee_id', id);
+      await client.query(`RELEASE SAVEPOINT ${sp}`);
+    } catch (err) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+      console.warn(`[ANONYMISATION] Table « ${t} » non purgée :`, err.message);
     }
-    await client.query('RELEASE SAVEPOINT dossier_administratif_insertion');
-  } catch (err) {
-    await client.query('ROLLBACK TO SAVEPOINT dossier_administratif_insertion').catch(() => {});
-    console.warn('[ANONYMISATION] Dossier administratif d\'insertion non purgé :', err.message);
+  }
+
+  // ── Commentaires libres des questionnaires FSE+ ─────────────────────────
+  //
+  // Les DEUX questionnaires portent un `commentaire` de 2 000 caractères, et
+  // les JSONB qui les contiennent sont volontairement CONSERVÉS ci-dessus au
+  // titre de la piste d'audit (≥ 5 ans). Conséquence non voulue (constat
+  // M-03) : une phrase du type « hospitalisation en psychiatrie en mars ;
+  // sursis probatoire jusqu'en 2027 » survivait cinq ans à l'anonymisation, en
+  // clair, dans un traitement dont le registre art. 30 affirme qu'il ne
+  // contient AUCUNE donnée de santé ni judiciaire.
+  //
+  // Un texte libre d'accompagnement porte par nature de l'art. 9 ou de l'art. 10
+  // sans qu'aucune colonne ne l'annonce — c'est le raisonnement qui a fait
+  // chiffrer les notes de suivi de la CIP en 2.47.0. Et ce commentaire n'entre
+  // dans AUCUNE des 29 colonnes de l'export ni dans le bilan : il n'est donc
+  // pas la pièce d'audit que sa conservation prétendait protéger.
+  //
+  // On retire donc la seule clé `commentaire` (`- 'commentaire'` sur le JSONB)
+  // et on conserve les réponses TYPÉES, qui sont, elles, la piste d'audit.
+  const JSONB_FSE = [
+    ['insertion_fse_sorties', 'fse_sortie'],
+    ['insertion_diagnostics', 'fse_entree'],
+    ['insertion_milestones', 'fse_sortie'], // copie historique portée par le jalon
+  ];
+  for (let i = 0; i < JSONB_FSE.length; i += 1) {
+    const [table, colonne] = JSONB_FSE[i];
+    const sp = `anon_fse_commentaire_${i}`;
+    await client.query(`SAVEPOINT ${sp}`);
+    try {
+      if (await tableExists(client, table)) {
+        const cols = await existingColumns(client, table);
+        if (cols.has(colonne) && cols.has('employee_id')) {
+          await client.query(
+            `UPDATE ${table} SET ${colonne} = ${colonne} - 'commentaire'
+              WHERE employee_id = $1 AND ${colonne} IS NOT NULL`,
+            [id]
+          );
+        }
+      }
+      await client.query(`RELEASE SAVEPOINT ${sp}`);
+    } catch (err) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+      console.warn(`[ANONYMISATION] Commentaire FSE+ de « ${table}.${colonne} » non retiré :`, err.message);
+    }
   }
 
   // ── Messagerie interne (correctif du 27/08) ─────────────────────────────

@@ -38,6 +38,7 @@ const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
 const { param } = require('express-validator');
 const { validate } = require('../../middleware/validate');
+const { logActivity } = require('../../middleware/activity-logger');
 
 const ADMIN_RH = authorize('ADMIN', 'RH');
 const TAILLE_MAX = 5 * 1024 * 1024; // 5 Mo — doublé par un CHECK en base
@@ -90,16 +91,47 @@ function runUpload(req, res, next) {
   });
 }
 
-/** Journal RGPD des pièces — jamais le contenu, jamais le fichier. */
+/**
+ * Journal RGPD des pièces — jamais le contenu, jamais le fichier.
+ *
+ * DOUBLÉ PAR LE JOURNAL D'ACTIVITÉ (correctif du 13/09, constat m-02). Cette
+ * écriture est en « best effort » : son `catch` avale l'échec pour ne pas
+ * refuser un document à cause d'un journal indisponible. Le prix de ce choix
+ * était qu'une consultation pouvait alors ne laisser AUCUNE trace — or
+ * l'autorité pose « consultation journalisée » en CONDITION de son acceptation
+ * du stockage de pièces signées. Deux journaux indépendants tombent rarement
+ * ensemble ; c'est la même parade que le bordereau de déchèterie (2.50.0).
+ */
 async function journaliser(req, action, employeeId, details) {
+  const charge = { employee_id: employeeId, ...(details || {}) };
+  let registreOk = true;
   try {
     await pool.query(
       'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
       [req.user && req.user.id != null ? req.user.id : null, action, 'insertion_pieces', employeeId,
-        JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
+        JSON.stringify(charge)]
     );
   } catch (e) {
+    registreOk = false;
     console.error(`[INSERTION] Journalisation ${action} impossible :`, e.message);
+  }
+  try {
+    await logActivity({
+      userId: req.user && req.user.id != null ? req.user.id : null,
+      username: req.user && req.user.username,
+      action: action.endsWith('CONSULTATION') ? 'view' : (action.endsWith('SUPPRESSION') ? 'delete' : 'create'),
+      entityType: 'insertion_piece',
+      entityId: employeeId,
+      details: charge,
+      ip: req.ip,
+    });
+  } catch (e) {
+    if (!registreOk) {
+      // Les DEUX journaux sont tombés : on le dit fort. Une pièce signée
+      // consultée sans aucune trace est exactement ce que la condition de
+      // l'autorité interdit.
+      console.error(`[INSERTION] AUCUNE trace pour ${action} (registre RGPD ET journal d'activité en échec) :`, e.message);
+    }
   }
 }
 
@@ -163,13 +195,43 @@ router.post('/:employeeId', ADMIN_RH, [
   const nom = String(f.originalname || 'piece').trim().slice(0, 200) || 'piece';
   const sha = crypto.createHash('sha256').update(f.buffer).digest('hex');
 
+  // RATTACHEMENT VÉRIFIÉ (correctif du 13/09, constat m-06). La clé étrangère
+  // ne contrôle que l'EXISTENCE de l'entretien ou de la PMSMP, pas qu'ils
+  // appartiennent bien à cette personne : un exemplaire signé pouvait être
+  // rattaché à l'entretien d'un AUTRE salarié, donc apparaître dans son
+  // dossier. Sur une pièce signée, c'est une erreur qu'on ne rattrape plus.
+  const milestoneId = lien(req.body.milestone_id);
+  const pmsmpId = lien(req.body.pmsmp_id);
+  try {
+    for (const [table, valeur, libelle] of [
+      ['insertion_milestones', milestoneId, 'entretien'],
+      ['insertion_pmsmp', pmsmpId, 'PMSMP'],
+    ]) {
+      if (valeur == null) continue;
+      const q = await pool.query(`SELECT 1 FROM ${table} WHERE id = $1 AND employee_id = $2`, [valeur, employeeId]);
+      if (q.rows.length === 0) {
+        return res.status(400).json({
+          error: `Rattachement invalide : cet ${libelle} n'appartient pas à ce salarié.`,
+          code: 'RATTACHEMENT_HORS_SALARIE',
+        });
+      }
+    }
+  } catch (err) {
+    // Table absente (base non migrée) : on ne bloque pas le dépôt, la FK
+    // refusera de toute façon une référence inexistante.
+    if (err.code !== '42P01') {
+      console.error('[INSERTION] Vérification du rattachement impossible :', err.message);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+
   try {
     const ins = await pool.query(
       `INSERT INTO insertion_pieces
          (employee_id, type, milestone_id, pmsmp_id, nom_fichier, mime, taille, contenu, sha256, depose_par)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING id, type, nom_fichier, mime, taille, milestone_id, pmsmp_id, created_at`,
-      [employeeId, type, lien(req.body.milestone_id), lien(req.body.pmsmp_id),
+      [employeeId, type, milestoneId, pmsmpId,
         nom, mime, f.buffer.length, f.buffer, sha, req.user.id]
     );
     // La trace porte le nom du fichier et son empreinte, jamais son contenu :

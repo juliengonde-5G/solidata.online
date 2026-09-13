@@ -280,6 +280,33 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
         {/* ══ Éligibilité IAE ══ */}
         <Section title="Éligibilité IAE" icon={CheckCircle2}
           subtitle="Critères constatés sur les Emplois de l'inclusion — référencés, jamais recopiés">
+          {/* Encadrement technique : le serveur ne lui envoie PAS la liste des
+              critères (correctif de sécurité du 13/09) — elle porte le RSA, la
+              RQTH, l'AAH et le fait d'être sortant de détention. Afficher les
+              pastilles toutes décochées se lirait « aucun critère constaté »,
+              ce qui serait faux. On dit donc ce qui est vrai : l'éligibilité est
+              vérifiée, le détail est réservé. */}
+          {!adminRh ? (
+            <div className="rounded-[10px] border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 space-y-1">
+              <p>
+                <span className="font-semibold text-slate-700">
+                  {cadre.eligibilite?.nb_criteres > 0
+                    ? `${cadre.eligibilite.nb_criteres} critère${cadre.eligibilite.nb_criteres > 1 ? 's' : ''} d'éligibilité constaté${cadre.eligibilite.nb_criteres > 1 ? 's' : ''}`
+                    : 'Aucun critère enregistré à ce jour'}
+                </span>
+                {cadre.eligibilite?.verifiee_le
+                  ? ` · vérifiée le ${frDate(cadre.eligibilite.verifiee_le)}`
+                  : ' · date de vérification non renseignée'}
+                {cadre.eligibilite?.source ? ` · ${SOURCE_OPTIONS.find((o) => o.value === cadre.eligibilite.source)?.label || cadre.eligibilite.source}` : ''}
+              </p>
+              <p className="text-xs text-slate-500">
+                Le détail des critères est réservé aux rôles Administrateur et RH : ce sont des
+                statuts sociaux et, pour certains, des données de santé. Vous voyez ici que la
+                vérification a bien eu lieu — c&apos;est la pièce du dossier de conformité qui vous concerne.
+              </p>
+            </div>
+          ) : (
+          <>
           <div className="flex flex-wrap gap-2">
             {criteresActifs.length === 0 && (
               <p className="text-sm text-slate-500">
@@ -317,6 +344,8 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
             jamais la copie. Rien n&apos;est obligatoire ici pour continuer — le dossier vous dit ce qui
             manque, il ne vous bloque pas.
           </p>
+          </>
+          )}
 
           {/* Bloc de report — décision 6 : copier-coller structuré, pas d'API. */}
           {cadre.bloc_emplois_inclusion && (
@@ -608,12 +637,18 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
       </div>
 
       {/* ══ Colonne droite : dossier de conformité (lot 2) ══ */}
-      <div className="xl:sticky xl:top-4">
-        {/* Colonne des 9 pièces (lot 2). `refreshKey` : toute écriture du
-            dossier peut changer un état (éligibilité, Pass, référent) — sans
-            cela la colonne resterait sur son état d'ouverture. */}
-        <DossierConformite employeeId={employeeId} refreshKey={cadre} onNaviguer={onNaviguer} />
-      </div>
+      {/* Réservée à ADMIN/RH, comme l'API qui l'alimente : rendue à un
+          encadrant technique, elle n'affichait qu'un bandeau d'erreur 403
+          dans la colonne de droite (constat m-07). Ne rien montrer vaut mieux
+          qu'annoncer une panne là où il n'y a qu'une habilitation. */}
+      {adminRh && (
+        <div className="xl:sticky xl:top-4">
+          {/* Colonne des 9 pièces (lot 2). `refreshKey` : toute écriture du
+              dossier peut changer un état (éligibilité, Pass, référent) — sans
+              cela la colonne resterait sur son état d'ouverture. */}
+          <DossierConformite employeeId={employeeId} refreshKey={cadre} onNaviguer={onNaviguer} />
+        </div>
+      )}
     </div>
   );
 }

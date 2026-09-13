@@ -1017,11 +1017,24 @@ export default function EntretienForm({
                   {saving ? 'Enregistrement…' : 'Enregistrer le brouillon'}
                 </button>
               )}
-              {!readOnly && (
+              {/* Correctif de sécurité du 13/09 (M-02) : la clôture d'un BILAN
+                  DE SORTIE écrit la sortie FSE+, pièce sur laquelle l'autorité
+                  de gestion calcule son délai de saisie. Elle est réservée à
+                  ADMIN/RH côté serveur (403) ; proposer le bouton à
+                  l'encadrement technique le mènerait droit à un refus. Les
+                  AUTRES entretiens, qu'il conduit, restent clôturables. */}
+              {!readOnly && (type !== 'bilan_sortie' || adminRh) && (
                 <button type="button" onClick={() => setCloseModal(true)}
                   className="px-3 py-1.5 rounded-lg bg-green-700 text-white text-sm font-medium hover:bg-green-800">
                   Clôturer {type === 'bilan_sortie' ? 'le bilan de sortie' : "l'entretien"}…
                 </button>
+              )}
+              {!readOnly && type === 'bilan_sortie' && !adminRh && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                  Vos saisies sont enregistrées. La <strong>clôture</strong> du bilan de sortie
+                  revient au service RH : elle enregistre la sortie dans le dossier de
+                  l&apos;opération cofinancée.
+                </p>
               )}
             </div>
             {step < steps.length - 1 ? (
@@ -1110,7 +1123,16 @@ export default function EntretienForm({
                   <div>
                     <label className="block text-[11px] text-gray-500 mb-1" htmlFor="ms-piece">Référence de la pièce fournie (facultatif)</label>
                     <input id="ms-piece" value={absencePiece} onChange={(e) => setAbsencePiece(e.target.value)} maxLength={200}
-                      className="input-modern py-1 w-full text-sm" placeholder="ex. justificatif remis le 12/09, classé au dossier" />
+                      className="input-modern py-1 w-full text-sm" placeholder="ex. justificatif remis le 12/09, classé au dossier"
+                      aria-describedby="ms-piece-aide" />
+                    {/* Ce champ est du texte libre versé tel quel dans l'export
+                        Excel : la liste fermée des motifs d'absence interdit
+                        précisément d'y nommer une nature médicale, rien
+                        n'empêchait de l'écrire ici (constat m-08). */}
+                    <p id="ms-piece-aide" className="text-[11px] text-gray-500 mt-1">
+                      N'inscrivez aucune information médicale : indiquez seulement la nature
+                      et la date de la pièce (« arrêt de travail » suffit, jamais le motif).
+                    </p>
                   </div>
                 </div>
               )}

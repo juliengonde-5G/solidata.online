@@ -1,15 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// REVUE DE SÉCURITÉ PR A — C-03 : injection de formule dans les exports CSV.
+// REVUE DE SÉCURITÉ PR A — M-04 : injection de formule dans les exports CSV.
 //
-// `esc()` (routes/exports-fse.js l.76 ; routes/exports.js l.451) ne met entre
-// guillemets que les cellules contenant « ; », « " » ou un saut de ligne. Une
-// cellule qui COMMENCE par =, +, -, @, TAB ou CR est donc écrite telle quelle,
-// et Excel / LibreOffice / Google Sheets l'interprètent comme une FORMULE à
-// l'ouverture du fichier chez l'agent de la DDETS.
+// `esc()` ne mettait entre guillemets que les cellules contenant « ; », « " »
+// ou un saut de ligne. Une cellule qui COMMENCE par =, +, -, @, TAB ou CR
+// partait donc telle quelle, et Excel / LibreOffice / Google Sheets
+// l'interprètent comme une FORMULE à l'ouverture du fichier chez l'agent de la
+// DDETS — le guillemetage n'y change rien, il est retiré avant l'évaluation.
 //
 // Le contenu de ces cellules vient de champs libres saisis ou importés
 // (`employees.city`, `first_name`, `last_name`, `insertion_projets.nom`).
-// Test de REPRODUCTION : vert tant que le défaut est là.
+//
+// TEST RETOURNÉ le 13/09 : il exigeait que `=1+1` et `@SUM(A1:A9)` sortent NUS
+// (« vert = défaut présent ») ; il exige maintenant qu'ils sortent neutralisés,
+// et que les NOMBRES produits par le code, eux, restent des nombres.
 // ═══════════════════════════════════════════════════════════════════════════
 const jwt = require('jsonwebtoken');
 
@@ -73,8 +76,8 @@ beforeEach(() => {
   });
 });
 
-describe('C-03 — injection de formule dans l’export FSE+ participants', () => {
-  test('DÉFAUT — une cellule commençant par « = », « @ » ou « + » part NON neutralisée', async () => {
+describe('M-04 — injection de formule dans l’export FSE+ participants', () => {
+  test('CORRIGÉ — une cellule commençant par « = », « @ » ou « + » est neutralisée', async () => {
     const res = await request(appExports)
       .get('/api/exports/fse-plus?projet=1&annee=2026&trimestre=1')
       .set('Authorization', `Bearer ${token}`);
@@ -84,18 +87,46 @@ describe('C-03 — injection de formule dans l’export FSE+ participants', () =
     const ligneDonnee = lignes[1]; // [0] = en-tête des 29 colonnes
     const cellules = ligneDonnee.split(';');
 
-    // Colonnes 2 et 3 (NOM, Prénom) et 6 (Commune) — indices 1, 2 et 5.
-    expect(cellules[1]).toBe('@SUM(A1:A9)');      // non préfixé, non quoté
-    expect(cellules[2]).toBe('=1+1');             // idem
-    // La commune contient un guillemet : `esc()` la met entre guillemets — mais
-    // le guillemetage est une convention CSV, pas une neutralisation de formule :
-    // le tableur DÉGUILLEMETTE puis évalue. Le contenu réel commence bien par « = ».
+    // Colonnes 2 et 3 (NOM, Prénom) — indices 1 et 2.
+    expect(cellules[1]).toBe("'@SUM(A1:A9)");
+    expect(cellules[2]).toBe("'=1+1");
+    // La commune contient un guillemet : elle est ET préfixée ET guillemetée.
+    // Le tableur déguillemette, trouve une apostrophe de tête, et n'évalue pas.
     const commune = cellules[5].replace(/^"|"$/g, '').replace(/""/g, '"');
-    expect(commune.startsWith('=HYPERLINK(')).toBe(true);
+    expect(commune.startsWith("'=HYPERLINK(")).toBe(true);
+    // Et le contenu n'a pas été altéré au-delà du préfixe : on neutralise, on
+    // ne tronque pas — l'agent doit lire la vraie commune, fût-elle absurde.
+    expect(commune).toContain('exfiltration.example');
+  });
 
-    // Ce qu'une neutralisation produirait (préfixe apostrophe ou quote forcée) :
-    expect(cellules[2].startsWith("'")).toBe(false);
-    expect(cellules[2].startsWith('"')).toBe(false);
+  test('CORRIGÉ — les NOMBRES produits par le code restent des nombres', () => {
+    // Garde-fou du correctif lui-même : préfixer un délai de saisie négatif le
+    // transformerait en texte, et la colonne cesserait de se trier — c'est
+    // précisément celle que l'instructeur « regarde en premier ».
+    const { escCsv, neutraliserFormule } = require('../../src/utils/export-csv');
+    expect(escCsv(-3)).toBe('-3');
+    expect(escCsv(0)).toBe('0');
+    expect(neutraliserFormule(-12, '-12')).toBe('-12');
+    // …mais la même valeur reçue comme CHAÎNE depuis la base est neutralisée.
+    expect(escCsv('-12')).toBe("'-12");
+  });
+
+  test('CORRIGÉ — les six amorces dangereuses sont couvertes, et elles seules', () => {
+    const { escCsv } = require('../../src/utils/export-csv');
+    // On compare le CONTENU de la cellule : une amorce « \r » déclenche aussi le
+    // guillemetage CSV, donc la chaîne rendue commence par « " ». Ce qui compte
+    // est que le tableau, une fois déguillemeté par le tableur, commence par
+    // l'apostrophe qui force le mode texte.
+    const contenu = (v) => {
+      const c = escCsv(v);
+      return c.startsWith('"') ? c.slice(1, -1).replace(/""/g, '"') : c;
+    };
+    for (const amorce of ['=', '+', '-', '@', '\t', '\r']) {
+      expect(contenu(`${amorce}X`).startsWith("'")).toBe(true);
+    }
+    for (const sain of ['Rouen', '0612345678', 'Le Houlme', "L'Hôpital", '2026-01-01']) {
+      expect(contenu(sain).startsWith("'")).toBe(false);
+    }
   });
 
   test('référence — une cellule contenant « ; » est bien quotée (le seul cas traité)', async () => {

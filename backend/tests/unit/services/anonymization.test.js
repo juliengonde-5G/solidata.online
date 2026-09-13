@@ -331,19 +331,49 @@ describe('anonymization — dossier administratif d’insertion (PR A)', () => {
     }
   });
 
-  it('CONSERVE les tables FSE+ (piste d’audit ≥ 5 ans) — lot 2', async () => {
+  it('CONSERVE les LIGNES des tables FSE+ (piste d’audit ≥ 5 ans) — lot 2', async () => {
     const client = makeMockClient();
     await anonymizeEmployee(client, 5);
     const sqls = dataSql(client.calls);
-    expect(sqls.some((s) => /insertion_fse_sorties/i.test(s))).toBe(false);
+    // Aucune suppression : la piste d'audit survit à l'anonymisation.
+    expect(sqls.some((s) => /DELETE FROM insertion_fse_sorties/i.test(s))).toBe(false);
     expect(sqls.some((s) => /insertion_projet_participants/i.test(s))).toBe(false);
   });
 
-  it('le bloc est protégé par un SAVEPOINT (une table absente ne fait pas échouer toute l’anonymisation)', async () => {
+  it('M-03 — RETIRE le commentaire libre des deux questionnaires FSE+', async () => {
+    // Les réponses TYPÉES sont la piste d'audit et restent ; le commentaire
+    // libre, lui, n'entre dans aucun export ni dans le bilan — il ne sert donc
+    // pas la conservation qui le protégeait, et il porte par nature de la santé
+    // ou du judiciaire sans qu'aucune colonne ne l'annonce.
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    const attendus = [
+      /UPDATE insertion_fse_sorties SET fse_sortie = fse_sortie - 'commentaire'/i,
+      /UPDATE insertion_diagnostics SET fse_entree = fse_entree - 'commentaire'/i,
+      /UPDATE insertion_milestones SET fse_sortie = fse_sortie - 'commentaire'/i,
+    ];
+    for (const re of attendus) expect(sqls.some((s) => re.test(s))).toBe(true);
+    // Et JAMAIS une réécriture du JSONB entier : seules les réponses typées
+    // doivent survivre, on ne les remplace pas par un objet vide.
+    expect(sqls.some((s) => /SET fse_sortie = '\{\}'/i.test(s))).toBe(false);
+    expect(sqls.some((s) => /SET fse_entree = NULL/i.test(s))).toBe(false);
+  });
+
+  it('m-01 — UN SAVEPOINT PAR TABLE (une table absente n’en épargne pas deux autres)', async () => {
     const client = makeMockClient();
     await anonymizeEmployee(client, 5);
     const sqls = client.calls.map((c) => c.sql);
-    expect(sqls).toContain('SAVEPOINT dossier_administratif_insertion');
-    expect(sqls).toContain('RELEASE SAVEPOINT dossier_administratif_insertion');
+    // Les 3 purges du dossier administratif + les 3 retraits de commentaire.
+    for (const t of ['insertion_pieces', 'insertion_pass_iae_evenements', 'employee_eligibilite']) {
+      expect(sqls).toContain(`SAVEPOINT anon_${t}`);
+      expect(sqls).toContain(`RELEASE SAVEPOINT anon_${t}`);
+    }
+    for (let i = 0; i < 3; i += 1) {
+      expect(sqls).toContain(`SAVEPOINT anon_fse_commentaire_${i}`);
+      expect(sqls).toContain(`RELEASE SAVEPOINT anon_fse_commentaire_${i}`);
+    }
+    // Le point de reprise PARTAGÉ a disparu : c'était lui le défaut.
+    expect(sqls).not.toContain('SAVEPOINT dossier_administratif_insertion');
   });
 });

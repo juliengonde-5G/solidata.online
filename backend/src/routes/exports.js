@@ -3,6 +3,7 @@ const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { neutraliserFormule, nomGenerateur } = require('../utils/export-csv');
 const { requireMfa } = require('../middleware/mfa');
 const { query } = require('express-validator');
 const { validate } = require('../middleware/validate');
@@ -391,11 +392,8 @@ async function logExportInsertionComplet(req, { format, dataset, lignes }) {
 }
 
 /** Nom lisible du générateur pour l'en-tête de traçabilité (jamais son e-mail). */
-function nomGenerateur(user) {
-  if (!user) return 'inconnu';
-  const nom = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-  return nom || user.username || `utilisateur #${user.id}`;
-}
+// `nomGenerateur` vit dans utils/export-csv.js : les DEUX exports transmis
+// hors de la structure doivent composer leur en-tête de la même façon.
 
 router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
   // Normalise une valeur de cellule (dates ISO, tableaux/JSON en texte).
@@ -406,6 +404,10 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
   };
+
+  // Neutralisation de formule : règle partagée avec l'export FSE+ (M-04), voir
+  // utils/export-csv.js — un tableur évalue toute cellule commençant par
+  // « = », « + », « - », « @ », TAB ou CR, guillemets compris.
 
   // Exécute une requête en NOMMANT le jeu de données en cas d'échec : le 500
   // rendu à l'écran doit dire lequel a échoué, faute de quoi on retombe sur le
@@ -431,7 +433,11 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     sheet.columns = ordered.map((k) => ({ header: k, key: k, width: Math.min(Math.max(k.length + 2, 12), 42) }));
     for (const r of rows) {
       const o = {};
-      for (const k of ordered) o[k] = fmtCell(r[k]);
+      // ExcelJS écrit une chaîne commençant par « = » comme une FORMULE quand
+      // la cellule est typée automatiquement : le classeur est exposé au même
+      // défaut que le CSV, et il est justement le format par défaut de cet
+      // export. Même neutralisation.
+      for (const k of ordered) o[k] = neutraliserFormule(r[k], fmtCell(r[k]));
       sheet.addRow(o);
     }
     sheet.getRow(1).font = { bold: true };
@@ -443,6 +449,14 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
   // dans Excel FR), colonnes matricule/nom/prénom en tête, valeurs échappées,
   // précédé des lignes « # » de traçabilité (règle 2 de l'en-tête).
   const toCsv = (rows, leadKeys = [], meta = []) => {
+    // Garde-fou local rétabli (constat m-09) : sans elle, `Object.keys(rows[0])`
+    // lève un TypeError sur un jeu vide. Les deux appelants sont gardés par un
+    // 409 en amont — la fonction, elle, ne doit pas dépendre de ses appelants.
+    if (!Array.isArray(rows) || rows.length === 0) {
+      const e = new Error('Aucune donnée à exporter');
+      e.code = 'EXPORT_VIDE';
+      throw e;
+    }
     const entete = meta.map((l) => `# ${l}`).join('\n') + (meta.length ? '\n\n' : '');
     const allKeys = Object.keys(rows[0]);
     const cols = [
@@ -450,7 +464,7 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
       ...allKeys.filter((k) => !leadKeys.includes(k)),
     ];
     const esc = (v) => {
-      const s = String(fmtCell(v));
+      const s = neutraliserFormule(v, String(fmtCell(v)));
       return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
     const lines = rows.map((r) => cols.map((k) => esc(r[k])).join(';'));
@@ -613,7 +627,14 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     const ou = err.datasetLabel ? ` (jeu de données « ${err.datasetLabel} »)` : '';
     console.error(`[EXPORTS] Erreur export insertion${ou} :`, err);
     if (res.headersSent) return res.end();
-    res.status(500).json({ error: `Erreur lors de la génération de l'export${ou}`, detail: err.message });
+    if (err.code === 'EXPORT_VIDE') {
+      return res.status(409).json({ error: 'Aucune donnée à exporter sur ce périmètre.', code: 'EXPORT_VIDE' });
+    }
+    // `detail: err.message` retiré (constat m-03) : c'était le message SQL brut
+    // rendu au client. Le jeu de données fautif et le SQLSTATE suffisent à
+    // rendre l'erreur diagnosticable ; la trace complète reste au journal
+    // serveur, juste au-dessus.
+    res.status(500).json({ error: `Erreur lors de la génération de l'export${ou}`, code: err.code });
   }
 });
 

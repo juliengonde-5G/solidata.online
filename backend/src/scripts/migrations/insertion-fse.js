@@ -117,6 +117,44 @@ async function run(client) {
   `);
   await client.query('CREATE INDEX IF NOT EXISTS idx_insertion_fse_sorties_date ON insertion_fse_sorties(date_sortie);');
 
+  // ÉLARGISSEMENT DU CHECK `situation_6mois` — correctif du 13/09 (constat
+  // M-05). La valeur « injoignable » a été ajoutée dans le CREATE TABLE seul :
+  // sur une base où cette migration a DÉJÀ tourné, `CREATE TABLE IF NOT EXISTS`
+  // ne fait rien et l'ancienne contrainte survit. Le relevé à six mois d'une
+  // personne partie sans laisser de numéro échouait donc en 23514, c'est-à-dire
+  // en « Erreur serveur » — précisément le cas pour lequel la valeur a été
+  // créée, et la seule façon de faire passer au vert la pièce « Suivi à
+  // +6 mois » du dossier de conformité.
+  //
+  // Reconstruction par DO-scan de `pg_constraint`, comme le CHECK voisin des
+  // alertes : on ne DROP que les contraintes qui portent sur cette colonne et
+  // qui ignorent encore la valeur (donc rejouable sans effet), et l'ancienne
+  // liste est un sous-ensemble strict de la nouvelle — aucune ligne existante
+  // ne peut être refusée.
+  await client.query(`
+    DO $$
+    DECLARE cname text;
+    BEGIN
+      FOR cname IN
+        SELECT conname FROM pg_constraint
+        WHERE conrelid = 'insertion_fse_sorties'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) ILIKE '%situation_6mois%'
+          AND pg_get_constraintdef(oid) NOT ILIKE '%injoignable%'
+      LOOP
+        EXECUTE 'ALTER TABLE insertion_fse_sorties DROP CONSTRAINT ' || quote_ident(cname);
+      END LOOP;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'insertion_fse_sorties'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) ILIKE '%situation_6mois%'
+      ) THEN
+        ALTER TABLE insertion_fse_sorties ADD CONSTRAINT insertion_fse_sorties_situation_6mois_check
+          CHECK (situation_6mois IS NULL OR situation_6mois IN
+            ('emploi_durable','emploi_transition','formation','autre_sortie_positive','inactivite','chomage','inconnue','injoignable'));
+      END IF;
+    END $$;
+  `);
+
   // ── (e) Entretiens : durée et assiduité ───────────────────────────────────
   // Le CHECK de `duree_minutes` est porté par la colonne (ADD COLUMN IF NOT
   // EXISTS le crée avec elle) ; celui de `presence` est reconstruit par DO-scan
@@ -201,23 +239,50 @@ async function run(client) {
   // Traitement DISTINCT de l'accompagnement : finalité propre (justifier une
   // dépense européenne), destinataire propre (autorité de gestion), et surtout
   // DURÉE propre — la piste d'audit FSE+ survit à l'anonymisation à 2 ans du
-  // dossier d'insertion. Garde NOT ILIKE : idempotent sans clé fonctionnelle.
-  await client.query(`
-    INSERT INTO rgpd_registre
+  // dossier d'insertion.
+  //
+  // Textes en PARAMÈTRES : ils servent à la création de l'entrée ET à sa mise
+  // en conformité sur une base déjà seedée (correctif du 13/09, constats M-03
+  // et M-06 — le registre affirmait « AUCUNE donnée de santé ni judiciaire »
+  // alors que la colonne 10 du fichier portait les critères d'éligibilité, dont
+  // « sortant de détention », et que les questionnaires portaient un
+  // commentaire libre de 2 000 caractères jamais purgé).
+  const CATEGORIES_DONNEES_FSE = "Identité, commune de résidence, dates de contrat et de parcours, CRITÈRES D'ÉLIGIBILITÉ IAE (codes du référentiel, colonne 10 du fichier participants : ils peuvent relever de l'art. 9 — RQTH, AAH —, et l'autorité de gestion a expressément retenu la RQTH comme simple code d'éligibilité et non comme information médicale), situation avant l'entrée, durée sans emploi, composition du foyer (foyer monoparental), stabilité du logement, nature des ressources principales, situation à la sortie et à six mois. AUCUNE donnée judiciaire : les critères marqués « sensible art. 10 » dans le référentiel (sortant de détention) sont EXCLUS du fichier participants. AUCUNE donnée de santé issue de l'accompagnement : les freins et leurs commentaires sont exclus de tout export FSE+. Un COMMENTAIRE LIBRE facultatif accompagne chacun des deux questionnaires : il n'est transmis dans aucun export et il est RETIRÉ à l'anonymisation du dossier — seules les réponses typées sont conservées au titre de la piste d'audit.";
+
+  const MESURES_SECURITE_FSE = "Accès ADMIN/RH strict, double authentification exigée, journalisation RGPD de chaque saisie de sortie, de chaque relevé à six mois et de chaque export (l'échec du journal fait échouer l'export), aucune donnée art. 9 issue de l'accompagnement et aucune donnée art. 10 dans les fichiers transmis (les critères d'éligibilité marqués « sensible art. 10 » sont retirés de la colonne 10 à la composition du fichier, pas à l'écran), cellules des fichiers CSV et Excel neutralisées contre l'interprétation en formule par le tableur du destinataire, une génération à zéro ligne est refusée plutôt que de produire un fichier vide, commentaires libres des questionnaires retirés à l'anonymisation du dossier d'insertion.";
+
+  await client.query(
+    `INSERT INTO rgpd_registre
       (nom_traitement, finalite, base_legale, categories_personnes, categories_donnees, destinataires, duree_conservation, mesures_securite)
-    SELECT
+     SELECT
       'Cofinancement FSE+ — suivi des participants',
       'Justification des dépenses cofinancées par le Fonds social européen+ : rattachement daté des participants aux opérations (ASI, postes CIP en OCS), questionnaire d''entrée dans l''opération, situation à la sortie et relevé de situation à six mois, complétude du dossier de conformité, bilans d''exécution et contrôle de service fait.',
       'Obligation légale (règlement UE 2021/1060, piste d''audit) et mission d''intérêt public',
       'Salariés en parcours d''insertion rattachés à une opération cofinancée',
-      'Identité, commune de résidence, dates de contrat et de parcours, critères d''éligibilité IAE, situation avant l''entrée, durée sans emploi, composition du foyer (foyer monoparental), stabilité du logement, nature des ressources principales, situation à la sortie et à six mois. AUCUNE donnée de santé ni judiciaire : les freins et leurs commentaires sont exclus de tout export FSE+.',
+      $1,
       'Autorité de gestion FSE+ et organismes de contrôle (Ma Démarche FSE+, Département 76, DDETS 76) ; en interne : ADMIN et RH uniquement',
-      'Piste d''audit FSE+ : au moins 5 ans après le dernier paiement de l''opération. Ces données sont volontairement CONSERVÉES lors de l''anonymisation du dossier d''insertion à 2 ans — l''effacement priverait la structure de sa capacité à justifier une dépense déjà perçue.',
-      'Accès ADMIN/RH strict, double authentification exigée, journalisation RGPD de chaque saisie de sortie, de chaque relevé à six mois et de chaque export (l''échec du journal fait échouer l''export), aucune donnée art. 9/10 dans les fichiers transmis, une génération à zéro ligne est refusée plutôt que de produire un fichier vide.'
-    WHERE NOT EXISTS (
+      'Piste d''audit FSE+ : au moins 5 ans après le dernier paiement de l''opération. Ces données sont volontairement CONSERVÉES lors de l''anonymisation du dossier d''insertion à 2 ans — l''effacement priverait la structure de sa capacité à justifier une dépense déjà perçue. Exception : le commentaire libre des questionnaires, qui ne sert aucun export, est retiré à l''anonymisation.',
+      $2
+     WHERE NOT EXISTS (
       SELECT 1 FROM rgpd_registre WHERE nom_traitement ILIKE 'Cofinancement FSE+%'
-    );
-  `);
+     )`,
+    [CATEGORIES_DONNEES_FSE, MESURES_SECURITE_FSE]
+  );
+
+  // Mise en conformité d'une entrée déjà écrite par la version antérieure.
+  // Double garde (jamais d'écrasement d'un texte retouché par le DPO) : on ne
+  // reprend qu'une entrée portant encore la formulation d'origine, et qui ne
+  // mentionne pas déjà la règle art. 10.
+  await client.query(
+    `UPDATE rgpd_registre
+        SET categories_donnees = $1, mesures_securite = $2,
+            duree_conservation = duree_conservation ||
+              ' Exception : le commentaire libre des questionnaires, qui ne sert aucun export, est retiré à l''anonymisation.'
+      WHERE nom_traitement ILIKE 'Cofinancement FSE+%'
+        AND categories_donnees LIKE '%AUCUNE donnée de santé ni judiciaire%'
+        AND categories_donnees NOT LIKE '%sensible art. 10%'`,
+    [CATEGORIES_DONNEES_FSE, MESURES_SECURITE_FSE]
+  );
 
   console.log('[INIT-DB] Migration PR A lot 2 (FSE+ : projets, participants, sorties, durée des entretiens) ✓');
 }

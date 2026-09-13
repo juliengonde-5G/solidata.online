@@ -21,10 +21,22 @@ const RUN = process.env.PR_A_E2E_DB === '1';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
 process.env.JWT_SECRET = JWT_SECRET;
 
-/** Jeton porteur du second facteur frais (requireMfa) — cf. middleware/mfa.js. */
+/**
+ * Jeton porteur du second facteur frais (requireMfa) — cf. middleware/mfa.js.
+ *
+ * `first_name` / `last_name` sont PORTÉS, comme dans le jeton réel composé par
+ * `routes/auth.js` (l. 187-197). Sans eux, tout ce qui compose un nom depuis le
+ * jeton — l'en-tête « Généré par » des fichiers transmis à l'autorité — se
+ * comporterait ici comme en repli, et la recette éprouverait une cascade de
+ * secours plutôt que le chemin normal.
+ */
 function signer(user) {
   return jwt.sign(
-    { id: user.id, username: user.username, role: user.role, mfa: true, mfa_at: Math.floor(Date.now() / 1000) },
+    {
+      id: user.id, username: user.username, role: user.role,
+      first_name: user.first_name || 'Jest', last_name: user.last_name || user.role,
+      mfa: true, mfa_at: Math.floor(Date.now() / 1000),
+    },
     JWT_SECRET,
     { expiresIn: '2h' }
   );

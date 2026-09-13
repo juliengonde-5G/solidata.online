@@ -203,7 +203,11 @@ export default function AdminInsertion() {
   // ── Critères d'éligibilité ──
   const openCrit = (c = null) => setEditCrit({
     code: c?.code || null, error: null,
-    form: { code: c?.code || '', libelle: c?.libelle || '', ordre: c?.ordre ?? '', actif: c ? c.actif !== false : true },
+    form: {
+      code: c?.code || '', libelle: c?.libelle || '', ordre: c?.ordre ?? '',
+      actif: c ? c.actif !== false : true,
+      sensible_art10: c ? c.sensible_art10 === true : false,
+    },
   });
 
   const saveCrit = async () => {
@@ -213,6 +217,7 @@ export default function AdminInsertion() {
       libelle: form.libelle.trim(),
       ordre: form.ordre === '' ? 0 : (parseInt(form.ordre, 10) || 0),
       actif: form.actif,
+      sensible_art10: form.sensible_art10 === true,
     };
     try {
       if (code) await api.put(`/insertion/eligibilite-criteres/${encodeURIComponent(code)}`, body);
@@ -470,6 +475,7 @@ export default function AdminInsertion() {
                       <th className="py-2 pr-3">Ordre</th>
                       <th className="py-2 pr-3">Libellé</th>
                       <th className="py-2 pr-3">Code</th>
+                      <th className="py-2 pr-3">Nature</th>
                       <th className="py-2 pr-3">Statut</th>
                       <th className="py-2" />
                     </tr>
@@ -480,6 +486,14 @@ export default function AdminInsertion() {
                         <td className="py-2 pr-3 text-slate-400">{c.ordre ?? 0}</td>
                         <td className="py-2 pr-3 font-medium text-slate-700">{c.libelle}</td>
                         <td className="py-2 pr-3 text-xs font-mono text-slate-500">{c.code}</td>
+                        <td className="py-2 pr-3">
+                          {c.sensible_art10 === true ? (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
+                              title="Condamnations et infractions (art. 10 RGPD) : jamais exporté, jamais rendu à l'encadrement technique, remplacé dans le bloc de report.">
+                              Donnée judiciaire
+                            </span>
+                          ) : <span className="text-xs text-slate-400">Ordinaire</span>}
+                        </td>
                         <td className="py-2 pr-3">
                           <span className={`text-xs px-1.5 py-0.5 rounded ${c.actif === false ? 'bg-slate-100 text-slate-500' : 'bg-green-50 text-green-700'}`}>
                             {c.actif === false ? 'Désactivé' : 'Actif'}
@@ -744,6 +758,25 @@ export default function AdminInsertion() {
                     onChange={(e) => setEditCrit({ ...editCrit, form: { ...editCrit.form, actif: e.target.checked } })} />
                   Critère actif (proposé dans les dossiers administratifs)
                 </label>
+                {/* Correctif de sécurité du 13/09 (M-06) : l'arbitrage se règle
+                    ici, pas dans le code. Décocher suffit à faire ressortir le
+                    critère dans les exports — c'est une décision de direction. */}
+                <div className="sm:col-span-2 rounded-[10px] border border-amber-200 bg-amber-50/60 p-3">
+                  <label className="flex items-start gap-2 text-sm text-slate-800 cursor-pointer">
+                    <input type="checkbox" checked={editCrit.form.sensible_art10} className="rounded border-slate-300 mt-0.5"
+                      onChange={(e) => setEditCrit({ ...editCrit, form: { ...editCrit.form, sensible_art10: e.target.checked } })} />
+                    <span>
+                      <span className="font-semibold">Donnée judiciaire (article 10 du RGPD)</span>
+                      <span className="block text-xs text-slate-600 mt-1">
+                        Le critère reste saisissable et visible dans la fiche, pour les rôles
+                        Administrateur et RH. Mais il ne part dans aucun fichier transmis hors de la
+                        structure, il n&apos;est pas compté dans le nombre de critères servi à
+                        l&apos;encadrement technique, et le bloc à coller sur les Emplois de
+                        l&apos;inclusion le remplace par « [critère judiciaire — voir la fiche] ».
+                      </span>
+                    </span>
+                  </label>
+                </div>
               </div>
             </>
           )}

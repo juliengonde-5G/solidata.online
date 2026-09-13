@@ -341,7 +341,11 @@ function decouper(csv) {
       const brut = JSON.stringify(r.body);
       expect(brut).not.toMatch(/KERMICHE|Kermiche|Nadia|Traore/);
       expect(r.body.identification).toHaveProperty('projet');
-      expect(r.body.identification.nominatif).toBe(false);
+      // m-05 — deux drapeaux au lieu d'un qui mentait : le bilan est non
+      // nominatif POUR LES PARTICIPANTS, et nomme les intervenants affectés au
+      // projet, comme l'autorité le demande au § 7.
+      expect(r.body.identification.participants_nominatifs).toBe(false);
+      expect(r.body.identification.intervenants_nominatifs).toBe(true);
       expect(brut).toMatch(/completude|complétude/i);
       expect(brut).toMatch(/sortie/i);
     });

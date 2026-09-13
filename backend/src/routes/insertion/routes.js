@@ -195,7 +195,7 @@ router.get('/diagnostic/:employeeId', async (req, res) => {
     // sous chaque item la source de la proposition (« proposé depuis « … » »)
     // et la conseillère confirme ou corrige d'un clic. Rien n'est enregistré
     // sans elle : la suggestion voyage à côté de la donnée, jamais dedans.
-    const { suggestions_fse, fse_completude } = await enrichirFse(row, empId);
+    const { suggestions_fse, fse_completude } = await enrichirFse(row, empId, baseRole);
     res.json({ ...row, suggestions_fse, fse_completude });
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic GET :', err);
@@ -322,8 +322,23 @@ function computeSuggestionsFreins(d) {
  * Résilient : l'échec de la lecture du salarié (base ancienne, colonne du lot 1
  * absente) ne doit pas priver la CIP de son diagnostic — on rend alors les
  * suggestions déductibles du seul diagnostic, jamais une erreur 500.
+ *
+ * CORRECTIF DE SÉCURITÉ DU 13/09 (constat C-02). Cette fonction relisait
+ * `employees.brsa` et `france_travail_id` APRÈS le masquage de la ligne de
+ * diagnostic, et `suggestionsEntree` en composait une phrase lisible
+ * (« Dossier administratif : bénéficiaire du RSA »). Le masquage par champ ne
+ * pouvait rien : il agit sur la ligne du diagnostic, la fuite venait d'une
+ * SECONDE requête, postérieure, sur une autre table.
+ *
+ * On ne filtre donc pas la sortie du moteur de suggestions : on ne l'ALIMENTE
+ * PAS. C'est le correctif structurel de 2.43.0 appliqué ici — rien de dérivé ne
+ * peut fuir d'une donnée qui n'a pas été lue. Le questionnaire FSE+ étant
+ * ADMIN/RH strict « y compris en lecture » (routes/insertion/fse.js), un
+ * encadrant technique n'a ni le questionnaire, ni ses suggestions, ni sa
+ * complétude.
  */
-async function enrichirFse(row, employeeId) {
+async function enrichirFse(row, employeeId, baseRole) {
+  if (baseRole === 'MANAGER') return { suggestions_fse: {}, fse_completude: null };
   const fse = (row && row.fse_entree && typeof row.fse_entree === 'object') ? row.fse_entree : {};
   let emp = {};
   try {
@@ -352,7 +367,19 @@ router.put('/diagnostic/:employeeId', [
 
     // Un MANAGER ne peut ni lire NI écrire les champs qui lui sont masqués
     // (frein judiciaire, détails santé, commentaire budget).
+    //
+    // Le questionnaire FSE+, lui, est refusé EXPLICITEMENT et non retiré en
+    // silence (correctif du 13/09, constat M-01) : c'est une pièce d'audit
+    // européenne, et un enregistrement qui « passe » sans rien écrire ferait
+    // croire à la personne qui l'a saisi qu'il est en base. L'écran ne propose
+    // pas ce questionnaire à l'encadrement ; y arriver signale un appel direct.
     if (baseRole === 'MANAGER') {
+      if ('fse_entree' in d || 'fse_entree_complet' in d || 'fse_entree_saisie_at' in d) {
+        return res.status(403).json({
+          error: "Le questionnaire FSE+ d'entrée est réservé aux rôles ADMIN et RH.",
+          code: 'FSE_ADMIN_RH_STRICT',
+        });
+      }
       for (const k of Object.keys(d)) {
         if (MANAGER_HIDDEN_FIELDS.includes(k) || k.startsWith('frein_judiciaire')) delete d[k];
       }
@@ -440,7 +467,7 @@ router.put('/diagnostic/:employeeId', [
     // Suggestions de freins recalculées sur la ligne COMPLÈTE après upsert
     // (toutes les réponses stockées, pas seulement celles du body) — le
     // frontend les surligne, la CIP décide (écart 1b).
-    const { suggestions_fse, fse_completude } = await enrichirFse(row, empId);
+    const { suggestions_fse, fse_completude } = await enrichirFse(row, empId, baseRole);
     res.json({ ...row, suggestions_freins: computeSuggestionsFreins(row), suggestions_fse, fse_completude });
   } catch (err) {
     console.error('[INSERTION] Erreur diagnostic PUT :', err.message, err.detail || '');
@@ -797,6 +824,25 @@ router.post('/milestones/:id/close', [
       return res.status(409).json({ error: 'Entretien déjà clôturé (verrouillé).', hint: "Réouvrir d'abord (POST /milestones/:id/reopen)." });
     }
 
+    // CORRECTIF DE SÉCURITÉ DU 13/09 (constat M-02). Clôturer un BILAN DE
+    // SORTIE écrit `insertion_fse_sorties` — avec `saisie_par` et `saisie_at`,
+    // les deux champs sur lesquels l'autorité de gestion calcule le délai de
+    // saisie. La même écriture passait par deux portes de niveaux
+    // d'habilitation différents : ADMIN/RH par `POST /insertion/fse/:id/sortie`,
+    // ADMIN/RH/MANAGER par ici. Un rôle explicitement écarté du volet FSE+ ne
+    // doit pas pouvoir créer une pièce de contrôle de service fait.
+    //
+    // La garde est posée ICI, après lecture du TYPE de jalon, et non sur la
+    // route : les autres entretiens (bilans intermédiaires, période d'essai)
+    // restent clôturables par l'encadrement technique, qui les conduit.
+    if (ms.milestone_type === 'bilan_sortie' && !['ADMIN', 'RH'].includes(baseRoleOf(req))) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'La clôture du bilan de sortie est réservée aux rôles ADMIN et RH (elle enregistre la sortie FSE+).',
+        code: 'BILAN_SORTIE_ADMIN_RH',
+      });
+    }
+
     const problems = [];
 
     // Lot 8 (EXG-30) — l'entretien de période d'essai a des contrôles ADAPTÉS :
@@ -985,7 +1031,9 @@ router.post('/milestones/:id/close', [
         return res.status(409).json({
           error: 'Clôture refusée — la sortie FSE+ n\'a pas pu être enregistrée.',
           code: 'FSE_SORTIE_NON_ENREGISTREE',
-          detail: e.message,
+          // `detail: e.message` retiré (constat m-03) : c'était le message SQL
+          // brut. Le code et les erreurs de validation suffisent à l'écran ; la
+          // cause technique reste au journal serveur, juste au-dessus.
           erreurs: e.erreurs,
         });
       }
@@ -998,7 +1046,20 @@ router.post('/milestones/:id/close', [
     try { resync = await resyncMilestones(pool, ms.employee_id, { userId: req.user.id }); }
     catch (e) { console.error('[INSERTION] resync post-clôture :', e.message); }
 
-    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: createdNext, resync, sortie_fse: sortieFse });
+    // `sortie_fse` PROJETÉ et non renvoyé tel quel : la ligne complète porte le
+    // JSONB `fse_sortie` et son commentaire libre, qui échappaient au masquage
+    // (constat M-02). L'écran n'a besoin que de savoir QUE la sortie est
+    // enregistrée, et de quand elle date.
+    const sortieFseProjetee = sortieFse
+      ? {
+        id: sortieFse.id,
+        date_sortie: sortieFse.date_sortie,
+        situation_sortie: sortieFse.situation_sortie,
+        source: sortieFse.source,
+        saisie_at: sortieFse.saisie_at,
+      }
+      : null;
+    res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: createdNext, resync, sortie_fse: sortieFseProjetee });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur close milestone :', err);
@@ -1895,10 +1956,18 @@ router.get('/alertes/:employeeId', [
 ], validate, async (req, res) => {
   try {
     const empId = parseInt(req.params.employeeId, 10);
+    // CORRECTIF DE SÉCURITÉ DU 13/09 (constat C-03) : le statut BRSA n'est même
+    // pas LU pour un encadrant technique. Cette route n'a pas d'`authorize` —
+    // elle hérite d'ADMIN/RH/MANAGER et son bandeau d'alertes s'affiche en tête
+    // de fiche pour tous les rôles ; y rapatrier un statut social, c'était le
+    // rendre à qui la projection du dossier administratif le refuse. Fragment
+    // composé de LITTÉRAUX, jamais d'une entrée utilisateur.
+    const alertesAdminRh = ['ADMIN', 'RH'].includes(baseRoleOf(req));
+    const colonneBrsa = alertesAdminRh ? 'e.brsa,' : 'NULL::boolean AS brsa,';
     const empRes = await pool.query(
       `SELECT e.id, e.first_name, e.last_name, e.insertion_status, e.insertion_start_date,
               e.pass_iae_number, e.pass_iae_end, e.cddi_derogation_motif, e.contract_end,
-              e.brsa, e.referent_unique_type,
+              ${colonneBrsa} e.referent_unique_type,
               COALESCE(e.parcours_num, 1) AS parcours_num
        FROM employees e WHERE e.id = $1`,
       [empId]
@@ -2068,10 +2137,16 @@ router.get('/alertes/:employeeId', [
     // 10. Référent unique non déterminé alors que la personne est BRSA. La
     // structure n'est PAS référente (décision du 12/09) : ne pas savoir à qui
     // parler, c'est un signalement à faire au Département, pas un détail.
-    if (emp.brsa === true && (!emp.referent_unique_type || emp.referent_unique_type === 'non_determine')) {
+    //
+    // L'alerte n'est servie qu'à ADMIN/RH (ce sont eux qui saisissent le
+    // référent) et son message ne NOMME plus le statut : un texte d'alerte est
+    // une donnée comme une autre dès lors qu'il énonce « la personne est
+    // bénéficiaire du RSA » sur l'écran d'un salarié. Ce qu'il faut faire —
+    // signaler au Département — se dit sans cela.
+    if (alertesAdminRh && emp.brsa === true && (!emp.referent_unique_type || emp.referent_unique_type === 'non_determine')) {
       alertes.push({
         type: 'referent_non_determine', niveau: 'critique',
-        message: 'Référent unique non déterminé alors que la personne est bénéficiaire du RSA — à signaler au Département.',
+        message: 'Référent unique non déterminé — à signaler au Département.',
       });
     }
 
