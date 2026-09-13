@@ -94,6 +94,26 @@ async function run(client) {
       END IF;
     END $$`);
 
+  // `reporte_jusqu_au` désigne un INSTANT (« cette obligation ressort dans
+  // 48 h »), pas un jour civil. Écrit en `TIMESTAMP WITHOUT TIME ZONE` par
+  // `NOW() + make_interval`, il était stocké en heure du SERVEUR et relu dans
+  // le fuseau du PROCESSUS : hors UTC, l'échéance affichée reculait de deux
+  // heures (défaut D-05). La comparaison SQL restait juste — c'est l'affichage
+  // qui mentait. Conversion idempotente, et les lignes déjà écrites sont
+  // interprétées en UTC, qui est le fuseau du serveur qui les a produites.
+  await client.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'insertion_echeance_reports'
+           AND column_name = 'reporte_jusqu_au' AND data_type = 'timestamp without time zone'
+      ) THEN
+        ALTER TABLE insertion_echeance_reports
+          ALTER COLUMN reporte_jusqu_au TYPE TIMESTAMPTZ USING reporte_jusqu_au AT TIME ZONE 'UTC';
+      END IF;
+    END $$`);
+
   console.log('[MIGRATION] insertion-echeances : jeton ETI + reports d\'obligation OK');
 }
 

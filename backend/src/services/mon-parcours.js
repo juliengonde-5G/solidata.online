@@ -54,10 +54,11 @@
 'use strict';
 
 const pool = require('../config/database');
-const { MILESTONE_TYPE_LABELS } = require('../routes/insertion/engine');
+const { MILESTONE_TYPE_LABELS_ALL } = require('../routes/insertion/engine');
 const { FREINS } = require('../routes/insertion/freins-registry');
 const { activiteHebdo } = require('./activite-hebdo');
-const { isoDate, aujourdhuiParis } = require('../utils/date-iso');
+const { isoDate, heureMurale, aujourdhuiParis } = require('../utils/date-iso');
+const { readInsertionSetting } = require('../utils/insertion-settings');
 
 /** Nom de la structure — un seul endroit, les deux documents le portent. */
 const STRUCTURE_NOM = 'Solidarité Textiles';
@@ -70,19 +71,49 @@ const STRUCTURE_ACTIVITE = 'collecte, tri et valorisation de textiles';
  */
 const FREINS_EXCLUS = FREINS.filter((f) => f.sensible != null).map((f) => f.key);
 
-/** Libellés d'entretien — liste FERMÉE, jamais le titre saisi. */
-const TYPE_ENTRETIEN_LABELS = {
-  ...MILESTONE_TYPE_LABELS,
-  point_etape_referent: 'Point avec le référent',
-  conciliation: 'Entretien de conciliation',
+/** Libellés d'entretien — liste FERMÉE de `engine.js`, jamais le titre saisi. */
+const TYPE_ENTRETIEN_LABELS = { ...MILESTONE_TYPE_LABELS_ALL };
+
+/**
+ * Libellés d'entretien du RÉCAP — le document que la personne peut remettre à
+ * un employeur (correctif M-10).
+ *
+ * Deux types de la PR B disent, à eux seuls, quelque chose de la SITUATION
+ * SOCIALE de la personne : « Entretien de conciliation (protection des droits) »
+ * est la procédure contradictoire qui précède une décision défavorable dans le
+ * cadre RSA, et « Point avec le référent » suppose un référent unique. Sur un
+ * document qui circule, une ligne datée suffit à faire comprendre qu'il y a eu
+ * litige — et à contredire la mention de pied de page qui promet l'absence de
+ * situation sociale. Les deux sont donc regroupés sous le libellé générique.
+ *
+ * Ils restent NOMMÉS dans « Mon parcours en une page », qui ne circule pas.
+ * Neutralisation réversible : réglage `insertion.recap_neutralise`.
+ */
+const TYPE_ENTRETIEN_LABELS_RECAP = {
+  ...TYPE_ENTRETIEN_LABELS,
+  point_etape_referent: 'Entretien d\'accompagnement',
+  conciliation: 'Entretien d\'accompagnement',
 };
 
-/** Catégories d'action — liste fermée (miroir de `cip_action_plans.category`). */
+/**
+ * Catégories d'action — liste fermée, MIROIR COMPLET du CHECK de
+ * `cip_action_plans.category` (six valeurs depuis la PR A).
+ *
+ * CORRECTIF D-07 : `job_dating` et `formation` manquaient. « Mon parcours en
+ * une page » filtre les lignes dont le libellé est nul : une action de
+ * formation ou une rencontre avec des employeurs DISPARAISSAIT du document —
+ * c'est-à-dire l'engagement le plus concret que la structure puisse montrer à
+ * la personne. Un test compare ce dictionnaire au CHECK : une septième
+ * catégorie ajoutée demain fera tomber la suite plutôt que de s'effacer en
+ * silence.
+ */
 const CATEGORIE_ACTION_LABELS = {
   competence: 'Développement des compétences',
   insertion: 'Recherche d\'emploi et insertion',
   socialisation: 'Vie sociale et quotidien',
   frein: 'Levée d\'une difficulté',
+  job_dating: 'Rencontre avec des employeurs',
+  formation: 'Formation',
 };
 
 /** Objet d'une PMSMP — liste fermée (CHECK de `insertion_pmsmp.objet`). */
@@ -209,15 +240,18 @@ function tronquer(v, max = TITRE_MAX) {
 /** Arrondi à 2 décimales — `null` reste `null` (jamais 0 par accident). */
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 
-/** Heure 'HH:MM' d'un horodatage, lue à Paris. `null` si l'heure n'est pas connue. */
-function heureParis(v) {
-  if (v == null || v === '') return null;
-  const d = v instanceof Date ? v : new Date(v);
-  if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat('fr-FR', {
-    timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(d);
-}
+/**
+ * Heure 'HH:MM' d'un rendez-vous. `null` si l'heure n'est pas connue.
+ *
+ * CORRECTIF D-01 : `interview_date` est un `TIMESTAMP WITHOUT TIME ZONE` qui
+ * porte DÉJÀ l'heure murale de Paris (le formulaire saisit un
+ * `<input type="datetime-local">`, la route l'écrit telle quelle). La convertir
+ * « vers Paris » lui ajoutait l'offset une seconde fois : le document que la
+ * personne garde dans sa poche annonçait **16:00 pour un rendez-vous de 14:00**.
+ * On lit donc la valeur telle qu'elle est — ici en repli, la requête la
+ * demandant désormais à PostgreSQL (`to_char`).
+ */
+const heureRdv = heureMurale;
 
 /** En-tête commun : identité de la personne. `null` si elle n'existe pas. */
 async function lireSalarie(employeeId) {
@@ -307,6 +341,8 @@ async function composerMonParcours({ employeeId }) {
     // fin de contrat à quiconque la lit par-dessus l'épaule.
     soft('prochain_rdv',
       `SELECT m.interview_date, m.due_date,
+              to_char(m.interview_date, 'YYYY-MM-DD') AS rdv_jour,
+              to_char(m.interview_date, 'HH24:MI') AS rdv_heure,
               u.first_name AS int_prenom, u.last_name AS int_nom
          FROM insertion_milestones m
          LEFT JOIN users u ON u.id = m.interviewer_id
@@ -366,10 +402,10 @@ async function composerMonParcours({ employeeId }) {
     mes_heures_semaine: heures,
     prochain_rdv: rdv
       ? {
-        date: isoDate(rdv.interview_date) || isoDate(rdv.due_date),
+        date: rdv.rdv_jour || isoDate(rdv.interview_date) || isoDate(rdv.due_date),
         // `null` quand seule une date d'échéance existe : le PDF écrit alors
         // « heure à confirmer », il n'invente pas un horaire.
-        heure: heureParis(rdv.interview_date),
+        heure: rdv.rdv_heure || heureRdv(rdv.interview_date),
         avec: prenomInitiale(rdv.int_prenom, rdv.int_nom) || prenomInitiale(emp.cip_prenom, emp.cip_nom),
       }
       : null,
@@ -400,6 +436,13 @@ async function composerMonRecap({ employeeId }) {
   const id = Number(employeeId);
   const emp = await lireSalarie(id);
   if (!emp) return null;
+
+  // Neutralisation des libellés qui « parlent » (M-10). En cas de réglage
+  // illisible, on retient la valeur la plus SÛRE : neutralisé.
+  const reglage = await readInsertionSetting('insertion.recap_neutralise').catch(() => true);
+  const neutralise = !(reglage === false || reglage === 'false' || reglage === 0 || reglage === '0');
+  const libelleEntretien = (t) => (neutralise ? TYPE_ENTRETIEN_LABELS_RECAP : TYPE_ENTRETIEN_LABELS)[t]
+    || 'Entretien d\'accompagnement';
 
   const [contrats, entretiens, pmsmp, actions, evaluations, objectifs, sortie] = await Promise.all([
     soft('contrats',
@@ -458,13 +501,21 @@ async function composerMonRecap({ employeeId }) {
     ...entretiens.map((m) => ({
       date: isoDate(m.completed_date),
       type: 'entretien',
-      libelle: TYPE_ENTRETIEN_LABELS[m.milestone_type] || 'Entretien d\'accompagnement',
+      libelle: libelleEntretien(m.milestone_type),
     })),
     ...pmsmp.map((p) => ({
       date: isoDate(p.date_debut),
       type: 'pmsmp',
       libelle: [
-        `Stage en entreprise chez ${p.entreprise}`,
+        // La raison sociale est un champ LIBRE, et le nom d'un ESAT, d'une
+        // entreprise adaptée ou d'un établissement de soins révèle par
+        // ricochet ce que ce document exclut par ailleurs (M-10). Elle n'est
+        // donc pas imprimée tant que `insertion.recap_neutralise` est vrai ;
+        // quand la direction la rétablit, elle est TRONQUÉE comme les autres
+        // textes co-construits.
+        neutralise || !p.entreprise
+          ? 'Stage en entreprise'
+          : `Stage en entreprise chez ${tronquer(p.entreprise, 60)}`,
         OBJET_PMSMP_LABELS[p.objet] || null,
         isoDate(p.date_fin) ? `jusqu'au ${isoDate(p.date_fin)}` : null,
       ].filter(Boolean).join(' — '),
@@ -527,6 +578,7 @@ module.exports = {
   CLES_INTERDITES,
   FREINS_EXCLUS,
   TYPE_ENTRETIEN_LABELS,
+  TYPE_ENTRETIEN_LABELS_RECAP,
   CATEGORIE_ACTION_LABELS,
   SORTIE_CLASS_LABELS,
   SORTIE_TYPE_LABELS,

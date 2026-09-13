@@ -44,8 +44,18 @@ function sousFuseau(tz, fn) {
 const GABARIT_SMS = { id: 1, type: 'sms', subject: null, body: 'Bonjour {prenom}, rappel : vous avez rendez-vous demain {date} à {heure} avec {cip} à Solidarité Textiles.' };
 const GABARIT_EMAIL = { id: 2, type: 'email', subject: 'Rappel de votre rendez-vous de demain', body: GABARIT_SMS.body };
 
+// L'heure du rendez-vous telle que la BASE la porte : `interview_date` est un
+// `timestamp WITHOUT time zone` qui contient l'heure MURALE de Paris saisie au
+// formulaire (`datetime-local`). Le pilote en fait un `Date` construit dans le
+// fuseau du processus — c'est exactement ce que la fixture reproduit, et c'est
+// pourquoi la valeur attendue est 14:00 sous TOUS les fuseaux (correctif D-01 :
+// le service convertissait « vers Paris » une heure qui l'était déjà et
+// annonçait 16:00 à la personne). Les colonnes `rdv_date` / `rdv_heure` sont
+// celles que PostgreSQL rend désormais par `to_char`.
 const RDV = {
-  milestone_id: 12, interview_date: new Date('2026-09-15T12:00:00Z'),
+  milestone_id: 12,
+  interview_date: new Date(2026, 8, 15, 14, 0, 0),
+  rdv_date: '15/09/2026', rdv_heure: '14:00',
   employee_id: 5, first_name: 'Amine',
   canal: 'sms', destinataire: '06 12 34 56 78',
   int_prenom: 'Claire', int_nom: 'MARTIN', cip_prenom: 'Claire', cip_nom: 'MARTIN',
@@ -142,11 +152,23 @@ describe('sélection — le consentement est une condition de LECTURE', () => {
     expect(sql).toMatch(/m\.interview_date IS NOT NULL/);
   });
 
-  test('« demain » est le jour civil de PARIS, calculé par PostgreSQL', async () => {
+  test('« demain » est le jour civil de PARIS, comparé au jour STOCKÉ', async () => {
     await svc.envoyerRappelsRdvSalaries();
     const sql = String(mockQuery.mock.calls.find(([s]) => /FROM insertion_milestones m/.test(String(s)))[0]);
-    expect(sql).toContain("AT TIME ZONE 'Europe/Paris'");
-    expect(sql).toContain("INTERVAL '1 day'");
+    // « Aujourd'hui » vient bien de Paris…
+    expect(sql).toContain("(NOW() AT TIME ZONE 'Europe/Paris')::date + 1");
+    // …mais `interview_date` n'est JAMAIS reconvertie : elle porte déjà l'heure
+    // murale de Paris. La conversion faisait basculer un rendez-vous de 23:30
+    // au surlendemain — il ne recevait alors aucun rappel (défaut D-03).
+    expect(sql).toContain('m.interview_date::date =');
+    expect(sql).not.toMatch(/interview_date AT TIME ZONE/);
+  });
+
+  test('la date et l\'heure du message sont lues PAR POSTGRESQL sur la valeur stockée', async () => {
+    await svc.envoyerRappelsRdvSalaries();
+    const sql = String(mockQuery.mock.calls.find(([s]) => /FROM insertion_milestones m/.test(String(s)))[0]);
+    expect(sql).toContain("to_char(m.interview_date, 'DD/MM/YYYY')");
+    expect(sql).toContain("to_char(m.interview_date, 'HH24:MI')");
   });
 
   test('le TYPE d’entretien n’est même pas sélectionné', async () => {
@@ -181,7 +203,8 @@ describe('contenu du message — quatre variables, et rien du parcours', () => {
     expect(gabarit.type).toBe('sms');
     expect(email).toBeNull();
     expect(phone).toBe('06 12 34 56 78');
-    // 12:00 UTC un 15 septembre = 14:00 à Paris.
+    // L'heure ANNONCÉE est celle que la conseillère a SAISIE (14:00) — jamais
+    // une heure reconvertie (défaut D-01 : « 16:00 » pour ce même rendez-vous).
     expect(variables).toEqual({ prenom: 'Amine', date: '15/09/2026', heure: '14:00', cip: 'Claire M.' });
     // Aucune variable de parcours n'est passée au gabarit.
     expect(Object.keys(variables).sort()).toEqual(['cip', 'date', 'heure', 'prenom']);

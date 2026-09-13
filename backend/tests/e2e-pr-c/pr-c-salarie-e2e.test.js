@@ -383,15 +383,19 @@ const brut = (o) => JSON.stringify(o);
       expect(recap.etapes.map((e) => e.libelle)).toContain('Bilan intermédiaire');
     });
 
-    test('V-81bis CONSTAT (O-02) — le type « conciliation » est écrit tel quel sur un document destiné à circuler', () => {
-      // Le libellé vient bien d'une liste FERMÉE (donc conforme au § 5.6.2),
-      // mais « Entretien de conciliation » désigne une procédure de protection
-      // des droits : sur un récapitulatif que la personne peut remettre à un
-      // employeur, il dit quelque chose de sa situation. Constat porté au
-      // rapport, pas un défaut de mise en œuvre — l'arbitrage appartient à la
-      // direction (voir aussi « Point avec le référent », qui désigne un
-      // accompagnement RSA).
-      expect(recap.etapes.map((e) => e.libelle)).toContain('Entretien de conciliation');
+    // CORRECTIF M-10 / O-02 — « Entretien de conciliation (protection des
+    // droits) » désigne la procédure contradictoire qui précède une décision
+    // RSA défavorable, et « Point avec le référent » suppose un référent
+    // unique : sur un récapitulatif que la personne peut remettre à un
+    // employeur, les deux disent quelque chose de sa situation sociale, que ce
+    // document promet par ailleurs de ne pas contenir. Ils sont regroupés sous
+    // un libellé générique ; le détail reste dans « Mon parcours », qui ne
+    // circule pas. Réversible par `insertion.recap_neutralise`.
+    test('V-81bis le Récap ne nomme NI la conciliation NI le point avec le référent', () => {
+      const libelles = recap.etapes.map((e) => e.libelle);
+      expect(brut(recap)).not.toContain('conciliation');
+      expect(brut(recap)).not.toContain('Point avec le référent');
+      expect(libelles).toContain("Entretien d'accompagnement");
     });
 
     test('V-82 les étapes sont datées et triées', () => {
@@ -407,10 +411,16 @@ const brut = (o) => JSON.stringify(o);
       expect(brut(recap)).not.toContain('SECRET_OBSERVATION_ITEM');
     });
 
-    test('V-84 la PMSMP est décrite par entreprise, objet et dates', () => {
+    // CORRECTIF M-10 — la raison sociale de l'entreprise d'accueil est un champ
+    // LIBRE : le nom d'un ESAT, d'une entreprise adaptée ou d'un établissement
+    // de soins révèle par ricochet ce que ce document exclut. Elle n'est plus
+    // imprimée ; l'objet et les dates, eux, restent (c'est ce qui vaut d'être
+    // montré à un employeur).
+    test('V-84 la PMSMP est décrite par son objet et ses dates, SANS raison sociale', () => {
       const p = recap.etapes.find((x) => x.type === 'pmsmp');
-      expect(p.libelle).toContain('Entreprise Martin');
+      expect(p.libelle).toContain('Stage en entreprise');
       expect(p.libelle).toContain("Découverte d'un métier");
+      expect(brut(recap)).not.toContain('Entreprise Martin');
       expect(brut(recap)).not.toContain('SECRET_BILAN_PMSMP');
     });
 

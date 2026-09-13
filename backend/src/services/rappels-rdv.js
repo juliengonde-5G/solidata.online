@@ -40,6 +40,7 @@
 const pool = require('../config/database');
 const { sendNotification } = require('./notification');
 const { readInsertionSetting } = require('../utils/insertion-settings');
+const { isoDate, heureMurale } = require('../utils/date-iso');
 
 /** Fuseau de référence de la structure. */
 const FUSEAU_PARIS = 'Europe/Paris';
@@ -148,6 +149,8 @@ async function lireGabarits() {
 async function selectionnerRendezVous() {
   const r = await pool.query(
     `SELECT m.id AS milestone_id, m.interview_date,
+            to_char(m.interview_date, 'DD/MM/YYYY') AS rdv_date,
+            to_char(m.interview_date, 'HH24:MI') AS rdv_heure,
             e.id AS employee_id, e.first_name,
             e.rappel_rdv_canal AS canal, e.rappel_rdv_destinataire AS destinataire,
             ui.first_name AS int_prenom, ui.last_name AS int_nom,
@@ -158,8 +161,13 @@ async function selectionnerRendezVous() {
        LEFT JOIN users uc ON uc.id = e.cip_referent_user_id
       WHERE m.status = 'planifie'
         AND m.interview_date IS NOT NULL
-        AND ((m.interview_date AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Paris')::date
-            = ((NOW() AT TIME ZONE 'Europe/Paris')::date + INTERVAL '1 day')::date
+        -- « Demain » à Paris, comparé au JOUR de la valeur STOCKÉE.
+        -- CORRECTIF D-03 : interview_date est un timestamp WITHOUT time zone
+        -- qui porte déjà l'heure murale de Paris. La convertir
+        -- (AT TIME ZONE UTC puis Europe/Paris) lui ajoutait deux heures : un
+        -- rendez-vous de 23:30 basculait au surlendemain et ne recevait AUCUN
+        -- rappel — ni ce soir-là, ni jamais.
+        AND m.interview_date::date = ((NOW() AT TIME ZONE 'Europe/Paris')::date + 1)
         AND e.rappel_rdv_consent = true
         AND e.is_active = true
         AND e.rappel_rdv_canal IS NOT NULL
@@ -170,17 +178,27 @@ async function selectionnerRendezVous() {
   return r.rows;
 }
 
-/** Date et heure du rendez-vous, formatées en français, lues à Paris. */
+/**
+ * Date (JJ/MM/AAAA) et heure (HH:MM) du rendez-vous, TELLES QU'ELLES SONT
+ * STOCKÉES.
+ *
+ * ═══ CORRECTIF D-01 — LE DÉFAUT LE PLUS VISIBLE DE LA PR C ════════════════
+ * `interview_date` est un `TIMESTAMP WITHOUT TIME ZONE` : le formulaire saisit
+ * un `<input type="datetime-local">` (chaîne naïve, l'heure que la conseillère
+ * lit sur sa montre) et la route l'écrit telle quelle. La valeur EST déjà
+ * l'heure de Paris. `Intl(Europe/Paris)` lui ajoutait donc l'offset une SECONDE
+ * fois, et le SMS annonçait **16:00 pour un rendez-vous saisi à 14:00** — un
+ * écart de deux heures, sur la seule fonction de la PR qui parle directement à
+ * la personne, et exactement de nature à lui faire manquer son rendez-vous.
+ *
+ * La requête demande désormais les deux valeurs à PostgreSQL (`to_char`) ; ce
+ * repli PUR sert quand elles manquent (appelant de test, colonne absente).
+ */
 function formaterRdv(instant) {
-  const d = instant instanceof Date ? instant : new Date(instant);
-  if (Number.isNaN(d.getTime())) return { date: null, heure: null };
-  const date = new Intl.DateTimeFormat('fr-FR', {
-    timeZone: FUSEAU_PARIS, day: '2-digit', month: '2-digit', year: 'numeric',
-  }).format(d);
-  const heure = new Intl.DateTimeFormat('fr-FR', {
-    timeZone: FUSEAU_PARIS, hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(d);
-  return { date, heure };
+  const jour = isoDate(instant);
+  const heure = heureMurale(instant);
+  if (!jour) return { date: null, heure: null };
+  return { date: `${jour.slice(8, 10)}/${jour.slice(5, 7)}/${jour.slice(0, 4)}`, heure };
 }
 
 /**
@@ -262,7 +280,9 @@ async function envoyerRappelsRdvSalaries() {
       console.warn(`[RAPPELS-RDV] Gabarit « ${canal} » absent — entretien #${rdv.milestone_id} ignoré (aucune trace posée : le rappel reste dû).`);
       continue;
     }
-    const { date, heure } = formaterRdv(rdv.interview_date);
+    const formate = formaterRdv(rdv.interview_date);
+    const date = rdv.rdv_date || formate.date;
+    const heure = rdv.rdv_heure || formate.heure;
     const variables = {
       prenom: rdv.first_name || '',
       date: date || '',
