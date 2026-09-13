@@ -85,6 +85,17 @@ const jourOuVide = (v) => (v ? String(v).slice(0, 10) : '');
 export default function DossierAdministratif({ employeeId, employee, baseRole, onChanged, onNaviguer }) {
   const toast = useToast();
   const adminRh = isAdminRh({ base_role: baseRole });
+  const [projetsActifs, setProjetsActifs] = useState([]);
+  const [rattachement, setRattachement] = useState({ projet_id: '', date_entree: new Date().toISOString().slice(0, 10) });
+  const [rattachementEnCours, setRattachementEnCours] = useState(false);
+  useEffect(() => {
+    if (!adminRh) return undefined;
+    let actif = true;
+    api.get('/insertion/projets')
+      .then((r) => { if (actif) setProjetsActifs((r.data || []).filter((p) => p.actif !== false)); })
+      .catch(() => { if (actif) setProjetsActifs([]); });
+    return () => { actif = false; };
+  }, [adminRh]);
 
   const [cadre, setCadre] = useState(null);
   const [criteres, setCriteres] = useState([]);
@@ -229,6 +240,35 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
 
   const referentNonDetermine = orient.referent_type === 'non_determine';
   const projets = cadre.projets || [];
+
+  // Rattachement à un projet cofinancé (PR A) : l'API vit dans routes/insertion/projets.js ;
+  // la liste des projets actifs est chargée à la demande, jamais bloquante pour la fiche.
+  const rattacherAuProjet = async () => {
+    setRattachementEnCours(true);
+    try {
+      await api.post(`/insertion/projets/${rattachement.projet_id}/participants`, {
+        employee_id: Number(employeeId), date_entree: rattachement.date_entree,
+      });
+      toast.success('Rattachement enregistré');
+      setRattachement({ projet_id: '', date_entree: new Date().toISOString().slice(0, 10) });
+      await rafraichir();
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Rattachement impossible');
+    } finally {
+      setRattachementEnCours(false);
+    }
+  };
+  const sortirDuProjet = async (p) => {
+    try {
+      await api.put(`/insertion/projets/${p.id}/participants/${p.participant_id}`, {
+        date_sortie: new Date().toISOString().slice(0, 10),
+      });
+      toast.success('Sortie du projet enregistrée à la date du jour');
+      await rafraichir();
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Sortie du projet impossible');
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4 items-start">
@@ -471,15 +511,12 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
           </Section>
         )}
 
-        {/* ══ Projets cofinancés — LECTURE (le rattachement se gère aux réglages) ══ */}
+        {/* ══ Projets cofinancés — rattachement DATÉ, saisi par la CIP, jamais déduit d'un statut ══ */}
         <Section title="Projets cofinancés" icon={FolderOpen}>
           {projets.length === 0 ? (
-            <div className="flex items-center justify-between gap-3 flex-wrap border border-dashed border-slate-200 rounded-[10px] p-3">
-              <p className="text-sm text-slate-500">Aucun rattachement à un projet cofinancé.</p>
-              <Link to="/admin/insertion" className="btn-secondary text-xs inline-flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" /> Rattacher à un projet
-              </Link>
-            </div>
+            <p className="text-sm text-slate-500 border border-dashed border-slate-200 rounded-[10px] p-3">
+              Aucun rattachement à un projet cofinancé.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -488,25 +525,55 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
                     <th className="py-2 pr-3">Projet cofinancé</th>
                     <th className="py-2 pr-3">Entrée</th>
                     <th className="py-2 pr-3">Sortie</th>
+                    {adminRh && <th className="py-2 pr-3"></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {projets.map((p) => (
-                    <tr key={p.id} className="border-b border-slate-50">
+                    <tr key={p.participant_id || p.id} className="border-b border-slate-50">
                       <td className="py-2 pr-3 font-medium text-slate-700">
                         {p.nom} <span className="text-xs text-slate-400">({PROJET_TYPE_LABELS[p.type] || p.type} · {p.code})</span>
                       </td>
                       <td className="py-2 pr-3 text-slate-600">{frDate(p.date_entree)}</td>
                       <td className="py-2 pr-3 text-slate-600">{p.date_sortie ? frDate(p.date_sortie) : <span className="text-slate-400">—</span>}</td>
+                      {adminRh && (
+                        <td className="py-2 pr-3 text-right">
+                          {!p.date_sortie && p.participant_id && (
+                            <button type="button" className="btn-ghost text-xs" onClick={() => sortirDuProjet(p)}>
+                              Sortie du projet
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+          {adminRh && (
+            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
+              <div className="min-w-[260px] flex-1">
+                <label className="label-modern">Rattacher à un projet</label>
+                <select className="select-modern" value={rattachement.projet_id} onChange={(e) => setRattachement((r) => ({ ...r, projet_id: e.target.value }))}>
+                  <option value="">— choisir un projet actif —</option>
+                  {projetsActifs.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nom} ({PROJET_TYPE_LABELS[p.type] || p.type})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label-modern">Date d'entrée dans le projet</label>
+                <input type="date" className="input-modern" value={rattachement.date_entree} onChange={(e) => setRattachement((r) => ({ ...r, date_entree: e.target.value }))} />
+              </div>
+              <button type="button" className="btn-primary text-sm" disabled={!rattachement.projet_id || !rattachement.date_entree || rattachementEnCours} onClick={rattacherAuProjet}>
+                <Plus className="w-4 h-4" /> {rattachementEnCours ? 'Rattachement…' : 'Rattacher'}
+              </button>
+            </div>
+          )}
           <p className="text-xs text-slate-500 mt-2">
-            Les rattachements se saisissent dans <Link to="/admin/insertion" className="underline">Réglages insertion</Link> —
-            jamais déduits automatiquement d&apos;un statut social.
+            Le rattachement est un geste de la CIP, daté, jamais déduit d&apos;un statut social ; les projets eux-mêmes
+            (dates, quotités des postes) se gèrent dans <Link to="/admin/insertion" className="underline">Réglages insertion</Link>.
           </p>
         </Section>
 

@@ -112,7 +112,7 @@ function composerBlocEmploisInclusion({ criteres, prescripteur, pass }) {
 async function lireProjets(employeeId) {
   try {
     const r = await pool.query(
-      `SELECT p.id, p.code, p.nom, p.type, pp.date_entree, pp.date_sortie
+      `SELECT p.id, p.code, p.nom, p.type, pp.id AS participant_id, pp.date_entree, pp.date_sortie
          FROM insertion_projet_participants pp
          JOIN insertion_projets p ON p.id = pp.projet_id
         WHERE pp.employee_id = $1
@@ -465,11 +465,20 @@ router.put('/:employeeId', ADMIN_RH, ID, validate, async (req, res) => {
     return res.status(400).json({ error: 'Aucun champ à modifier' });
   }
 
+  // La connexion est rendue dans un `finally` UNIQUE. Les deux refus métier
+  // ci-dessous (salarié introuvable, critère inconnu) sortaient auparavant par
+  // un `return` nu, sans `client.release()` : chaque refus retirait
+  // définitivement une connexion du pool, et vingt formulaires mal remplis
+  // suffisaient à figer TOUTE l'application (plus aucune requête, quel que soit
+  // le module, ne pouvait obtenir de connexion). Reproduit puis corrigé —
+  // preuve sur PostgreSQL réel, `tests/e2e-pr-a/pr-a-cadre-e2e.test.js`.
   const client = await pool.connect();
+  let libere = false;
+  const rendre = () => { if (!libere) { libere = true; client.release(); } };
   try {
     await client.query('BEGIN');
     const exists = await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [employeeId]);
-    if (exists.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Salarié non trouvé' }); }
+    if (exists.rows.length === 0) { await client.query('ROLLBACK'); rendre(); return res.status(404).json({ error: 'Salarié non trouvé' }); }
 
     if (sets.length > 0) {
       vals.push(employeeId);
@@ -490,6 +499,7 @@ router.put('/:employeeId', ADMIN_RH, ID, validate, async (req, res) => {
       const inconnus = codes.filter((c) => !connus.has(c));
       if (inconnus.length > 0) {
         await client.query('ROLLBACK');
+        rendre();
         return res.status(400).json({ error: `Critère d'éligibilité inconnu : ${inconnus.join(', ')}` });
       }
       await client.query(
@@ -511,14 +521,15 @@ router.put('/:employeeId', ADMIN_RH, ID, validate, async (req, res) => {
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    if (err.code === '23503') { client.release(); return res.status(400).json({ error: 'Référence invalide (prescripteur ou critère inexistant).' }); }
-    if (err.code === '23514') { client.release(); return res.status(400).json({ error: 'Valeur refusée par la base : vérifiez les listes déroulantes.' }); }
-    if (err.code === '42703') { client.release(); return res.status(503).json({ error: 'Dossier administratif indisponible : base non migrée.' }); }
-    client.release();
+    rendre();
+    if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (prescripteur ou critère inexistant).' });
+    if (err.code === '23514') return res.status(400).json({ error: 'Valeur refusée par la base : vérifiez les listes déroulantes.' });
+    if (err.code === '42703') return res.status(503).json({ error: 'Dossier administratif indisponible : base non migrée.' });
     console.error('[INSERTION] Erreur cadre PUT :', err.message);
     return res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    rendre();
   }
-  client.release();
 
   try {
     await journaliser(req, 'INSERTION_CADRE_MODIFICATION', employeeId, { champs });

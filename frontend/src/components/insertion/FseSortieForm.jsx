@@ -135,8 +135,8 @@ export default function FseSortieForm({ employeeId, mode = 'sortie', valeurs = n
           <>
             <p className="text-[12px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2">
               Relevé de la situation de la personne six mois après sa sortie — c'est l'indicateur de résultat
-              du cofinancement. Si la personne est injoignable, choisissez « Non renseignée » : le relevé aura
-              été fait, et c'est cela que le bilan mesure.
+              du cofinancement. Si la personne a changé de numéro ou ne répond plus, choisissez « Injoignable » :
+              le relevé aura été fait, et l'autorité distingue une personne injoignable d'un oubli de saisie.
             </p>
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-1.5">Situation à +6 mois</label>
