@@ -502,15 +502,69 @@ async function checkRenouvellementsAPreparer() {
 }
 
 /**
- * Suivis post-sortie (extension 2026-07 PR1, EXG-08) — un bilan de sortie
- * réalisé il y a ~3 mois sans entretien suivi_post_sortie sur le même parcours
- * → création de l'entretien (échéance = sortie + 3 mois, statut a_planifier
- * pour entrer dans la chaîne d'alertes de planification). Fenêtre bornée à
- * 7 mois pour ne pas ressusciter les anciens dossiers au déploiement.
- * NB : pas de filtre is_active (les sortis sont généralement désactivés).
+ * Alerte « sortie FSE+ non renseignée » (PR A lot 2) — ENVELOPPE.
+ *
+ * Le corps du job vit dans `services/fse-participants.js`, livré par le lot 2.
+ * Le `require` est donc PARESSEUX et gardé : les deux lots sont écrits en
+ * parallèle, et un scheduler qui planterait au chargement parce qu'un fichier
+ * n'existe pas encore arrêterait TOUS les autres jobs (alertes d'entretien,
+ * purges RGPD, sauvegardes) — le coût d'un module manquant doit rester borné à
+ * ce job-là. Absent ou incomplet → un avertissement au journal, jamais une
+ * exception : la supervision verra alors « jamais exécuté » pour ce job, ce qui
+ * est exactement l'information utile.
+ *
+ * @returns {Promise<{crees:number, verifies:number}>}
+ */
+async function checkFseSortiesNonRenseignees() {
+  let fseParticipants = null;
+  try {
+    fseParticipants = require('./fse-participants');
+  } catch (_) {
+    console.warn('[SCHEDULER] checkFseSortiesNonRenseignees ignoré : services/fse-participants.js absent');
+    return { crees: 0, verifies: 0 };
+  }
+  if (!fseParticipants || typeof fseParticipants.checkFseSortiesNonRenseignees !== 'function') {
+    console.warn('[SCHEDULER] checkFseSortiesNonRenseignees ignoré : la fonction n\'est pas encore exportée par services/fse-participants.js');
+    return { crees: 0, verifies: 0 };
+  }
+  return fseParticipants.checkFseSortiesNonRenseignees();
+}
+
+/**
+ * Suivis post-sortie (extension 2026-07 PR1, EXG-08 — délai porté à +6 mois par
+ * la PR A lot 0) : un bilan de sortie réalisé sans entretien `suivi_post_sortie`
+ * sur le même parcours → création de l'entretien (statut `a_planifier`, pour
+ * qu'il entre dans la chaîne d'alertes de planification).
+ *
+ * POURQUOI +6 ET NON +3. Le délai était fixé à 3 mois dans le code, sans
+ * paramètre. Or l'indicateur de RÉSULTAT que l'autorité et le cofinanceur FSE+
+ * mesurent — « situation de la personne à six mois de sa sortie » — se relève à
+ * +6 mois : un jalon posé à +3 faisait travailler la CIP sans documenter ce qui
+ * est demandé, et le relevé à 6 mois n'était réclamé nulle part. Le délai
+ * devient donc un réglage (`insertion.post_sortie_mois`, défaut 6, borné 1-12
+ * par `readPostSortieMois`), et le TITRE porte le délai retenu : un dossier
+ * archivé doit dire à quelle échéance le suivi était attendu, sans qu'on ait à
+ * relire le réglage du jour.
+ *
+ * FENÊTRE DE CRÉATION [mois−1 ; mois+4] après la sortie, calculée en mois
+ * calendaires (`make_interval`, paramétré) et non en jours fixes :
+ *  - borne basse `mois−1` : on pose le jalon un mois AVANT l'échéance, le temps
+ *    de reprendre contact avec une personne qui a quitté la structure ;
+ *  - borne haute `mois+4` : au-delà, la donnée n'est plus recueillable et
+ *    ressusciter les anciens dossiers au déploiement (ou à un changement de
+ *    réglage) n'apporterait qu'un jalon en retard de naissance.
+ * Idempotent : le `NOT EXISTS` empêche le doublon, et une violation d'unicité
+ * concurrente (23505) est absorbée — un second passage ne crée rien.
+ * NB : pas de filtre `is_active` (les sortis sont généralement désactivés).
+ *
+ * @returns {Promise<{crees:number, verifies:number}>} pour le journal job_runs
  */
 async function createPostSortieFollowups() {
+  let crees = 0;
+  let verifies = 0;
   try {
+    const { readPostSortieMois } = require('../utils/insertion-settings');
+    const mois = await readPostSortieMois();
     const rows = await pool.query(
       `SELECT im.id, im.employee_id, COALESCE(im.parcours_num, 1) AS parcours_num,
               im.completed_date, e.first_name, e.last_name
@@ -518,26 +572,30 @@ async function createPostSortieFollowups() {
        JOIN employees e ON e.id = im.employee_id
        WHERE im.milestone_type = 'bilan_sortie' AND im.status = 'realise'
          AND im.completed_date IS NOT NULL
-         AND im.completed_date <= CURRENT_DATE - INTERVAL '80 days'
-         AND im.completed_date >= CURRENT_DATE - INTERVAL '7 months'
+         AND im.completed_date <= CURRENT_DATE - make_interval(months => $1)
+         AND im.completed_date >= CURRENT_DATE - make_interval(months => $2)
          AND NOT EXISTS (
            SELECT 1 FROM insertion_milestones s
            WHERE s.employee_id = im.employee_id
              AND COALESCE(s.parcours_num, 1) = COALESCE(im.parcours_num, 1)
              AND s.milestone_type = 'suivi_post_sortie'
-         )`
+         )`,
+      [Math.max(0, mois - 1), mois + 4]
     );
+    verifies = rows.rows.length;
+    const titre = `Suivi post-sortie (+${mois} mois)`;
     for (const r of rows.rows) {
       const due = new Date(r.completed_date);
-      due.setMonth(due.getMonth() + 3);
+      due.setMonth(due.getMonth() + mois);
       try {
         await pool.query(
           `INSERT INTO insertion_milestones
              (employee_id, parcours_num, milestone_type, titre, due_date, status, previous_milestone_id)
-           VALUES ($1, $2, 'suivi_post_sortie', 'Suivi post-sortie', $3, 'a_planifier', $4)`,
-          [r.employee_id, r.parcours_num, due.toISOString().split('T')[0], r.id]
+           VALUES ($1, $2, 'suivi_post_sortie', $3, $4, 'a_planifier', $5)`,
+          [r.employee_id, r.parcours_num, titre, due.toISOString().split('T')[0], r.id]
         );
-        console.log(`[SCHEDULER] Suivi post-sortie cree pour ${r.first_name} ${r.last_name}`);
+        crees++;
+        console.log(`[SCHEDULER] Suivi post-sortie (+${mois} mois) cree pour ${r.first_name} ${r.last_name}`);
       } catch (e) {
         if (e.code !== '23505') throw e;
       }
@@ -545,6 +603,7 @@ async function createPostSortieFollowups() {
   } catch (err) {
     console.error('[SCHEDULER] Erreur createPostSortieFollowups:', err.message);
   }
+  return { crees, verifies };
 }
 
 /**
@@ -2017,6 +2076,10 @@ async function runAllJobs() {
     await runInstrumented('checkPassIaeExpiring', checkPassIaeExpiring);
     await runInstrumented('checkRenouvellementsAPreparer', checkRenouvellementsAPreparer);
     await runInstrumented('createPostSortieFollowups', createPostSortieFollowups);
+    // Conformité FSE+ : une sortie non renseignée dans les semaines qui suivent
+    // la fin du contrat n'est plus recueillable — d'où un job quotidien plutôt
+    // qu'un contrôle à la demande.
+    await runInstrumented('checkFseSortiesNonRenseignees', checkFseSortiesNonRenseignees);
     // Filet de la note de profil initial (2.43.0) : rattrape les liaisons dont
     // la génération à chaud a échoué. Placé après les jobs d'insertion, il ne
     // retarde aucune alerte.
@@ -2100,6 +2163,10 @@ module.exports = {
   // Filet de la note de profil initial CIP (2.43.0) — exposé pour les tests
   // et pour un déclenchement manuel de rattrapage.
   genererNotesProfilManquantes,
+  // Suivi post-sortie (+N mois) et alerte de sortie FSE+ non renseignée —
+  // exposés pour les tests et pour un déclenchement manuel de rattrapage.
+  createPostSortieFollowups,
+  checkFseSortiesNonRenseignees,
   checkRseEcheances,
   checkEnergieSaisie,
   checkQhseDocuments,

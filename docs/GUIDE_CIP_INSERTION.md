@@ -1,7 +1,7 @@
 # Guide CIP — Le module Insertion au quotidien
 
 > **Module livré (parcours d'insertion étendu) — dernière mise à jour 23/07/2026 (lot 8 inclus).**
-> Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Seul le **volet RSE de l'insertion (RSEi)** fait l'objet d'une mission séparée et n'est pas traité ici. Les copies d'écran seront ajoutées après la première recette avec la CIP.
+> Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
 - **Public** : conseillère/conseiller en insertion professionnelle (CIP) de Solidarité Textiles ; certains passages concernent les encadrants techniques (ETI) et la direction.
 - **Principe du module** : chaque salarié en insertion a un **dossier unique de parcours** — une frise chronologique, des entretiens historisés, des objectifs, un journal d'actions. Tout ce que vous saisissez sert trois fois : votre suivi quotidien, le document remis au salarié, la preuve pour les contrôles (DDETS, CD76). **Vous ne saisissez jamais deux fois la même chose.**
@@ -82,6 +82,8 @@
 
 1. Depuis la fiche : **« Commencer le diagnostic d'accueil »**. Le questionnaire suit la trame que vous connaissez, **une rubrique à la fois** (repère « Rubrique 3/12 » et sommaire cliquable sur le côté) : identité et famille, logement, accès aux droits, santé, budget, mobilité, situation professionnelle, projet professionnel, expression du salarié, et les volets **linguistique** (auto-évaluation simplifiée CECRL + votre observation), **FSE+ (entrée)** et **situation judiciaire** (réduite au niveau de frein et à l'impact sur l'organisation du travail — voir vigilance).
 2. Chaque rubrique se conclut par votre **commentaire CIP** et, quand la rubrique nourrit un frein, par la **valorisation du frein** : une rangée de six boutons **[Non évalué | 1 | 2 | 3 | 4 | 5]**. Le bouton suggéré par les réponses est mis en évidence (la suggestion est **calculée par le serveur** à partir de vos réponses structurées) — **vous confirmez ou corrigez d'un clic, c'est toujours vous qui décidez**.
+
+> **Sens de l'échelle — à lire une fois pour toutes.** **1 = pas de difficulté sur cet axe. 5 = difficulté bloquante.** Le chiffre **monte avec la difficulté**, et la couleur du bouton le confirme (1-2 vert, 3 jaune, 4-5 orange puis rouge). C'est le même sens partout : radar, tendances (↗ signifie que le frein **s'aggrave**), export 23 colonnes, indicateurs de pilotage. *Deux guides diffusés portaient l'échelle inversée ; ils sont corrigés — si vous avez appris l'inverse, c'est bien cette version qui fait foi.*
 3. La rubrique **« expression du salarié »** (attentes, difficultés, objectifs, aide souhaitée — les mots du salarié) alimente directement les **objectifs du parcours**, marqués « origine : salarié ». C'est la trace de la co-construction.
 4. Vous pouvez **vous arrêter à tout moment** : le diagnostic reste « en cours » et, à la réouverture, reprend là où vous étiez. Faire le diagnostic en **deux séances** (par exemple garder Santé et Budget pour un second rendez-vous, quand la confiance est là) est prévu — l'essentiel est de terminer dans la fenêtre des 30 jours.
 5. À la fin : le radar des freins (la **toile d'araignée**, 9 axes) s'affiche, avec les « non évalué » réellement absents du tracé. Clôturez, puis générez le **PDF** (exemplaire salarié / exemplaire dossier — voir cas 16).
@@ -395,7 +397,7 @@ Trois éléments se cumulent : la case « validé en présence du salarié » co
 Elle reçoit un dossier pseudonymisé (jamais le nom, jamais les identifiants), produit une note étiquetée « Proposition IA », que vous éditez librement. Elle ne fixe aucun niveau de frein, ne classe aucune sortie, ne prend aucune décision. Tout reste à votre main.
 
 **5. Je ne peux pas évaluer un frein (sujet pas encore abordé) : je mets 1 ?**
-Non, jamais. Choisissez « Non évalué » : l'axe n'est pas tracé sur la toile d'araignée et n'entre pas dans les moyennes. Un 1 « par défaut » fausse tout.
+Non, jamais. Sur l'échelle, **1 signifie « pas de difficulté »** — le mettre par défaut, c'est affirmer que tout va bien sur un sujet que vous n'avez pas abordé. Choisissez « Non évalué » : l'axe n'est alors pas tracé sur la toile d'araignée et n'entre pas dans les moyennes. C'est la seule réponse honnête, et elle est prévue pour cela.
 
 **6. Un ancien salarié est réembauché : comment faire ?**
 Sa réentrée en parcours ouvre un **nouveau parcours** (numéroté) sur le même dossier : nouveau diagnostic d'accueil (dans les 30 jours), nouveaux bilans, nouveau bilan de sortie et nouvelle enquête de satisfaction le moment venu. L'historique du premier parcours reste lisible sur la frise.
@@ -429,7 +431,7 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **Échéances du parcours** | Les rendez-vous obligatoires posés automatiquement (diagnostic, renouvellements, bilan de sortie) — appelés « jalons » dans les documents techniques. |
 | **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement sur son écran dédié et **note les grilles de compétences métier** (onglet Compétences) ; n'accède jamais aux volets santé, judiciaire ou budget. |
 | **File active** | L'ensemble des salariés en parcours dont vous êtes référente. |
-| **Frein** | Difficulté périphérique à l'emploi, évaluée de 1 (très bloquant) à 5 (résolu) ou « non évalué ». Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
+| **Frein** | Difficulté périphérique à l'emploi, évaluée de **1 (pas de difficulté)** à **5 (bloquant)**, ou « non évalué ». Le chiffre monte avec la difficulté : c'est le sens de l'échelle affichée à l'écran (1 vert → 5 rouge). Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
 | **Jalon** | Terme technique pour une échéance du parcours (voir ci-dessus). |
 | **Pass IAE** | Agrément individuel délivré via la plateforme des emplois de l'inclusion, valable 24 mois, prolongeable par un prescripteur habilité sur présentation d'un bilan du parcours. |
 | **Période d'essai (entretien de)** | Point formalisé à environ un mois : décision « confirmée / à revoir / rompue ». Auto-créé à la liaison recrutement (cas 6). |
@@ -444,12 +446,12 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 
 ---
 
-## 19. Le volet RSE de l'insertion (mission séparée)
+## 19. Le volet RSE de la structure — un autre module, livré
 
-Le module couvre désormais **l'ensemble du parcours d'accompagnement**, de l'entrée au suivi post-sortie, **espace encadrant technique compris** : les grilles de compétences métier (cas 7), le portefeuille de compétences et le style d'apprentissage au diagnostic (cas 4), l'entretien de période d'essai (cas 6) et la check-list d'embauche (cas 5) sont tous **livrés**. Il n'y a plus de « phase 2 » de l'accompagnement en attente.
+Le module Insertion couvre **l'ensemble du parcours d'accompagnement**, de l'entrée au suivi post-sortie, **espace encadrant technique compris** : les grilles de compétences métier (cas 7), le portefeuille de compétences et le style d'apprentissage au diagnostic (cas 4), l'entretien de période d'essai (cas 6) et la check-list d'embauche (cas 5) sont tous **livrés**.
 
-Reste, hors de ce guide, un seul chantier : le **volet RSE de l'insertion (RSEi)** — pilotage de la responsabilité sociale de la structure (module Pilotage RSE) — qui fait l'objet d'une **mission dédiée séparée**. Il ne fait pas partie du module Insertion décrit ici et sera documenté à part le moment venu.
+Le **pilotage de la démarche de labellisation RSEi** n'est pas « une mission séparée » à venir : c'est un **module de l'application, livré** — « Pilotage RSE » (27 critères du référentiel, plan d'action, registre de preuves, campagnes d'auto-évaluation, matrice des parties prenantes, bilan RSE annuel et dossier de préparation AFNOR). Il n'est pas décrit ici parce qu'il n'est pas votre outil de travail quotidien : **c'est la structure qui est labellisée, jamais le logiciel**, et le module ne manipule que des **agrégats non nominatifs** — aucune donnée individuelle de parcours n'y entre. Ce que votre accompagnement produit (traçabilité, boucle d'écoute, indicateurs sociaux) y sert de **preuve**, sans qu'aucun dossier ne quitte le module Insertion.
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). Les copies d'écran seront ajoutées lors de la première recette avec la CIP.*
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP.*
