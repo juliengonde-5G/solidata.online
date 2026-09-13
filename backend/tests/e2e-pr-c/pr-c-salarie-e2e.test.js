@@ -848,7 +848,12 @@ const brut = (o) => JSON.stringify(o);
       expect(liste.length).toBe(10);
       const p = liste.find((x) => x.cle === 'rappels_rdv');
       expect(p).toBeDefined();
-      expect(p.retention.valeur).toBe(365);
+      // 90 jours depuis l'arbitrage de minimisation (point 4 de la revue de
+      // sécurité) : rien n'exige de garder un an la preuve qu'un SMS de rappel
+      // est parti, 90 jours suffisent à traiter une réclamation. Le défaut est
+      // lu de la source UNIQUE des réglages d'insertion — deux défauts en dur
+      // auraient divergé au premier arbitrage, et c'est celui-ci.
+      expect(p.retention.valeur).toBe(90);
     });
   });
 

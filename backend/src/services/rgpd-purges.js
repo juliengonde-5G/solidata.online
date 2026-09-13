@@ -771,8 +771,22 @@ async function purgeExpiredRefreshTokens({ trigger = 'auto', userId = null } = {
 // 8. RAPPELS DE RENDEZ-VOUS ENVOYÉS AUX SALARIÉS (PR C lot 7)
 // ══════════════════════════════════════════
 
-/** Rétention par défaut de la trace des rappels (jours) — miroir du réglage. */
-const RAPPELS_RDV_RETENTION_DEFAUT_JOURS = 365;
+/**
+ * Rétention par défaut de la trace des rappels (jours).
+ *
+ * Lue de la source UNIQUE des réglages d'insertion : deux défauts en dur, c'est
+ * une divergence garantie au premier arbitrage — celui-ci est précisément
+ * arrivé (365 → 90, minimisation ; rien n'exige de garder un an la preuve qu'un
+ * SMS de rappel est parti). Le repli 90 ne sert que si le dictionnaire est
+ * inaccessible.
+ */
+const RAPPELS_RDV_RETENTION_DEFAUT_JOURS = (() => {
+  try {
+    const { INSERTION_SETTING_DEFAULTS } = require('../utils/insertion-settings');
+    const v = INSERTION_SETTING_DEFAULTS && INSERTION_SETTING_DEFAULTS['insertion.rappels_retention_jours'];
+    return Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : 90;
+  } catch (_) { return 90; }
+})();
 
 /**
  * Supprime la trace des rappels de rendez-vous envoyés passé le délai.
