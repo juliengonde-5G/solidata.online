@@ -333,3 +333,24 @@ variable d'environnement associée.
 | Clé `settings` | Emplacement | Valeur par défaut |
 |-----------------|-------------|--------------------|
 | `insertion.note_profil_auto` | `backend/src/utils/insertion-settings.js` | `true` — génération systématique à la liaison candidat→collaborateur (désactivable) |
+
+### Cadre RSA et temps d'accompagnement — PR B (2.53.0, 13/09/2026)
+
+Solidarité Textiles est **structure d'accueil**, pas référent unique (décision de direction du
+12/09/2026) : ces cinq réglages tiennent le compteur d'activité hebdomadaire, la périodicité
+attendue des points avec le référent et la clôture des feuilles de temps. Défauts en code dans
+`backend/src/utils/insertion-settings.js`, éditables dans **Réglages insertion** (`/admin/insertion`).
+
+| Clé `settings` | Défaut | Usage |
+|-----------------|--------|-------|
+| `insertion.cer_heures_min` | `15` | Plancher hebdomadaire d'activité (temps de travail CDDI + accompagnement + PMSMP). Sert au calcul du compteur, jamais affiché comme un « seuil » sur un document que la personne peut voir. |
+| `insertion.cer_heures_max` | `20` | Plafond informatif. **Ne déclenche jamais d'alerte** : dépasser 20 h en CDDI n'est pas un manquement, c'est un contrat de travail. |
+| `insertion.semaines_sous_seuil_consecutives` | `2` | Nombre de semaines **consécutives** en dessous du plancher qui déclenchent le signalement — jamais pendant une semaine couverte par un arrêt déclaré, et une semaine sans relevé d'heures interrompt la série au lieu de la prolonger. |
+| `insertion.point_etape_referent_mois` | `3` | Périodicité attendue d'un contact avec le référent unique — un entretien « Point avec le référent » tenu **ou** une fiche pour le référent effectivement remise ; les deux valent alimentation. |
+| `insertion.feuille_temps_cloture_jour` | `10` | Jour du mois suivant à partir duquel une feuille de temps non validée est signalée à l'écran. Ce n'est pas une date limite opposable à l'intervenant, seulement le moment où le retard devient visible. |
+
+Deux réglages voisins, déjà en place depuis la PR A et réutilisés par le lot 3, complètent la
+fourchette d'entretien : `insertion.duree_entretien_defaut` (objet JSON, durée proposée à la
+clôture par type d'entretien) reçoit deux entrées supplémentaires — `point_etape_referent: 60` et
+`conciliation: 45` — qui suivent la même doctrine (une durée **proposée**, jamais imposée, en
+minutes déclaratives).
