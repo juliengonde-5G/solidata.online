@@ -46,6 +46,14 @@ const REFERENT_MODALITES = ['tripartite', 'bilaterale'];
 const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../utils/field-crypto');
 const { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS } = require('./masking');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
+// PR C lot 5 — la file active, la pastille de risque et la complétude du socle
+// viennent TOUTES du moteur d'échéances : une seconde règle ici et la liste
+// contredirait l'écran « Mes échéances » (contrat 20 § 5.2 / 5.5).
+const {
+  sqlSocleComplet, sqlPerimetreFileActive, niveauxRisqueCohorte, lienEti,
+} = require('../../services/echeances-cip');
+const { isoDate } = require('../../utils/date-iso');
+const { journalPour } = require('../../utils/insertion-journal');
 const { autoLogActivity } = require('../../middleware/activity-logger');
 const { PMSMP_MAX_JOURS_CONVENTION, PMSMP_MAX_CUMUL_12M, pmsmpDays, computeCumul12MoisGlissants } = require('./pmsmp-rules');
 const { ageBracket } = require('../../utils/pii-pseudonymize');
@@ -130,14 +138,46 @@ function decryptDiagRow(row) {
 const DYNAMIC_SORTIE_CLASSES = ['emploi_durable', 'emploi_transition', 'sortie_positive'];
 const SORTIE_CLASSES = [...DYNAMIC_SORTIE_CLASSES, 'autre'];
 
-// GET /api/insertion — Vue d'ensemble de tous les employés actifs
-// IMPORTANT: doit etre AVANT /:employeeId pour ne pas etre intercepte
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /api/insertion — FILE ACTIVE (PR C lot 5, contrat 20 § 5.2)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Ce que cette route corrige, et pourquoi ce n'est pas un détail d'affichage :
+//
+//  - LES PERMANENTS SORTENT. La liste rendait `is_active = true` sans regarder
+//    `insertion_status` : la CIP y trouvait les chauffeurs, les encadrants, la
+//    comptable. Une file de suivi qui contient des gens qu'on ne suit pas n'est
+//    plus une file, c'est un annuaire.
+//
+//  - `is_active` N'EST PLUS UN FILTRE. Une personne SORTIE est inactive — et
+//    c'est précisément à ce moment-là que la sortie FSE+ et le relevé à +6 mois
+//    deviennent dus. La faire disparaître le jour où le travail commence était
+//    la meilleure façon de ne jamais le faire. Elle reste donc visible tant que
+//    `insertion.file_active_terminees_mois` (7) n'est pas écoulé ; `?inclure=tous`
+//    rend tous les parcours, même anciens.
+//
+//  - `brsa` N'EST PAS LU POUR UN MANAGER. Pas masqué après lecture : ABSENT de
+//    la requête (même correctif que C-03 de la PR A). Un statut social qui
+//    traverse le réseau « pour être retiré ensuite » a déjà fuité une fois de
+//    trop dans ce module.
+//
+//  - `risque` VIENT DES OBLIGATIONS, par la MÊME fonction que l'écran
+//    « Mes échéances » (`services/echeances-cip.js`). Une seconde règle ici, et
+//    la pastille de la liste contredirait la liste des échéances — celle qu'on
+//    croit étant toujours la plus visible.
+//
+// IMPORTANT : doit rester AVANT /:employeeId pour ne pas être intercepté.
 router.get('/', async (req, res) => {
   try {
+    const baseRole = baseRoleOf(req);
+    const adminRh = ['ADMIN', 'RH'].includes(baseRole);
+    const tous = req.query.inclure === 'tous';
+    const mine = req.query.mine === '1' || req.query.mine === 'true';
+
     // Detecter quelles tables existent pour adapter la requete
     const tablesCheck = await pool.query(`
       SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('employee_contracts', 'pcm_reports', 'insertion_diagnostics')
+      WHERE table_schema = 'public' AND table_name IN ('employee_contracts', 'pcm_reports', 'insertion_diagnostics', 'insertion_projet_participants')
     `);
     const existingTables = new Set(tablesCheck.rows.map(r => r.table_name));
 
@@ -159,21 +199,72 @@ router.get('/', async (req, res) => {
       subqueries += `, 0 as has_pcm`;
     }
     if (existingTables.has('insertion_diagnostics')) {
+      // La complétude du SOCLE est dérivée du fichier partagé
+      // `backend/src/data/diagnostic-socle-champs.json` : le stepper du
+      // diagnostic et cette colonne désignent les mêmes champs, sans quoi
+      // l'écran afficherait « socle terminé » pendant que la file le nie.
       subqueries += `,
-        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics diag WHERE diag.employee_id = e.id), 0) as has_diagnostic`;
+        COALESCE((SELECT COUNT(*)::int FROM insertion_diagnostics diag WHERE diag.employee_id = e.id), 0) as has_diagnostic,
+        COALESCE((SELECT ${sqlSocleComplet('d2')} FROM insertion_diagnostics d2
+                   WHERE d2.employee_id = e.id AND COALESCE(d2.parcours_num, 1) = COALESCE(e.parcours_num, 1)
+                   LIMIT 1), false) as diagnostic_socle_complet`;
     } else {
-      subqueries += `, 0 as has_diagnostic`;
+      subqueries += `, 0 as has_diagnostic, false as diagnostic_socle_complet`;
+    }
+    if (existingTables.has('insertion_projet_participants')) {
+      subqueries += `,
+        COALESCE((SELECT ARRAY_AGG(DISTINCT UPPER(pr.type)) FROM insertion_projet_participants pp
+                   JOIN insertion_projets pr ON pr.id = pp.projet_id
+                  WHERE pp.employee_id = e.id AND pp.date_sortie IS NULL), ARRAY[]::text[]) as projets`;
+    } else {
+      subqueries += `, ARRAY[]::text[] as projets`;
+    }
+
+    const moisTermines = await readInsertionSetting('insertion.file_active_terminees_mois');
+    const perimetre = sqlPerimetreFileActive({ alias: 'e', moisTermines, tous });
+    const params = [];
+    let filtreMine = '';
+    if (mine && req.user && req.user.id != null) {
+      params.push(req.user.id);
+      filtreMine = ` AND e.cip_referent_user_id = $${params.length}`;
     }
 
     const result = await pool.query(`
       SELECT e.id, e.first_name, e.last_name, e.is_active,
-        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end
+        t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end,
+        e.insertion_status, e.insertion_start_date, e.insertion_end_date,
+        COALESCE(e.parcours_num, 1) AS parcours_num,
+        e.cip_referent_user_id,
+        NULLIF(TRIM(CONCAT(UPPER(u.last_name), ' ', u.first_name)), '') AS cip_referent_nom,
+        e.pass_iae_statut, e.pass_iae_end, e.referent_unique_type,
+        ${adminRh ? 'e.brsa' : 'NULL::boolean AS brsa'},
+        rdv.interview_date AS prochain_rdv_date, rdv.milestone_type AS prochain_rdv_type,
+        rdv.titre AS prochain_rdv_titre,
+        der.completed_date AS dernier_entretien
         ${subqueries}
       FROM employees e
       LEFT JOIN teams t ON e.team_id = t.id
-      WHERE e.is_active = true
+      LEFT JOIN users u ON u.id = e.cip_referent_user_id
+      LEFT JOIN LATERAL (
+        SELECT im.interview_date, im.milestone_type, im.titre
+          FROM insertion_milestones im
+         WHERE im.employee_id = e.id AND im.status = 'planifie'
+           AND im.interview_date IS NOT NULL AND im.interview_date >= NOW() - INTERVAL '1 day'
+         ORDER BY im.interview_date LIMIT 1
+      ) rdv ON true
+      LEFT JOIN LATERAL (
+        SELECT im.completed_date FROM insertion_milestones im
+         WHERE im.employee_id = e.id AND im.status = 'realise' AND im.completed_date IS NOT NULL
+         ORDER BY im.completed_date DESC LIMIT 1
+      ) der ON true
+      WHERE ${perimetre}${filtreMine}
       ORDER BY UPPER(e.last_name), UPPER(e.first_name)
-    `);
+    `, params);
+
+    // Pastille de risque — chargée une seule fois pour toute la cohorte, et
+    // dégradée en silence si elle échoue (une liste sans pastille reste une
+    // liste utilisable ; une liste qui rend 500 ne l'est pas).
+    const risques = await niveauxRisqueCohorte({ db: pool, baseRole, userId: req.user && req.user.id, mine, tous });
 
     const now = new Date();
     const employees = result.rows.map(e => {
@@ -183,10 +274,29 @@ router.get('/', async (req, res) => {
         if (days <= 30) urgency = 'critique';
         else if (days <= 60) urgency = 'attention';
       }
-      return { ...e, urgency, has_pcm: e.has_pcm > 0, has_diagnostic: e.has_diagnostic > 0 };
+      const heure = e.prochain_rdv_date
+        ? new Date(e.prochain_rdv_date).toISOString().slice(11, 16)
+        : null;
+      const ligne = {
+        ...e,
+        urgency,
+        has_pcm: e.has_pcm > 0,
+        has_diagnostic: e.has_diagnostic > 0,
+        diagnostic_socle_complet: e.diagnostic_socle_complet === true,
+        projets: Array.isArray(e.projets) ? e.projets.filter(Boolean) : [],
+        prochain_rdv: e.prochain_rdv_date ? {
+          date: isoDate(e.prochain_rdv_date),
+          heure: heure === '00:00' ? null : heure,
+          type: e.prochain_rdv_titre || e.prochain_rdv_type || null,
+        } : null,
+        dernier_entretien: isoDate(e.dernier_entretien),
+        risque: risques.get(Number(e.id)) || null,
+      };
+      delete ligne.prochain_rdv_date; delete ligne.prochain_rdv_type; delete ligne.prochain_rdv_titre;
+      return ligne;
     });
 
-    console.log(`[INSERTION] GET / → ${employees.length} salaries actifs`);
+    console.log(`[INSERTION] GET / → ${employees.length} parcours (${tous ? 'tous' : 'file active'})`);
     res.json(employees);
   } catch (err) {
     console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');
@@ -2698,7 +2808,8 @@ router.get('/renouvellements', async (req, res) => {
               m.id AS milestone_id, m.status AS milestone_status, m.titre AS milestone_titre,
               m.due_date AS milestone_due_date, m.renouvellement_avis, m.renouvellement_duree_mois,
               (m.renouvellement_form IS NOT NULL) AS formulaire_rempli,
-              (m.locked_at IS NOT NULL) AS verrouille
+              (m.locked_at IS NOT NULL) AS verrouille,
+              m.eti_token, m.eti_token_expires_at
        FROM employees e
        JOIN employee_contracts ec ON ec.employee_id = e.id AND ec.is_current = true
        LEFT JOIN LATERAL (
@@ -2716,28 +2827,113 @@ router.get('/renouvellements', async (req, res) => {
        ORDER BY ec.end_date, UPPER(e.last_name), UPPER(e.first_name)`,
       [jours]
     );
-    const renouvellements = rows.rows.map((r) => ({
-      employee_id: r.employee_id,
-      first_name: r.first_name,
-      last_name: r.last_name,
-      contract_id: r.contract_id,
-      contract_end: r.contract_end,
-      jours_restants: r.jours_restants,
-      a_creer: r.milestone_id == null,
-      entretien: r.milestone_id == null ? null : {
-        id: r.milestone_id,
-        status: r.milestone_status,
-        titre: r.milestone_titre,
-        due_date: r.milestone_due_date,
-        renouvellement_avis: r.renouvellement_avis,
-        renouvellement_duree_mois: r.renouvellement_duree_mois,
-        formulaire_rempli: r.formulaire_rempli === true,
-        verrouille: r.verrouille === true,
-      },
-    }));
+    const maintenant = new Date();
+    const renouvellements = rows.rows.map((r) => {
+      // Le lien public n'est exposé que s'il EXISTE ET n'est pas expiré :
+      // afficher une adresse qui répondra 410 vaut moins que ne rien afficher —
+      // la CIP l'enverrait, et l'encadrant se heurterait au refus.
+      const exp = r.eti_token_expires_at ? new Date(r.eti_token_expires_at) : null;
+      const vivant = !!r.eti_token && exp instanceof Date && !Number.isNaN(exp.getTime()) && exp > maintenant;
+      return {
+        employee_id: r.employee_id,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        contract_id: r.contract_id,
+        contract_end: r.contract_end,
+        jours_restants: r.jours_restants,
+        a_creer: r.milestone_id == null,
+        entretien: r.milestone_id == null ? null : {
+          id: r.milestone_id,
+          status: r.milestone_status,
+          titre: r.milestone_titre,
+          due_date: r.milestone_due_date,
+          renouvellement_avis: r.renouvellement_avis,
+          renouvellement_duree_mois: r.renouvellement_duree_mois,
+          formulaire_rempli: r.formulaire_rempli === true,
+          verrouille: r.verrouille === true,
+          lien_eti: vivant ? lienEti(r.eti_token) : null,
+          eti_expire_le: vivant ? r.eti_token_expires_at : null,
+        },
+      };
+    });
     res.json({ anticipation_jours: jours, total: renouvellements.length, renouvellements });
   } catch (err) {
     console.error('[INSERTION] Erreur renouvellements :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST /api/insertion/renouvellements/:milestoneId/lien-eti — PR C lot 5
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Produit le LIEN PUBLIC que la CIP envoie à l'encadrant technique. Jusqu'ici
+// le bouton « Copier le lien » copiait l'adresse d'un écran AUTHENTIFIÉ : son
+// destinataire — un encadrant d'atelier sans compte — tombait sur la page de
+// connexion. Le geste le plus courant du module était donc, en pratique,
+// impraticable.
+//
+// Régénérer REMPLACE le jeton précédent : c'est le mode de révocation, et il
+// n'en faut pas d'autre. Un lien envoyé par erreur se tue en en produisant un
+// nouveau, sans écran d'administration à inventer.
+const { journaliserDocument: journaliserLienEti } = journalPour('insertion_eti', '[INSERTION][ETI]');
+
+router.post('/renouvellements/:milestoneId/lien-eti', [
+  param('milestoneId').isInt().withMessage('ID invalide'),
+], validate, async (req, res) => {
+  try {
+    const cur = await pool.query(
+      'SELECT id, employee_id, milestone_type, locked_at FROM insertion_milestones WHERE id = $1',
+      [req.params.milestoneId]
+    );
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Entretien non trouvé' });
+    const ms = cur.rows[0];
+    if (ms.milestone_type !== 'renouvellement') {
+      return res.status(400).json({
+        error: "Un lien encadrant ne se produit que pour un entretien de renouvellement.",
+        code: 'TYPE_INVALIDE',
+      });
+    }
+    // Même garde d'appartenance que l'écriture du formulaire : un MANAGER ne
+    // fabrique un lien que pour un salarié dont il est l'encadrant référent.
+    if (baseRoleOf(req) === 'MANAGER' && !(await managerOwnsEmployee(pool, ms.employee_id, req.user.id))) {
+      return res.status(403).json({
+        error: "Accès refusé : vous n'êtes pas l'encadrant référent de ce salarié.",
+        code: 'renouvellement_non_autorise',
+      });
+    }
+    if (ms.locked_at) {
+      return res.status(409).json({
+        error: 'Entretien clôturé et verrouillé — aucun lien ne peut plus être produit.',
+        locked_at: ms.locked_at,
+      });
+    }
+
+    const jours = Math.round(Number(await readInsertionSetting('insertion.eti_token_validite_jours')) || 60);
+    const token = require('crypto').randomBytes(16).toString('hex');
+    const r = await pool.query(
+      `UPDATE insertion_milestones
+          SET eti_token = $1,
+              eti_token_expires_at = NOW() + make_interval(days => $2),
+              eti_token_generated_by = $3,
+              updated_at = NOW()
+        WHERE id = $4
+        RETURNING eti_token_expires_at`,
+      [token, jours, req.user && req.user.id, ms.id]
+    );
+
+    // Journal BLOQUANT : le lien ouvre un accès SANS COMPTE à une pièce du
+    // dossier. Sa production est le seul moment où l'on peut dire qui l'a
+    // ouvert — la trace ne porte que le PRÉFIXE du jeton, jamais le jeton
+    // entier (un registre lisible par un administrateur deviendrait sinon un
+    // trousseau de liens actifs).
+    await journaliserLienEti(pool, req, 'INSERTION_ETI_LIEN_GENERATION', ms.employee_id, {
+      milestone_id: ms.id, token_prefix: token.slice(0, 6), validite_jours: jours,
+    });
+
+    res.status(201).json({ lien: lienEti(token), expire_le: r.rows[0].eti_token_expires_at });
+  } catch (err) {
+    console.error('[INSERTION] Erreur génération lien ETI :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -4605,3 +4801,12 @@ module.exports = router;
 // dupliquer ~150 lignes de SQL. Un router Express est une fonction : on peut
 // lui attacher des propriétés sans changer son contrat.
 module.exports.gatherAuditKpis = gatherAuditKpis;
+// PR C lot 5 — helpers réutilisés par les surfaces voisines. `snapshotMilestone`
+// est appelé par le routeur PUBLIC `eti-public.js` : l'historisation d'un
+// entretien déjà réalisé doit être LA MÊME, qu'un avis entre par un compte ou
+// par un lien à jeton — une seconde copie de cet INSERT finirait par écrire un
+// autre `action` ou un autre `changed_by`, et l'historique probant n'aurait
+// plus une seule forme.
+module.exports.snapshotMilestone = snapshotMilestone;
+module.exports.managerOwnsEmployee = managerOwnsEmployee;
+module.exports.baseRoleOf = baseRoleOf;
