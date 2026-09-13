@@ -23,6 +23,51 @@ import StyleApprentissage from './StyleApprentissage';
 
 const AUTOSAVE_MS = 30000;
 
+// ── Questionnaire FSE+ d'entrée (PR A lot 2) ──────────────────────────────
+// Les valeurs sont CELLES DU SCHÉMA SERVEUR (backend/src/utils/fse-schema.js) :
+// l'écran ne peut pas proposer une réponse que la validation refuserait.
+const FSE_QUESTIONS = [
+  {
+    cle: 'statut_avant_entree',
+    libelle: "Situation avant l'entrée dans la structure",
+    options: [['demandeur_emploi', "Demandeur d'emploi"], ['inactif', 'Inactif'], ['emploi', 'En emploi'], ['formation', 'En formation']],
+  },
+  {
+    cle: 'duree_sans_emploi',
+    libelle: "Durée sans emploi avant l'entrée",
+    options: [['lt_6m', '< 6 mois'], ['6_12m', '6 – 12 mois'], ['12_24m', '12 – 24 mois'], ['gt_24m', '> 24 mois']],
+  },
+  { cle: 'foyer_monoparental', libelle: 'Foyer monoparental', options: [[true, 'Oui'], [false, 'Non']] },
+  { cle: 'sans_domicile_stable', libelle: 'Sans domicile stable', options: [[true, 'Oui'], [false, 'Non']] },
+  {
+    cle: 'ressources_principales',
+    libelle: 'Ressources principales',
+    options: [['rsa', 'RSA'], ['are', 'ARE'], ['aah', 'AAH'], ['ass', 'ASS'], ['aucune', 'Aucune'], ['autre', 'Autre']],
+  },
+];
+
+// Réponses saisies AVANT la PR A, quand le questionnaire était un objet libre.
+// Le serveur les convertit à l'écriture ; ici on les convertit à l'AFFICHAGE,
+// sinon un dossier déjà rempli paraîtrait vide et serait ressaisi pour rien.
+const FSE_ALIAS = { moins_6_mois: 'lt_6m', '6_12_mois': '6_12m', '12_24_mois': '12_24m', plus_24_mois: 'gt_24m' };
+const fseNormaliser = (cle, v) => (cle === 'duree_sans_emploi' && FSE_ALIAS[v]) || v;
+
+/** Rangée de boutons de réponse (maquette 5) — un clic, jamais une liste. */
+function ChipsReponse({ value, onChange, options }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map(([v, l]) => (
+        <button key={String(v)} type="button" onClick={() => onChange(value === v ? null : v)}
+          className={`px-3 py-1.5 rounded-lg border text-sm transition ${
+            value === v ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'
+          }`}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Petits contrôles de saisie ──
 
 function BoolPicker({ value, onChange, labels = ['Oui', 'Non'] }) {
@@ -166,6 +211,14 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   // Suggestions calculées par le SERVEUR (renvoyées par le PUT — écart 1b) ;
   // prioritaires sur le pré-calcul local.
   const [serverSuggestions, setServerSuggestions] = useState(() => diagnostic?.suggestions_freins || null);
+  // PR A lot 2 — le questionnaire FSE+ arrive PRÉ-REMPLI par déduction des
+  // rubriques précédentes (amendement CIP 08 § 10). Trois états distincts :
+  // la proposition du serveur, les propositions écartées d'un clic (« Corriger »),
+  // et le fait d'être participant d'une opération ASI — qui rend la rubrique
+  // obligatoire et la marque en rouge dans le sommaire.
+  const [fseSuggestions, setFseSuggestions] = useState(() => diagnostic?.suggestions_fse || {});
+  const [fseEcartees, setFseEcartees] = useState({});
+  const [participantAsi, setParticipantAsi] = useState(false);
   const pendingRef = useRef({});
   const timerRef = useRef(null);
   const freins = visibleFreins(baseRole);
@@ -175,6 +228,8 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
     const d = diagnostic || {};
     setDraft({ ...d });
     setServerSuggestions(d.suggestions_freins || null);
+    setFseSuggestions(d.suggestions_fse || {});
+    setFseEcartees({});
     pendingRef.current = {};
     let resume = 0;
     for (let i = 0; i < STEPS.length - 1; i++) {
@@ -183,6 +238,16 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
     }
     setStep(d.statut_saisie === 'complet' ? 0 : resume);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId]);
+
+  // Rattachement à une opération cofinancée — réservé ADMIN/RH côté serveur :
+  // un refus (403) n'est pas une erreur ici, c'est l'absence d'habilitation.
+  useEffect(() => {
+    let vivant = true;
+    api.get(`/insertion/fse/${employeeId}`)
+      .then((r) => { if (vivant) setParticipantAsi(!!r.data?.participant_asi); })
+      .catch(() => { if (vivant) setParticipantAsi(false); });
+    return () => { vivant = false; };
   }, [employeeId]);
 
   const markDirty = useCallback((dirty) => { if (onDirtyChange) onDirtyChange(dirty); }, [onDirtyChange]);
@@ -199,6 +264,7 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
       markDirty(false);
       if (res.data?.statut_saisie) setDraft((f) => ({ ...f, statut_saisie: res.data.statut_saisie }));
       if (res.data?.suggestions_freins) setServerSuggestions(res.data.suggestions_freins);
+      if (res.data?.suggestions_fse) setFseSuggestions(res.data.suggestions_fse);
       if (onSaved) onSaved(res.data);
       setSaving(false);
       return true;
@@ -247,6 +313,15 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
   const cur = STEPS[step];
   const fse = draft.fse_entree || {};
   const setFse = (k, v) => setField('fse_entree', { ...fse, [k]: v });
+  // Complétude sur les 5 items OBLIGATOIRES (le commentaire est une aide, pas
+  // une pièce du dossier) — même règle que le serveur.
+  const fseRenseignes = FSE_QUESTIONS.filter((q) => {
+    const v = fse[q.cle];
+    return v !== null && v !== undefined && v !== '';
+  }).length;
+  const fseIncomplet = fseRenseignes < FSE_QUESTIONS.length;
+  /** Accepte la proposition du serveur (« Confirmer ») : la valeur est alors saisie. */
+  const confirmerFse = (cle, valeur) => { setFse(cle, valeur); setFseEcartees((e) => ({ ...e, [cle]: true })); };
 
   // Champs internes masqués en mode relecture (co-construction avec le salarié).
   const hideInternal = relecture;
@@ -302,9 +377,15 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                   i === step ? 'bg-teal-600 text-white' : 'text-gray-600 hover:bg-gray-100'
                 }`}>
                 <span>{i + 1}. {st.label}</span>
-                <span className={`text-[10px] px-1.5 rounded-full ${i === step ? 'bg-white/20' : n === t && t > 0 ? 'bg-green-100 text-green-700' : n > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'}`}>
-                  {n}/{t}
-                </span>
+                {st.id === 'fse' && participantAsi && fseIncomplet && i !== step ? (
+                  <span className="text-[10px] px-1.5 rounded-full bg-red-100 text-red-700 font-semibold" title="Participant d'une opération cofinancée : ce questionnaire est obligatoire">
+                    {fseRenseignes}/{FSE_QUESTIONS.length}
+                  </span>
+                ) : (
+                  <span className={`text-[10px] px-1.5 rounded-full ${i === step ? 'bg-white/20' : n === t && t > 0 ? 'bg-green-100 text-green-700' : n > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'}`}>
+                    {n}/{t}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -528,32 +609,65 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
 
           {cur.id === 'fse' && (
             <div className="space-y-3">
-              <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2">
-                Questionnaire participant FSE+ (entrée dans l'opération). Les réponses déjà saisies dans les autres rubriques
-                (niveau de formation, ressources, logement, situation familiale, RQTH) sont réutilisées automatiquement — seuls les items restants sont à compléter.
-              </p>
-              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
-                Toute fausse déclaration peut faire l'objet de sanctions disciplinaires ou pénales.
-              </p>
-              <FieldRow label="Situation juste avant l'entrée">
-                <ChoicePicker value={fse.statut_avant_entree} onChange={(v) => setFse('statut_avant_entree', v)}
-                  options={[['demandeur_emploi', "Demandeur d'emploi"], ['inactif', 'Inactif (ni emploi ni recherche)'], ['emploi', 'En emploi'], ['formation', 'En formation']]} />
-              </FieldRow>
-              <FieldRow label="Durée sans emploi avant l'entrée">
-                <ChoicePicker value={fse.duree_sans_emploi} onChange={(v) => setFse('duree_sans_emploi', v)}
-                  options={[['moins_6_mois', '< 6 mois'], ['6_12_mois', '6-12 mois'], ['12_24_mois', '12-24 mois'], ['plus_24_mois', '> 24 mois']]} />
-              </FieldRow>
-              <div className="grid grid-cols-2 gap-3">
-                <FieldRow label="Foyer monoparental">
-                  <BoolPicker value={fse.foyer_monoparental} onChange={(v) => setFse('foyer_monoparental', v)} />
-                </FieldRow>
-                <FieldRow label="Sans domicile stable à l'entrée">
-                  <BoolPicker value={fse.sans_domicile_stable} onChange={(v) => setFse('sans_domicile_stable', v)} />
-                </FieldRow>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2 flex-1 min-w-[240px]">
+                  Questionnaire du participant à l'opération cofinancée. Les réponses proposées viennent des rubriques
+                  précédentes de ce diagnostic : <strong>confirmez-les ou corrigez-les</strong> — rien n'est enregistré sans vous.
+                </p>
+                <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${
+                  fseRenseignes === FSE_QUESTIONS.length ? 'bg-green-100 text-green-700'
+                    : participantAsi ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {fseRenseignes}/{FSE_QUESTIONS.length} réponses
+                </span>
               </div>
-              <FieldRow label="Commentaire (FSE+)">
-                <textarea value={fse.commentaire || ''} onChange={(e) => setFse('commentaire', e.target.value)} rows={2} className="input-modern py-1 w-full" />
+
+              {participantAsi && fseIncomplet && (
+                <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+                  Cette personne participe à une opération cofinancée : ce questionnaire est une pièce du dossier européen.
+                  Tant qu'il est incomplet, le dossier de conformité le signale — mais rien ne vous empêche de continuer.
+                </p>
+              )}
+
+              {FSE_QUESTIONS.map((q) => {
+                const valeur = fseNormaliser(q.cle, fse[q.cle] ?? null);
+                const sug = fseSuggestions[q.cle];
+                // La proposition ne s'affiche QUE si la réponse est vide et que
+                // la conseillère ne l'a pas déjà écartée : une suggestion qui
+                // revient après avoir été corrigée serait un harcèlement d'écran.
+                const proposer = sug && !fseEcartees[q.cle] && (valeur === null || valeur === undefined || valeur === '');
+                return (
+                  <div key={q.cle} className="py-2 border-b border-gray-100 last:border-0">
+                    <p className="text-sm font-semibold text-gray-700 mb-1.5">{q.libelle}</p>
+                    <ChipsReponse value={valeur} onChange={(v) => setFse(q.cle, v)} options={q.options} />
+                    {proposer && (
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                          proposé depuis « {sug.source} »
+                        </span>
+                        <button type="button" onClick={() => confirmerFse(q.cle, sug.valeur)}
+                          className="px-2 py-0.5 rounded-lg border border-teal-300 text-teal-700 text-[11px] font-medium hover:bg-teal-50">
+                          Confirmer
+                        </button>
+                        <button type="button" onClick={() => setFseEcartees((e) => ({ ...e, [q.cle]: true }))}
+                          className="px-2 py-0.5 rounded-lg border border-gray-300 text-gray-500 text-[11px] hover:bg-gray-50">
+                          Corriger
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              <FieldRow label="Commentaire (facultatif)">
+                <textarea value={fse.commentaire || ''} onChange={(e) => setFse('commentaire', e.target.value)} rows={2}
+                  className="input-modern py-1 w-full" placeholder="Précision utile au dossier FSE+…" />
               </FieldRow>
+
+              <p className="text-[12px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                Ces réponses alimentent le dossier européen de l'opération (piste d'audit d'au moins 5 ans).
+                Une fausse déclaration engage la personne : relisez-les avec elle avant d'enregistrer.
+              </p>
             </div>
           )}
 
