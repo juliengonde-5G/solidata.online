@@ -4,6 +4,8 @@
 > **Complété le 13/09/2026 (PR A « Conformité immédiate ») :** le dossier administratif de chaque salarié et les obligations du cofinancement FSE+ font l'objet d'un guide à part — [Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) — auquel renvoie le nouveau cas 20.
 > **Complété le même jour (PR B « Cadre RSA et temps d'accompagnement ») :** quatre nouveaux cas d'usage (21 à 24) — le point avec le référent et l'entretien de conciliation, la fiche pour le référent et sa remise, le relevé d'assiduité et l'actualisation France Travail, le compteur d'activité hebdomadaire, et la feuille de temps de l'intervenant. Solidarité Textiles y est **structure d'accueil**, pas référent unique (décision de direction du 12/09/2026) : le pas-à-pas complet vit dans le guide dédié (§ 9 et § 10 de [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md)), ce guide-ci n'en donne que les repères, dans le fil de l'accompagnement quotidien.
 >
+> **Complété le 13/09/2026 (PR C « Section CIP et documents du salarié », v. 2.54.0) :** l'espace CIP est réorganisé autour de ce qu'il y a à faire — l'écran d'ouverture devient **« Mes échéances »** (cas 1, réécrit), la fiche passe de huit à **quatre onglets** (Situation / Suivi / Dossier administratif / Diagnostic — cas 25), l'écran de l'encadrant technique s'ouvre désormais **sans compte, par un lien** (cas 26), et deux nouveaux documents sont produits **pour la personne accompagnée** — « Mon parcours en une page » et « Mon Récap » — avec des **rappels de rendez-vous** par SMS ou e-mail sur son accord (cas 27 et 28). Rien de ce qui existait n'a été supprimé ; ce qui a changé de place est signalé au fil du texte.
+>
 > Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
 - **Public** : conseillère/conseiller en insertion professionnelle (CIP) de Solidarité Textiles ; certains passages concernent les encadrants techniques (ETI) et la direction.
@@ -30,7 +32,7 @@
 14. [Pass IAE et prolongation](#14-pass-iae-et-prolongation)
 15. [Mes tableaux](#15-mes-tableaux)
 16. [Ce que je remets au salarié](#16-ce-que-je-remets-au-salarié)
-17. [FAQ — 10 questions fréquentes](#17-faq--10-questions-fréquentes)
+17. [FAQ — 11 questions fréquentes](#17-faq--11-questions-fréquentes)
 18. [Lexique](#18-lexique)
 19. [Le volet RSE de l'insertion (mission séparée)](#19-le-volet-rse-de-linsertion-mission-séparée)
 20. [Dossier administratif et FSE+](#20--dossier-administratif-et-fse)
@@ -38,6 +40,10 @@
 22. [J'alimente le référent : la fiche, l'assiduité, l'actualisation France Travail](#22-jalimente-le-référent--la-fiche-lassiduité-lactualisation-france-travail)
 23. [Je lis le compteur d'activité (15-20 h)](#23-je-lis-le-compteur-dactivité-15-20-h)
 24. [Ma feuille de temps](#24-ma-feuille-de-temps)
+25. [La fiche en quatre onglets : ce qui a changé de place](#25-la-fiche-en-quatre-onglets--ce-qui-a-changé-de-place)
+26. [Le lien de l'encadrant technique, sans compte](#26-le-lien-de-lencadrant-technique-sans-compte)
+27. [Les documents que je remets à la personne : « Mon parcours » et « Mon Récap »](#27-les-documents-que-je-remets-à-la-personne--mon-parcours--et--mon-récap-)
+28. [Les rappels de rendez-vous par SMS ou e-mail](#28-les-rappels-de-rendez-vous-par-sms-ou-e-mail)
 
 ---
 
@@ -45,23 +51,25 @@
 
 **Objectif** : savoir en moins de deux minutes ce qui vous attend cette semaine, sans rien chercher.
 
+> **Depuis le 13/09/2026 (PR C)**, l'écran d'ouverture de l'**Espace CIP** s'appelle **« Mes échéances »**. Il remplace l'ancien tableau de bord à trois couleurs par **cinq blocs**, dans l'ordre où ils se traitent un lundi matin — et il distingue désormais deux choses qu'on confondait : ce qui **se contrôle** (une obligation réglementaire ou contractuelle) et ce qui **s'organise** (le rythme normal du suivi). La file active des salariés est à gauche de l'écran (cas 25) ; les échéances, décrites ici, occupent la colonne de droite.
+
 **Pas à pas**
 
-1. Ouvrez **Espace CIP**. En tête de page, le bloc **« Aujourd'hui / Cette semaine »** liste vos entretiens planifiés, avec l'heure et un badge **« préparation prête »** quand la note de préparation a déjà été générée (voir cas 8). Un clic ouvre directement la fiche du salarié sur le bon entretien.
-2. En dessous, le bloc **Alertes** regroupe ce qui demande une action, **une ligne par salarié** (les badges se cumulent sur la ligne). Trois couleurs seulement :
-   - **rouge** = réglementaire ou contractuel (Pass IAE arrivant à échéance, cumul CDDI ≥ 22 mois, diagnostic non réalisé à 30 jours ; depuis septembre 2026 : **sortie FSE+ non renseignée** 15 jours après une fin de contrat — puis un second rappel à 25 jours —, **référent unique non déterminé** pour un bénéficiaire du RSA, **questionnaire FSE+ d'entrée incomplet** pour un participant à une opération cofinancée) ;
-   - **ambre** = organisation du suivi (bilan en retard, prochain rendez-vous non planifié, action critique en retard, renouvellement à préparer) ;
-   - **gris** = à venir (pour anticiper, rien d'urgent) ;
-   - **ambre** également pour la **situation à +6 mois non relevée** après une sortie (indicateur de résultat du cofinancement).
-3. Sur chaque alerte : **« Vu — me le rappeler dans 7 jours »** pour la mettre de côté sans la perdre. Le report est **enregistré en base et partagé** avec vos collègues CIP (acquitter, c'est acquitter pour toute l'équipe ; l'auteur et la date sont journalisés).
-4. Votre **file active** (« Espace CIP — mes salariés ») liste les salariés dont vous êtes référente ; les filtres (en parcours, fin de contrat proche, sans prochain RDV) servent à organiser la semaine.
+1. **Aujourd'hui / Cette semaine** — inchangé : vos entretiens planifiés, avec l'heure et un badge **« préparation prête »** quand la note de préparation a déjà été générée (voir cas 8), et vos retards regroupés **par salarié**. Un clic ouvre directement la fiche sur le bon entretien.
+2. **À traiter cette semaine — obligations** — ce que l'autorité de tutelle contrôle : Pass IAE arrivant à échéance ou expiré, cumul CDDI ≥ 23 mois sans dérogation, diagnostic socle non réalisé à 30 jours, **sortie FSE+ non renseignée** (orange à J+15, rouge à J+25), **questionnaire FSE+ d'entrée incomplet** pour un participant à une opération cofinancée, **suivi à +6 mois échu**, **référent unique non déterminé**, **catégorie France Travail « G » depuis plus de 30 jours** (orange seulement — c'est le référent, pas nous, qui la change), et une ligne agrégée **« N salariés sous 15 h »** (le détail nominatif est dans le Dossier administratif de chacun, cas 23). Sur chaque ligne, un bouton **« Reporter 48 h »** : la ligne réapparaît deux jours plus tard, grisée en attendant, avec le nombre de reports déjà posés. **À partir du deuxième report**, un motif est demandé (liste fermée : « j'attends une pièce du salarié », « j'attends une réponse du référent ou d'un partenaire », « la personne est absente ou injoignable », « un rendez-vous est déjà pris pour le traiter », « autre raison »). **Ce bloc ne se coche jamais comme "vu" — reporter n'est pas classer.**
+3. **Organisation du suivi** — le reste, comme avant : bilans en retard, prochain rendez-vous non planifié, renouvellements arrivant à échéance (avec le bouton « Copier le lien encadrant », cas 26), actions critiques en retard. Ce bloc, lui, reste **acquittable 7 jours** (« Vu — me le rappeler dans 7 jours »), enregistré en base et partagé avec vos collègues.
+4. **Rendez-vous réguliers et rappels** — inchangé depuis la PR B : actualisations France Travail du mois, points avec le référent qui arrivent à échéance, salariés sous 15 h, référents non déterminés en rouge.
+5. **Ma file active** — les quatre indicateurs (en parcours, retards, à venir 7 jours, sorties dynamiques de l'année) et les boutons d'export.
 
-**Ce qui est automatique** : les alertes se calculent seules à partir des dates déjà saisies (contrats, Pass, entretiens planifiés, échéances d'actions). Les rappels J-14 / J-7 / J-1 sur les entretiens planifiés aussi. Vous n'avez rien à programmer.
+**Un bloc vide n'est jamais un cadre silencieux** : il affiche une phrase verte (« Rien à traiter cette semaine. », « Le suivi est à jour… »). Dans le menu, la pastille sur **« Espace CIP »** compte les **obligations rouges non reportées** — c'est le même nombre que celui du bloc 2, jamais un autre calcul.
+
+**Ce qui est automatique** : le calcul des obligations et de l'organisation du suivi depuis les dates déjà saisies (contrats, Pass, entretiens, actions), les rappels J-14 / J-7 / J-1 sur les entretiens planifiés. Vous n'avez rien à programmer.
 
 > **Points de vigilance**
-> - Le rouge signifie « agir cette semaine ». Si vous voyez du rouge partout, dites-le : les seuils sont réglables par l'administrateur (écran Réglages insertion), ils doivent rester crédibles.
-> - « Me le rappeler dans 7 jours » reporte l'affichage, pas l'échéance réelle : un Pass expire à sa date, quoi qu'il arrive.
+> - **Reporter une obligation n'efface pas l'échéance réelle** : un Pass expire à sa date, quoi qu'il arrive. Le report déplace seulement l'affichage de 48 heures.
+> - **Un MANAGER ne voit pas les quatre familles sociales** du bloc « Obligations » (sortie FSE+, questionnaire FSE+ d'entrée, catégorie G, sous 15 h) : elles ne sont même pas calculées pour lui, comme pour la file active.
 > - **L'alerte « sortie FSE+ non renseignée » ne se reporte pas à la légère** : passé un mois, la situation ne se recueille plus auprès de la personne, et la plateforme européenne bloque le dépôt du bilan financier. Voir le [guide Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) (cas 20).
+> - Si vous voyez du rouge partout, dites-le : certains seuils sont réglables par l'administrateur (écran Réglages insertion), ils doivent rester crédibles.
 
 ---
 
@@ -136,7 +144,7 @@
 
 **Pas à pas**
 
-1. Sur la fiche du salarié, onglet **Synthèse**, dépliez le bloc **« Accueil / intégration »**. Sept étapes y figurent : **promesse d'embauche, contrat signé, mutuelle / prévoyance, charte d'insertion, livret d'accueil remis, règlement intérieur, formation au poste**.
+1. Sur la fiche du salarié (Espace CIP), onglet **Situation** *(depuis le 13/09/2026 — cet onglet réunit ce qui vivait avant dans « Synthèse », voir cas 25)*, dépliez le bloc **« Accueil / intégration »**. Sept étapes y figurent : **promesse d'embauche, contrat signé, mutuelle / prévoyance, charte d'insertion, livret d'accueil remis, règlement intérieur, formation au poste**.
 2. Pour chaque étape : cochez **« fait »**, la **date** se met au jour du jour (modifiable), et renseignez le **responsable**. Une **barre de complétude** (« 4/7 ») résume l'avancement en tête de bloc.
 3. Si la personne vient du module Recrutement, certaines étapes (charte d'insertion, livret d'accueil) sont **déjà cochées** à la liaison, reprises des documents remis au recrutement — vous n'y revenez pas.
 
@@ -173,7 +181,7 @@
 
 **Pas à pas**
 
-1. Sur la fiche du salarié, onglet **« Compétences »**. L'encadrant crée une évaluation avec **« + Nouvelle évaluation »** : il choisit la **filière** (tri, collecte, logistique, boutique, ou transverse), une **période** repère (ex. « M+3 ») et la date.
+1. Sur la fiche du salarié, onglet **Suivi**, encart repliable **« Compétences »** *(depuis le 13/09/2026 ; c'était un onglet à part entière, voir cas 25)*. L'encadrant crée une évaluation avec **« + Nouvelle évaluation »** : il choisit la **filière** (tri, collecte, logistique, boutique, ou transverse), une **période** repère (ex. « M+3 ») et la date.
 2. La grille se remplit **une ligne par compétence**, groupée par rubrique (Comportement, Accompagnement social et professionnel en transverse ; Activités métier par filière). Pour chaque item, de **gros boutons de note 0 à 10** ou **« N/E »** (non évalué). Deux champs repliés — **observation** et **objectif de progression** — restent facultatifs.
 3. La **moyenne** s'affiche en direct, les « N/E » **exclus** (jamais comptés comme des zéros). Une **synthèse** de l'encadrant conclut la grille.
 4. **Trois validations horodatées** — « Vu avec le salarié », « Encadrant technique », « CIP » — permettent de faire passer l'évaluation de **brouillon** à **validée**. Tant que les trois ne sont pas cochées, elle reste en brouillon.
@@ -262,7 +270,7 @@
 **Pas à pas**
 
 1. La liste **« Renouvellements à préparer »** (Espace CIP) affiche les contrats finissant dans moins de six semaines. L'encadrant technique concerné est prévenu de son côté.
-2. **L'encadrant remplit son volet** sur un **écran dédié** (`RenouvellementETI`), accessible par un **lien direct** que vous lui envoyez (bouton « Copier le lien » sur la ligne du salarié) : un salarié, une page, les rubriques de la trame papier (assiduité, motivation, autonomie, participation, projet professionnel, motifs) en boutons et cases larges, l'**avis** (favorable / avec réserves / défavorable), la **durée proposée** (2 / 4 / 6 mois), puis **« Transmettre à la CIP »**. Il n'a pas à naviguer dans le module.
+2. **L'encadrant remplit son volet sur un lien que vous lui envoyez, et qui s'ouvre sans compte** (depuis le 13/09/2026 — voir le détail au cas 26) : bouton **« Copier le lien encadrant »** sur la ligne du salarié, dans le bloc « Organisation du suivi » de Mes échéances. Il n'a rien à installer ni à se souvenir d'un mot de passe : un salarié, une page, les rubriques de la trame papier (assiduité, motivation, autonomie, participation, projet professionnel, motifs) en boutons et cases larges, l'**avis** (favorable / avec réserves / défavorable), la **durée proposée** (2 / 4 / 6 mois), puis **« Transmettre à la CIP »**.
 3. Vous recevez le formulaire **pré-rempli** dans votre liste : complétez votre volet (éléments du parcours, votre avis), préparez la réunion de renouvellement.
 4. **Triple validation** : encadrant, CIP, directeur — chacun valide avec son compte, horodaté. Le PDF de renouvellement est généré pour le dossier.
 5. Le renouvellement recale automatiquement les échéances du parcours.
@@ -283,7 +291,7 @@
 
 **Pas à pas**
 
-1. Fiche salarié → onglet Parcours → **« + PMSMP »**.
+1. Fiche salarié (Espace CIP) → onglet **Situation** → **« + PMSMP »**.
 2. Saisissez : dates, **organisme d'accueil** (avec son SIRET), **objet légal** (découvrir un métier / confirmer un projet professionnel / initier un recrutement), tuteur, et plus tard le bilan de l'immersion.
 3. Cochez **« Convention saisie dans l'outil officiel (Immersion Facilitée) »** une fois la saisie faite sur la plateforme — c'est elle qui fait foi, la convention Cerfa signée reste au dossier.
 4. La PMSMP apparaît sur la frise du parcours (couloir dédié) et dans la colonne PMSMP des exports.
@@ -396,7 +404,7 @@
 
 ---
 
-## 17. FAQ — 10 questions fréquentes
+## 17. FAQ — 11 questions fréquentes
 
 **1. L'ordinateur s'éteint (ou je ferme l'onglet) en plein diagnostic : ai-je tout perdu ?**
 Non. La sauvegarde est continue (bandeau « Brouillon enregistré à HH:MM »). À la réouverture, le diagnostic « en cours » reprend là où vous étiez, rubrique comprise.
@@ -426,7 +434,10 @@ Santé : uniquement l'impact professionnel (contre-indications, RQTH + échéanc
 Vous (CIP/RH) et l'administrateur : tout. L'encadrant technique : le volet professionnel — renouvellement, **grilles de compétences métier**, entretien de période d'essai, objectifs et éléments professionnels du diagnostic (portefeuille, style d'apprentissage) ; **jamais** les détails santé, judiciaire ou budget, ni les textes du diagnostic social (masquage testé automatiquement à chaque livraison). À noter : les grilles de compétences, non sensibles, ne sont pas cloisonnées par atelier (un encadrant peut voir celles d'un autre atelier — voir cas 7). La direction : la fiche en lecture. L'auditeur externe (rôle dédié) : uniquement des agrégats non nominatifs.
 
 **10. Les alertes s'accumulent et je ne m'y retrouve plus : que faire ?**
-D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappeler dans 7 jours » sur ce qui peut attendre (le report est tracé et partagé). Si le volume reste ingérable, demandez l'ajustement des seuils dans les réglages : des alertes que plus personne ne lit ne protègent personne.
+D'abord le bloc « Obligations » (§ 1) : une ligne s'y traite ou se **reporte 48 heures** — elle ne se met jamais de côté pour une semaine. Pour le reste, dans « Organisation du suivi », utilisez « Vu — me le rappeler dans 7 jours » sur ce qui peut vraiment attendre (le report est tracé et partagé). Si le volume reste ingérable, demandez l'ajustement des seuils dans les réglages : des alertes que plus personne ne lit ne protègent personne.
+
+**11. Le lien de renouvellement que j'ai copié ne marche plus pour l'encadrant : pourquoi ?**
+Un lien encadrant est valable **60 jours**. Passé ce délai, ou si l'entretien a été clôturé entre-temps, l'encadrant voit un message qui le lui dit et l'invite à vous demander un nouveau lien — vous le régénérez d'un clic (cas 26), l'ancien cesse alors immédiatement de fonctionner.
 
 ---
 
@@ -448,14 +459,18 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **Criticité** | Niveau d'urgence d'une action CIP (haute / moyenne / basse) ; une action critique en retard déclenche une alerte. |
 | **Diagnostic d'accueil** | Premier entretien approfondi du parcours (trame 12 rubriques), à réaliser dans les 30 jours suivant l'entrée. |
 | **Échéances du parcours** | Les rendez-vous obligatoires posés automatiquement (diagnostic, renouvellements, bilan de sortie) — appelés « jalons » dans les documents techniques. |
-| **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement sur son écran dédié et **note les grilles de compétences métier** (onglet Compétences) ; n'accède jamais aux volets santé, judiciaire ou budget. |
+| **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement **par un lien que vous lui envoyez, sans compte** (cas 26) et **note les grilles de compétences métier** (onglet Suivi de la fiche, encart Compétences) ; n'accède jamais aux volets santé, judiciaire ou budget. |
 | **Feuille de temps** | Pièce mensuelle signée par un intervenant (entretiens et actions accompagnés, temps d'ateliers collectifs), contre-signée par la RH, exportée sans jamais le nom du bénéficiaire — exigée par les projets cofinancés en coûts simplifiés (cas 24). |
 | **Fiche pour le référent** | Document limitatif (9 rubriques, jamais de santé ni de judiciaire) transmis au référent unique externe, tracé et remis en double — au référent et à la personne concernée (cas 22). |
-| **File active** | L'ensemble des salariés en parcours dont vous êtes référente. |
+| **File active** | La liste, à gauche de l'espace CIP : les salariés **en parcours**, plus ceux **sortis depuis moins de sept mois** (c'est après la sortie que la donnée FSE+ et le relevé à six mois sont dus) — jamais les permanents. Le filtre « Mes salariés » la restreint à ceux dont vous êtes référente (cas 25). |
+| **Obligation** | Échéance **réglementaire ou contractuelle** du bloc « Mes échéances » (Pass IAE, cumul CDDI, diagnostic, sortie FSE+, référent unique, catégorie G, sous 15 h…) : elle ne se coche jamais « vu », elle se **reporte 48 heures** au plus, avec un motif à partir du deuxième report (cas 1). |
 | **Frein** | Difficulté périphérique à l'emploi, évaluée de **1 (pas de difficulté)** à **5 (bloquant)**, ou « non évalué ». Le chiffre monte avec la difficulté : c'est le sens de l'échelle affichée à l'écran (1 vert → 5 rouge). Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
 | **Intervenant (temps d'accompagnement)** | Une personne qui a réellement mené un entretien, saisi un temps, ou occupe un poste affecté à un projet cofinancé dans l'année — pas un rôle en soi (cas 24). |
 | **Jalon** | Terme technique pour une échéance du parcours (voir ci-dessus). |
+| **Lien encadrant (lien ETI)** | Adresse publique, valable **60 jours**, qui ouvre le formulaire de renouvellement pour l'encadrant technique **sans compte SOLIDATA** (cas 26). Le régénérer révoque immédiatement le précédent. |
 | **MDFSE+** | *Ma Démarche FSE+* — la plateforme sur laquelle se déposent les dossiers du cofinancement européen. Elle fait foi ; SOLIDATA prépare les pièces et contrôle les délais, il ne la remplace pas. |
+| **Mon parcours en une page** | Document remis à la personne accompagnée, en français simple : ses engagements, ceux de la structure, ses heures de la semaine (sans aucun objectif ni seuil), son prochain rendez-vous, son référent, les documents déjà remis (cas 27). |
+| **Mon Récap** | Récapitulatif du parcours que la personne peut partager à un tiers de son choix (un futur employeur, par exemple) : contrats, grandes étapes datées, objectifs — sans aucune donnée de santé, de justice, de situation sociale, ni aucun texte libre (cas 27). |
 | **Orienteur** | Organisme qui a envoyé la personne vers la structure (Département-CMS, France Travail, mission locale, Cap emploi, CCAS…). À ne pas confondre avec le **prescripteur habilité** (qui valide l'éligibilité IAE) ni avec le **référent unique** (qui tient le parcours dans la durée). |
 | **Pass IAE** | Agrément individuel délivré via la plateforme des emplois de l'inclusion, valable 24 mois, prolongeable par un prescripteur habilité sur présentation d'un bilan du parcours. |
 | **Période d'essai (entretien de)** | Point formalisé à environ un mois : décision « confirmée / à revoir / rompue ». Auto-créé à la liaison recrutement (cas 6). |
@@ -489,7 +504,7 @@ Le **pilotage de la démarche de labellisation RSEi** n'est pas « une mission s
 
 **Objectif** : tenir, pour chaque salarié, le dossier que l'autorité de tutelle et le cofinanceur européen demandent — et savoir, avant un contrôle, ce qui manque.
 
-Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier administratif »** (3ᵉ onglet, après « Diagnostic ») et le menu une entrée **« Dossiers FSE+ — pièces à compléter »**. Ce qu'on y fait :
+Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier administratif »** (3ᵉ des quatre onglets de la fiche, entre « Suivi » et « Diagnostic » — cas 25) et le menu une entrée **« Dossiers FSE+ — pièces à compléter »**. Ce qu'on y fait :
 
 - **Éligibilité IAE** : cocher les critères constatés, la date de vérification, la source, et la **référence** des justificatifs — qui restent sur *Les Emplois de l'inclusion* et ne se déposent jamais ici. Un **bloc à copier** prépare la saisie sur la plateforme.
 - **Pass IAE** : numéro et dates, **suspensions et prolongations** ; le statut (actif / suspendu / prolongé / expiré) est **calculé**, jamais saisi.
@@ -501,7 +516,7 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 > **Tout le pas-à-pas est dans un guide dédié : [Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md).** Il explique aussi ce qui protège les personnes (chiffrement, masquage par rôle, journalisation, ce que reçoit l'IA), de quoi répondre à un salarié qui demande ce qu'on note sur lui.
 
-**Ce qui n'est pas encore livré**, et qui est annoncé dans ce guide : la réorganisation de la fiche en quatre onglets (PR C), et l'écran encadrant accessible par simple lien. Le cadre RSA — point avec le référent, fiche pour le référent, relevé d'assiduité, actualisation France Travail, compteur d'activité, feuille de temps — est **livré** depuis la PR B (cas 21 à 24 ci-dessous).
+**Tout est désormais livré.** La **réorganisation de la fiche en quatre onglets** et l'**écran encadrant accessible par simple lien** — annoncés ici comme à venir — sont **livrés depuis le 13/09/2026 (PR C)** : voir cas 25 et 26. Le cadre RSA — point avec le référent, fiche pour le référent, relevé d'assiduité, actualisation France Travail, compteur d'activité, feuille de temps — est **livré** depuis la PR B (cas 21 à 24 ci-dessous).
 
 ---
 
@@ -513,7 +528,7 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 **Pas à pas**
 
-1. Onglet **Entretiens & bilans**, bouton **« Nouvel entretien »** : le sélecteur de type compte désormais **huit valeurs**, les six habituelles plus deux.
+1. Onglet **Suivi** *(« Entretiens & bilans » avant le 13/09/2026, voir cas 25)*, bouton **« Nouvel entretien »** : le sélecteur de type compte désormais **huit valeurs**, les six habituelles plus deux.
 2. **« Point avec le référent »** — le dialogue avec le professionnel qui tient le CER. Choisissez la **modalité** : *tripartite* (la personne accompagnée était présente à l'échange) ou *bilatérale* (entre professionnels, sans elle) — c'est cette distinction que l'autorité regarde en premier. Trois champs courts : ce qui a été dit au référent, ce que le référent a transmis, les suites à donner. **Cet entretien est hors du compte des bilans d'accompagnement.**
 3. **« Entretien de conciliation (protection des droits) »** — la réforme du RSA ouvre un droit de contestation avant sanction. Le formulaire **commence par les motifs légitimes**, à choix multiples : un problème de santé, une garde d'enfant, un problème de transport, une démarche administrative, une formation ou une démarche d'emploi, un deuil ou un événement familial, autre motif. Puis « Ce que la personne a exprimé, dans ses mots » (texte libre), et l'**issue** : maintien du parcours en l'état, reprise avec aménagement, réorientation, sans suite.
 
@@ -597,4 +612,100 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10.*
+## 25. La fiche en quatre onglets : ce qui a changé de place
+
+**Objectif** : retrouver du premier coup ce qui, avant le 13/09/2026, vivait dans huit onglets.
+
+**Rien n'a disparu.** Huit onglets ne décrivaient pas huit gestes : ils décrivaient huit endroits où la donnée était rangée. « Freins » et « Synthèse » étaient deux vues de la même situation ; « Entretiens », « Objectifs & actions » et « Compétences » trois moments du même suivi. La fiche compte désormais **quatre onglets** :
+
+| Onglet | Ce qu'on y trouve |
+|---|---|
+| **Situation** *(par défaut)* | Les **freins** — radar **et**, nouveau, un **tableau des écarts** entre l'entrée en parcours et la dernière évaluation, avec un badge par axe (« levé », « stable », « aggravé », ou « non comparable » si l'axe manque d'un côté) — puis la note de profil initial, la frise du parcours (repliée), la check-list d'embauche tant qu'elle n'est pas complète, la PMSMP, la satisfaction de sortie, les **documents pour la personne** (cas 27), et le bouton **« Proposition de synthèse (IA) »** *(anciennement « Analyser le profil »)*. |
+| **Suivi** | Les entretiens & bilans, les objectifs, les actions, le journal de suivi, et un encart repliable pour les **compétences** notées par l'encadrant technique. |
+| **Dossier administratif** | Inchangé (cas 20) — éligibilité, Pass IAE, orientation et référent, statuts sociaux, projets cofinancés, pièces signées, dossier de conformité, et désormais aussi le **consentement aux rappels de rendez-vous** (cas 28). |
+| **Diagnostic** | Le socle en sept rubriques et les approfondissements, repliés en dessous (cas 3). |
+
+**Ce qui a bougé, en un coup d'œil** :
+- « Synthèse » → **Situation**.
+- « Freins » → fusionné dans **Situation**, en tête.
+- « Entretiens & bilans », « Objectifs & actions », « Compétences » → fusionnés dans **Suivi**.
+- « Cadre administratif » → **Dossier administratif** (même contenu, nom retenu à l'usage).
+- « Assistant IA » → disparaît en tant qu'onglet : la proposition de synthèse est dans **Situation**, la préparation d'un entretien est dans l'entretien lui-même, et la **sonde technique** (« Tester la connexion IA ») est partie dans les **Réglages insertion** — ce n'était pas un outil de suivi d'un dossier, c'est un contrôle d'exploitation.
+
+**La fiche collaborateur** (`/employees`, onglet « Parcours insertion ») a, elle aussi, maigri : elle ne montre plus qu'un **résumé** (statut, parcours n°, référent CIP, référent unique, prochain rendez-vous, dernier entretien, niveau de risque) et un bouton **« Ouvrir dans l'espace CIP »**. La saisie se fait toujours dans l'espace CIP — deux écrans qui affichent la même chose, l'un modifiable et l'autre non, finissaient par se contredire.
+
+> **Points de vigilance**
+> - Vous cherchez encore un onglet disparu ? Le tableau ci-dessus donne sa nouvelle adresse.
+> - Rien de ce qui était saisi n'a été perdu dans le déplacement : c'est le même formulaire, à un autre endroit.
+
+---
+
+## 26. Le lien de l'encadrant technique, sans compte
+
+**Objectif** : que l'encadrant reçoive un lien qu'il peut réellement ouvrir, sans mot de passe à retenir.
+
+**Pas à pas**
+
+1. Dans **Mes échéances**, bloc « Organisation du suivi », sur la ligne du renouvellement à préparer : bouton **« Créer le lien encadrant »** (ou **« Copier le lien encadrant »** s'il en existe déjà un valide).
+2. Envoyez ce lien par le canal habituel (message interne, SMS). L'encadrant l'ouvre sur son téléphone ou son ordinateur : **aucune connexion, aucun compte**. Il voit le prénom, le nom, le poste et la date de fin de contrat de la personne — rien d'autre (ni freins, ni statut, ni référent).
+3. Il répond avec ses mots aux rubriques habituelles (assiduité, motivation, autonomie, participation, motifs), donne son **avis** et la **durée proposée**, puis « Transmettre ». Un écran « Merci ! » confirme, et le formulaire ne peut plus être modifié une fois transmis.
+4. Le lien reste valable **60 jours**. Si l'entretien est **clôturé** avant que l'encadrant n'ait répondu, le lien s'éteint aussi : l'écran le lui dit (« cet entretien est clôturé, il n'y a rien à faire »).
+5. **Régénérer un lien tue le précédent immédiatement** — c'est le seul moyen de révoquer un lien envoyé par erreur. Utilisez-le si vous vous êtes trompée de destinataire.
+
+**Ce qui est automatique** : la validité de 60 jours, l'extinction à la clôture de l'entretien, le remplacement de l'ancien lien par le nouveau.
+
+> **Points de vigilance**
+> - **Un compte SOLIDATA reste possible** pour un encadrant qui en a un (écran `RenouvellementETI`, cas 11) : les deux voies coexistent, choisissez celle qui convient à la personne.
+> - Le lien ne contient **aucune donnée sensible visible dans son adresse** — il ne se devine pas, mais ne le publiez jamais dans un canal ouvert à tous (un canal public de messagerie, par exemple).
+
+---
+
+## 27. Les documents que je remets à la personne : « Mon parcours » et « Mon Récap »
+
+**Objectif** : donner à la personne accompagnée, à tout moment de son parcours, un document qu'elle peut lire, comprendre et montrer à un tiers si elle le souhaite — sans jamais y faire figurer ce qui ne la regarde pas de cette façon.
+
+**Pas à pas**
+
+1. Sur la fiche du salarié, onglet **Situation**, panneau **« Documents pour la personne »**.
+2. **« Aperçu »** montre ce que contiendrait le document **sans rien enregistrer** — utile pour vérifier avant de produire.
+3. **« Générer et imprimer »** enregistre une **copie exacte** de ce qui est remis (un instantané, daté) puis ouvre l'impression. Ce qui a été remis le 12 mars reste ce qu'il était le 12 mars, même si le dossier évolue ensuite.
+4. **« Réimprimer »** relit ce document déjà enregistré — jamais recomposé : deux exemplaires du même document ne peuvent pas diverger.
+5. **« Tracer la remise »** : la date et le mode (en main propre, par e-mail, par courrier). **Une remise ne se trace qu'une fois** — pour une nouvelle version, générez un nouveau document.
+
+**« Mon parcours en une page »** *(une page A4, en français simple)* : mes engagements (ceux que vous avez co-construits avec la personne), les engagements de la structure, **mes heures de la semaine** — travail et accompagnement, sans aucun objectif ni seuil affiché —, mon prochain rendez-vous (sans jamais dire de quel type d'entretien il s'agit), mon référent, et les documents déjà remis.
+
+**« Mon Récap »** *(une à deux pages, partageable par la personne à qui elle veut)* : ses contrats, les grandes étapes datées de son parcours (entretiens désignés par leur type, PMSMP avec l'organisme d'accueil, formations, actions désignées par leur catégorie et le partenaire), le compte de ses objectifs atteints et en cours, sa sortie si elle a eu lieu. **Aucun texte libre, aucune donnée de santé, de justice ou de situation sociale n'y figure jamais** — pas même une mention de leur absence.
+
+**Ce qui est automatique** : rien n'est envoyé ni imprimé sans votre geste ; un champ dont la source manque s'écrit « pas encore renseigné », jamais deviné.
+
+> **Points de vigilance**
+> - **Ces deux documents sont réservés ADMIN/RH** : ils portent le nom du référent unique et les heures hebdomadaires de la personne, deux informations qu'un manager ne reçoit pas ailleurs dans le dossier.
+> - Le mot « seuil » ne figure **jamais** sur « Mon parcours » : les heures de la semaine s'affichent, une cible ne s'affiche pas.
+> - Un panneau vide (aucun document généré) ne veut pas dire qu'il n'y a rien à faire — proposez l'aperçu à la personne dès que c'est utile pour elle, pas seulement à la sortie.
+
+---
+
+## 28. Les rappels de rendez-vous par SMS ou e-mail
+
+**Objectif** : que la personne se souvienne de son rendez-vous de demain, sans jamais recevoir un message qui en dit trop.
+
+**Pas à pas**
+
+1. Sur la fiche du salarié, onglet **Dossier administratif**, section **« Rappels de rendez-vous »**.
+2. **Lisez la phrase à la personne, telle quelle** : *« Vous recevrez un message la veille de chaque rendez-vous. Vous pouvez arrêter quand vous voulez. Le message ne dit jamais pourquoi vous avez rendez-vous. »* Son accord (ou son refus) se recueille **oralement**, puis se saisit à l'écran.
+3. Choisissez le **canal** (SMS ou e-mail) et le **destinataire** : les contacts déjà connus sont proposés **masqués** (« 06 ** ** ** 12 ») — c'est à vous de vérifier de vive voix que c'est le bon numéro, pas à l'écran de servir d'annuaire.
+4. **« Retirer le consentement »** est possible à tout moment, d'un clic : le contact est alors effacé, pas seulement désactivé.
+5. En dessous, l'**historique des rappels déjà envoyés** (destinataire masqué, date, statut).
+
+**Ce qui part dans le message** : le prénom de la personne, la date et l'heure du rendez-vous, le prénom et l'initiale de la conseillère. **Rien d'autre — jamais le type d'entretien, jamais un motif.**
+
+**Ce qui est automatique** : l'envoi, chaque jour à 18 h, pour tous les rendez-vous du lendemain dont la personne a donné son accord. **Sans clé d'envoi SMS/e-mail configurée sur le serveur, rien ne part** — le job tourne quand même et marque ses lignes « simulé », il ne prétend jamais avoir envoyé ce qu'il n'a pas envoyé.
+
+> **Points de vigilance**
+> - **Un rendez-vous reprogrammé ne reçoit pas de second rappel.** Si vous déplacez un entretien après l'envoi du rappel initial, aucun nouveau message ne partira pour la nouvelle date — c'est une limite connue, pensez à prévenir la personne autrement dans ce cas.
+> - Le consentement est **individuel et révocable** : il ne se déduit d'aucun autre accord donné par ailleurs (remise d'un document, signature d'un entretien…).
+> - La trace d'un rappel envoyé ne montre **jamais** le contact en clair, même à vous : c'est voulu, elle sert à prouver qu'un message est parti, pas à retrouver le numéro de la personne.
+
+---
+
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique.*

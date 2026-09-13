@@ -1,21 +1,24 @@
 # Guide CIP — Dossier administratif et conformité FSE+
 
 > **Livré le 13/09/2026 (PR A « Conformité immédiate »), complété le même jour (PR B « Cadre RSA et
-> temps d'accompagnement »).** Ce guide complète le
+> temps d'accompagnement », puis PR C « Section CIP et documents du salarié », v. 2.54.0).** Ce guide
+> complète le
 > [Guide CIP — Le module Insertion au quotidien](GUIDE_CIP_INSERTION.md), qui reste le mode d'emploi de
 > l'accompagnement lui-même (diagnostic, bilans, objectifs, actions, sortie). Ici, on ne parle que de ce
 > que **l'autorité de tutelle et le cofinanceur européen exigent** : le dossier administratif de chaque
 > salarié, le questionnaire FSE+ d'entrée et de sortie, le relevé à six mois, l'écran qui dit ce qui
-> manque avant qu'un contrôleur ne le découvre — et, depuis la PR B, ce que la structure doit au
-> référent unique externe des bénéficiaires du RSA (§ 9) et la feuille de temps de l'intervenant qui
-> les accompagne (§ 10).
+> manque avant qu'un contrôleur ne le découvre — ce que la structure doit au référent unique externe des
+> bénéficiaires du RSA (§ 9) et la feuille de temps de l'intervenant qui les accompagne (§ 10) —, et
+> désormais **la façon dont ces obligations remontent chaque semaine à la conseillère** (§ 11) et **les
+> deux documents produits pour la personne accompagnée** (§ 12).
 >
 > - **Public** : CIP, RH, administrateur. Les écrans décrits sont réservés aux rôles **ADMIN et RH** — un
 >   encadrant technique n'en voit aucun. La feuille de temps (§ 10) fait exception : un encadrant
 >   technique qui mène lui-même des entretiens ou des actions voit **la sienne**, jamais celle d'un
 >   collègue.
 > - **Les copies d'écran de ce guide sont des maquettes**, validées le 12/09/2026 avant développement :
->   l'écran livré peut différer dans le détail.
+>   l'écran livré peut différer dans le détail. Les blocs et écrans de la PR C (§ 11 et § 12) n'ont pas
+>   encore de maquette illustrée dans ce guide.
 
 ---
 
@@ -31,8 +34,10 @@
 8. [Les projets cofinancés (Réglages insertion)](#8-les-projets-cofinancés-réglages-insertion)
 9. [Le cadre RSA en structure d'accueil](#9-le-cadre-rsa-en-structure-daccueil)
 10. [La feuille de temps](#10-la-feuille-de-temps)
-11. [Ce qui protège les personnes](#11-ce-qui-protège-les-personnes)
-12. [FAQ — 9 questions](#12-faq--9-questions)
+11. [Mes échéances : les obligations et leur report](#11-mes-échéances--les-obligations-et-leur-report)
+12. [Documents pour le salarié et rappels de rendez-vous](#12-documents-pour-le-salarié-et-rappels-de-rendez-vous)
+13. [Ce qui protège les personnes](#13-ce-qui-protège-les-personnes)
+14. [FAQ — 11 questions](#14-faq--11-questions)
 
 ---
 
@@ -57,7 +62,7 @@ Trois documents transmis par la référente institutionnelle en septembre 2026 c
 
 **Pas à pas**
 
-1. Ouvrez la fiche d'un salarié dans **Espace CIP**, puis l'onglet **« Dossier administratif »** (3ᵉ onglet, juste après « Diagnostic »).
+1. Ouvrez la fiche d'un salarié dans **Espace CIP**, puis l'onglet **« Dossier administratif »** *(depuis le 13/09/2026, 3ᵉ des quatre onglets de la fiche, entre « Suivi » et « Diagnostic » — voir [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 25)*.
 2. **Éligibilité IAE** — cliquez les critères constatés (14 au référentiel : bénéficiaire du RSA, ASS, AAH, demandeur d'emploi de longue ou très longue durée, jeune de moins de 26 ans, senior, RQTH, QPV, ZRR, réfugié, sortant de détention, parent isolé, sans domicile stable). Renseignez la **date de vérification**, la **source** (auto-prescription / prescripteur habilité) et la **référence des justificatifs** (« dossier Emplois de l'inclusion n°… »). **On référence, on ne dépose jamais** : une notification de droits porte le montant des ressources, la composition du foyer et parfois la santé. Elle reste sur la plateforme de l'État, qui fait foi ; notre outil en garde l'adresse, pas la copie.
 3. **Pass IAE** — numéro, date de début, date de fin. Le **statut** (Actif / Suspendu / Prolongé / Expiré / Inconnu) est **calculé**, jamais saisi : il se déduit des dates et des événements. Bouton **« + Événement »** pour enregistrer une **suspension** ou une **prolongation** (type, du, au, motif, référence Emplois de l'inclusion). Une date de fin laissée vide s'affiche « en cours », pas « — ». Le bouton **« Bilan de prolongation (PDF) »** est là, comme avant ; il demande un numéro de Pass.
 4. **Orientation et référent unique** — l'orienteur (Département-CMS, France Travail, mission locale, Cap emploi, CCAS, autre), le prescripteur habilité, la date de prescription, puis le **référent unique** et son contact. **Nous sommes structure d'accueil, pas référent unique** (arbitrage du 12/09/2026) : le contrat d'engagements réciproques est tenu par le CMS ou France Travail, et nous **alimentons** ce référent. C'est pourquoi son nom et son téléphone comptent autant que le reste : sans eux, personne ne sait à qui envoyer un point d'étape. Quand le référent est **France Travail**, cochez « Actualisation mensuelle requise » : le bouton « Actualisation faite aujourd'hui » enregistre chaque passage (une actualisation oubliée coupe les droits). Un référent **« non déterminé »** s'affiche en rouge, avec sa consigne : à signaler au Département si la personne est bénéficiaire du RSA.
@@ -279,7 +284,7 @@ Trois documents transmis par la référente institutionnelle en septembre 2026 c
 
 ### 9.2 Deux entretiens dédiés
 
-Dans **Entretiens & bilans**, bouton **« Nouvel entretien »**, le sélecteur de type propose désormais huit valeurs — les six habituelles, plus :
+Dans l'onglet **Suivi** *(« Entretiens & bilans » avant le 13/09/2026)*, bouton **« Nouvel entretien »**, le sélecteur de type propose désormais huit valeurs — les six habituelles, plus :
 
 - **« Point avec le référent »** — le dialogue avec le professionnel qui tient le contrat d'engagements réciproques. Choisissez sa **modalité** : *tripartite* (la personne était présente) ou *bilatérale* (entre professionnels, sans elle) — c'est cette distinction que l'autorité regarde. Cet entretien est **hors du compte des bilans d'accompagnement**.
 - **« Entretien de conciliation (protection des droits) »** — la réforme du RSA ouvre un droit de contestation avant sanction. Le formulaire **commence par les motifs légitimes** (un problème de santé, une garde d'enfant, un problème de transport, une démarche administrative, une formation ou une démarche d'emploi, un deuil ou un événement familial, autre motif) : la question posée est « qu'est-ce qui vous en a empêché ? », jamais « pourquoi n'avez-vous pas obéi ? ». Puis l'issue : maintien du parcours, reprise avec aménagement, réorientation, sans suite.
@@ -339,7 +344,44 @@ Le bloc **« Rendez-vous réguliers et rappels »** (menu Espace CIP) affiche d�
 
 ---
 
-## 11. Ce qui protège les personnes
+## 11. Mes échéances : les obligations et leur report
+
+**Objectif** : que ce que l'autorité contrôlera un jour soit, chaque semaine, visible avant même d'ouvrir un dossier.
+
+Depuis le 13/09/2026 (PR C), l'écran d'ouverture de l'**Espace CIP** s'appelle **« Mes échéances »**. Il distingue deux choses que le tableau de bord précédent mélangeait sous une seule couleur :
+
+- **Les obligations** — ce qui relève d'un texte ou d'une convention : Pass IAE arrivant à échéance ou expiré, cumul CDDI ≥ 23 mois sans motif de dérogation, diagnostic socle non réalisé dans le délai, **sortie FSE+ non renseignée** (à J+15 puis à J+25 après la fin de contrat), **questionnaire FSE+ d'entrée incomplet** pour un participant à une opération cofinancée, **suivi à +6 mois échu**, **référent unique non déterminé**, **catégorie France Travail « G » depuis plus de 30 jours**, et une ligne agrégée **« N salariés sous 15 h »**. Ces lignes ne se cochent jamais « traité » : elles se **reportent 48 heures**, et à partir du deuxième report un motif est demandé, choisi dans une liste fermée (attente d'une pièce, attente d'une réponse du référent, personne absente, rendez-vous déjà pris, autre raison). Reporter déplace l'affichage, **jamais l'échéance réelle** : un Pass expire à sa date quoi qu'il arrive.
+- **L'organisation du suivi** — bilans en retard, rendez-vous non planifié, renouvellements à préparer, actions critiques : ce bloc reste **acquittable sept jours**, comme avant (« Vu — me le rappeler dans 7 jours »).
+
+**Pourquoi cette distinction compte pour un contrôle** : le nombre d'obligations rouges **non reportées** est le chiffre affiché en pastille sur le menu « Espace CIP » — c'est un compteur qu'un contrôleur peut vous demander de commenter à tout moment, et il ne peut jamais être « mis de côté » par erreur comme une alerte ordinaire.
+
+**Ce qui est exclu pour un profil MANAGER, avant même le calcul** : les quatre familles d'obligations qui touchent à un statut social (sortie FSE+, questionnaire FSE+ d'entrée, catégorie France Travail « G », sous 15 h) ne sont ni calculées ni transmises — comme les statuts sociaux du Dossier administratif (§ 2).
+
+> **Point de vigilance** — Un bloc qui n'a rien à afficher le dit en toutes lettres (« Rien à traiter cette semaine. ») : un cadre vide silencieux se lirait comme une panne, pas comme une bonne nouvelle.
+
+---
+
+## 12. Documents pour le salarié et rappels de rendez-vous
+
+**Objectif** : donner à la personne accompagnée, sur simple demande, un document qu'elle comprend et qu'elle peut montrer si elle le souhaite — et lui rappeler ses rendez-vous sans jamais lui dire, par écrit, ce qu'ils recouvrent.
+
+Depuis le 13/09/2026 (PR C), l'onglet **Situation** de la fiche du salarié comporte un panneau **« Documents pour la personne »** :
+
+- **« Mon parcours en une page »** — une seule page A4, en français simple : les engagements pris avec la personne, ceux de la structure, ses **heures de la semaine** (temps de travail et accompagnement, **sans jamais afficher un objectif ni un seuil**), son prochain rendez-vous (sans en nommer le type), son référent, et les documents qui lui ont déjà été remis.
+- **« Mon Récap »** — un récapitulatif d'une à deux pages, que la personne peut partager à un tiers de son choix : ses contrats, les grandes étapes datées (entretiens désignés par leur type, PMSMP avec l'organisme d'accueil, actions désignées par leur catégorie), ses objectifs atteints ou en cours, sa sortie le cas échéant. **Aucun texte libre, aucune donnée de santé, de justice ni de situation sociale n'y figure — pas même une mention de leur absence.**
+
+Trois gestes, dans cet ordre : **« Aperçu »** (n'enregistre rien) → **« Générer et imprimer »** (enregistre une copie exacte de ce qui est remis, datée) → **« Tracer la remise »** (date + mode : main propre, e-mail, courrier — une remise ne se trace qu'une fois). **« Réimprimer »** relit toujours le document déjà enregistré, jamais un document recomposé : deux exemplaires ne peuvent pas diverger. **Réservé ADMIN/RH** : ces documents portent le nom du référent unique et les heures hebdomadaires, deux informations qu'un manager ne reçoit pas ailleurs.
+
+**Les rappels de rendez-vous** se paramètrent dans le **Dossier administratif**, section « Rappels de rendez-vous » : le **consentement** se recueille oralement — une phrase à lire à la personne lui explique qu'elle recevra un message la veille de chaque rendez-vous, qu'elle peut arrêter quand elle veut, et que **le message ne dit jamais pourquoi elle a rendez-vous** — puis se saisit à l'écran avec le **canal** (SMS ou e-mail) et le **destinataire** choisi parmi ses contacts, proposés **masqués**. Le message part chaque jour à **18 h** (heure de Paris), pour les rendez-vous du lendemain des seules personnes ayant donné leur accord, et ne contient que le prénom, la date, l'heure et le prénom de la conseillère. **Sans clé d'envoi configurée sur le serveur, rien ne part** — le système le dit, il ne prétend jamais avoir envoyé ce qu'il n'a pas envoyé.
+
+> **Points de vigilance**
+> - **Un rendez-vous reprogrammé après l'envoi d'un rappel n'en reçoit pas de second** : c'est une limite assumée pour garantir qu'aucun rappel n'est jamais envoyé deux fois pour le même entretien.
+> - Le consentement est **individuel, révocable en un clic**, et son retrait efface le contact plutôt que de le désactiver.
+> - La trace d'un rappel envoyé ne montre jamais le contact en clair — elle prouve qu'un message est parti, elle ne sert pas d'annuaire.
+
+---
+
+## 13. Ce qui protège les personnes
 
 De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi, et qui le voit ? ».
 
@@ -359,7 +401,7 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 
 ---
 
-## 12. FAQ — 9 questions
+## 14. FAQ — 11 questions
 
 **1. Je n'ai pas les justificatifs d'éligibilité sous la main : je bloque le dossier ?** Non. Cochez les critères, mettez la date de vérification quand vous l'aurez, et notez la référence du dossier sur les Emplois de l'inclusion. La pièce « Éligibilité IAE référencée » restera « en cours » — c'est un signalement, pas un verrou.
 
@@ -375,10 +417,14 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 
 **7. Dois-je encore saisir sur les Emplois de l'inclusion et sur Ma Démarche FSE+ ?** Oui, comme avant. SOLIDATA **prépare, contrôle et trace** ; les plateformes de l'État font foi, et chaque export le rappelle en toutes lettres. Le bloc à copier du dossier administratif est là précisément pour raccourcir la saisie sur la plateforme, pas pour la remplacer.
 
-**8. Qu'est-ce qui n'est pas encore livré ?** Deux choses, annoncées : la **réorganisation de la fiche en quatre onglets** et la remontée du questionnaire FSE+ dans le socle du diagnostic, avec la **PR C** ; et un **écran encadrant accessible par lien** (sans compte SOLIDATA) pour les renouvellements. La **feuille de temps mensuelle par intervenant**, l'**agrégat des heures d'accompagnement** et la **fiche pour le référent** externe (§ 9 et § 10) sont, eux, **livrés** depuis la PR B. Aujourd'hui, l'écran de renouvellement demande toujours un compte SOLIDATA.
+**8. Qu'est-ce qui n'est pas encore livré ?** Rien, côté conformité FSE+ et cadre RSA : ce guide est à jour. La **réorganisation de la fiche en quatre onglets**, la remontée du questionnaire FSE+ dans le socle du diagnostic, et l'**écran encadrant accessible par simple lien** (sans compte SOLIDATA) pour les renouvellements — annoncés ici comme à venir — sont **livrés depuis le 13/09/2026 (PR C, v. 2.54.0)**, voir § 11 et § 12 ainsi que [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 25 et 26. La **feuille de temps mensuelle par intervenant**, l'**agrégat des heures d'accompagnement** et la **fiche pour le référent** externe (§ 9 et § 10) restent **livrés** depuis la PR B.
 
 **9. La base légale de la fiche pour le référent, c'est réglé ?** Pas encore, et nous le disons sans détour. L'entrée au registre est posée sur la mission d'intérêt public du dispositif, mais **c'est notre délégué à la protection des données qui doit la confirmer** avant que le traitement soit définitivement établi, et l'analyse d'impact déjà engagée pour le module doit être complétée de ce point précis. En attendant, la fiche continue d'être produite quand le référent en a besoin — la structure ne peut pas faire autrement — mais ce point figure explicitement parmi ce qui reste à trancher (voir [`PRESENTATION_AUTORITE_INSERTION.md`](PRESENTATION_AUTORITE_INSERTION.md) § 12).
 
+**10. Une obligation rouge, je peux la reporter combien de fois ?** Autant de fois que nécessaire, mais **jamais gratuitement** : à partir du deuxième report, un motif est exigé, choisi dans une liste fermée. Le nombre de reports d'un dossier reste visible — c'est ce qui dit qu'un dossier « tourne en rond », pas la couleur de la ligne.
+
+**11. La personne n'a pas de téléphone ou d'e-mail à elle : puis-je quand même activer les rappels ?** Non, pas raisonnablement : le destinataire doit être un contact **qui lui appartient** — c'est une règle de conduite (vérifiée oralement), aucun contrôle technique ne peut la garantir. Sans contact propre, laissez le consentement à « jamais demandé » plutôt que d'utiliser le téléphone d'un tiers.
+
 ---
 
-*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée). Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail. À réviser après la première recette avec la CIP et à la livraison de la PR C.*
+*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée), **puis à la livraison de la PR C « Section CIP et documents du salarié » (v. 2.54.0)** : nouveaux § 11 (écran « Mes échéances », obligations reportables 48 h) et § 12 (« Mon parcours en une page », « Mon Récap », rappels de rendez-vous), anciens § 11-12 renumérotés § 13-14, deux nouvelles questions de FAQ, mise à jour des renvois d'onglets (Dossier administratif, Suivi) et de la question 8. Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail — les blocs de la PR C n'ont pas encore de maquette illustrée ici.*
