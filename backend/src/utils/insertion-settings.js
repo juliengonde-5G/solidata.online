@@ -34,6 +34,15 @@
  *    25). Les deux bornent la fenêtre où la donnée de sortie est encore
  *    recueillable auprès de la personne : passé ce délai elle ne se rattrape
  *    pas, d'où deux rappels et non un seul ;
+ *  - insertion.cer_heures_min / _max        : fourchette d'activité hebdo
+ *    attendue d'un bénéficiaire du RSA (défauts 15 et 20 — le plafond est
+ *    informatif, il ne déclenche jamais d'alerte) ;
+ *  - insertion.semaines_sous_seuil_consecutives : nombre de semaines
+ *    consécutives sous le plancher qui déclenchent l'alerte (défaut 2) ;
+ *  - insertion.point_etape_referent_mois    : périodicité attendue d'un point
+ *    avec le référent unique ou d'une fiche remise (défaut 3 mois) ;
+ *  - insertion.feuille_temps_cloture_jour   : jour du mois suivant à partir
+ *    duquel une feuille de temps non validée est signalée (défaut 10) ;
  *  - insertion.duree_entretien_defaut      : durée PROPOSÉE à la clôture d'un
  *    entretien, en minutes, par type technique (JSON). C'est une proposition
  *    ajustable, jamais une durée imposée : l'agrégat d'heures d'accompagnement
@@ -72,6 +81,30 @@ const INSERTION_SETTING_DEFAULTS = {
   // PR A lot 0 — alertes « sortie FSE+ non renseignée » (job du lot 2).
   'insertion.alerte_sortie_fse_j1': 15,
   'insertion.alerte_sortie_fse_j2': 25,
+  // ── PR B (2.53.0) — cadre RSA et temps d'accompagnement ──────────────────
+  //
+  // `cer_heures_min` / `cer_heures_max` : la fourchette d'activité hebdomadaire
+  // attendue d'un bénéficiaire du RSA (loi pour le plein emploi). Le PLANCHER
+  // sert d'indicateur ; le PLAFOND est informatif et ne déclenche JAMAIS
+  // d'alerte — dépasser 20 h en CDDI n'est pas un manquement, c'est un contrat
+  // de travail. Paramétrables parce que la fourchette est fixée par convention
+  // départementale et peut différer d'un territoire à l'autre.
+  'insertion.cer_heures_min': 15,
+  'insertion.cer_heures_max': 20,
+  // Nombre de semaines CONSÉCUTIVES sous le plancher qui déclenchent l'alerte.
+  // Deux, et non une : une semaine basse arrive (un pont, une semaine de
+  // reprise, un mois de paie importé à moitié). Alerter dès la première
+  // fabriquerait un signal que plus personne ne regarderait.
+  'insertion.semaines_sous_seuil_consecutives': 2,
+  // Périodicité attendue d'un contact avec le référent unique — un « Point avec
+  // le référent » tenu OU une fiche effectivement remise. Les deux valent
+  // alimentation : ne compter que les entretiens ferait apparaître « jamais de
+  // point » sur un dossier où une fiche part chaque trimestre.
+  'insertion.point_etape_referent_mois': 3,
+  // Jour du mois suivant à partir duquel une feuille de temps non validée est
+  // signalée (lot 4). Ce n'est pas une date limite opposable à l'intervenant :
+  // c'est le moment où le retard devient visible dans l'écran.
+  'insertion.feuille_temps_cloture_jour': 10,
   // PR A lot 0 — durées d'entretien proposées par type technique (minutes).
   // Défaut d'objet : la lecture accepte une surcharge en JSON dans `settings`
   // et retombe sur ce défaut si le JSON est illisible (jamais un objet vide,
@@ -83,6 +116,11 @@ const INSERTION_SETTING_DEFAULTS = {
     renouvellement: 30,
     bilan_sortie: 60,
     suivi_post_sortie: 15,
+    // PR B lot 3 — un point avec le référent se tient rarement en moins d'une
+    // heure (trois agendas à faire coïncider) ; une conciliation est plus
+    // courte, mais jamais expédiée.
+    point_etape_referent: 60,
+    conciliation: 45,
   },
 };
 

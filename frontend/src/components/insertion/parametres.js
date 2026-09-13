@@ -23,7 +23,19 @@ export const PARAMETRES_DEFAUTS = {
   duree_entretien_defaut: {
     diagnostic_accueil: 90, bilan_intermediaire: 45, periode_essai: 30,
     renouvellement: 30, bilan_sortie: 60, suivi_post_sortie: 15,
+    point_etape_referent: 60, conciliation: 45,
   },
+  // PR B (2026-09, lot 3) — cadre RSA et temps d'accompagnement. Mêmes défauts
+  // que le backend (`utils/insertion-settings.js`) : ce miroir sert de REPLI si
+  // l'appel échoue, jamais de source. Le badge d'activité, le bloc « Rendez-vous
+  // réguliers et rappels » et la feuille de temps affichent la valeur du
+  // serveur — une constante figée ici dirait « sous 15 h » pendant que le
+  // serveur en compterait 20.
+  cer_heures_min: 15,
+  cer_heures_max: 20,
+  semaines_sous_seuil_consecutives: 2,
+  point_etape_referent_mois: 3,
+  feuille_temps_cloture_jour: 10,
 };
 
 let cache = null;

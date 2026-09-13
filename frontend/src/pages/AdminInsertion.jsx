@@ -60,6 +60,15 @@ const PARAMS = [
   { key: 'insertion.alerte_sortie_fse_j2', name: 'alerte_sortie_fse_j2', label: 'Alerte « sortie FSE+ non renseignée » — 2e seuil (jours)', help: 'Second rappel, plus pressant.', type: 'number', def: 25 },
   { key: 'insertion.retention_months', name: 'retention_months', label: 'Rétention RGPD des dossiers sortis (mois)', help: 'Délai avant anonymisation des dossiers d\'insertion après la fin du parcours (référentiel CNIL : 24 mois).', type: 'number', def: 24 },
   { key: 'insertion.ia_preparation_auto', name: 'ia_preparation_auto', label: 'Préparation IA automatique à J-7', help: 'Génère la note de préparation IA 7 jours avant chaque entretien planifié.', type: 'boolean', def: false },
+  // ── PR B (2026-09) — cadre RSA et temps d'accompagnement ──────────────────
+  // La fourchette 15-20 h est fixée par convention départementale : elle se
+  // règle, elle ne se code pas. Le PLAFOND est informatif — le dépasser n'est
+  // pas un manquement, c'est un contrat de travail.
+  { key: 'insertion.cer_heures_min', name: 'cer_heures_min', label: 'Activité hebdomadaire attendue — plancher (heures)', help: 'Repère du cadre RSA. Le temps de travail en CDDI compte : un salarié à 26 h est au-dessus par le seul fait de travailler.', type: 'number', def: 15 },
+  { key: 'insertion.cer_heures_max', name: 'cer_heures_max', label: 'Activité hebdomadaire attendue — plafond (heures)', help: 'Informatif : le dépassement ne déclenche aucune alerte.', type: 'number', def: 20 },
+  { key: 'insertion.semaines_sous_seuil_consecutives', name: 'semaines_sous_seuil_consecutives', label: 'Semaines consécutives basses avant signalement', help: 'Une semaine basse arrive (un pont, une reprise). Le signalement n\'apparaît qu\'au-delà, et jamais pendant un arrêt déclaré ni sur une semaine dont les heures ne sont pas encore relevées.', type: 'number', def: 2 },
+  { key: 'insertion.point_etape_referent_mois', name: 'point_etape_referent_mois', label: 'Périodicité du point avec le référent (mois)', help: 'Un point tenu OU une fiche effectivement remise vaut alimentation du référent unique.', type: 'number', def: 3 },
+  { key: 'insertion.feuille_temps_cloture_jour', name: 'feuille_temps_cloture_jour', label: 'Feuille de temps — jour de signalement du mois suivant', help: 'Jour à partir duquel une feuille de temps non validée est signalée. Ce n\'est pas une date limite opposable à l\'intervenant.', type: 'number', def: 10 },
 ];
 
 const msgErreur = (err, repli) => err?.response?.data?.error || err?.message || repli;

@@ -107,6 +107,27 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_FSE_SIX_MOIS_SAISIE: 'Relevé de situation à 6 mois (FSE+)',
   INSERTION_PROJET_PARTICIPANT: 'Rattachement / retrait d’un participant à un projet cofinancé',
 
+  // ── Cadre RSA — structure d'accueil (routes/insertion/rsa.js, PR B lot 3) ──
+  // La structure n'est pas référent unique : elle ALIMENTE un référent externe.
+  // Chaque geste qui fait SORTIR de l'information vers ce tiers laisse une
+  // trace distincte — produire un aperçu, générer une fiche enregistrée, la
+  // relire, attester de sa remise — parce que « qui a transmis quoi, à qui et
+  // quand » est précisément ce à quoi la structure doit pouvoir répondre.
+  INSERTION_ACTIVITE_CONSULTATION: 'Consultation du compteur d’activité hebdomadaire',
+  INSERTION_ASSIDUITE_CONSULTATION: 'Consultation du relevé d’assiduité',
+  INSERTION_FICHE_REFERENT_APERCU: 'Aperçu d’une fiche pour le référent (sans enregistrement)',
+  INSERTION_FICHE_REFERENT_GENERATION: 'Génération d’une fiche pour le référent',
+  INSERTION_FICHE_REFERENT_CONSULTATION: 'Consultation d’une fiche pour le référent déjà transmise',
+  INSERTION_FICHE_REFERENT_REMISE: 'Remise d’une fiche pour le référent (référent et/ou personne concernée)',
+  INSERTION_ACTUALISATION_FT_MAJ: 'Mise à jour du registre d’actualisation France Travail',
+
+  // ── Temps d'accompagnement (routes/insertion/temps.js, PR B lot 4) ────────
+  // La feuille de temps est une pièce de FINANCEMENT (cofinancement FSE+) :
+  // sa signature et sa réouverture engagent, et l'export part vers l'extérieur.
+  INSERTION_FEUILLE_TEMPS_VALIDATION: 'Validation d’une feuille de temps d’accompagnement',
+  INSERTION_FEUILLE_TEMPS_REOUVERTURE: 'Réouverture d’une feuille de temps d’accompagnement (motif obligatoire)',
+  EXPORT_FEUILLE_TEMPS: 'Export d’une feuille de temps d’accompagnement',
+
   // ── Effectifs ETP / états ASP (routes/effectifs.js) ───────────────────────
   ASP_IMPORT: 'Import d’un état ASP mensuel',
   ASP_LIAISON: 'Liaison salarié ↔ état ASP',
@@ -175,6 +196,9 @@ export const RGPD_ENTITY_LABELS = {
   insertion: 'Dossiers d’insertion',
   insertion_freins: 'Freins périphériques (insertion)',
   insertion_notes_profil: 'Notes de profil initial (CIP)',
+  insertion_cadre: 'Dossier administratif d’insertion',
+  insertion_rsa: 'Cadre RSA — alimentation du référent unique',
+  insertion_temps: 'Temps d’accompagnement (feuilles de temps)',
   tours: 'Tournées',
   cav: 'Conteneurs d’apport volontaire (CAV)',
   production_daily: 'Production quotidienne',

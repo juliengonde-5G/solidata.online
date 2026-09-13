@@ -299,6 +299,58 @@ async function anonymizeEmployee(client, id) {
     await client.query('DELETE FROM insertion_notes_suivi WHERE employee_id = $1', [id]);
   }
 
+  // ── PR B lot 3 — cadre RSA (structure d'accueil) ──────────────────────────
+  //
+  // FICHES TRANSMISES AU RÉFÉRENT : purge INTÉGRALE. Chaque ligne porte un
+  // SNAPSHOT complet du point de situation envoyé à un tiers — identité,
+  // activité hebdomadaire, assiduité, niveaux de freins, actions. Nullifier le
+  // `contenu` laisserait une coquille dont la seule information restante serait
+  // « quelque chose a été transmis au Département ce jour-là ». La FK CASCADE
+  // ferait déjà le travail à la suppression du salarié, mais l'anonymisation ne
+  // supprime pas la fiche : elle la conserve, pseudonymisée. D'où ce DELETE
+  // explicite — ceinture et bretelles, même doctrine que les notes de suivi.
+  if (await tableExists(client, 'insertion_alimentations_referent')) {
+    await client.query('DELETE FROM insertion_alimentations_referent WHERE employee_id = $1', [id]);
+  }
+
+  // REGISTRE D'ACTUALISATION FRANCE TRAVAIL : purge intégrale également. Ce
+  // qu'il conserve — « rappelée le 3, actualisation non honorée » — n'a aucune
+  // valeur d'agrégat (il ne sert à aucun indicateur de pilotage) et constitue
+  // exactement le genre de constat de manquement individuel qu'on ne garde pas
+  // après l'exercice du droit à l'effacement.
+  if (await tableExists(client, 'insertion_actualisations_ft')) {
+    await client.query('DELETE FROM insertion_actualisations_ft WHERE employee_id = $1', [id]);
+  }
+
+  // FEUILLES DE TEMPS DES INTERVENANTS (lot 4) : la feuille elle-même est une
+  // PIÈCE DE FINANCEMENT conservée au moins 5 ans au titre de la piste d'audit
+  // FSE+ — la supprimer priverait la structure de sa capacité à justifier une
+  // dépense déjà perçue (même arbitrage que `insertion_fse_sorties`). Mais elle
+  // n'a aucun besoin de dire DE QUI il s'agit : les lignes ne portent qu'un
+  // identifiant interne, et c'est lui qu'on retire. Le volume d'heures, le
+  // projet et la date — c'est-à-dire tout ce que le financeur contrôle —
+  // survivent intacts.
+  //
+  // `jsonb_agg` sur un tableau vide rend NULL, d'où le COALESCE : sans lui, une
+  // feuille sans ligne verrait son snapshot passer de `[]` à `null`, ce qui se
+  // lit « feuille jamais composée » au lieu de « feuille vide ».
+  if (await tableExists(client, 'insertion_feuilles_temps')) {
+    await client.query(
+      `UPDATE insertion_feuilles_temps f
+          SET lignes = COALESCE((
+                SELECT jsonb_agg(
+                         CASE WHEN (l->>'employee_id')::text = $1::text
+                              THEN jsonb_set(l, '{employee_id}', 'null'::jsonb)
+                              ELSE l END
+                         ORDER BY ord)
+                  FROM jsonb_array_elements(f.lignes) WITH ORDINALITY AS t(l, ord)
+              ), '[]'::jsonb)
+        WHERE jsonb_typeof(f.lignes) = 'array'
+          AND f.lignes @> jsonb_build_array(jsonb_build_object('employee_id', $1::int))`,
+      [id]
+    );
+  }
+
   // Profil de personnalité PCM (2.43.0 — audit du module PCM, défaut D5,
   // reco R7). Défaut constaté : le PCM d'un candidat RECRUTÉ n'était jamais
   // purgé. La purge planifiée des candidats exclut explicitement les recrutés
