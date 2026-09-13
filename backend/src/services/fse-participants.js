@@ -434,10 +434,12 @@ function composerPieces(ctx, reglages = {}) {
         detail = retard != null ? `fin de contrat il y a ${retard} jour(s), sortie non saisie` : 'sortie non saisie';
       }
     } else {
-      const base = e.contract_end || s.date_sortie;
-      const delai = joursEntre(base, s.saisie_at);
+      // Même base que la colonne 26 de l'export (règle dictée) : la sortie de
+      // l'opération. Compter depuis la fin de contrat donnerait ici un délai
+      // conforme et, dans le fichier remis à l'autorité, un délai hors délai.
+      const delai = joursEntre(s.date_sortie, s.saisie_at);
       etat = delai <= DELAI_SAISIE_SORTIE_JOURS ? 'complet' : 'partiel';
-      detail = `saisie le ${frDate(s.saisie_at)} · ${delai} jour(s) après la fin de contrat`;
+      detail = `saisie le ${frDate(s.saisie_at)} · ${delai} jour(s) après la sortie`;
     }
     pieces.push({ cle: 'sortie_delai', libelle: `Statut de sortie saisi dans le mois`, etat, detail, lien: 'dossier#fse-sortie' });
   }
@@ -616,12 +618,19 @@ async function checkFseSortiesNonRenseignees(db = pool) {
        JOIN insertion_projet_participants pp ON pp.employee_id = e.id
        JOIN insertion_projets pr ON pr.id = pp.projet_id AND pr.type = 'asi'
        WHERE e.contract_end IS NOT NULL
-         AND e.contract_end < CURRENT_DATE - ($1 || ' days')::interval
+         -- Soustraction de DATES (nombre de jours entiers), et non comparaison
+         -- a un intervalle : contract_end < CURRENT_DATE - '15 days' compare
+         -- deux instants de minuit et n'est donc vrai qu'au SEIZIEME jour.
+         -- L'ecran d'alertes (routes.js, fse_sortie_a_saisir) lit deja
+         -- jours >= seuil : les deux implementations de la meme regle
+         -- divergeaient d'un jour, celle qui laisse une trace etant la plus
+         -- tardive. Preuve : tests/e2e-pr-a/pr-a-fse-e2e.test.js.
+         AND (CURRENT_DATE - e.contract_end) >= $1::int
          AND NOT EXISTS (
            SELECT 1 FROM insertion_fse_sorties s
            WHERE s.employee_id = e.id AND s.parcours_num = COALESCE(e.parcours_num, 1)
          )`,
-      [String(seuil1)]
+      [seuil1]
     );
 
     for (const r of rows.rows) {

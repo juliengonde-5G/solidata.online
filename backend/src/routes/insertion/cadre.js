@@ -472,7 +472,18 @@ router.put('/:employeeId', ADMIN_RH, ID, validate, async (req, res) => {
   // suffisaient à figer TOUTE l'application (plus aucune requête, quel que soit
   // le module, ne pouvait obtenir de connexion). Reproduit puis corrigé —
   // preuve sur PostgreSQL réel, `tests/e2e-pr-a/pr-a-cadre-e2e.test.js`.
-  const client = await pool.connect();
+  // Obtention de la connexion DANS un try : Express 4 ne capte pas le rejet
+  // d'un gestionnaire asynchrone. Si le pool est saturé, `pool.connect()` lève
+  // au bout de deux secondes et, hors try, la requête resterait SANS RÉPONSE —
+  // l'écran de la CIP tournerait indéfiniment au lieu d'annoncer une
+  // indisponibilité.
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    console.error('[INSERTION] Cadre PUT — connexion indisponible :', err.message);
+    return res.status(503).json({ error: 'Base momentanément indisponible, réessayez dans un instant.' });
+  }
   let libere = false;
   const rendre = () => { if (!libere) { libere = true; client.release(); } };
   try {

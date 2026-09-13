@@ -171,7 +171,14 @@ function completudeDossier(pieces) {
 function ligneParticipant(r, projet, pieces) {
   const fse = r.fse_entree && typeof r.fse_entree === 'object' ? r.fse_entree : {};
   const comp = completude(fse, FSE_ENTREE_ITEMS);
-  const delai = r.saisie_at ? joursEntre(r.contract_end || r.fse_date_sortie, r.saisie_at) : '';
+  // COLONNE 26 — la règle est DICTÉE et arithmétique : « colonne 25 moins
+  // colonne 23 », c'est-à-dire la date de saisie moins la DATE DE SORTIE DE
+  // L'OPÉRATION. Elle se compte depuis la fin de contrat : sur une rupture
+  // anticipée les deux dates diffèrent, et l'instructeur qui refait la
+  // soustraction sur le fichier trouvait un écart inexplicable (43 jours lus,
+  // 12 imprimés). La date de sortie est NOT NULL en base : il n'y a pas de cas
+  // où la base de calcul manquerait.
+  const delai = r.saisie_at ? joursEntre(r.fse_date_sortie, r.saisie_at) : '';
   const dossierPct = completudeDossier(pieces);
   return [
     r.id,
@@ -448,11 +455,14 @@ router.get('/fse-plus/bilan', [
           (v) => SITUATION_SORTIE_LABELS[v] || v
         ),
         sortie_non_renseignee: rows.filter((r) => !r.situation_sortie && (r.date_sortie || (r.contract_end && jour(r.contract_end) < jour(new Date())))).length,
+        // Même base de calcul que la colonne 26 de (a) : le bilan agrégé et le
+        // fichier nominatif ne peuvent pas porter deux « délais de saisie »
+        // différents — c'est le premier rapprochement que fait l'instructeur.
         delai_saisie_jours_moyen: (() => {
-          const d = rows.filter((r) => r.saisie_at).map((r) => joursEntre(r.contract_end || r.fse_date_sortie, r.saisie_at));
+          const d = rows.filter((r) => r.saisie_at).map((r) => joursEntre(r.fse_date_sortie, r.saisie_at));
           return d.length === 0 ? null : Math.round((d.reduce((a, b) => a + b, 0) / d.length) * 10) / 10;
         })(),
-        saisies_dans_le_mois: rows.filter((r) => r.saisie_at && joursEntre(r.contract_end || r.fse_date_sortie, r.saisie_at) <= 30).length,
+        saisies_dans_le_mois: rows.filter((r) => r.saisie_at && joursEntre(r.fse_date_sortie, r.saisie_at) <= 30).length,
       },
       // § 5 Résultat à +6 mois — avec la ligne « non relevée »
       indicateurs_six_mois: {
@@ -487,7 +497,7 @@ router.get('/fse-plus/bilan', [
         population: "Participants dont le rattachement au projet est SAISI et daté (jamais déduit d'un statut), entrés avant la fin de la période et non sortis avant son début.",
         completude_questionnaire: `Items obligatoires renseignés / ${FSE_ENTREE_ITEMS.filter((i) => i.obligatoire).length} (le commentaire libre n'est pas compté).`,
         completude_dossier: "Pièces à l'état « complet » rapportées aux pièces EXIGIBLES à la date de génération, c'est-à-dire les 9 pièces moins celles qui sont « sans objet » (pièces de sortie d'un parcours en cours). Une pièce « partielle » n'est pas comptée comme complète.",
-        delai_saisie: "Date de saisie de la sortie moins date de fin de contrat (à défaut, moins la date de sortie). L'horodatage retenu est celui du PREMIER recueil : une correction ultérieure ne crée pas de retard rétroactif.",
+        delai_saisie: "Date de saisie de la sortie moins date de sortie de l'opération (règle dictée par l'autorité : colonne 25 moins colonne 23 de l'export des participants). L'horodatage retenu est celui du PREMIER recueil : une correction ultérieure ne crée pas de retard rétroactif.",
         situation_sortie: "Réponse explicite de la conseillère ; à défaut, déduction depuis la catégorie de sortie IAE (emploi durable, emploi de transition, sortie positive). La catégorie IAE « autre » n'a pas d'équivalent FSE+ et donne « Non renseignée » — aucune situation n'est inventée.",
         heures: `Heures d'activité des participants sur la période, source : ${heures.source}. Absence de saisie → valeur nulle, jamais zéro.`,
         cibles: "Objectif non paramétré : aucune cible conventionnelle n'est enregistrée pour ce projet.",

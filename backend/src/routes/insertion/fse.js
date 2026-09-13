@@ -68,13 +68,14 @@ router.get('/:employeeId', [param('employeeId').isInt().withMessage('ID employé
     const s = sortie.rows[0] || null;
 
     // Délai de saisie : la colonne que l'autorité regarde en premier (09 § 2
-    // (a) colonne 26). Compté depuis la fin de contrat quand elle est connue —
-    // c'est l'événement qui déclenche l'obligation — sinon depuis la sortie.
+    // (a) colonne 26), dont la règle est DICTÉE — date de saisie moins DATE DE
+    // SORTIE DE L'OPÉRATION. L'écran affiche donc exactement le nombre qui
+    // partira dans l'export : deux bases de calcul produiraient deux « délais
+    // de saisie » différents sous le même nom.
     let delaiSaisieJours = null;
     if (s) {
-      const base = emp.contract_end || s.date_sortie;
       delaiSaisieJours = Math.floor(
-        (new Date(String(s.saisie_at).slice(0, 10)) - new Date(String(base).slice(0, 10))) / 86400000
+        (new Date(String(s.saisie_at).slice(0, 10)) - new Date(String(s.date_sortie).slice(0, 10))) / 86400000
       );
     }
     let echeance6mois = null;
