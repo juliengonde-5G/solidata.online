@@ -49,6 +49,7 @@ const InsertionParcours = lazy(() => import('./pages/InsertionParcours'));
 const ActionsCIP = lazy(() => import('./pages/ActionsCIP'));
 const AuditInsertion = lazy(() => import('./pages/AuditInsertion'));
 const RenouvellementETI = lazy(() => import('./pages/RenouvellementETI'));
+const EtiRenouvellement = lazy(() => import('./pages/EtiRenouvellement')); // PR C — écran ETI à jeton public
 const AdminInsertion = lazy(() => import('./pages/AdminInsertion'));
 const DossiersFSE = lazy(() => import('./pages/DossiersFSE'));
 const TempsAccompagnement = lazy(() => import('./pages/TempsAccompagnement'));
@@ -172,6 +173,8 @@ function App() {
               <Route path="/pcm-test/:token" element={<PCMTest />} />
               {/* Réponse publique à une enquête (RSEI-13) — SANS authentification, mode kiosque FALC */}
               <Route path="/enquete/:token" element={<EnqueteReponse />} />
+              {/* Avis de l'encadrant technique par lien public (PR C 2.54.0) — SANS authentification, jeton hex 32 valable 60 j */}
+              <Route path="/eti/renouvellement/:token" element={<EtiRenouvellement />} />
               <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
 
 

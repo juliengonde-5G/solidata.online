@@ -28,6 +28,11 @@ import { PASS_STATUT_LABELS, PASS_STATUT_CLASSES } from '../components/insertion
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
 import { exportFicheReferentPDF, exportReleveAssiduitePDF } from '../components/insertion/pdf-referent';
+// PR C lot 7 — documents POUR la personne (Mon parcours en une page, Mon Récap)
+// et consentement aux rappels de RDV. Ancrages posés par l'orchestrateur : le
+// lot 5 les DÉPLACE avec les onglets, il ne les supprime pas (contrat 20 § 1.1).
+import DocumentsSalariePanel from '../components/insertion/DocumentsSalariePanel';
+import RappelsConsentement from '../components/insertion/RappelsConsentement';
 import ActiviteHebdo from '../components/insertion/ActiviteHebdo';
 import { TYPE_LABELS_RSA } from '../components/insertion/entretiens-rsa';
 import { formatEmployeeName, compareByName } from '../utils/names';
@@ -1512,6 +1517,13 @@ export default function InsertionParcours() {
                     <div className="bg-white rounded-lg border p-4">
                       <PmsmpPanel employeeId={selectedEmployee.id} canEdit={adminRh} />
                     </div>
+                    {/* PR C lot 7 — documents remis à la personne (ADMIN/RH : le
+                        composant ne rend rien pour les autres rôles). */}
+                    {adminRh && (
+                      <div className="bg-white rounded-lg border p-4">
+                        <DocumentsSalariePanel employee={emp} />
+                      </div>
+                    )}
                     {/* Questionnaire de satisfaction — visible dès qu'une sortie
                         existe ou que le questionnaire a été rempli. */}
                     {(analysis.satisfaction || emp.insertion_status === 'termine'
@@ -1561,6 +1573,7 @@ export default function InsertionParcours() {
                     employee={emp}
                     baseRole={user?.base_role || user?.role}
                     onChanged={(d) => { setCadre(d); setCadreError(null); }}
+                    extra={adminRh ? <RappelsConsentement employee={emp} /> : null}
                     onNaviguer={(lien) => {
                       // « Compléter » du dossier de conformité : le lien porte
                       // l'onglet visé (« diagnostic#fse », « suivi », « dossier#… »).

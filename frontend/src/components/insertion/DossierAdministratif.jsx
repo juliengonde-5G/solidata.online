@@ -84,7 +84,7 @@ const BRSA_OPTIONS = [
 const PROJET_TYPE_LABELS = { asi: 'ASI', ocs: 'OCS', autre: 'Autre' };
 const jourOuVide = (v) => (v ? String(v).slice(0, 10) : '');
 
-export default function DossierAdministratif({ employeeId, employee, baseRole, onChanged, onNaviguer }) {
+export default function DossierAdministratif({ employeeId, employee, baseRole, onChanged, onNaviguer, extra = null }) {
   const toast = useToast();
   const adminRh = isAdminRh({ base_role: baseRole });
   const [projetsActifs, setProjetsActifs] = useState([]);
@@ -660,6 +660,8 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
           <DossierConformite employeeId={employeeId} refreshKey={cadre} onNaviguer={onNaviguer} />
         </div>
       )}
+      {/* PR C lot 7 — bloc additionnel (consentement aux rappels de RDV), fourni par la page */}
+      {extra}
     </div>
   );
 }
