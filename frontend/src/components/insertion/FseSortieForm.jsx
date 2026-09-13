@@ -25,6 +25,9 @@ const SITUATIONS = [
   ['chomage', "Chômage (demandeur d'emploi)"],
   ['inconnue', 'Non renseignée'],
 ];
+// Relevé à +6 mois : la personne qui a changé de numéro n'est pas « non
+// renseignée » (oubli), elle est injoignable — l'autorité distingue les deux.
+const SITUATIONS_6MOIS = [...SITUATIONS, ['injoignable', 'Injoignable']];
 
 const TYPES_CONTRAT = [
   ['cdi', 'CDI'],
@@ -137,7 +140,7 @@ export default function FseSortieForm({ employeeId, mode = 'sortie', valeurs = n
             </p>
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-1.5">Situation à +6 mois</label>
-              <ChipsRow value={situation6} onChange={setSituation6} options={SITUATIONS} />
+              <ChipsRow value={situation6} onChange={setSituation6} options={SITUATIONS_6MOIS} />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-1" htmlFor="fse-date-releve">Date du relevé</label>

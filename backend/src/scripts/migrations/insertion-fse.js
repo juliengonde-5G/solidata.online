@@ -109,7 +109,7 @@ async function run(client) {
       fse_sortie JSONB,
       saisie_at TIMESTAMP NOT NULL DEFAULT NOW(),
       saisie_par INTEGER REFERENCES users(id),
-      situation_6mois VARCHAR(30) CHECK (situation_6mois IN ('emploi_durable', 'emploi_transition', 'formation', 'autre_sortie_positive', 'inactivite', 'chomage', 'inconnue')),
+      situation_6mois VARCHAR(30) CHECK (situation_6mois IN ('emploi_durable', 'emploi_transition', 'formation', 'autre_sortie_positive', 'inactivite', 'chomage', 'inconnue', 'injoignable')),
       date_releve_6mois DATE,
       releve_6mois_par INTEGER REFERENCES users(id),
       UNIQUE(employee_id, parcours_num)

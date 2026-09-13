@@ -3133,13 +3133,21 @@ router.put('/objectif-sorties', authorize('ADMIN', 'RH'), async (req, res) => {
 router.get('/parametres', async (req, res) => {
   try {
     const [echeanceActionJours, rythmeBilansMois, delaiDiagnosticJours, alertePassIaeMois,
-      iaPreparationAuto, noteProfilAuto] = await Promise.all([
+      iaPreparationAuto, noteProfilAuto, postSortieMois, alerteSortieFseJ1, alerteSortieFseJ2,
+      dureeEntretienDefaut] = await Promise.all([
       readInsertionSetting('insertion.echeance_action_defaut_jours'),
       readInsertionSetting('insertion.rythme_bilans_mois'),
       readInsertionSetting('insertion.delai_diagnostic_jours'),
       readInsertionSetting('insertion.alerte_pass_iae_mois'),
       readInsertionSetting('insertion.ia_preparation_auto'),
       readInsertionSetting('insertion.note_profil_auto'),
+      // PR A « Conformité immédiate » (2026-09) : les quatre réglages du volet
+      // FSE+ / durée d'entretien sont servis ici pour que la fenêtre de clôture
+      // (EntretienForm) et les alertes lisent la MÊME valeur que le serveur.
+      readInsertionSetting('insertion.post_sortie_mois'),
+      readInsertionSetting('insertion.alerte_sortie_fse_j1'),
+      readInsertionSetting('insertion.alerte_sortie_fse_j2'),
+      readInsertionSetting('insertion.duree_entretien_defaut'),
     ]);
     res.json({
       echeance_action_defaut_jours: echeanceActionJours,
@@ -3150,6 +3158,10 @@ router.get('/parametres', async (req, res) => {
       // 2.43.0 — note de profil initial générée d'office à la liaison
       // candidat→collaborateur (défaut true, demande client).
       note_profil_auto: noteProfilAuto,
+      post_sortie_mois: postSortieMois,
+      alerte_sortie_fse_j1: alerteSortieFseJ1,
+      alerte_sortie_fse_j2: alerteSortieFseJ2,
+      duree_entretien_defaut: dureeEntretienDefaut,
     });
   } catch (err) {
     console.error('[INSERTION] Erreur parametres :', err.message);

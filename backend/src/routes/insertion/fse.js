@@ -17,7 +17,7 @@ const { authorize } = require('../../middleware/auth');
 const { body, param } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const {
-  FSE_ENTREE_ITEMS, FSE_SORTIE_ITEMS, SITUATIONS_SORTIE,
+  FSE_ENTREE_ITEMS, FSE_SORTIE_ITEMS, SITUATIONS_SORTIE, SITUATIONS_6MOIS,
   completude, suggestionsEntree,
 } = require('../../utils/fse-schema');
 const fseParticipants = require('../../services/fse-participants');
@@ -173,7 +173,7 @@ router.post('/:employeeId/sortie', [
  */
 router.post('/:employeeId/six-mois', [
   param('employeeId').isInt().withMessage('ID employé invalide'),
-  body('situation_6mois').isIn(SITUATIONS_SORTIE).withMessage(`situation_6mois invalide (${SITUATIONS_SORTIE.join(', ')})`),
+  body('situation_6mois').isIn(SITUATIONS_6MOIS).withMessage(`situation_6mois invalide (${SITUATIONS_6MOIS.join(', ')})`),
   body('date_releve_6mois').optional({ nullable: true }).isISO8601().withMessage('date_releve_6mois invalide'),
 ], validate, async (req, res) => {
   try {

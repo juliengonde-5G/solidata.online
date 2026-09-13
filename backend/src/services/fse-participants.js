@@ -28,7 +28,7 @@
 const pool = require('../config/database');
 const { readInsertionSetting } = require('../utils/insertion-settings');
 const {
-  FSE_ENTREE_ITEMS, FSE_SORTIE_ITEMS, SITUATIONS_SORTIE,
+  FSE_ENTREE_ITEMS, FSE_SORTIE_ITEMS, SITUATIONS_SORTIE, SITUATIONS_6MOIS,
   valider, completude, estVide,
 } = require('../utils/fse-schema');
 
@@ -197,10 +197,10 @@ async function enregistrerSortie({ employeeId, milestone = null, payload = {}, u
  */
 async function enregistrerSixMois({ employeeId, parcoursNum = null, situation6mois, dateReleve, userId, client } = {}) {
   const db = client || pool;
-  if (!SITUATIONS_SORTIE.includes(situation6mois)) {
+  if (!SITUATIONS_6MOIS.includes(situation6mois)) {
     const err = new Error('Situation à six mois hors liste');
     err.code = 'SIX_MOIS_INVALIDE';
-    err.erreurs = [{ cle: 'situation_6mois', motif: `Situation attendue parmi : ${SITUATIONS_SORTIE.join(', ')}.` }];
+    err.erreurs = [{ cle: 'situation_6mois', motif: `Situation attendue parmi : ${SITUATIONS_6MOIS.join(', ')}.` }];
     throw err;
   }
   const d = jour(dateReleve) || jour(new Date());

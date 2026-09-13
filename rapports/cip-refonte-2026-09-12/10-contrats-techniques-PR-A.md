@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS insertion_fse_sorties (
   fse_sortie JSONB, saisie_at TIMESTAMP NOT NULL DEFAULT NOW(), saisie_par INTEGER REFERENCES users(id),
   situation_6mois VARCHAR(30) CHECK (situation_6mois IN ('emploi_durable','emploi_transition','formation','autre_sortie_positive','inactivite','chomage','inconnue')),
   date_releve_6mois DATE, releve_6mois_par INTEGER REFERENCES users(id), UNIQUE(employee_id, parcours_num));
+-- amendement d'intégration : situation_6mois admet aussi 'injoignable' (personne partie sans numéro ≠ oubli de saisie)
 ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS duree_minutes SMALLINT CHECK (duree_minutes IS NULL OR (duree_minutes >= 0 AND duree_minutes <= 600));
 ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS presence VARCHAR(10);      -- present | absent | excuse (CHECK via DO-scan)
 ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS absence_motif VARCHAR(20); -- sante | administratif | garde | transport | autre (facultatif, jamais imprimé « injustifiée »)

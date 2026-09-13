@@ -80,6 +80,14 @@ const SITUATIONS_SORTIE = [
   'autre_sortie_positive', 'inactivite', 'chomage', 'inconnue',
 ];
 
+/**
+ * Relevé à +6 mois : mêmes situations, plus « injoignable » — la personne partie
+ * sans laisser de numéro n'a pas une situation « non renseignée » (ce serait un
+ * oubli de la CIP), elle est INJOIGNABLE, et l'autorité veut distinguer les deux
+ * (colonne 27 de l'export). Jamais proposée à la sortie elle-même.
+ */
+const SITUATIONS_6MOIS = [...SITUATIONS_SORTIE, 'injoignable'];
+
 const SITUATION_SORTIE_LABELS = {
   emploi_durable: 'Emploi durable',
   emploi_transition: 'Emploi de transition',
@@ -88,6 +96,7 @@ const SITUATION_SORTIE_LABELS = {
   inactivite: 'Inactivité',
   chomage: "Chômage (demandeur d'emploi)",
   inconnue: 'Non renseignée',
+  injoignable: 'Injoignable',
 };
 
 /** Questionnaire de SORTIE de l'opération. */
@@ -300,6 +309,7 @@ module.exports = {
   FSE_ENTREE_ITEMS,
   FSE_SORTIE_ITEMS,
   SITUATIONS_SORTIE,
+  SITUATIONS_6MOIS,
   SITUATION_SORTIE_LABELS,
   MAX_TEXTE,
   valider,
