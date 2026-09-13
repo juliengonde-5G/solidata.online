@@ -146,6 +146,10 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_DOC_SALARIE_REMISE: 'Remise tracée d’un document au salarié',
   INSERTION_RAPPEL_CONSENTEMENT: 'Recueil ou retrait du consentement aux rappels de rendez-vous',
   INSERTION_RAPPEL_ENVOI: 'Envoi d’un rappel de rendez-vous au salarié (SMS / e-mail)',
+  // Message de vérification du contact, envoyé AU MOMENT du recueil pour que la
+  // conseillère puisse demander « vous l’avez reçu ? » tant que la personne est
+  // devant elle (correctif M-05 de la revue de sécurité PR C).
+  INSERTION_RAPPEL_VERIFICATION: 'Vérification du contact choisi pour les rappels de rendez-vous',
 
   // ── Effectifs ETP / états ASP (routes/effectifs.js) ───────────────────────
   ASP_IMPORT: 'Import d’un état ASP mensuel',

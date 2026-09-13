@@ -105,9 +105,16 @@ function masquerDestinataire(canal, valeur) {
   if (canal === 'email') {
     const at = v.indexOf('@');
     if (at <= 0) return '***';
-    return `${v.charAt(0)}***${v.slice(at)}`.slice(0, 60);
+    // CORRECTIF m-09 : sur un local-part d'une ou deux lettres, « a***@x.fr »
+    // le révélait INTÉGRALEMENT. Sous trois caractères, on ne montre rien.
+    return (at < 3 ? `***${v.slice(at)}` : `${v.charAt(0)}***${v.slice(at)}`).slice(0, 60);
   }
-  const chiffres = v.replace(/\D/g, '');
+  let chiffres = v.replace(/\D/g, '');
+  // Le numéro est stocké en E.164 (+33612345678) depuis le correctif M-04 : on
+  // le REPRÉSENTE en forme française, parce que la conseillère vérifie de vive
+  // voix (« c'est bien le 06 qui finit par 78 ? ») et que « 33 ** ** ** 78 » ne
+  // ressemble à rien de ce que la personne connaît de son propre numéro.
+  if (/^33\d{9}$/.test(chiffres)) chiffres = `0${chiffres.slice(2)}`;
   if (chiffres.length < 4) return '***';
   return `${chiffres.slice(0, 2)} ** ** ** ${chiffres.slice(-2)}`;
 }
@@ -299,12 +306,26 @@ async function envoyerRappelsRdvSalaries() {
         canal === 'sms' ? rdv.destinataire : null,
         variables
       );
-      const statut = res && res.dryRun ? 'dry_run' : 'envoye';
+      // ═══ CORRECTIF M-04 — un envoi n'est réussi que sur PREUVE ═══════════
+      // `sendNotification` rendait le JSON de Brevo sans regarder le statut
+      // HTTP, et on concluait « envoyé » dès qu'aucune exception n'était levée.
+      // Un 400 (numéro invalide), un 401 (clé révoquée) ou un 402 (crédits
+      // épuisés) étaient donc inscrits « envoyé » — définitivement, l'unicité
+      // interdisant toute nouvelle tentative. La personne n'était pas prévenue,
+      // et la trace, qui EST la preuve du service rendu, affirmait le contraire.
+      const succes = !!(res && (res.ok === true
+        || res.messageId || res.reference || Array.isArray(res.messageIds)));
+      const statut = res && res.dryRun ? 'dry_run' : (succes ? 'envoye' : 'echec');
+      const motif = succes ? null
+        : `Refus du service d'envoi${res && res.status ? ` (HTTP ${res.status})` : ''}${res && res.message ? ` : ${res.message}` : ''}`;
       const trace = await tracerEnvoi({
         milestoneId: rdv.milestone_id, employeeId: rdv.employee_id,
-        canal, destinataire: rdv.destinataire, statut,
+        canal, destinataire: rdv.destinataire, statut, erreur: motif,
       });
-      if (trace) bilan[statut === 'dry_run' ? 'dry_run' : 'envoyes'] += 1;
+      if (statut === 'echec') {
+        console.error(`[RAPPELS-RDV] Rappel REFUSÉ par le service d'envoi (entretien #${rdv.milestone_id}) : ${motif}`);
+      }
+      if (trace) bilan[statut === 'dry_run' ? 'dry_run' : (statut === 'echec' ? 'echecs' : 'envoyes')] += 1;
     } catch (err) {
       console.error(`[RAPPELS-RDV] Envoi impossible (entretien #${rdv.milestone_id}) :`, err.message);
       await tracerEnvoi({

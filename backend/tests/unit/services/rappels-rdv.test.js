@@ -210,6 +210,25 @@ describe('contenu du message — quatre variables, et rien du parcours', () => {
     expect(Object.keys(variables).sort()).toEqual(['cip', 'date', 'heure', 'prenom']);
   });
 
+  // ═══ CORRECTIF M-04 — un refus du service d'envoi n'est plus un « envoi » ══
+  test('un REFUS de Brevo est tracé « echec », jamais « envoye »', async () => {
+    mockSend.mockResolvedValueOnce({ code: 'invalid_parameter', message: 'recipient is invalid', ok: false, status: 400 });
+    const bilan = await svc.envoyerRappelsRdvSalaries();
+    expect(bilan.echecs).toBe(1);
+    expect(bilan.envoyes).toBe(0);
+    const trace = mockQuery.mock.calls.find(([s]) => /INSERT INTO insertion_rappels_rdv/.test(String(s)));
+    expect(trace[1]).toContain('echec');
+    // Le motif est conservé pour que l'exploitant sache POURQUOI.
+    expect(String(trace[1][5])).toContain('400');
+  });
+
+  test('un envoi réussi reste « envoye » (statut HTTP, identifiant de message ou dry-run)', async () => {
+    mockSend.mockResolvedValueOnce({ messageId: 'abc', ok: true, status: 201 });
+    const bilan = await svc.envoyerRappelsRdvSalaries();
+    expect(bilan.envoyes).toBe(1);
+    expect(bilan.echecs).toBe(0);
+  });
+
   test('un e-mail part sur le canal e-mail, et le téléphone reste vide', async () => {
     branche({ rdvs: [{ ...RDV, canal: 'email', destinataire: 'amine@exemple.fr' }] });
     await svc.envoyerRappelsRdvSalaries();
@@ -260,8 +279,17 @@ describe('trace — masquée, unique, journalisée', () => {
   });
 
   test('masquage : deux premiers et deux derniers chiffres, initiale pour un e-mail', () => {
-    expect(svc.masquerDestinataire('sms', '+33612345678')).toBe('33 ** ** ** 78');
+    // Le numéro est stocké en E.164 depuis M-04 ; il est REPRÉSENTÉ en forme
+    // française, parce que la conseillère vérifie de vive voix (« c'est bien le
+    // 06 qui finit par 78 ? ») et que « 33 ** ** ** 78 » ne ressemble à rien de
+    // ce que la personne connaît de son propre numéro.
+    expect(svc.masquerDestinataire('sms', '+33612345678')).toBe('06 ** ** ** 78');
+    expect(svc.masquerDestinataire('sms', '06 12 34 56 78')).toBe('06 ** ** ** 78');
     expect(svc.masquerDestinataire('email', 'jean.dupont@gmail.com')).toBe('j***@gmail.com');
+    // CORRECTIF m-09 — sous trois caractères, le local-part était révélé
+    // INTÉGRALEMENT par « a***@x.fr ».
+    expect(svc.masquerDestinataire('email', 'a@x.fr')).toBe('***@x.fr');
+    expect(svc.masquerDestinataire('email', 'ab@x.fr')).toBe('***@x.fr');
     expect(svc.masquerDestinataire('sms', '')).toBe('—');
     expect(svc.masquerDestinataire('email', 'pas-une-adresse')).toBe('***');
   });

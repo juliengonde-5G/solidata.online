@@ -39,11 +39,11 @@ app.use('/api/rgpd', require('../../src/routes/rgpd'));
 jest.setTimeout(240000);
 
 const PREFIXE = 'jest_prC_sal';
-const M = { riche: 'PRCS_RICHE', nu: 'PRCS_NU', rdv: 'PRCS_RDV', sansConsent: 'PRCS_NOCONS', anon: 'PRCS_ANON' };
+const M = { riche: 'PRCS_RICHE', nu: 'PRCS_NU', rdv: 'PRCS_RDV', sansConsent: 'PRCS_NOCONS', anon: 'PRCS_ANON', m03: 'PRCS_M03' };
 const MATS = Object.values(M);
 const JOUR = aujourdhuiParis();
 const DEMAIN = decalerJours(JOUR, 1);
-let U; let riche; let nu; let empRdv; let sansConsent; let anon; let msRdv;
+let U; let riche; let nu; let empRdv; let sansConsent; let anon; let msRdv; let m03;
 
 const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
 
@@ -205,7 +205,10 @@ const brut = (o) => JSON.stringify(o);
   });
 
   afterAll(async () => {
-    await purgerPrC(pool, { matricules: MATS, employeeIds: [anon], usernamePrefix: PREFIXE });
+    // `m03` est ANONYMISÉ par sa propre vérification : son matricule a été
+    // effacé, la purge par matricule ne le retrouverait plus et il resterait
+    // dans la cohorte que la suite voisine croit seule (V-01).
+    await purgerPrC(pool, { matricules: MATS, employeeIds: [anon, m03].filter(Boolean), usernamePrefix: PREFIXE });
     await pool.query("DELETE FROM insertion_partenaires WHERE nom = 'Mission locale test'").catch(() => {});
     await pool.end();
   });
@@ -591,7 +594,10 @@ const brut = (o) => JSON.stringify(o);
       );
       expect(l.rows[0].rappel_rdv_consent).toBe(true);
       expect(l.rows[0].rappel_rdv_canal).toBe('sms');
-      expect(l.rows[0].rappel_rdv_destinataire).toBe('06 12 34 56 78');
+      // CORRECTIF M-04 — le numéro est NORMALISÉ en E.164 à l'écriture : « +336
+      // 12 34 56 78 », que produisait `notification.js`, était refusé par Brevo
+      // (« recipient is invalid ») et l'échec était inscrit « envoyé ».
+      expect(l.rows[0].rappel_rdv_destinataire).toBe('+33612345678');
       expect(l.rows[0].rappel_rdv_consent_at).toBeTruthy();
       const c = await pool.query(
         "SELECT granted FROM rgpd_consents WHERE entity_type = 'employee' AND entity_id = $1 AND consent_type = 'rappel_rdv'", [empRdv]
@@ -741,7 +747,9 @@ const brut = (o) => JSON.stringify(o);
         for (const mot of ['bilan', 'conciliation', 'sortie', 'renouvellement', 'diagnostic', 'référent', 'rsa']) {
           expect([g.type, mot, texte.includes(mot)]).toEqual([g.type, mot, false]);
         }
-        expect(g.body).toContain('{prenom}');
+        // CORRECTIF M-05 — le prénom a quitté le gabarit : une erreur de saisie
+        // d'un chiffre faisait partir un message NOMINATIF chez un inconnu.
+        expect(g.body).not.toContain('{prenom}');
         expect(g.body).toContain('{heure}');
       }
     });
@@ -756,7 +764,12 @@ const brut = (o) => JSON.stringify(o);
 
     test('V-111 masquage d\'une adresse e-mail', () => {
       expect(masquerDestinataire('email', 'jean.dupont@gmail.com')).toBe('j***@gmail.com');
-      expect(masquerDestinataire('sms', '+33612345678')).toBe('33 ** ** ** 78');
+      // Le numéro stocké est en E.164 ; il est REPRÉSENTÉ en forme française —
+      // la conseillère vérifie de vive voix (« c'est bien le 06 qui finit par
+      // 78 ? »).
+      expect(masquerDestinataire('sms', '+33612345678')).toBe('06 ** ** ** 78');
+      // CORRECTIF m-09 — un local-part d'une lettre était révélé entièrement.
+      expect(masquerDestinataire('email', 'a@x.fr')).toBe('***@x.fr');
     });
   });
 
@@ -855,6 +868,44 @@ const brut = (o) => JSON.stringify(o);
       expect(c.rows[0].n).toBe(0);
       const ms = await pool.query('SELECT eti_token FROM insertion_milestones WHERE id = $1', [msAnon.rows[0].id]);
       expect(ms.rows[0].eti_token).toBeNull();
+    });
+
+    // ═══ CORRECTIF M-03 — base NON MIGRÉE, effacement quand même ═══════════
+    // La garde était un `try { … } catch (42703)` dont le commentaire promettait
+    // « l'anonymisation ne doit pas échouer pour autant ». Dans PostgreSQL, une
+    // instruction en erreur AVORTE la transaction : toutes les suivantes
+    // tombaient en 25P02 et le droit à l'effacement n'était pas exercé. On
+    // reproduit une base où la migration PR C n'est pas passée (déploiement
+    // interrompu, base de recette, restauration partielle) en retirant la
+    // colonne, puis on la rétablit.
+    test('V-129 une colonne PR C absente n\'empêche PAS l\'anonymisation (SAVEPOINT / catalogue)', async () => {
+      const cible = await creerSalarie(pool, M.m03, {
+        first_name: 'Nadia', last_name: 'Nonmigree', insertion_status: 'en_parcours',
+      });
+      m03 = cible;
+      await pool.query('ALTER TABLE insertion_milestones DROP COLUMN IF EXISTS eti_token');
+      let erreur = null;
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { anonymizeEmployee } = require('../../src/services/anonymization');
+        await anonymizeEmployee(client, cible);
+        await client.query('COMMIT');
+      } catch (e) {
+        erreur = e;
+        await client.query('ROLLBACK').catch(() => {});
+      } finally {
+        client.release();
+        // Colonne rétablie exactement comme la migration la pose.
+        await pool.query('ALTER TABLE insertion_milestones ADD COLUMN IF NOT EXISTS eti_token VARCHAR(32)');
+        await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_insertion_milestones_eti_token
+                            ON insertion_milestones(eti_token) WHERE eti_token IS NOT NULL`);
+      }
+      expect(erreur).toBeNull();
+      const e = await pool.query('SELECT first_name, malibou_id FROM employees WHERE id = $1', [cible]);
+      // Le dossier EST anonymisé : avant le correctif, le ROLLBACK le laissait
+      // intact (« Marie » dans la reproduction de la revue de sécurité).
+      expect(e.rows[0].first_name).not.toBe('Nadia');
     });
   });
 });

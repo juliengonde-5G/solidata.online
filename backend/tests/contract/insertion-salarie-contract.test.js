@@ -374,6 +374,36 @@ describe('6. consentement aux rappels', () => {
     expect(JSON.stringify(details)).not.toContain('06 12 34 56 78');
   });
 
+  // ═══ CORRECTIF M-04 — le numéro est NORMALISÉ en E.164 à l'écriture ═══════
+  // `services/notification.js` faisait `+33${'{'}phone.substring(1){'}'}` et gardait les
+  // espaces : « +336 12 34 56 78 » était refusé par Brevo (« recipient is
+  // invalid »), c'est-à-dire que le format encouragé par cet écran était
+  // précisément celui qui échouait.
+  test('le numéro est stocké en E.164, jamais avec ses séparateurs', async () => {
+    await put('/api/insertion/salarie/5/rappels-consentement', 'ADMIN', { consent: true, canal: 'sms', destinataire: '06 12 34 56 78' });
+    const maj = mockQuery.mock.calls.find(([q]) => /UPDATE employees\s+SET rappel_rdv_consent/.test(String(q)));
+    expect(maj[1]).toContain('+33612345678');
+    expect(maj[1]).not.toContain('06 12 34 56 78');
+  });
+
+  // ═══ CORRECTIF M-05 — message de VÉRIFICATION du contact ═════════════════
+  // Rien ne garantissait que le contact appartienne à la personne : le premier
+  // rappel — qui nomme la structure d'insertion — serait parti chez un inconnu
+  // sans que personne ne puisse le savoir. Le message part pendant l'entretien,
+  // et son issue est rendue à l'écran.
+  test('un message de vérification est envoyé au recueil, et son issue est rendue', async () => {
+    const res = await put('/api/insertion/salarie/5/rappels-consentement', 'ADMIN', { consent: true, canal: 'sms', destinataire: '0612345678' });
+    expect(res.status).toBe(200);
+    expect(res.body.verification).toBeTruthy();
+    expect(['envoye', 'dry_run', 'echec', 'gabarit_absent']).toContain(res.body.verification.statut);
+  });
+
+  test('aucun message de vérification sur un RETRAIT', async () => {
+    branche({ majConsentement: [{ id: 5, consent: false, canal: null, consent_at: '2026-09-13T10:00:00Z' }] });
+    const res = await put('/api/insertion/salarie/5/rappels-consentement', 'ADMIN', { consent: false });
+    expect(res.body.verification).toBeNull();
+  });
+
   test('retrait : `{ consent: false }` suffit, et le destinataire est effacé', async () => {
     branche({ majConsentement: [{ id: 5, consent: false, canal: null, consent_at: '2026-09-13T10:00:00Z' }] });
     const res = await put('/api/insertion/salarie/5/rappels-consentement', 'ADMIN', { consent: false });

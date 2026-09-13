@@ -66,10 +66,35 @@ const MODES_REMISE_SALARIE = ['main_propre', 'email', 'courrier'];
  * quatre seules que le job substitue ({prenom}, {date}, {heure}, {cip}) — `cip`
  * étant un prénom suivi d'une initiale, jamais un nom complet.
  */
-const RAPPEL_SMS_BODY = 'Bonjour {prenom}, rappel : vous avez rendez-vous demain {date} à {heure} '
+// CORRECTIF M-05 — le PRÉNOM est retiré du gabarit. Un chiffre de trop dans le
+// numéro saisi par la conseillère, et ce message — prénom + nom de la structure
+// d'insertion + fait d'un rendez-vous — partait chez un inconnu, une fois par
+// rendez-vous. Le message reste parfaitement clair pour son destinataire : il
+// arrive sur SON téléphone, ou dans SA boîte. La direction peut rétablir
+// « Bonjour {prenom} » depuis l'écran des gabarits si elle le décide.
+const RAPPEL_SMS_BODY = 'Bonjour, rappel : vous avez rendez-vous demain {date} à {heure} '
   + 'avec {cip} à Solidarité Textiles. En cas d\'empêchement, prévenez-nous.';
 const RAPPEL_EMAIL_SUBJECT = 'Rappel de votre rendez-vous de demain';
 const RAPPEL_EMAIL_BODY = RAPPEL_SMS_BODY;
+
+/** Gabarit historique (avec prénom) — repère de la mise à jour non destructive. */
+const RAPPEL_SMS_BODY_V1 = 'Bonjour {prenom}, rappel : vous avez rendez-vous demain {date} à {heure} '
+  + 'avec {cip} à Solidarité Textiles. En cas d\'empêchement, prévenez-nous.';
+
+/**
+ * MESSAGE DE VÉRIFICATION envoyé au moment du recueil du consentement (M-05).
+ *
+ * Rien ne garantissait que le contact saisi appartienne à la personne : le
+ * premier message qu'elle aurait dû recevoir partait chez un inconnu, et
+ * personne ne pouvait le savoir. Ce message part PENDANT l'entretien, de sorte
+ * que la conseillère puisse demander « vous l'avez reçu ? » tant que la
+ * personne est devant elle. Il ne nomme personne et ne dit rien du parcours.
+ */
+const CATEGORIE_VERIFICATION = 'insertion_rappel_verification';
+const VERIFICATION_SMS_BODY = 'Solidarité Textiles : ce message confirme que vous recevrez un rappel '
+  + 'la veille de vos rendez-vous. Vous pouvez arrêter quand vous voulez, dites-le à votre conseillère.';
+const VERIFICATION_EMAIL_SUBJECT = 'Confirmation : rappels de vos rendez-vous';
+const VERIFICATION_EMAIL_BODY = VERIFICATION_SMS_BODY;
 
 async function run(client) {
   // ── (a) Consentement aux rappels de rendez-vous ──────────────────────────
@@ -155,7 +180,7 @@ async function run(client) {
   await client.query(
     `INSERT INTO message_templates (name, type, category, subject, body, variables)
      SELECT 'Rappel rendez-vous salarié', 'sms', 'insertion_rappel_rdv', NULL, $1,
-            ARRAY['prenom','date','heure','cip']
+            ARRAY['date','heure','cip']
       WHERE NOT EXISTS (
         SELECT 1 FROM message_templates WHERE category = 'insertion_rappel_rdv' AND type = 'sms'
       )`,
@@ -164,11 +189,38 @@ async function run(client) {
   await client.query(
     `INSERT INTO message_templates (name, type, category, subject, body, variables)
      SELECT 'Rappel rendez-vous salarié', 'email', 'insertion_rappel_rdv', $1, $2,
-            ARRAY['prenom','date','heure','cip']
+            ARRAY['date','heure','cip']
       WHERE NOT EXISTS (
         SELECT 1 FROM message_templates WHERE category = 'insertion_rappel_rdv' AND type = 'email'
       )`,
     [RAPPEL_EMAIL_SUBJECT, RAPPEL_EMAIL_BODY]
+  );
+
+  // Retrait du prénom sur un gabarit DÉJÀ SEEDÉ et JAMAIS MODIFIÉ : la
+  // comparaison porte sur le texte d'origine mot pour mot, donc un gabarit
+  // qu'un administrateur a retouché n'est jamais réécrit (M-05).
+  await client.query(
+    `UPDATE message_templates
+        SET body = $1, variables = ARRAY['date','heure','cip']
+      WHERE category = 'insertion_rappel_rdv' AND body = $2`,
+    [RAPPEL_SMS_BODY, RAPPEL_SMS_BODY_V1]
+  );
+
+  // Gabarits du message de vérification (M-05).
+  await client.query(
+    // Casts explicites : le même paramètre sert de VALEUR insérée et de
+    // critère de comparaison — sans eux, PostgreSQL refuse en 42P08
+    // « inconsistent types deduced for parameter $1 » (le piège de 2.25.0).
+    `INSERT INTO message_templates (name, type, category, subject, body, variables)
+     SELECT 'Vérification du contact — rappels de rendez-vous', 'sms', $1::varchar, NULL, $2::text, ARRAY[]::text[]
+      WHERE NOT EXISTS (SELECT 1 FROM message_templates WHERE category = $1::varchar AND type = 'sms')`,
+    [CATEGORIE_VERIFICATION, VERIFICATION_SMS_BODY]
+  );
+  await client.query(
+    `INSERT INTO message_templates (name, type, category, subject, body, variables)
+     SELECT 'Vérification du contact — rappels de rendez-vous', 'email', $1::varchar, $2::varchar, $3::text, ARRAY[]::text[]
+      WHERE NOT EXISTS (SELECT 1 FROM message_templates WHERE category = $1::varchar AND type = 'email')`,
+    [CATEGORIE_VERIFICATION, VERIFICATION_EMAIL_SUBJECT, VERIFICATION_EMAIL_BODY]
   );
 
   // ── (e) Registre RGPD (art. 30) ──────────────────────────────────────────
@@ -221,4 +273,8 @@ module.exports = {
   RAPPEL_SMS_BODY,
   RAPPEL_EMAIL_SUBJECT,
   RAPPEL_EMAIL_BODY,
+  CATEGORIE_VERIFICATION,
+  VERIFICATION_SMS_BODY,
+  VERIFICATION_EMAIL_SUBJECT,
+  VERIFICATION_EMAIL_BODY,
 };

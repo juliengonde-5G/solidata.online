@@ -47,6 +47,11 @@ describe('migration insertion-salarie — contrat d’exécution', () => {
       else if (/^\s*CREATE INDEX/i.test(s)) expect(s).toMatch(/CREATE INDEX IF NOT EXISTS/i);
       else if (/^\s*DO \$\$/i.test(s)) expect(s).toMatch(/IF NOT EXISTS \(\s*\n?\s*SELECT 1 FROM pg_constraint/i);
       else if (/^\s*INSERT INTO/i.test(s)) expect(s).toMatch(/WHERE NOT EXISTS/i);
+      // La mise à jour du gabarit historique (retrait du prénom, correctif
+      // M-05) est gardée AUTREMENT : elle ne s'applique qu'au texte d'origine
+      // MOT POUR MOT, donc elle est idempotente et ne réécrit jamais un gabarit
+      // qu'un administrateur a retouché.
+      else if (/^\s*UPDATE message_templates/i.test(s)) expect(s).toMatch(/WHERE category = 'insertion_rappel_rdv' AND body = \$2/);
       else throw new Error(`Instruction non gardée : ${s.slice(0, 80)}`);
     }
   });
@@ -106,9 +111,22 @@ describe('migration insertion-salarie — ce que la DDL pose', () => {
   });
 
   test('les gabarits sont seedés une seule fois, pour les deux canaux', () => {
+    // Quatre depuis le correctif M-05 : les deux du rappel J-1 et les deux du
+    // message de VÉRIFICATION du contact, envoyé au recueil du consentement.
     const inserts = sql.split('INSERT INTO message_templates').length - 1;
-    expect(inserts).toBe(2);
+    expect(inserts).toBe(4);
     expect(sql).toMatch(/WHERE NOT EXISTS \(\s*SELECT 1 FROM message_templates WHERE category = 'insertion_rappel_rdv'/);
+  });
+
+  test('le message de vérification ne nomme personne et ne dit rien du parcours', () => {
+    const textes = [migration.VERIFICATION_SMS_BODY, migration.VERIFICATION_EMAIL_BODY,
+      migration.VERIFICATION_EMAIL_SUBJECT].join(' ').toLowerCase();
+    for (const interdit of ['bilan', 'diagnostic', 'renouvellement', 'sortie', 'conciliation',
+      'référent', 'insertion', 'rsa', 'sanction', 'convocation']) {
+      expect(textes).not.toContain(interdit);
+    }
+    // Aucune variable du tout : ce message ne porte aucune donnée de dossier.
+    expect([...migration.VERIFICATION_SMS_BODY.matchAll(/\{(\w+)\}/g)]).toHaveLength(0);
   });
 
   test('LE gabarit ne nomme JAMAIS le rendez-vous', () => {
@@ -119,13 +137,18 @@ describe('migration insertion-salarie — ce que la DDL pose', () => {
       'référent', 'insertion', 'rsa', 'sanction', 'convocation']) {
       expect(textes).not.toContain(interdit);
     }
-    expect(migration.RAPPEL_SMS_BODY).toContain('{prenom}');
+    // CORRECTIF M-05 — le PRÉNOM a quitté le gabarit : un chiffre de trop dans
+    // le numéro saisi, et ce message (prénom + nom de la structure d'insertion
+    // + fait d'un rendez-vous) partait chez un inconnu, une fois par
+    // rendez-vous. Le message reste clair pour son destinataire : il arrive sur
+    // SON téléphone.
+    expect(migration.RAPPEL_SMS_BODY).not.toContain('{prenom}');
     expect(migration.RAPPEL_SMS_BODY).toContain('{date}');
     expect(migration.RAPPEL_SMS_BODY).toContain('{heure}');
     expect(migration.RAPPEL_SMS_BODY).toContain('{cip}');
-    // Aucune variable en dehors de ces quatre-là.
+    // Aucune variable en dehors de ces trois-là.
     const variables = [...migration.RAPPEL_SMS_BODY.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
-    expect(new Set(variables)).toEqual(new Set(['prenom', 'date', 'heure', 'cip']));
+    expect(new Set(variables)).toEqual(new Set(['date', 'heure', 'cip']));
   });
 
   test('entrée au registre art. 30, gardée, fondée sur le CONSENTEMENT', () => {

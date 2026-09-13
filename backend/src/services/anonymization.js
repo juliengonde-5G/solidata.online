@@ -353,14 +353,20 @@ async function anonymizeEmployee(client, id) {
     await client.query('DELETE FROM insertion_echeance_reports WHERE employee_id = $1', [id]);
   }
 
-  // JETON PUBLIC DE L'ENCADRANT (lot 5) : un lien qui ouvre un formulaire nominatif
-  // ne doit pas survivre à l'anonymisation du dossier qu'il concerne. Requête
-  // gardée : sur une base où la migration du lot 5 n'est pas passée, la colonne
-  // n'existe pas et l'anonymisation ne doit pas échouer pour autant.
-  try {
+  // JETON PUBLIC DE L'ENCADRANT (lot 5) : un lien qui ouvre un formulaire
+  // nominatif ne doit pas survivre à l'anonymisation du dossier qu'il concerne.
+  //
+  // CORRECTIF M-03 — la garde était un `try { … } catch (42703)`, et son
+  // commentaire promettait « l'anonymisation ne doit pas échouer pour autant ».
+  // Dans PostgreSQL, une instruction en erreur AVORTE LA TRANSACTION ENTIÈRE :
+  // toutes les suivantes échouaient en 25P02 jusqu'au ROLLBACK, et le droit à
+  // l'effacement n'était pas exercé du tout — l'exploitant recevant une erreur
+  // qui ne nomme même pas la colonne manquante. C'est le constat C-07 de la
+  // 2.50.0, et ce fichier applique déjà le bon patron trois fois plus bas.
+  // On INTERROGE le catalogue au lieu d'essayer-pour-voir.
+  const colsMilestones = await existingColumns(client, 'insertion_milestones');
+  if (colsMilestones.has('eti_token')) {
     await client.query('UPDATE insertion_milestones SET eti_token = NULL WHERE employee_id = $1 AND eti_token IS NOT NULL', [id]);
-  } catch (err) {
-    if (err.code !== '42703') throw err;
   }
 
   // CONSENTEMENT AUX RAPPELS. On efface le CONTACT choisi par la personne
@@ -373,15 +379,13 @@ async function anonymizeEmployee(client, id) {
   // (`rappel_rdv`) ; les autres types de consentement survivent à
   // l'anonymisation du dossier — cela dépasse son périmètre et relève d'un
   // arbitrage (rapport 21-realisation-lot7.md, « limites »).
-  try {
-    await client.query(
-      `UPDATE employees SET rappel_rdv_consent = NULL, rappel_rdv_destinataire = NULL,
-              rappel_rdv_canal = NULL, rappel_rdv_consent_at = NULL, rappel_rdv_consent_by = NULL
-        WHERE id = $1`, [id]
-    );
-  } catch (err) {
-    if (err.code !== '42703') throw err;
-  }
+  // Même correctif M-03 : `nullifyBy` filtre les colonnes RÉELLEMENT présentes
+  // (helper du fichier) au lieu de laisser une colonne absente avorter la
+  // transaction d'anonymisation.
+  await nullifyBy(client, 'employees', 'id', id, [
+    'rappel_rdv_consent', 'rappel_rdv_destinataire', 'rappel_rdv_canal',
+    'rappel_rdv_consent_at', 'rappel_rdv_consent_by',
+  ]);
   if (await tableExists(client, 'rgpd_consents')) {
     await client.query(
       "DELETE FROM rgpd_consents WHERE entity_type = 'employee' AND entity_id = $1 AND consent_type = 'rappel_rdv'",

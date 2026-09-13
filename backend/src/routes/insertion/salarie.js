@@ -45,6 +45,8 @@ const { param } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { composerMonParcours, composerMonRecap } = require('../../services/mon-parcours');
 const { masquerDestinataire } = require('../../services/rappels-rdv');
+const { sendNotification, normaliserTelephone } = require('../../services/notification');
+const { CATEGORIE_VERIFICATION } = require('../../scripts/migrations/insertion-salarie');
 const { isoDate, aujourdhuiParis, decalerJours } = require('../../utils/date-iso');
 
 const router = express.Router();
@@ -61,9 +63,14 @@ const CANAUX = ['sms', 'email'];
 
 /**
  * Numéro mobile français ou E.164. On accepte les séparateurs usuels (espaces,
- * points, tirets) : refuser « 06 12 34 56 78 » parce qu'il porte des espaces
- * ferait ressaisir la CIP sans rien protéger. `services/notification.js`
- * normalise ensuite en +33 avant l'appel à Brevo.
+ * points, tirets) à la SAISIE : refuser « 06 12 34 56 78 » parce qu'il porte des
+ * espaces ferait ressaisir la CIP sans rien protéger.
+ *
+ * CORRECTIF M-04 : le numéro est NORMALISÉ en E.164 avant d'être stocké. Le
+ * commentaire d'origine affirmait que `services/notification.js` le faisait ;
+ * il ne le faisait pas (`+33${'{'}phone.substring(1){'}'}` conservait les espaces), si
+ * bien que le format encouragé par l'écran était précisément celui que Brevo
+ * refusait — et le refus était enregistré comme un succès.
  */
 const TEL_FR_RE = /^0[1-9](?:[\s.-]?\d{2}){4}$/;
 const TEL_E164_RE = /^\+[1-9]\d{7,14}$/;
@@ -81,6 +88,34 @@ const ecrireJournal = (db, req, action, employeeId, details) =>
   ecrireJournalPartage(db, req, action, employeeId, details, 'insertion_salarie');
 const journaliser = (req, action, employeeId, details) =>
   journalSalarie.journaliser(pool, req, action, employeeId, details);
+
+/**
+ * Envoie le message de VÉRIFICATION du contact (M-05). Best effort : il ne
+ * porte aucune donnée de parcours, il ne nomme personne, et son échec ne remet
+ * jamais en cause un consentement déjà recueilli et tracé.
+ * @returns {Promise<{statut:'envoye'|'echec'|'dry_run'|'gabarit_absent', message?:string}>}
+ */
+async function envoyerVerification({ canal, destinataire }) {
+  try {
+    const g = await pool.query(
+      'SELECT id, name, type, subject, body FROM message_templates WHERE category = $1 AND type = $2 AND is_active = true LIMIT 1',
+      [CATEGORIE_VERIFICATION, canal]
+    );
+    if (g.rows.length === 0) return { statut: 'gabarit_absent' };
+    const res = await sendNotification(
+      g.rows[0],
+      canal === 'email' ? destinataire : null,
+      canal === 'sms' ? destinataire : null,
+      {}
+    );
+    if (res && res.dryRun) return { statut: 'dry_run' };
+    const succes = !!(res && (res.ok === true || res.messageId || res.reference));
+    return succes ? { statut: 'envoye' } : { statut: 'echec', message: (res && res.message) || null };
+  } catch (err) {
+    console.error('[INSERTION][SALARIE] Message de vérification impossible :', err.message);
+    return { statut: 'echec', message: err.message };
+  }
+}
 
 /** Parcours courant du salarié (repli 1), comme `cadre.js` et `rsa.js`. */
 async function parcoursNum(employeeId) {
@@ -357,7 +392,7 @@ router.put('/:employeeId/rappels-consentement', ID, validate, async (req, res) =
   }
 
   let canal = null;
-  let destinataire = null;
+  let destinataire = null; // normalisé en E.164 pour le canal SMS (M-04)
   if (b.consent === true) {
     canal = String(b.canal || '').trim();
     if (!CANAUX.includes(canal)) {
@@ -373,6 +408,7 @@ router.put('/:employeeId/rappels-consentement', ID, validate, async (req, res) =
     const valide = canal === 'sms'
       ? (TEL_FR_RE.test(destinataire) || TEL_E164_RE.test(destinataire))
       : EMAIL_RE.test(destinataire);
+    if (valide && canal === 'sms') destinataire = normaliserTelephone(destinataire);
     if (!valide) {
       return res.status(400).json({
         error: canal === 'sms'
@@ -413,11 +449,43 @@ router.put('/:employeeId/rappels-consentement', ID, validate, async (req, res) =
       destinataire_masque: destinataire ? masquerDestinataire(canal, destinataire) : null,
     });
     await client.query('COMMIT');
+
+    // ═══ CORRECTIF M-05 — MESSAGE DE VÉRIFICATION DU CONTACT ═════════════
+    //
+    // Rien ne garantissait que le numéro ou l'adresse saisis appartiennent à la
+    // personne. Un chiffre de trop, et le premier rappel — qui nomme la
+    // structure d'insertion et l'existence d'un rendez-vous — partait chez un
+    // inconnu, une fois par rendez-vous, sans que personne ne puisse le savoir
+    // (l'échec d'envoi n'était même pas détecté, cf. M-04).
+    //
+    // Le message part MAINTENANT, pendant l'entretien : la conseillère peut
+    // demander « vous l'avez reçu ? » tant que la personne est devant elle.
+    // Il est BEST EFFORT et n'échoue jamais le recueil — le consentement est
+    // déjà écrit et tracé ; son issue est rendue à l'écran ET journalisée.
+    //
+    // Ce n'est pas un double opt-in strict (qui exigerait une confirmation
+    // AVANT d'activer les rappels) : celui-ci reste à l'arbitrage de la
+    // direction et du DPO, faute de voie de retour depuis un SMS.
+    let verification = null;
+    if (b.consent === true) {
+      verification = await envoyerVerification({ canal, destinataire });
+      try {
+        // Code DISTINCT du recueil : deux lignes portant le même code se
+        // liraient comme deux consentements. La trace dit qu'un message de
+        // vérification est parti et vers quel canal — jamais le contact.
+        await journaliser(req, 'INSERTION_RAPPEL_VERIFICATION', employeeId, {
+          statut: verification.statut, canal,
+          destinataire_masque: masquerDestinataire(canal, destinataire),
+        });
+      } catch (_) { /* la trace du recueil, elle, est déjà écrite et bloquante */ }
+    }
+
     res.json({
       consent: upd.rows[0].consent,
       canal: upd.rows[0].canal || null,
       destinataire_masque: destinataire ? masquerDestinataire(canal, destinataire) : null,
       consent_at: upd.rows[0].consent_at,
+      verification,
     });
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
