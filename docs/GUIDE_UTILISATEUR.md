@@ -292,7 +292,7 @@ Depuis l'**onglet PCM du dossier candidat** (là où le profil s'affiche), deux 
 Espace de travail de la **CIP** (Conseillère en Insertion Professionnelle) pour les salariés en Contrat à Durée Déterminée d'Insertion. Menu → **Gestion du personnel** → **Parcours insertion**.
 *Un guide dédié, pas à pas et par cas d'usage, existe pour ce module : [`GUIDE_CIP_INSERTION.md`](GUIDE_CIP_INSERTION.md). La présente section n'en donne que les repères.*
 
-**Rôles** : ADMIN et RH voient l'intégralité du dossier ; **MANAGER** y accède avec les volets sensibles masqués (santé, judiciaire, budget, notes de suivi).
+**Rôles** : ADMIN et RH voient l'intégralité du dossier ; **MANAGER** y accède avec les volets sensibles masqués (santé, judiciaire, budget, notes de suivi). La **file active** elle-même diffère selon le rôle : la CIP (ADMIN/RH) y retrouve les salariés **en parcours**, plus ceux **sortis depuis moins de sept mois** (c'est après la sortie que la donnée FSE+ et le relevé à +6 mois sont dus) ; un **MANAGER ne voit que les parcours en cours** — jamais un parcours terminé, même récemment sorti.
 
 **Le parcours démarre tout seul.** À la liaison d'une fiche de recrutement avec un collaborateur — ou à l'import de paye pour un poste marqué CDDI — le parcours s'ouvre et les **échéances** sont posées, calées sur les **dates réelles du contrat**. Il n'y a pas de « bouton créer un parcours » à ne pas oublier.
 

@@ -674,13 +674,15 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 **« Mon parcours en une page »** *(une page A4, en français simple)* : mes engagements (ceux que vous avez co-construits avec la personne), les engagements de la structure, **mes heures de la semaine** — travail et accompagnement, sans aucun objectif ni seuil affiché —, mon prochain rendez-vous (sans jamais dire de quel type d'entretien il s'agit), mon référent, et les documents déjà remis.
 
-**« Mon Récap »** *(une à deux pages, partageable par la personne à qui elle veut)* : ses contrats, les grandes étapes datées de son parcours (entretiens désignés par leur type, PMSMP avec l'organisme d'accueil, formations, actions désignées par leur catégorie et le partenaire), le compte de ses objectifs atteints et en cours, sa sortie si elle a eu lieu. **Aucun texte libre, aucune donnée de santé, de justice ou de situation sociale n'y figure jamais** — pas même une mention de leur absence.
+**« Mon Récap »** *(une à deux pages, partageable par la personne à qui elle veut)* : ses contrats, les grandes étapes datées de son parcours (entretiens désignés par leur type — **« Entretien de conciliation » et « Point avec le référent » y apparaissent sous le libellé générique « Entretien d'accompagnement »**, pour ne pas laisser deviner un contentieux ou un référent RSA sur un document qui peut circuler —, PMSMP **sans le nom de l'entreprise ou de l'organisme d'accueil** *(depuis le 13/09/2026 : une raison sociale peut, par elle-même, révéler ce que ce document exclut par ailleurs — un ESAT, une entreprise adaptée, un établissement de soins)*, formations, actions désignées par leur catégorie et le partenaire), le compte de ses objectifs atteints et en cours, sa sortie si elle a eu lieu. **Aucun texte libre, aucune donnée de santé, de justice ou de situation sociale n'y figure jamais** — pas même une mention de leur absence.
 
 **Ce qui est automatique** : rien n'est envoyé ni imprimé sans votre geste ; un champ dont la source manque s'écrit « pas encore renseigné », jamais deviné.
 
 > **Points de vigilance**
 > - **Ces deux documents sont réservés ADMIN/RH** : ils portent le nom du référent unique et les heures hebdomadaires de la personne, deux informations qu'un manager ne reçoit pas ailleurs dans le dossier.
 > - Le mot « seuil » ne figure **jamais** sur « Mon parcours » : les heures de la semaine s'affichent, une cible ne s'affiche pas.
+> - **« Mon parcours » nomme votre référent** (c'est fait pour que la personne sache à qui s'adresser) : sa mention de pied dit donc qu'il ne contient aucune donnée de santé ni de justice, **pas** qu'il ne contient « aucune situation sociale ». C'est **« Mon Récap »**, le document qui circule, qui porte cette promesse-là — grâce aux deux neutralisations ci-dessus.
+> - Ces deux neutralisations (libellé générique des entretiens, raison sociale de la PMSMP) sont activées par défaut sur un réglage (`insertion.recap_neutralise`) que la direction peut désactiver : si un jour « Mon Récap » vous semble à nouveau nommer un entretien de conciliation ou une entreprise d'accueil, c'est que ce réglage a été changé — pas une régression.
 > - Un panneau vide (aucun document généré) ne veut pas dire qu'il n'y a rien à faire — proposez l'aperçu à la personne dès que c'est utile pour elle, pas seulement à la sortie.
 
 ---
@@ -693,17 +695,18 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 1. Sur la fiche du salarié, onglet **Dossier administratif**, section **« Rappels de rendez-vous »**.
 2. **Lisez la phrase à la personne, telle quelle** : *« Vous recevrez un message la veille de chaque rendez-vous. Vous pouvez arrêter quand vous voulez. Le message ne dit jamais pourquoi vous avez rendez-vous. »* Son accord (ou son refus) se recueille **oralement**, puis se saisit à l'écran.
-3. Choisissez le **canal** (SMS ou e-mail) et le **destinataire** : les contacts déjà connus sont proposés **masqués** (« 06 ** ** ** 12 ») — c'est à vous de vérifier de vive voix que c'est le bon numéro, pas à l'écran de servir d'annuaire.
-4. **« Retirer le consentement »** est possible à tout moment, d'un clic : le contact est alors effacé, pas seulement désactivé.
-5. En dessous, l'**historique des rappels déjà envoyés** (destinataire masqué, date, statut).
+3. Choisissez le **canal** (SMS ou e-mail) et le **destinataire** : les contacts déjà connus sont proposés **masqués** (« 06 ** ** ** 12 ») — c'est à vous de vérifier de vive voix que c'est le bon numéro, pas à l'écran de servir d'annuaire. **Dès que vous enregistrez un accord, un message de vérification part aussitôt** sur ce contact (« vous recevrez un rappel la veille de vos rendez-vous, vous pouvez arrêter quand vous voulez ») — demandez à la personne, pendant qu'elle est encore devant vous, si elle l'a bien reçu : c'est la seule façon de savoir si le numéro ou l'adresse saisis lui appartiennent vraiment. Son résultat s'affiche à l'écran (envoyé / échec / non configuré) ; un échec de ce message ne remet pas en cause le consentement, qui reste enregistré et tracé.
+4. **« Retirer le consentement »** est possible à tout moment, d'un clic : le contact est alors effacé, pas seulement désactivé. **Le retrait reste toujours possible**, y compris pour une personne dont le parcours vient de se terminer.
+5. En dessous, l'**historique des rappels déjà envoyés** (destinataire masqué, date, statut) — conservé **90 jours**, purgé ensuite automatiquement.
 
-**Ce qui part dans le message** : le prénom de la personne, la date et l'heure du rendez-vous, le prénom et l'initiale de la conseillère. **Rien d'autre — jamais le type d'entretien, jamais un motif.**
+**Ce qui part dans le message** : la date et l'heure du rendez-vous, le prénom et l'initiale de la conseillère. **Rien d'autre — jamais le prénom de la personne, jamais le type d'entretien, jamais un motif.** *(Depuis le 13/09/2026 : le prénom de la personne a été retiré du message — un chiffre de trop dans le numéro saisi, et c'était un prénom accompagné du nom de la structure d'insertion qui partait chez un inconnu. Le message reste parfaitement clair pour son destinataire : il arrive sur SON téléphone ou dans SA boîte.)*
 
 **Ce qui est automatique** : l'envoi, chaque jour à 18 h, pour tous les rendez-vous du lendemain dont la personne a donné son accord. **Sans clé d'envoi SMS/e-mail configurée sur le serveur, rien ne part** — le job tourne quand même et marque ses lignes « simulé », il ne prétend jamais avoir envoyé ce qu'il n'a pas envoyé.
 
 > **Points de vigilance**
 > - **Un rendez-vous reprogrammé ne reçoit pas de second rappel.** Si vous déplacez un entretien après l'envoi du rappel initial, aucun nouveau message ne partira pour la nouvelle date — c'est une limite connue, pensez à prévenir la personne autrement dans ce cas.
 > - Le consentement est **individuel et révocable** : il ne se déduit d'aucun autre accord donné par ailleurs (remise d'un document, signature d'un entretien…).
+> - **Un permanent (« none ») ne peut pas donner ce consentement** — l'écran le refuse, ce n'est pas un oubli : les rappels concernent l'accompagnement, pas les personnes hors parcours.
 > - La trace d'un rappel envoyé ne montre **jamais** le contact en clair, même à vous : c'est voulu, elle sert à prouver qu'un message est parti, pas à retrouver le numéro de la personne.
 
 ---

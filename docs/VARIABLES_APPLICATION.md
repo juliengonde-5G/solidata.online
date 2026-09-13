@@ -292,7 +292,9 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 ### Purges de rétention RGPD (2.44.0, étendues en 2.45.0, 2.50.0, 2.54.0)
 
 Les dix purges (2.50.0 : bordereaux de collecte en déchèterie ; 2.54.0 / PR C : trace des rappels
-de rendez-vous — `purgeRappelsRdv`, seuil `insertion.rappels_retention_jours` défaut 365 jours,
+de rendez-vous — `purgeRappelsRdv`, seuil `insertion.rappels_retention_jours` **défaut 90 jours**
+*(90 depuis les correctifs de revue de sécurité de la PR C, rapport `24-correctifs-PR-C.md` § 7
+point 4 — minimisation, ramené de 365 à 90)*,
 décrit ci-dessus dans « Section CIP et documents du salarié ») sont décrites dans le registre `PURGES_RGPD` de
 `backend/src/services/rgpd-purges.js` — source unique du job planifié **et** du bouton
 « Lancer maintenant » de l'écran RGPD. Chaque seuil se règle sans redéploiement ; l'écran
@@ -367,12 +369,13 @@ déploiement**.
 
 | Clé `settings` | Défaut | Lot | Usage |
 |-----------------|--------|-----|-------|
-| `insertion.eti_token_validite_jours` | `60` | 5 | Durée de validité du lien public de l'encadrant technique (`/eti/renouvellement/:token`). Le régénérer révoque immédiatement le précédent — c'est le seul mode de révocation. |
+| `insertion.eti_token_validite_jours` | `60` | 5 | Durée de validité du lien public de l'encadrant technique (`/eti/renouvellement/:token`). Le régénérer révoque immédiatement le précédent — c'est le seul mode de révocation. Ce lien n'est lui-même **rendu** (par `GET /renouvellements` et par le bloc « Organisation du suivi » de `GET /echeances`) qu'à ADMIN/RH ou au MANAGER qui est le référent (CIP) ou l'encadrant (manager) DE CE salarié précis — jamais à un autre MANAGER (correctif de sécurité PR C, constat B-01/D-02). |
 | `insertion.report_echeance_heures` | `48` | 5 | Durée d'un report d'obligation dans l'écran « Mes échéances ». Reporter déplace l'affichage, **jamais l'échéance réelle**. |
-| `insertion.file_active_terminees_mois` | `7` | 5 | Une personne sortie reste dans la file active pendant ce délai (c'est **après** la sortie que la donnée FSE+ et le relevé à +6 mois sont dus) ; au-delà, `?inclure=tous` reste disponible pour la retrouver. |
+| `insertion.file_active_terminees_mois` | `7` | 5 | Une personne sortie reste dans la file active pendant ce délai (c'est **après** la sortie que la donnée FSE+ et le relevé à +6 mois sont dus) ; au-delà, `?inclure=tous` reste disponible pour la retrouver. **Réservé ADMIN/RH depuis le correctif M-07** (revue de sécurité PR C) : un MANAGER ne voit que les parcours `en_parcours` — jamais les parcours terminés, quel que soit ce réglage — et `?inclure=tous` n'a aucun effet pour lui. |
 | `insertion.categorie_g_alerte_jours` | `30` | 5 | Au-delà, la catégorie France Travail « G » devient une obligation **orange** (jamais rouge — seul le référent peut la changer). |
 | `insertion.rappel_rdv_heure_envoi` | `18` | 7 | Heure de Paris à laquelle le job d'envoi des rappels de rendez-vous se déclenche (fonction pure `doitEnvoyerRappels`, DST géré par `Intl`). Une valeur absente ou illisible retombe sur 18, **jamais sur 0** — `Number(null)` vaut 0, ce qui enverrait les rappels à minuit en silence (défaut évité, voir `21-realisation-lot7.md` § 4). |
-| `insertion.rappels_retention_jours` | `365` | 7 | Purge de `insertion_rappels_rdv` par `purgeRappelsRdv` (10ᵉ purge de `services/rgpd-purges.js`). |
+| `insertion.rappels_retention_jours` | `90` *(365 jusqu'aux correctifs de revue de sécurité de la PR C, ramené par minimisation)* | 7 | Purge de `insertion_rappels_rdv` par `purgeRappelsRdv` (10ᵉ purge de `services/rgpd-purges.js`). |
+| `insertion.recap_neutralise` | `true` | 7 | Sur « Mon Récap » (jamais sur « Mon parcours en une page », qui ne circule pas) : regroupe « Entretien de conciliation » et « Point avec le référent » sous le libellé générique « Entretien d'accompagnement », et retire la raison sociale de l'organisme d'accueil d'une PMSMP (« Stage en entreprise », sans nom). Ajouté par un correctif de revue de sécurité de la PR C (constat M-10) : un document qui peut circuler ne doit pas, par une ligne datée, laisser deviner un litige RSA ou un établissement (ESAT, entreprise adaptée, structure de soins). Un réglage illisible retient la valeur la plus sûre (`true`). Passer à `false` est un arbitrage de la direction, pas une décision technique. |
 
 **Dépendance à `BREVO_API_KEY`** : sans cette clé (§ ci-dessus, « Notifications »), le job de rappels
 de rendez-vous **tourne quand même** — il ne prétend jamais avoir envoyé ce qu'il n'a pas envoyé —
