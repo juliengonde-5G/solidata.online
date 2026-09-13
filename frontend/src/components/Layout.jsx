@@ -147,6 +147,7 @@ const NAV_TREE = [
           { label: 'Espace CIP (insertion)', path: '/insertion', icon: Heart, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Actions CIP', path: '/insertion/actions', icon: ListChecks, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Dossiers FSE+', path: '/insertion/conformite', icon: FolderOpen, roles: ['ADMIN', 'RH'] },
+          { label: "Temps d'accompagnement", path: '/insertion/temps', icon: Clock, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Pilotage & indicateurs', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Effectifs ETP', path: '/rh/effectifs', icon: Gauge, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },
