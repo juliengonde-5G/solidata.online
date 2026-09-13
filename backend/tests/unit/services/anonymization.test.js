@@ -16,6 +16,12 @@ const TABLE_COLUMNS = {
     // extension 2026-08 (import paie lot 3) : contacts d'urgence (tiers)
     'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_email',
     'emergency_contact2_name', 'emergency_contact2_phone', 'emergency_contact2_email',
+    // PR A lot 1 (2026-09) : dossier administratif d'insertion
+    'brsa', 'brsa_date_constat', 'ft_categorie', 'ft_categorie_date',
+    'orienteur_type', 'orienteur_nom',
+    'referent_unique_type', 'referent_unique_nom', 'referent_unique_contact',
+    'actualisation_ft_requise', 'actualisation_ft_derniere_date', 'actualisation_ft_rappels_non_honores',
+    'pass_iae_statut', 'eligibilite_verifiee_le', 'eligibilite_source',
     // colonnes conservées (agrégats)
     'contract_type', 'contract_start', 'contract_end', 'weekly_hours', 'team_id', 'position',
     'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur_id', 'date_prescription', 'user_id',
@@ -47,6 +53,12 @@ const TABLE_COLUMNS = {
   messagerie_messages: ['id', 'conversation_id', 'auteur_type', 'auteur_user_id', 'auteur_vehicle_id', 'texte', 'type', 'source', 'lien', 'created_at'],
   messagerie_mentions: ['id', 'message_id', 'user_id', 'vehicle_id'],
   messagerie_participants: ['id', 'conversation_id', 'user_id', 'vehicle_id', 'dernier_lu_message_id'],
+  // PR A (2026-09) — lot 1 : tables PURGÉES ; lot 2 : tables CONSERVÉES.
+  employee_eligibilite: ['id', 'employee_id', 'critere_code', 'date_constat', 'created_by'],
+  insertion_pass_iae_evenements: ['id', 'employee_id', 'type', 'date_debut', 'date_fin', 'motif', 'reference_externe'],
+  insertion_pieces: ['id', 'employee_id', 'type', 'nom_fichier', 'mime', 'taille', 'contenu', 'sha256', 'depose_par'],
+  insertion_fse_sorties: ['id', 'employee_id', 'parcours_num', 'projet_id', 'source', 'date_sortie', 'situation_sortie', 'fse_sortie', 'situation_6mois'],
+  insertion_projet_participants: ['id', 'projet_id', 'employee_id', 'date_entree', 'date_sortie'],
 };
 
 function makeMockClient(userIdLie = null) {
@@ -281,5 +293,57 @@ describe('anonymization — messagerie interne', () => {
     await anonymizeEmployee(client, 5);
     const sqls = dataSql(client.calls);
     expect(sqls.some((s) => /messagerie_/i.test(s))).toBe(false);
+  });
+});
+
+// ── PR A lot 1 (2026-09) — dossier administratif d'insertion ───────────────
+describe('anonymization — dossier administratif d’insertion (PR A)', () => {
+  it('efface ce qui NOMME (orienteur, référent unique) et les DATES de constat des statuts', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const empUpdate = dataSql(client.calls).find((s) => /^UPDATE employees SET/i.test(s));
+    for (const col of ['orienteur_nom', 'referent_unique_nom', 'referent_unique_contact',
+      'brsa_date_constat', 'ft_categorie_date']) {
+      expect(empUpdate).toContain(col);
+    }
+  });
+
+  it('CONSERVE les valeurs catégorielles non nominatives (typologies de cohorte)', async () => {
+    // Même doctrine que les scores de freins et la classification de sortie :
+    // `brsa`, `ft_categorie`, les TYPES d'orienteur et de référent, la source
+    // d'éligibilité et le statut du Pass alimentent le reporting DREETS /
+    // Département sans désigner personne.
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const empUpdate = dataSql(client.calls).find((s) => /^UPDATE employees SET/i.test(s));
+    for (const kept of ['brsa', 'ft_categorie', 'orienteur_type', 'referent_unique_type',
+      'eligibilite_source', 'pass_iae_statut']) {
+      expect(empUpdate).not.toContain(`${kept} =`);
+    }
+  });
+
+  it('SUPPRIME critères d’éligibilité, événements du Pass et pièces signées', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    for (const t of ['employee_eligibilite', 'insertion_pass_iae_evenements', 'insertion_pieces']) {
+      expect(sqls.some((s) => new RegExp(`DELETE FROM ${t} WHERE employee_id = \\$1`, 'i').test(s))).toBe(true);
+    }
+  });
+
+  it('CONSERVE les tables FSE+ (piste d’audit ≥ 5 ans) — lot 2', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    expect(sqls.some((s) => /insertion_fse_sorties/i.test(s))).toBe(false);
+    expect(sqls.some((s) => /insertion_projet_participants/i.test(s))).toBe(false);
+  });
+
+  it('le bloc est protégé par un SAVEPOINT (une table absente ne fait pas échouer toute l’anonymisation)', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = client.calls.map((c) => c.sql);
+    expect(sqls).toContain('SAVEPOINT dossier_administratif_insertion');
+    expect(sqls).toContain('RELEASE SAVEPOINT dossier_administratif_insertion');
   });
 });

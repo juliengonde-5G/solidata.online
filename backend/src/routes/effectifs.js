@@ -969,6 +969,16 @@ async function computeComparaisonAnnuelle(annee, today) {
     parMois.get(m).push(l);
   }
 
+  // PR A lot 1 — rapprochement du compte BRSA. L'état ASP déclare « Dont BRSA :
+  // N » ; l'outil, lui, connaît le statut personne par personne depuis le
+  // dossier administratif. Requête SOUPLE (`soft`) : sur une base où la
+  // migration PR A n'est pas passée, la colonne `brsa` est absente et la
+  // comparaison affiche « — » côté SOLIDATA plutôt que de casser la page.
+  // `brsa = true` STRICT : un statut non renseigné (NULL) n'est jamais compté
+  // comme « non BRSA », il n'est simplement pas compté — jamais de zéro inventé.
+  const brsaRes = await soft('SELECT id FROM employees WHERE brsa = true', [], 'salariés BRSA');
+  const brsaIds = new Set(brsaRes.rows.map((r) => r.id));
+
   const prevTotaux = computeTotaux(semaines, personnes, 'prev', today);
   const realTotaux = computeTotaux(semaines, personnes, 'real', today);
   const aspByMois = new Map(aspMensuel.map((r) => [Number(r.mois), r]));
@@ -985,7 +995,11 @@ async function computeComparaisonAnnuelle(annee, today) {
     const etpAsp = row && row.etp_asp != null ? engine.round2(Number(row.etp_asp)) : null;
     const base = real != null ? real : prev;
     const ecart = etpAsp != null && base != null ? engine.round2(base - etpAsp) : null;
-    const nbSolidata = personnes.filter((p) => etpPersonneMois(semaines, p, m, today).couvert).length;
+    const couvertes = personnes.filter((p) => etpPersonneMois(semaines, p, m, today).couvert);
+    const nbSolidata = couvertes.length;
+    const nbBrsaSolidata = brsaIds.size === 0
+      ? null // aucun statut BRSA renseigné : on le DIT, on n'annonce pas « 0 »
+      : couvertes.filter((p) => brsaIds.has(p.employee_id)).length;
 
     mois.push({
       mois: m,
@@ -1002,6 +1016,10 @@ async function computeComparaisonAnnuelle(annee, today) {
       ecart_pct: ecart != null && etpAsp ? engine.round2((ecart / etpAsp) * 100) : null,
       nb_salaries_asp: lignesMois.length || (row && row.nb_salaries_asp != null ? Number(row.nb_salaries_asp) : null),
       nb_salaries_solidata: nbSolidata,
+      // « Dont BRSA » de l'état ASP, en regard du compte tenu dans le dossier
+      // administratif. `null` des deux côtés = information absente, jamais 0.
+      nb_brsa_asp: row && row.nb_brsa != null ? Number(row.nb_brsa) : null,
+      nb_brsa_solidata: nbBrsaSolidata,
       statut: statutMois(row),
       // Lecture d'un coup d'œil : « X ETP d'écart, dont Y portés par des
       // salariés absents de l'import de paie ».
@@ -1115,9 +1133,9 @@ router.post('/asp/import', WRITE, runUpload(uploadAspPdf.single('fichier')), [
       await cx.query('BEGIN');
       const up = await cx.query(`
         INSERT INTO etp_asp_mensuel (annee, mois, etp_asp, heures_declarees, heures_eligibles,
-          etp_conventionnes_asp, taux_asp, nb_salaries_asp, montant_forfaitaire,
+          etp_conventionnes_asp, taux_asp, nb_salaries_asp, montant_forfaitaire, nb_brsa,
           source, fichier_nom, saisi_par, valide_le)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'import_pdf',$10,$11,NOW())
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'import_pdf',$11,$12,NOW())
         ON CONFLICT (annee, mois) DO UPDATE SET
           etp_asp = EXCLUDED.etp_asp,
           heures_declarees = EXCLUDED.heures_declarees,
@@ -1126,6 +1144,11 @@ router.post('/asp/import', WRITE, runUpload(uploadAspPdf.single('fichier')), [
           taux_asp = EXCLUDED.taux_asp,
           nb_salaries_asp = EXCLUDED.nb_salaries_asp,
           montant_forfaitaire = EXCLUDED.montant_forfaitaire,
+          -- PR A lot 1 : « Dont BRSA » de l'état ASP. Le parseur le lisait
+          -- depuis toujours et la valeur était JETÉE ici — c'est le seul
+          -- chiffre qui permette de rapprocher le compte DÉCLARÉ à l'ASP du
+          -- compte BRSA tenu dans le dossier administratif.
+          nb_brsa = EXCLUDED.nb_brsa,
           source = 'import_pdf',
           fichier_nom = EXCLUDED.fichier_nom,
           saisi_par = EXCLUDED.saisi_par,
@@ -1133,7 +1156,7 @@ router.post('/asp/import', WRITE, runUpload(uploadAspPdf.single('fichier')), [
         RETURNING id`,
       [etat.annee, etat.mois, etat.entetes.etp_realises, etat.entetes.heures_declarees,
         etat.entetes.heures_eligibles, etat.entetes.etp_conventionnes, etat.entetes.taux,
-        etat.entetes.nb_salaries, etat.entetes.montant_forfaitaire,
+        etat.entetes.nb_salaries, etat.entetes.montant_forfaitaire, etat.entetes.nb_brsa,
         req.file.originalname || null, req.user.id]);
 
       // Réimport du même mois : on remplace le détail (idempotent).

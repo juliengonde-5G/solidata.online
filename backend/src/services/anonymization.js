@@ -176,6 +176,22 @@ async function anonymizeEmployee(client, id) {
     { col: 'france_travail_id', value: null },
     { col: 'eligibilite_criteres', value: null },
     { col: 'eligibilite_justificatifs_ref', value: null },
+    // PR A lot 1 — dossier administratif d'insertion. On efface ce qui NOMME
+    // (l'orienteur, le référent unique externe et ses coordonnées — données
+    // personnelles de TIERS, même doctrine que les contacts d'urgence) et les
+    // DATES de constat des statuts sociaux (une date de constat BRSA ou de
+    // catégorie France Travail est une information sur la situation de la
+    // personne à un instant donné, sans valeur d'agrégat).
+    // On CONSERVE `brsa`, `ft_categorie`, `referent_unique_type`,
+    // `orienteur_type`, `eligibilite_source` et `pass_iae_statut` : ce sont des
+    // valeurs CATÉGORIELLES non nominatives, qui alimentent les typologies de
+    // cohorte du reporting DREETS/Département — même doctrine que les scores de
+    // freins et la classification de sortie conservés plus bas.
+    { col: 'orienteur_nom', value: null },
+    { col: 'referent_unique_nom', value: null },
+    { col: 'referent_unique_contact', value: null },
+    { col: 'brsa_date_constat', value: null },
+    { col: 'ft_categorie_date', value: null },
     { col: 'is_active', raw: 'false' },
     { col: 'updated_at', raw: 'NOW()' },
   ]);
@@ -401,6 +417,43 @@ async function anonymizeEmployee(client, id) {
         await client.query(`UPDATE insertion_satisfaction_sortie SET ${sets.join(', ')} WHERE employee_id = $1`, [id]);
       }
     }
+  }
+
+  // ── Dossier administratif d'insertion (PR A, lots 1 et 2) ───────────────
+  //
+  // Ce que l'on SUPPRIME intégralement :
+  //  - `employee_eligibilite` : la liste des critères IAE constatés est le
+  //    portrait social le plus condensé du dossier (RSA, AAH, QPV, sortant de
+  //    détention, sans domicile…). La nullifier laisserait des lignes dont la
+  //    seule information restante serait « cette personne cochait des cases » ;
+  //  - `insertion_pass_iae_evenements` : les motifs de suspension sont du texte
+  //    libre où figure couramment un arrêt maladie (art. 9) ;
+  //  - `insertion_pieces` : entretiens signés, conventions PMSMP et accusés de
+  //    remise numérisés — des IMAGES, sur lesquelles aucun masquage par champ
+  //    ne peut rien (même doctrine que les notes de suivi, 2.47.0).
+  //
+  // Ce que l'on CONSERVE, délibérément :
+  //  - `insertion_fse_sorties` et `insertion_projet_participants` — piste
+  //    d'audit FSE+ ≥ 5 ans après le dernier paiement, exactement comme
+  //    `fse_entree` / `fse_sortie` ci-dessus (addendum plan 05 § 6bis-1). Le
+  //    rattachement à un projet et la situation de sortie sont les deux pièces
+  //    que l'autorité de gestion peut réclamer après l'anonymisation ; elles
+  //    sont inscrites au registre RGPD et à l'AIPD à ce titre.
+  //
+  // SAVEPOINT : ce bloc s'exécute DANS la transaction de la route RGPD. Sur une
+  // base où la migration PR A n'est pas encore passée, une table absente
+  // avorterait toute la transaction (25P02) et le `catch` ne ferait que
+  // déplacer l'échec — la promesse « on ne fait pas échouer toute
+  // l'anonymisation » serait fausse sans lui (doctrine 2.50.0, constat C-07).
+  await client.query('SAVEPOINT dossier_administratif_insertion');
+  try {
+    for (const t of ['insertion_pieces', 'insertion_pass_iae_evenements', 'employee_eligibilite']) {
+      await deleteBy(client, t, 'employee_id', id);
+    }
+    await client.query('RELEASE SAVEPOINT dossier_administratif_insertion');
+  } catch (err) {
+    await client.query('ROLLBACK TO SAVEPOINT dossier_administratif_insertion').catch(() => {});
+    console.warn('[ANONYMISATION] Dossier administratif d\'insertion non purgé :', err.message);
   }
 
   // ── Messagerie interne (correctif du 27/08) ─────────────────────────────
