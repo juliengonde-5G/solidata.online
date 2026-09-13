@@ -194,6 +194,7 @@ app.use('/api/production', require('./routes/production'));
 // (non montés), réactivable en décommentant la ligne ci-dessous. Flux réel : Pennylane + contrôle facturation.
 // app.use('/api/billing', require('./routes/billing'));
 app.use('/api/reporting', require('./routes/reporting'));
+app.use('/api/exports', require('./routes/exports-fse')); // FSE+ participants (PR A) — avant ./exports
 app.use('/api/exports', require('./routes/exports'));
 app.use('/api/tri', require('./routes/tri'));
 app.use('/api/chaine-config', require('./routes/chaine-config'));
