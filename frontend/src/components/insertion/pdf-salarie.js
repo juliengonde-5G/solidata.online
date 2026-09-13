@@ -129,7 +129,7 @@ export function exportMonParcoursPDF(contenu) {
     + 'ni de situation sociale. Vous pouvez demander à le corriger ou à l’effacer auprès de la structure.'
     + ' — édité le ' + new Date().toLocaleDateString('fr-FR') + '</div>';
 
-  openPrintWindow('Mon parcours — ' + nom, body, { large: true });
+  return openPrintWindow('Mon parcours — ' + nom, body, { large: true });
 }
 
 /**
@@ -188,7 +188,7 @@ export function exportMonRecapPDF(contenu) {
     + '<div class="footer">Document établi à la demande de la personne — ne contient aucune information de santé, '
     + 'de justice ni de situation sociale. — édité le ' + new Date().toLocaleDateString('fr-FR') + '</div>';
 
-  openPrintWindow('Mon Récap — ' + nom, body, { large: true });
+  return openPrintWindow('Mon Récap — ' + nom, body, { large: true });
 }
 
 export default { exportMonParcoursPDF, exportMonRecapPDF };

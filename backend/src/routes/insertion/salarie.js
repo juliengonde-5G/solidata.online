@@ -283,12 +283,23 @@ router.put('/:employeeId/documents/:id/remise', [...ID, ...DOC_ID], validate, as
     client = await pool.connect();
     await client.query('BEGIN');
     const existant = await client.query(
-      'SELECT id, type, remis_le FROM insertion_documents_salarie WHERE id = $1 AND employee_id = $2 FOR UPDATE',
+      'SELECT id, type, remis_le, genere_le FROM insertion_documents_salarie WHERE id = $1 AND employee_id = $2 FOR UPDATE',
       [documentId, employeeId]
     );
     if (existant.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Document non trouvé' });
+    }
+    // CORRECTIF m-05 — la date était bornée dans le futur, jamais dans le
+    // passé : une remise datée de 1950 était acceptée. Un document ne peut pas
+    // avoir été remis avant d'avoir été composé.
+    const genereLe = isoDate(existant.rows[0].genere_le);
+    if (genereLe && remisLe < genereLe) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Ce document a été généré le ${genereLe} : il ne peut pas avoir été remis avant.`,
+        code: 'REMISE_ANTERIEURE_GENERATION',
+      });
     }
     if (existant.rows[0].remis_le != null) {
       await client.query('ROLLBACK');
@@ -422,16 +433,32 @@ router.put('/:employeeId/rappels-consentement', ID, validate, async (req, res) =
   try {
     client = await pool.connect();
     await client.query('BEGIN');
+    // CORRECTIF m-06 — le registre art. 30 déclare « salariés suivis au titre
+    // d'un parcours d'insertion » ; le code, lui, acceptait n'importe quel
+    // salarié, permanent compris. On aligne le CODE sur la déclaration : un
+    // permanent n'a pas de rendez-vous d'accompagnement à se faire rappeler.
+    // Les parcours TERMINÉS restent acceptés — le relevé à +6 mois donne bien
+    // lieu à un rendez-vous. Un RETRAIT, lui, est toujours possible : refuser
+    // d'enregistrer le retrait de quelqu'un sorti du périmètre serait
+    // exactement l'inverse de l'article 7-3.
     const upd = await client.query(
       `UPDATE employees
           SET rappel_rdv_consent = $1, rappel_rdv_canal = $2, rappel_rdv_destinataire = $3,
               rappel_rdv_consent_at = NOW(), rappel_rdv_consent_by = $4
         WHERE id = $5
+          AND ($1 = false OR COALESCE(insertion_status, 'none') <> 'none')
         RETURNING id, rappel_rdv_consent AS consent, rappel_rdv_canal AS canal, rappel_rdv_consent_at AS consent_at`,
       [b.consent, canal, destinataire, req.user.id, employeeId]
     );
     if (upd.rows.length === 0) {
       await client.query('ROLLBACK');
+      const existe = await pool.query("SELECT COALESCE(insertion_status, 'none') AS s FROM employees WHERE id = $1", [employeeId]);
+      if (existe.rows.length > 0) {
+        return res.status(409).json({
+          error: "Les rappels de rendez-vous ne concernent que les personnes suivies dans un parcours d'insertion.",
+          code: 'HORS_PARCOURS',
+        });
+      }
       return res.status(404).json({ error: 'Salarié non trouvé' });
     }
     await client.query(

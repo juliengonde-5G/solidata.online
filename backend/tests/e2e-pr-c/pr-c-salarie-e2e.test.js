@@ -39,11 +39,11 @@ app.use('/api/rgpd', require('../../src/routes/rgpd'));
 jest.setTimeout(240000);
 
 const PREFIXE = 'jest_prC_sal';
-const M = { riche: 'PRCS_RICHE', nu: 'PRCS_NU', rdv: 'PRCS_RDV', sansConsent: 'PRCS_NOCONS', anon: 'PRCS_ANON', m03: 'PRCS_M03' };
+const M = { riche: 'PRCS_RICHE', nu: 'PRCS_NU', rdv: 'PRCS_RDV', sansConsent: 'PRCS_NOCONS', anon: 'PRCS_ANON', m03: 'PRCS_M03', perm: 'PRCS_PERM' };
 const MATS = Object.values(M);
 const JOUR = aujourdhuiParis();
 const DEMAIN = decalerJours(JOUR, 1);
-let U; let riche; let nu; let empRdv; let sansConsent; let anon; let msRdv; let m03;
+let U; let riche; let nu; let empRdv; let sansConsent; let anon; let msRdv; let m03; let permId;
 
 const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
 
@@ -208,7 +208,7 @@ const brut = (o) => JSON.stringify(o);
     // `m03` est ANONYMISÉ par sa propre vérification : son matricule a été
     // effacé, la purge par matricule ne le retrouverait plus et il resterait
     // dans la cohorte que la suite voisine croit seule (V-01).
-    await purgerPrC(pool, { matricules: MATS, employeeIds: [anon, m03].filter(Boolean), usernamePrefix: PREFIXE });
+    await purgerPrC(pool, { matricules: MATS, employeeIds: [anon, m03, permId].filter(Boolean), usernamePrefix: PREFIXE });
     await pool.query("DELETE FROM insertion_partenaires WHERE nom = 'Mission locale test'").catch(() => {});
     await pool.end();
   });
@@ -548,6 +548,20 @@ const brut = (o) => JSON.stringify(o);
       expect(c.status).toBe(200);
     });
 
+    // CORRECTIF m-05 — la date était bornée dans le futur, jamais dans le
+    // passé : « remis le 12/03/1950 » était accepté sur un document composé la
+    // semaine dernière.
+    test('V-94bis une remise ANTÉRIEURE à la génération est refusée', async () => {
+      const doc = await auth(request(app).post(`/api/insertion/salarie/${riche}/mon-recap`), 'ADMIN');
+      expect(doc.status).toBe(201);
+      const r = await auth(request(app).put(`/api/insertion/salarie/${riche}/documents/${doc.body.id}/remise`), 'ADMIN')
+        .send({ remis_le: '1950-03-12', remis_mode: 'main_propre' });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('REMISE_ANTERIEURE_GENERATION');
+      const l = await pool.query('SELECT remis_le FROM insertion_documents_salarie WHERE id = $1', [doc.body.id]);
+      expect(l.rows[0].remis_le).toBeNull();
+    });
+
     test('V-95 aucune fuite de connexion sur la série de refus', async () => {
       const avant = etatPool(pool);
       for (let i = 0; i < 6; i += 1) {
@@ -608,6 +622,25 @@ const brut = (o) => JSON.stringify(o);
       const d = typeof j[0].details === 'string' ? JSON.parse(j[0].details) : j[0].details;
       expect(d.destinataire_masque).toBe('06 ** ** ** 78');
       expect(JSON.stringify(d)).not.toContain('0612345678');
+    });
+
+    // CORRECTIF m-06 — le registre art. 30 déclare des personnes « suivies au
+    // titre d'un parcours d'insertion » ; le code acceptait un PERMANENT.
+    test('V-98bis un permanent ne peut pas consentir (409), et rien n\'est écrit', async () => {
+      const permanent = await creerSalarie(pool, M.perm, {
+        first_name: 'Paul', last_name: 'Permanent', insertion_status: 'none',
+      });
+      permId = permanent;
+      const r = await auth(request(app).put(`/api/insertion/salarie/${permanent}/rappels-consentement`), 'ADMIN')
+        .send({ consent: true, canal: 'sms', destinataire: '0612345678' });
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('HORS_PARCOURS');
+      const l = await pool.query('SELECT rappel_rdv_consent FROM employees WHERE id = $1', [permanent]);
+      expect(l.rows[0].rappel_rdv_consent).toBeNull();
+      // Le RETRAIT, lui, reste toujours possible (art. 7-3).
+      const retrait = await auth(request(app).put(`/api/insertion/salarie/${permanent}/rappels-consentement`), 'ADMIN')
+        .send({ consent: false });
+      expect(retrait.status).toBe(200);
     });
 
     test('V-99 le RETRAIT efface le contact et trace le refus', async () => {

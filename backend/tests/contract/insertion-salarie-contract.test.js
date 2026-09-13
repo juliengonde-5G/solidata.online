@@ -98,6 +98,9 @@ function branche(over = {}) {
     if (/UPDATE employees\s+SET rappel_rdv_consent/.test(s)) {
       return Promise.resolve({ rows: over.majConsentement === null ? [] : [{ id: 5, consent: true, canal: 'sms', consent_at: '2026-09-13T10:00:00Z' }] });
     }
+    if (/COALESCE\(insertion_status, 'none'\) AS s FROM employees/.test(s)) {
+      return Promise.resolve({ rows: over.salarie || [{ id: 5, s: 'en_parcours' }] });
+    }
     if (/INSERT INTO rgpd_consents/.test(s)) return Promise.resolve({ rows: [] });
     if (/FROM insertion_rappels_rdv/.test(s)) return Promise.resolve({ rows: over.rappels || [] });
     if (/FROM insertion_objectifs/.test(s)) return Promise.resolve({ rows: [] });
@@ -398,6 +401,20 @@ describe('6. consentement aux rappels', () => {
     expect(['envoye', 'dry_run', 'echec', 'gabarit_absent']).toContain(res.body.verification.statut);
   });
 
+  // CORRECTIF m-06 — le registre art. 30 déclare des personnes « suivies au
+  // titre d'un parcours d'insertion » ; le code acceptait n'importe qui, un
+  // permanent compris. Le CODE est aligné sur la déclaration (et non l'inverse).
+  test('un PERMANENT ne peut pas consentir — mais il peut toujours RETIRER', async () => {
+    // `null` = la mise à jour ne touche AUCUNE ligne (le prédicat de périmètre
+    // l'a écartée) ; la route vérifie ensuite si la fiche existe.
+    branche({ majConsentement: null, salarie: [{ id: 5, s: 'none' }] });
+    const refus = await put('/api/insertion/salarie/5/rappels-consentement', 'ADMIN', { consent: true, canal: 'sms', destinataire: '0612345678' });
+    expect(refus.status).toBe(409);
+    expect(refus.body.code).toBe('HORS_PARCOURS');
+    const maj = mockQuery.mock.calls.find(([q]) => /UPDATE employees\s+SET rappel_rdv_consent/.test(String(q)));
+    expect(String(maj[0])).toContain("insertion_status, 'none') <> 'none'");
+  });
+
   test('aucun message de vérification sur un RETRAIT', async () => {
     branche({ majConsentement: [{ id: 5, consent: false, canal: null, consent_at: '2026-09-13T10:00:00Z' }] });
     const res = await put('/api/insertion/salarie/5/rappels-consentement', 'ADMIN', { consent: false });
@@ -445,7 +462,9 @@ describe('6. consentement aux rappels', () => {
   });
 
   test('salarié inconnu → 404 après ROLLBACK', async () => {
-    branche({ majConsentement: null });
+    // Aucune ligne mise à jour ET aucune fiche : c'est un 404. (Une fiche qui
+    // existe mais hors parcours rend 409 — correctif m-06.)
+    branche({ majConsentement: null, salarie: [] });
     const res = await put('/api/insertion/salarie/999/rappels-consentement', 'ADMIN', { consent: false });
     expect(res.status).toBe(404);
     expect(aExecute(/^ROLLBACK$/)).toBe(true);

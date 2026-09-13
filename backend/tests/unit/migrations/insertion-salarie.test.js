@@ -52,6 +52,9 @@ describe('migration insertion-salarie — contrat d’exécution', () => {
       // MOT POUR MOT, donc elle est idempotente et ne réécrit jamais un gabarit
       // qu'un administrateur a retouché.
       else if (/^\s*UPDATE message_templates/i.test(s)) expect(s).toMatch(/WHERE category = 'insertion_rappel_rdv' AND body = \$2/);
+      // Alignement du libellé du registre (m-06) : même garde — seule la
+      // phrase d'origine, mot pour mot, est remplacée.
+      else if (/^\s*UPDATE rgpd_registre/i.test(s)) expect(s).toMatch(/AND categories_personnes = \$2/);
       else throw new Error(`Instruction non gardée : ${s.slice(0, 80)}`);
     }
   });

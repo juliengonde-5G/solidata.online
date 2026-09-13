@@ -86,7 +86,11 @@ async function run(client) {
     BEGIN
       IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
-         WHERE conname = 'chk_insertion_echeance_reports_motif'
+         -- conrelid ajouté (correctif m-03) : sans lui, un homonyme sur une
+         -- AUTRE table ferait croire la contrainte posée et le CHECK ne serait
+         -- jamais créé. La migration jumelle du même lot le faisait déjà.
+         WHERE conrelid = 'insertion_echeance_reports'::regclass
+           AND conname = 'chk_insertion_echeance_reports_motif'
       ) THEN
         ALTER TABLE insertion_echeance_reports
           ADD CONSTRAINT chk_insertion_echeance_reports_motif

@@ -68,7 +68,11 @@ describe('A. idempotence — analyse textuelle', () => {
   test('le CHECK du motif passe par un DO-scan de pg_constraint', () => {
     // `ALTER TABLE ... ADD CONSTRAINT` n'accepte pas IF NOT EXISTS : la seule
     // façon de le rejouer est d'interroger `pg_constraint` d'abord.
-    expect(sql).toMatch(/SELECT 1 FROM pg_constraint WHERE conname = 'chk_insertion_echeance_reports_motif'/);
+    // Le scan porte sur la TABLE et le nom (correctif m-03) : `conname` seul,
+    // un homonyme sur une autre table ferait croire la contrainte posée.
+    expect(sql).toMatch(/SELECT 1 FROM pg_constraint/);
+    expect(sql).toMatch(/conrelid = 'insertion_echeance_reports'::regclass/);
+    expect(sql).toMatch(/conname = 'chk_insertion_echeance_reports_motif'/);
     expect(sql).toMatch(/ADD CONSTRAINT chk_insertion_echeance_reports_motif/);
   });
 

@@ -90,8 +90,14 @@ export default function DocumentsSalariePanel({ employee }) {
   if (!adminRh || !employeeId) return null;
 
   const imprimer = (type, contenu) => {
-    if (type === 'mon_recap') exportMonRecapPDF(contenu);
-    else exportMonParcoursPDF(contenu);
+    const ouverte = type === 'mon_recap' ? exportMonRecapPDF(contenu) : exportMonParcoursPDF(contenu);
+    // La fenêtre d'impression peut être bloquée par le navigateur. Le message
+    // passe par le bandeau de l'écran, jamais par une boîte native (m-08) : le
+    // document EST généré et enregistré, seule l'impression est à relancer.
+    if (ouverte === false) {
+      toast.error("Fenêtre d'impression bloquée par le navigateur — autorisez les fenêtres pour ce site, puis utilisez « Réimprimer ».");
+    }
+    return ouverte;
   };
 
   const voirApercu = async (type) => {

@@ -251,7 +251,7 @@ async function run(client) {
       'Insertion — rappels de rendez-vous au salarié (SMS / e-mail)',
       'Prévenir la personne accompagnée, la veille, qu''elle a un rendez-vous le lendemain, afin de réduire les rendez-vous manqués. Service rendu à la personne, à sa demande : aucun rappel n''est envoyé sans son accord, et le message ne dit jamais de quel rendez-vous il s''agit.',
       'Consentement de la personne concernée (art. 6-1-a du RGPD) — recueilli, horodaté et révocable à tout moment',
-      'Salariés en parcours d''insertion ayant expressément accepté de recevoir ces rappels',
+      'Salariés suivis au titre d''un parcours d''insertion — y compris après la sortie, pour le rendez-vous de suivi à +6 mois — ayant expressément accepté de recevoir ces rappels',
       $1,
       'La personne concernée elle-même. Sous-traitant technique d''acheminement : Brevo (envoi SMS et e-mail). En interne : ADMIN et RH uniquement.',
       'Trace de l''envoi (canal et destinataire masqué) : 365 jours par défaut, paramétrable (insertion.rappels_retention_jours) ; suppression intégrale à l''anonymisation du dossier du salarié. Le contenu des messages n''est jamais conservé.',
@@ -260,6 +260,19 @@ async function run(client) {
       SELECT 1 FROM rgpd_registre WHERE nom_traitement ILIKE 'Insertion — rappels de rendez-vous au salarié%'
      )`,
     [CATEGORIES_DONNEES_RAPPEL, MESURES_SECURITE_RAPPEL]
+  );
+
+  // Alignement du libellé du registre sur ce que le code fait réellement
+  // (correctif m-06) : la version d'origine disait « en parcours » alors que le
+  // recueil est ouvert aux parcours terminés (relevé à +6 mois). Mise à jour
+  // NON DESTRUCTIVE : seule la phrase d'origine, mot pour mot, est remplacée.
+  await client.query(
+    `UPDATE rgpd_registre
+        SET categories_personnes = $1
+      WHERE nom_traitement ILIKE 'Insertion — rappels de rendez-vous au salarié%'
+        AND categories_personnes = $2`,
+    ['Salariés suivis au titre d\'un parcours d\'insertion — y compris après la sortie, pour le rendez-vous de suivi à +6 mois — ayant expressément accepté de recevoir ces rappels',
+      'Salariés en parcours d\'insertion ayant expressément accepté de recevoir ces rappels']
   );
 
   console.log('[INIT-DB] Migration « Le salarié — documents et rappels de rendez-vous » (PR C lot 7) ✓');
