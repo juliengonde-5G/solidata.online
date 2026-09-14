@@ -165,6 +165,12 @@ const num = (v) => {
 /** Arrondi à deux décimales, ou `null`. */
 const r2 = (v) => (num(v) == null ? null : Math.round(num(v) * 100) / 100);
 
+/**
+ * Séparateur de milliers à la française — le document est imprimé et lu par un
+ * agent de l'État : « 1 820 heures » et non « 1820 heures ».
+ */
+const milliers = (v) => String(v == null ? '' : v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
 /** Pourcentage entier, `null` si le dénominateur est nul (jamais « 0 % »). */
 function part(n, total) {
   if (n == null || !Number.isFinite(total) || total <= 0) return null;
@@ -866,7 +872,7 @@ function bloc9Methode(blocs, contexte) {
   if (blocs['1_effectifs_etp']) {
     const b = blocs['1_effectifs_etp'];
     ajouter('ETP — base de calcul',
-      `Base unique de ${b.base_heures} heures annuelles par ETP. L'ETP validé sur les états mensuels de présence ASP FAIT FOI ; l'« effectif pondéré » est un contrôle interne (somme des quotités contractuelles divisées par 35 h hebdomadaires, ce qui est la même base).`);
+      `Base unique de ${milliers(b.base_heures)} heures annuelles par ETP. L'ETP validé sur les états mensuels de présence ASP FAIT FOI ; l'« effectif pondéré » est un contrôle interne (somme des quotités contractuelles divisées par 35 h hebdomadaires, ce qui est la même base).`);
     ajouter('Taux de réalisation des ETP',
       b.etp_conventionnes == null
         ? "Objectif non paramétré : l'annexe financière (ETP conventionnés) n'est pas saisie dans l'outil — aucun taux n'est calculé."
