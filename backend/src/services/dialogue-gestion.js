@@ -282,9 +282,17 @@ async function bloc1Effectifs(soft, db, p) {
     FROM etp_asp_mensuel WHERE annee = $1 ORDER BY mois`, [p.annee]);
 
   // « Effectif pondéré » — contrôle ERP, mois par mois : somme des quotités
-  // contractuelles (heures hebdomadaires / 35) des contrats d'insertion
-  // couvrant le 15 du mois. 35 h × 52 semaines = 1 820 h : la division par 35
-  // EST la base 1 820 h, il n'y a donc bien qu'une seule base dans ce document.
+  // contractuelles (heures hebdomadaires / 35) des CDDI couvrant le 15 du mois.
+  // 35 h × 52 semaines = 1 820 h : la division par 35 EST la base 1 820 h, il
+  // n'y a donc bien qu'une seule base dans ce document.
+  //
+  // PÉRIMÈTRE RESTREINT AUX CDDI, et c'est dit au lecteur (note du bloc et
+  // ligne de méthode). Le CDI Inclusion ne se reconnaît PAS à son type de
+  // contrat — l'import de paie le range en « CDI » et c'est l'intitulé du poste
+  // qui le distingue (règle `keepContractForInsertion` de la grille Effectifs
+  // ETP, qui n'est pas exportable depuis un routeur). Inventer ici une valeur
+  // `'CDI INCLUSION'` qui n'existe dans aucune ligne aurait donné l'illusion
+  // d'un périmètre complet en comptant exactement les mêmes contrats.
   const pondere = await soft('effectif_pondere', `
     WITH mois AS (
       SELECT generate_series(1, 12) AS m
@@ -293,7 +301,7 @@ async function bloc1Effectifs(soft, db, p) {
            COALESCE(SUM(COALESCE(ec.weekly_hours, e.weekly_hours, 35)::numeric / 35), 0)::float AS etp
     FROM mois
     LEFT JOIN employee_contracts ec
-      ON UPPER(COALESCE(ec.contract_type, '')) IN ('CDDI', 'CDI INCLUSION', 'CDI_INCLUSION')
+      ON UPPER(COALESCE(ec.contract_type, '')) = 'CDDI'
      AND ec.start_date <= make_date($1::int, mois.m, 15)
      AND (ec.end_date IS NULL OR ec.end_date >= make_date($1::int, mois.m, 15))
     LEFT JOIN employees e ON e.id = ec.employee_id
@@ -335,7 +343,7 @@ async function bloc1Effectifs(soft, db, p) {
     source_etp_asp: 'etp_asp_mensuel',
     note: convention.etp_conventionnes == null
       ? "L'ETP ASP validé fait foi ; l'effectif pondéré est un contrôle interne. Objectif non paramétré : l'annexe financière n'est pas saisie, le taux de réalisation n'est donc pas rendu."
-      : "L'ETP ASP validé fait foi ; l'effectif pondéré est un contrôle interne calculé sur la même base de 1 820 h (quotité contractuelle / 35 h).",
+      : "L'ETP ASP validé fait foi ; l'effectif pondéré est un contrôle interne calculé sur la même base de 1 820 h (quotité contractuelle / 35 h), sur les seuls contrats de type CDDI.",
   };
 }
 
@@ -872,7 +880,7 @@ function bloc9Methode(blocs, contexte) {
   if (blocs['1_effectifs_etp']) {
     const b = blocs['1_effectifs_etp'];
     ajouter('ETP — base de calcul',
-      `Base unique de ${milliers(b.base_heures)} heures annuelles par ETP. L'ETP validé sur les états mensuels de présence ASP FAIT FOI ; l'« effectif pondéré » est un contrôle interne (somme des quotités contractuelles divisées par 35 h hebdomadaires, ce qui est la même base).`);
+      `Base unique de ${milliers(b.base_heures)} heures annuelles par ETP. L'ETP validé sur les états mensuels de présence ASP FAIT FOI ; l'« effectif pondéré » est un contrôle interne (somme des quotités contractuelles divisées par 35 h hebdomadaires, ce qui est la même base), calculé sur les seuls contrats de type CDDI : le CDI Inclusion se reconnaît à l'intitulé du poste et non au type de contrat, il n'y est donc pas compté. L'écran « Effectifs conventionnés (ETP) » applique, lui, la règle complète.`);
     ajouter('Taux de réalisation des ETP',
       b.etp_conventionnes == null
         ? "Objectif non paramétré : l'annexe financière (ETP conventionnés) n'est pas saisie dans l'outil — aucun taux n'est calculé."
