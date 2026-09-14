@@ -198,6 +198,277 @@ function faireKAnon(seuil, sousSeuil) {
   };
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// k-ANONYMAT — une seule passe, sur TOUT le document
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * ═══ POURQUOI UNE PASSE ET NON UN APPEL PAR CHAMP (correctif B-01 / D-07) ══
+ *
+ * Le garde-fou était posé À LA MAIN, agrégat par agrégat, au moment de composer
+ * chaque bloc. Il couvrait donc exactement les endroits où son auteur avait
+ * pensé à lui — les blocs 2 et 3, deux champs du 5 — et rien d'autre. Le
+ * document transmis publiait pendant ce temps, sur la ligne voisine de celle
+ * qu'il venait de masquer : la raison sociale de l'unique entreprise d'accueil
+ * d'une période à une immersion, le montant exact d'une aide financière
+ * d'urgence unique, le nom du partenaire d'un axe portant une seule action,
+ * « 1 entretien de conciliation », « 1 sortie en emploi durable ». Une
+ * suppression que la ligne d'à côté défait est pire qu'une absence de
+ * suppression : elle affirme une protection qu'elle ne fournit pas, sous un
+ * pied de page signé « aucune donnée permettant d'identifier une personne ».
+ *
+ * La protection est donc **structurelle et par défaut** : les blocs composent
+ * des valeurs BRUTES, et une seule fonction parcourt ensuite le document
+ * ENTIER. Tout nombre entier compris entre 1 et k−1 est retiré, SAUF s'il
+ * figure dans l'une des deux listes blanches explicites ci-dessous. Un bloc 10
+ * écrit l'an prochain sera protégé sans que personne n'ait à y penser — c'est
+ * l'inverse exact du dispositif précédent, et c'est le seul sens qui tienne :
+ * on n'oublie pas d'ajouter un champ à une liste d'exceptions, on oublie de
+ * l'ajouter à une liste de protections.
+ *
+ * ═══ CE QUE LA PASSE NE FAIT PAS ══════════════════════════════════════════
+ *  · **Zéro reste zéro** : « personne dans cette catégorie » ne désigne
+ *    personne, et supprimer les zéros rendrait le document illisible.
+ *  · Les MESURES (taux, heures, euros, ETP, base de calcul, années) ne sont pas
+ *    des comptes de personnes : elles ne sont pas retirées pour leur propre
+ *    valeur — mais elles le sont dès que le compte dont elles dérivent l'est
+ *    (`K_DEPENDANCES_FRATRIE`, `K_TAUX`), sans quoi la suppression serait
+ *    cosmétique : un taux multiplié par un dénominateur publié rend le
+ *    numérateur.
+ */
+
+/** Libellés des blocs — le document DIT combien il retire, et où. */
+const K_BLOC_LIBELLES = {
+  '1_effectifs_etp': '1. Effectifs et ETP',
+  '2_publics_entree': "2. Publics à l'entrée",
+  '3_freins': '3. Freins',
+  '4_accompagnement': '4. Accompagnement',
+  '5_immersions': '5. Immersions',
+  '6_sorties': '6. Sorties',
+  '7_resultats': '7. Résultats',
+  '8_conformite': '8. Conformité',
+  '9_methode': '9. Méthode',
+};
+
+/**
+ * LISTE BLANCHE 1 — les effectifs bruts globaux publiés EN CLAIR, avec la
+ * raison de chacun. Elle est courte À DESSEIN : chaque ligne est une exception
+ * argumentée au principe, pas une commodité d'affichage.
+ */
+const K_EFFECTIFS_PUBLIES = new Map([
+  ['blocs.2_publics_entree.effectif',
+    "tête de chapitre : sans l'effectif de référence, aucune ventilation du document ne se lit."],
+  ['blocs.5_immersions.conventions',
+    "nombre d'actes (conventions signées) et non de personnes ; ce qui le détaille — jours, entreprises, liste des raisons sociales — est retiré tant qu'il reste sous le seuil."],
+  ['blocs.6_sorties.methode_b.denominateur',
+    'indicateur n° 15 de la matrice de l’autorité : le dénominateur des sorties est explicitement réclamé.'],
+  ['blocs.6_sorties.methode_b.non_documentees',
+    "indicateur n° 15 : les sorties non documentées sont l'objet même de la demande — les masquer viderait le document de sa raison d'être."],
+  ['blocs.6_sorties.methode_b.documentees',
+    'se déduit des deux précédents (dénominateur moins non documentées) : le masquer serait une protection que la ligne voisine défait.'],
+  ['blocs.6_sorties.methode_b.par_classification.non_documentee',
+    'même valeur que « sorties non documentées » ci-dessus.'],
+  ['blocs.6_sorties.rapprochement_asp.sorties_asp',
+    "chiffre que le destinataire détient déjà — c'est lui qui a enregistré ces déclarations ; le publier ne lui apprend rien sur nos dossiers et c'est la condition pour que l'écart soit discutable en séance."],
+  ['blocs.6_sorties.rapprochement_asp.ecart',
+    'se déduit du dénominateur (publié par mandat) et du chiffre ASP ci-dessus : le masquer serait une protection que les deux lignes voisines défont.'],
+]);
+
+/**
+ * LISTE BLANCHE 2 — les clés qui ne comptent JAMAIS des personnes : un taux, un
+ * nombre d'heures, un montant en euros, un ETP, une base de calcul, un nombre
+ * de mois. Elles traversent la passe pour leur propre valeur ; elles sont
+ * retirées, elles, par dépendance (voir plus bas) dès que le compte qui les
+ * produit l'est.
+ */
+const K_MESURES = new Set([
+  'base_heures', 'nb_mois_asp_valides', 'etp_asp', 'effectif_pondere', 'etp_asp_moyen',
+  'etp_conventionnes', 'taux_realisation_pct', 'part_pct', 'taux_pct', 'pct',
+  'total_h', 'moyenne_par_personne_h', 'moyenne_globale', 'delai_moyen_diagnostic_jours',
+  'montant_total', 'jours', 'annee', 'trimestre', 'k_anonymat', 'seuil',
+]);
+
+/**
+ * DÉPENDANCES DE FRATRIE — « cette clé n'est rendue que si la clé de comptage
+ * du MÊME objet l'est ». Le déclencheur est la VALEUR sous le seuil, et non la
+ * suppression : `conventions` est publié par liste blanche, et c'est bien lui
+ * qui doit faire disparaître la liste des entreprises d'accueil quand il vaut 1.
+ */
+const K_DEPENDANCES_FRATRIE = {
+  n: ['part_pct', 'montant_total', 'nb_montants_saisis'],
+  nb_personnes: ['moyenne_par_personne_h'],
+  nb_reponses: ['moyenne_globale'],
+  participants: ['pct'],
+  actions_engagees: ['partenaire_principal'],
+  echus: ['taux_pct'],
+  conventions: ['jours', 'entreprises_distinctes', 'liste_entreprises'],
+  nb_personnes_concernees: ['nb_semaines'],
+};
+
+/**
+ * TAUX MIROIRS — un taux dont le dénominateur est PUBLIÉ redonne son
+ * numérateur par multiplication. Il suit donc le sort de la case de comptage
+ * qu'il reflète. Quand le dénominateur est lui-même retiré, le taux ne
+ * reconstitue rien et reste rendu : l'autorité a besoin de ses taux.
+ */
+const K_TAUX = [
+  {
+    denominateur: 'blocs.6_sorties.methode_b.denominateur',
+    comptes: 'blocs.6_sorties.methode_b.par_classification',
+    miroirs: ['blocs.6_sorties.methode_b.taux_pct', 'blocs.6_sorties.methode_b.ecart_cible'],
+    // `dynamiques` = documentées moins « autre » : les deux termes sont publiés
+    // par mandat (indicateur n° 15), le taux est donc déjà déductible. Le
+    // masquer serait une suppression que le document défait trois lignes plus
+    // haut — exactement le défaut que ce correctif ferme.
+    exempts: ['dynamiques'],
+  },
+  {
+    denominateur: 'blocs.6_sorties.methode_a.denominateur',
+    comptes: 'blocs.6_sorties.methode_a.par_classification',
+    miroirs: ['blocs.6_sorties.methode_a.taux_pct'],
+    exempts: [],
+  },
+];
+
+/**
+ * DISTRIBUTIONS dont les cases SOMMENT à un total publié : une seule case
+ * retirée s'y retrouve par soustraction — et le document désignait
+ * obligeamment laquelle. La *suppression complémentaire* (une seconde case
+ * retirée, la plus petite publiée) est la parade classique ; son prix est un
+ * chiffre de moins par distribution, et il est assumé.
+ */
+const K_DISTRIBUTIONS = [
+  { chemin: 'blocs.2_publics_entree.par_categorie_ft', total: 'blocs.2_publics_entree.effectif' },
+  { chemin: 'blocs.2_publics_entree.par_referent_unique', total: 'blocs.2_publics_entree.effectif' },
+  { chemin: 'blocs.2_publics_entree.sexe', total: 'blocs.2_publics_entree.effectif' },
+  { chemin: 'blocs.2_publics_entree.tranches_age', total: 'blocs.2_publics_entree.effectif' },
+  { chemin: 'blocs.2_publics_entree.niveaux_formation', total: 'blocs.2_publics_entree.effectif' },
+  { chemin: 'blocs.5_immersions.par_debouche', total: 'blocs.5_immersions.conventions' },
+  { chemin: 'blocs.6_sorties.methode_b.par_classification', total: 'blocs.6_sorties.methode_b.denominateur' },
+  { chemin: 'blocs.7_resultats.situation_6_mois', total: 'blocs.7_resultats.nb_sorties_suivies' },
+];
+
+/** Lit / écrit une valeur par son chemin pointé, sans jamais créer de clé. */
+function lireChemin(racine, chemin) {
+  let cur = racine;
+  for (const seg of chemin.split('.')) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[seg];
+  }
+  return cur;
+}
+function ecrireChemin(racine, chemin, valeur) {
+  const segs = chemin.split('.');
+  let cur = racine;
+  for (let i = 0; i < segs.length - 1; i++) {
+    if (cur == null || typeof cur !== 'object') return false;
+    cur = cur[segs[i]];
+  }
+  if (cur == null || typeof cur !== 'object') return false;
+  if (!(segs[segs.length - 1] in cur)) return false;
+  cur[segs[segs.length - 1]] = valeur;
+  return true;
+}
+
+/**
+ * Applique le k-anonymat au document ENTIER et rend le compte des agrégats
+ * retirés, PAR BLOC.
+ *
+ * ═══ POURQUOI LE CHEMIN EXACT N'EST PLUS PUBLIÉ ═══════════════════════════
+ * Le document listait, en fin de page, le chemin de chaque agrégat retiré. Sur
+ * une distribution qui somme à un effectif publié, cette liste désigne la case
+ * à reconstituer par soustraction : elle transformait une bonne intention
+ * — « le document dit ce qu'il ne dit pas » — en mode d'emploi. Un COMPTE par
+ * bloc conserve l'honnêteté sans l'indication ; les valeurs retirées restent
+ * visiblement vides à leur place, et la CIP qui a besoin du détail le lit sur
+ * l'écran interne, qui n'applique aucune suppression.
+ */
+function appliquerKAnonymat(document, seuil) {
+  const s = Number.isFinite(seuil) && seuil >= 1 ? Math.round(seuil) : 5;
+  const retires = new Map(); // bloc → nombre d'agrégats retirés
+  const marquer = (chemin) => {
+    const bloc = chemin.split('.')[1] || 'document';
+    retires.set(bloc, (retires.get(bloc) || 0) + 1);
+  };
+  /** Un entier de 1 à k−1 : le seul motif de suppression. Zéro n'en est pas un. */
+  const sousSeuil = (v) => typeof v === 'number' && Number.isInteger(v)
+    && Math.abs(v) >= 1 && Math.abs(v) < s;
+
+  // ── 1. Passe récursive : tout compte sous le seuil est retiré ────────────
+  const parcourir = (noeud, chemin) => {
+    if (Array.isArray(noeud)) {
+      noeud.forEach((v, i) => {
+        if (v && typeof v === 'object') parcourir(v, `${chemin}[${i}]`);
+      });
+      return;
+    }
+    if (!noeud || typeof noeud !== 'object') return;
+    for (const [cle, val] of Object.entries(noeud)) {
+      const sousChemin = `${chemin}.${cle}`;
+      if (val && typeof val === 'object') { parcourir(val, sousChemin); continue; }
+      if (typeof val !== 'number') continue;
+      if (K_MESURES.has(cle)) continue;
+      if (K_EFFECTIFS_PUBLIES.has(sousChemin)) continue;
+      if (sousSeuil(val)) { noeud[cle] = null; marquer(sousChemin); }
+    }
+    // ── 2. Dépendances de fratrie, dans le MÊME objet ─────────────────────
+    for (const [compteur, dependants] of Object.entries(K_DEPENDANCES_FRATRIE)) {
+      if (!(compteur in noeud)) continue;
+      const v = noeud[compteur];
+      const doitTomber = v === null || sousSeuil(v);
+      if (!doitTomber) continue;
+      for (const d of dependants) {
+        if (!(d in noeud) || noeud[d] === null) continue;
+        noeud[d] = null;
+        marquer(`${chemin}.${d}`);
+      }
+    }
+  };
+  parcourir(document.blocs || {}, 'blocs');
+
+  // ── 3. Taux miroirs : un taux ne survit pas à la case qu'il reflète ──────
+  for (const t of K_TAUX) {
+    const den = lireChemin(document, t.denominateur);
+    if (den == null) continue;                // dénominateur retiré : rien à reconstituer
+    const comptes = lireChemin(document, t.comptes);
+    if (!comptes || typeof comptes !== 'object') continue;
+    for (const miroir of t.miroirs) {
+      const cible = lireChemin(document, miroir);
+      if (!cible || typeof cible !== 'object') continue;
+      for (const cle of Object.keys(cible)) {
+        if (t.exempts.includes(cle)) continue;
+        if (cible[cle] == null) continue;
+        if (Object.prototype.hasOwnProperty.call(comptes, cle) && comptes[cle] === null) {
+          cible[cle] = null;
+          marquer(`${miroir}.${cle}`);
+        }
+      }
+    }
+  }
+
+  // ── 4. Suppression complémentaire ────────────────────────────────────────
+  for (const d of K_DISTRIBUTIONS) {
+    const total = lireChemin(document, d.total);
+    if (total == null) continue;              // total retiré : aucune soustraction possible
+    const dist = lireChemin(document, d.chemin);
+    if (!dist || typeof dist !== 'object') continue;
+    const supprimees = Object.keys(dist).filter((c) => dist[c] === null);
+    if (supprimees.length !== 1) continue;    // zéro (rien à faire) ou deux (déjà sûr)
+    // La plus PETITE case publiée strictement positive : c'est celle dont la
+    // perte coûte le moins d'information au lecteur.
+    const candidates = Object.keys(dist)
+      .filter((c) => typeof dist[c] === 'number' && dist[c] > 0)
+      .sort((a, b) => dist[a] - dist[b]);
+    if (candidates.length === 0) continue;    // que des zéros : le complément est le total lui-même
+    dist[candidates[0]] = null;
+    marquer(`${d.chemin}.${candidates[0]}`);
+  }
+
+  return [...retires.entries()]
+    .map(([bloc, nb]) => ({ bloc, libelle: K_BLOC_LIBELLES[bloc] || bloc, nb }))
+    .sort((a, b) => a.bloc.localeCompare(b.bloc));
+}
+
 /** Bornes civiles d'une période — année entière, ou trimestre 1-4. */
 function bornes(annee, trimestre) {
   const an = Number(annee);
@@ -353,8 +624,7 @@ async function bloc1Effectifs(soft, db, p) {
  * un document annuel qui ne compterait que les personnes encore là en décembre
  * effacerait la moitié de l'activité.
  */
-async function bloc2Publics(soft, db, p, k) {
-  const base = 'blocs.2_publics_entree';
+async function bloc2Publics(soft, db, p) {
   const cohorte = await soft('cohorte_publics', `
     SELECT e.id, e.gender, e.birth_date, e.brsa, e.ft_categorie,
            COALESCE(e.referent_unique_type, 'non_determine') AS referent_unique_type,
@@ -385,8 +655,8 @@ async function bloc2Publics(soft, db, p, k) {
     : [];
 
   const parCritere = (criteres || []).map((c) => {
-    const n = k(c.n, `${base}.par_critere_eligibilite.${c.code}`);
-    return { code: c.code, libelle: c.libelle, n, part_pct: n == null ? null : part(n, effectif) };
+    const n = num(c.n);
+    return { code: c.code, libelle: c.libelle, n, part_pct: part(n, effectif) };
   });
 
   // BRSA : le compte de l'outil ET le compte déclaré à l'ASP, côte à côte.
@@ -394,9 +664,7 @@ async function bloc2Publics(soft, db, p, k) {
   const brsaAsp = await soft('brsa_asp', `
     SELECT nb_brsa FROM etp_asp_mensuel
     WHERE annee = $1 AND nb_brsa IS NOT NULL ORDER BY mois DESC LIMIT 1`, [p.annee]);
-  const nBrsaK = k(nBrsa, `${base}.brsa.n`);
-
-  const compte = (valeurs, cles, chemin, libelleNul) => {
+  const compte = (valeurs, cles, libelleNul) => {
     const brut = {};
     for (const c of cles) brut[c] = 0;
     if (libelleNul) brut[libelleNul] = 0;
@@ -406,9 +674,7 @@ async function bloc2Publics(soft, db, p, k) {
       if (!(cle in brut)) brut[cle] = 0;
       brut[cle] += 1;
     }
-    const out = {};
-    for (const [cle, n] of Object.entries(brut)) out[cle] = k(n, `${chemin}.${cle}`);
-    return out;
+    return brut;
   };
 
   const tranches = {};
@@ -417,25 +683,20 @@ async function bloc2Publics(soft, db, p, k) {
     const cle = t || 'non_renseignee';
     tranches[cle] = (tranches[cle] || 0) + 1;
   }
-  const tranchesK = {};
-  for (const [cle, n] of Object.entries(tranches)) tranchesK[cle] = k(n, `${base}.tranches_age.${cle}`);
 
   return {
-    effectif, // effectif brut global du bloc — jamais masqué
+    effectif, // effectif brut global du bloc — jamais masqué (liste blanche K_EFFECTIFS_PUBLIES)
     par_critere_eligibilite: parCritere,
     brsa: {
-      n: nBrsaK,
-      part_pct: nBrsaK == null ? null : part(nBrsaK, effectif),
+      n: nBrsa,
+      part_pct: part(nBrsa, effectif),
       n_asp: brsaAsp && brsaAsp[0] ? num(brsaAsp[0].nb_brsa) : null,
     },
-    par_categorie_ft: compte(cohorte.map((r) => r.ft_categorie), FT_CATEGORIES,
-      `${base}.par_categorie_ft`, 'non_renseignee'),
-    par_referent_unique: compte(cohorte.map((r) => r.referent_unique_type), REFERENT_TYPES,
-      `${base}.par_referent_unique`, null),
-    sexe: compte(cohorte.map((r) => r.gender), ['F', 'M'], `${base}.sexe`, 'non_renseigne'),
-    tranches_age: tranchesK,
-    niveaux_formation: compte(cohorte.map((r) => r.niveau_formation), [],
-      `${base}.niveaux_formation`, 'non_renseigne'),
+    par_categorie_ft: compte(cohorte.map((r) => r.ft_categorie), FT_CATEGORIES, 'non_renseignee'),
+    par_referent_unique: compte(cohorte.map((r) => r.referent_unique_type), REFERENT_TYPES, null),
+    sexe: compte(cohorte.map((r) => r.gender), ['F', 'M'], 'non_renseigne'),
+    tranches_age: tranches,
+    niveaux_formation: compte(cohorte.map((r) => r.niveau_formation), [], 'non_renseigne'),
   };
 }
 
@@ -451,8 +712,7 @@ async function bloc2Publics(soft, db, p, k) {
  *
  * Le frein judiciaire n'est pas lu — sa colonne n'apparaît pas dans le SQL.
  */
-async function bloc3Freins(soft, db, p, k) {
-  const base = 'blocs.3_freins';
+async function bloc3Freins(soft, db, p) {
   const cols = AXES_BLOC3.map((f) => f.column);
   const dCols = cols.map((c) => `d.${c} AS entree_${c}`).join(', ');
   const lmCols = cols.map((c) => `lm.${c} AS actuel_${c}`).join(', ');
@@ -520,24 +780,30 @@ async function bloc3Freins(soft, db, p, k) {
       else if (actuel >= entree + 1) aggraves += 1;
       else stables += 1;
     }
-    const a = actionsParAxe.get(f.key) || {};
-    const chemin = `${base}.par_axe.${f.key}`;
+    const a = actionsParAxe.get(f.key);
+    // CORRECTIF M-04 — une source ILLISIBLE ne s'imprime pas « 0 ». `actions`
+    // vaut `null` quand la requête a échoué (base non migrée) et `[]` quand
+    // elle n'a rien trouvé : « aucune action engagée sur cet axe » et « nous
+    // n'avons pas pu lire les actions » ne se lisent pas pareil sur la pièce
+    // qui instruit un conventionnement, et le second dessert la structure.
+    const illisible = actions == null;
+    const cpt = (v) => (illisible ? null : (num(v) || 0));
     return {
       axe: f.key,
       label: f.label,
-      concernes_entree: k(concernes, `${chemin}.concernes_entree`),
-      leves: k(leves, `${chemin}.leves`),
-      stables: k(stables, `${chemin}.stables`),
-      aggraves: k(aggraves, `${chemin}.aggraves`),
-      non_evalues: k(nonEvalues, `${chemin}.non_evalues`),
-      actions_engagees: num(a.n_actions) || 0,
+      concernes_entree: concernes,
+      leves,
+      stables,
+      aggraves,
+      non_evalues: nonEvalues,
+      actions_engagees: cpt(a && a.n_actions),
       partenaire_principal: partenaireParAxe.get(f.key) || null,
-      orientations_dora: num(a.n_dora) || 0,
+      orientations_dora: cpt(a && a.n_dora),
       dora_resultats: {
-        oriente: num(a.dora_oriente) || 0,
-        pris_en_charge: num(a.dora_pris_en_charge) || 0,
-        refuse: num(a.dora_refuse) || 0,
-        sans_suite: num(a.dora_sans_suite) || 0,
+        oriente: cpt(a && a.dora_oriente),
+        pris_en_charge: cpt(a && a.dora_pris_en_charge),
+        refuse: cpt(a && a.dora_refuse),
+        sans_suite: cpt(a && a.dora_sans_suite),
       },
     };
   });
@@ -545,6 +811,7 @@ async function bloc3Freins(soft, db, p, k) {
   return {
     par_axe: parAxe,
     nb_dossiers: lignes == null ? null : lignes.length,
+    actions_illisibles: actions == null,
     echelle: '1 = pas de difficulté … 5 = bloquant. Une BAISSE de niveau est une amélioration.',
   };
 }
@@ -560,14 +827,17 @@ async function bloc4Accompagnement(soft, db, p) {
     WHERE COALESCE(im.completed_date, im.due_date) BETWEEN $1::date AND $2::date
     GROUP BY im.milestone_type`, [p.debut, p.fin]);
   const parType = new Map((entretiensRows || []).map((r) => [String(r.type), r]));
+  // CORRECTIF M-04 — source illisible ≠ zéro entretien (voir bloc 3).
+  const entretiensIllisibles = entretiensRows == null;
   const entretiens = TYPES_ENTRETIEN.map((t) => {
     const r = parType.get(t) || { realises: 0, echus: 0, realises_echus: 0 };
     return {
       type: t,
       label: MILESTONE_TYPE_LABELS_ALL[t] || t,
-      realises: num(r.realises) || 0,
-      echus: num(r.echus) || 0,
-      taux_pct: num(r.echus) > 0 ? Math.round((num(r.realises_echus) / num(r.echus)) * 100) : null,
+      realises: entretiensIllisibles ? null : (num(r.realises) || 0),
+      echus: entretiensIllisibles ? null : (num(r.echus) || 0),
+      taux_pct: !entretiensIllisibles && num(r.echus) > 0
+        ? Math.round((num(r.realises_echus) / num(r.echus)) * 100) : null,
     };
   });
 
@@ -609,7 +879,9 @@ async function bloc4Accompagnement(soft, db, p) {
       AND COALESCE(a.date_realisation, a.echeance, a.created_at::date) BETWEEN $1::date AND $2::date
     GROUP BY a.aide_nature`, [p.debut, p.fin]);
   const aidesParNature = new Map((aides || []).map((r) => [String(r.nature), r]));
-  const aidesMobilisees = AIDE_NATURES
+  // Source illisible → `null` NOMMÉ, jamais une liste vide qui se lirait
+  // « aucune aide mobilisée » sur le document transmis (M-04).
+  const aidesMobilisees = aides == null ? null : AIDE_NATURES
     .map((n) => {
       const r = aidesParNature.get(n);
       if (!r) return null;
@@ -628,6 +900,7 @@ async function bloc4Accompagnement(soft, db, p) {
 
   return {
     entretiens,
+    entretiens_illisibles: entretiensIllisibles,
     heures_accompagnement: heures,
     delai_moyen_diagnostic_jours: delai && delai[0] && delai[0].jours != null
       ? Math.round(Number(delai[0].jours)) : null,
@@ -636,8 +909,7 @@ async function bloc4Accompagnement(soft, db, p) {
 }
 
 /** Bloc 5 — Immersions (PMSMP) et trajectoire immersion → emploi (S1 / S7). */
-async function bloc5Immersions(soft, db, p, k) {
-  const base = 'blocs.5_immersions';
+async function bloc5Immersions(soft, db, p) {
   const rows = await soft('pmsmp_periode', `
     SELECT entreprise, debouche, embauche_accueillant,
            (date_fin - date_debut + 1) AS jours
@@ -659,27 +931,41 @@ async function bloc5Immersions(soft, db, p, k) {
     const d = r.debouche && DEBOUCHES.includes(r.debouche) ? r.debouche : 'non_renseigne';
     parDebouche[d] += 1;
   }
-  const parDeboucheK = {};
-  for (const [d, n] of Object.entries(parDebouche)) parDeboucheK[d] = k(n, `${base}.par_debouche.${d}`);
-
   const embauches = rows.filter((r) => r.embauche_accueillant === true).length;
 
   return {
     conventions: rows.length,          // effectif brut global du bloc
     jours,
     entreprises_distinctes: entreprises.length,
-    par_debouche: parDeboucheK,
+    par_debouche: parDebouche,
     par_debouche_labels: DEBOUCHE_LABELS,
-    embauches_chez_accueillant: k(embauches, `${base}.embauches_chez_accueillant`),
+    embauches_chez_accueillant: embauches,
     // Raison sociale d'entreprises d'accueil : ce n'est pas une donnée
-    // personnelle. Aucun compte par entreprise n'est publié — « trois immersions
-    // chez X » rapproché du bloc des débouchés désignerait une personne.
+    // personnelle EN ELLE-MÊME. Mais sur une période à une ou deux conventions,
+    // elle en devient un identifiant indirect (art. 4-1) pour un destinataire
+    // qui reçoit par ailleurs les déclarations d'Immersion Facilitée : la liste,
+    // les jours et le nombre d'entreprises ne sortent donc que si le nombre de
+    // conventions atteint le seuil (correctif B-01, dépendance déclarée dans
+    // K_DEPENDANCES_FRATRIE). Aucun compte PAR entreprise n'est publié.
     liste_entreprises: entreprises,
   };
 }
 
-/** Bloc 6 — Sorties, par le moteur PUR partagé (une seule règle pour tous). */
-async function bloc6Sorties(soft, db, p, anneeDoubleMethode) {
+/**
+ * Charge les lignes de sortie d'une période et les passe au moteur PUR.
+ *
+ * ═══ POURQUOI CETTE FONCTION EST EXPORTÉE (correctif M-07) ════════════════
+ * Le moteur `sorties-engine` documente une PRÉCONDITION : « deux bilans pour un
+ * même parcours : le PREMIER rencontré fait foi — la requête appelante les
+ * ordonne ». La règle vivait bien à un seul endroit, mais sa précondition
+ * avait été recopiée de façon incomplète dans `routes/performance.js`, qui
+ * n'ordonnait pas : sur un parcours réouvert puis repris, PostgreSQL ne
+ * garantit aucun ordre, et le reporting RH pouvait classer « emploi de
+ * transition » ce que la synthèse transmise appelait « emploi durable ».
+ * Le chargement vit donc ici, et les appelants l'APPELLENT au lieu de le
+ * recopier — une précondition ne se transmet pas par commentaire.
+ */
+async function chargerSorties(soft, db, p, anneeDoubleMethode) {
   const fins = await soft('fins_parcours', `
     SELECT e.id AS employee_id, COALESCE(e.parcours_num, 1) AS parcours_num
     FROM employees e
@@ -709,7 +995,7 @@ async function bloc6Sorties(soft, db, p, anneeDoubleMethode) {
   const cibles = await lireCibles(db);
   return calculerSorties({
     finsParcours: fins || [],
-    bilansClasses: bilans || [],
+    bilansClasses: (bilans || []).map(projeterSortieType),
     sortiesAsp,
     annee: p.annee,
     cibles,
@@ -717,9 +1003,30 @@ async function bloc6Sorties(soft, db, p, anneeDoubleMethode) {
   });
 }
 
+/** Bloc 6 — Sorties, par le moteur PUR partagé (une seule règle pour tous). */
+const bloc6Sorties = chargerSorties;
+
+/**
+ * CORRECTIF M-03 — `sortie_type` est un `VARCHAR(50)` SANS CHECK, listé parmi
+ * les champs éditables d'un entretien sans validateur de liste fermée : la CIP
+ * peut y écrire « CDI chez Leroy Merlin (oncle de M.) ». Le moteur en fait une
+ * CLÉ d'objet (`par_type`), rendue par l'API et surtout FIGÉE dans le snapshot
+ * `insertion_dialogues_gestion.contenu` — table sans rétention ni accroche
+ * d'anonymisation : un texte libre y survivrait à l'anonymisation du salarié
+ * qu'il décrit. `services/mon-parcours.js` documente la règle inverse pour la
+ * MÊME colonne (« une valeur hors liste devient null, jamais recopiée ») ; on
+ * l'applique ici, avec la MÊME liste — la recopier en ferait une seconde.
+ * Une valeur hors liste est rangée sous `autre`, jamais perdue en silence.
+ */
+function projeterSortieType(b) {
+  if (!b || !b.sortie_type) return b;
+  const { SORTIE_TYPE_LABELS } = require('./mon-parcours');
+  const connu = Object.prototype.hasOwnProperty.call(SORTIE_TYPE_LABELS, String(b.sortie_type));
+  return { ...b, sortie_type: connu ? String(b.sortie_type) : 'autre' };
+}
+
 /** Bloc 7 — Résultats : situation à +6 mois et satisfaction de sortie. */
-async function bloc7Resultats(soft, db, p, k) {
-  const base = 'blocs.7_resultats';
+async function bloc7Resultats(soft, db, p) {
   const rows = await soft('situation_6_mois', `
     SELECT s.situation_6mois, s.date_releve_6mois
     FROM insertion_fse_sorties s
@@ -731,9 +1038,6 @@ async function bloc7Resultats(soft, db, p, k) {
     const cle = r.situation_6mois ? (MAP_SITUATION_6_MOIS[r.situation_6mois] || 'autre') : 'non_renseigne';
     compte[cle] += 1;
   }
-  const situationK = {};
-  for (const [cle, n] of Object.entries(compte)) situationK[cle] = k(n, `${base}.situation_6_mois.${cle}`);
-
   const sat = await soft('satisfaction', `
     SELECT COUNT(*)::int AS nb, ROUND(AVG(satisfaction_globale)::numeric, 2) AS moyenne
     FROM insertion_satisfaction_sortie
@@ -741,24 +1045,21 @@ async function bloc7Resultats(soft, db, p, k) {
 
   const nbReponses = sat && sat[0] ? num(sat[0].nb) || 0 : 0;
   return {
-    situation_6_mois: situationK,
+    situation_6_mois: compte,
     nb_sorties_suivies: rows == null ? null : rows.length,
     satisfaction: {
       nb_reponses: nbReponses,
       // Sous le seuil, la MOYENNE elle-même n'est pas rendue : sur trois
-      // réponses, une moyenne se décompose. Même règle que les enquêtes.
-      moyenne_globale: nbReponses >= 1 && k(nbReponses, `${base}.satisfaction.moyenne_globale`) == null
-        ? null
-        : (sat && sat[0] && sat[0].moyenne != null ? Number(sat[0].moyenne) : null),
+      // réponses, une moyenne se décompose. Même règle que les enquêtes — la
+      // suppression est posée par la dépendance `nb_reponses → moyenne_globale`.
+      moyenne_globale: sat && sat[0] && sat[0].moyenne != null ? Number(sat[0].moyenne) : null,
       echelle: '1 à 4',
     },
   };
 }
 
 /** Bloc 8 — Conformité et ruptures de droits évitées (indicateur 12). */
-async function bloc8Conformite(soft, db, p, k) {
-  const base = 'blocs.8_conformite';
-
+async function bloc8Conformite(soft, db, p) {
   // Complétude FSE+ par projet — PROJECTION EXPLICITE : `conformiteProjet`
   // rend la liste NOMINATIVE des participants (nom, prénom, identifiant). Seuls
   // les trois agrégats en sortent ; la liste des dossiers incomplets reste sur
@@ -830,16 +1131,28 @@ async function bloc8Conformite(soft, db, p, k) {
       const m = await activiteHebdoCohorte({
         employeeIds: cohorte.map((r) => Number(r.id)), annee: p.annee,
       });
-      let personnes = 0; let total = 0;
+      let personnes = 0; let total = 0; let relevees = 0;
       for (const v of m.values()) {
         const n = num(v && v.nb_semaines_sous_seuil) || 0;
         if (n > 0) personnes += 1;
         total += n;
+        relevees += num(v && v.nb_semaines_relevees) || 0;
       }
-      semaines = {
-        nb_personnes_concernees: k(personnes, `${base}.semaines_sous_15h.nb_personnes_concernees`),
-        nb_semaines: total,
-      };
+      // CORRECTIF D-03 — « 0 semaine sous 15 h » et « aucune semaine relevée »
+      // sont deux affirmations différentes, et la seconde est la seule vraie
+      // quand la paie n'a rien remonté. Le moteur d'activité le SAIT
+      // (`nb_semaines_relevees`) ; jusqu'ici seul `nb_semaines_sous_seuil`
+      // était lu, et le document affirmait à l'autorité que personne n'était
+      // jamais passé sous le plancher. Même doctrine que la PR B pour le relevé
+      // d'assiduité : une semaine sans relevé est `null`, jamais 0 h.
+      semaines = relevees === 0
+        ? {
+          nb_personnes_concernees: null,
+          nb_semaines: null,
+          nb_semaines_relevees: 0,
+          note: "Aucune semaine relevée sur la période — l'indicateur n'est pas calculable (ce n'est pas « zéro semaine sous le plancher »).",
+        }
+        : { nb_personnes_concernees: personnes, nb_semaines: total, nb_semaines_relevees: relevees };
     } catch (err) {
       console.error(`[INSERTION][DIALOGUE] « semaines_sous_seuil » ignorée : ${err.message}`);
     }
@@ -896,11 +1209,26 @@ function bloc9Methode(blocs, contexte) {
       "Compte de l'outil (statut constaté au dossier) présenté à côté du nombre déclaré sur le dernier état mensuel ASP disponible. Un écart n'est pas une anomalie : les deux comptes ne se font pas à la même date.");
   }
 
+  if (blocs['3_freins'] && blocs['3_freins'].actions_illisibles) {
+    ajouter('Freins — actions engagées',
+      "Indicateur non rendu : la source (actions d'accompagnement rattachées à un axe de frein) n'a pas pu être lue sur la période. Aucune valeur n'est estimée — « 0 action » aurait été faux dans le sens qui dessert la structure.");
+  }
+
   if (blocs['3_freins']) {
     ajouter('Freins — évolution',
       "Comparaison du niveau relevé au diagnostic d'accueil et du niveau de la DERNIÈRE évaluation en date (dernier entretien réalisé du parcours courant portant au moins un frein). Levé = baisse d'au moins un niveau ; aggravé = hausse d'au moins un niveau ; stable sinon ; non évalué dès que l'une des deux valeurs manque. L'échelle va de 1 (pas de difficulté) à 5 (bloquant).");
     ajouter('Freins — concernés à l\'entrée',
       'Personnes dont le niveau au diagnostic est de 2 ou plus sur cet axe.');
+  }
+
+  if (blocs['4_accompagnement'] && blocs['4_accompagnement'].entretiens_illisibles) {
+    ajouter('Entretiens',
+      "Indicateur non rendu : la source (entretiens de la période) n'a pas pu être lue. Le tableau des entretiens est vide parce qu'il n'est pas calculable, non parce qu'aucun entretien n'a eu lieu.");
+  }
+
+  if (blocs['4_accompagnement'] && blocs['4_accompagnement'].aides_mobilisees == null) {
+    ajouter('Aides mobilisées',
+      "Indicateur non rendu : la source (aides mobilisées sur les actions d'accompagnement) n'a pas pu être lue sur la période.");
   }
 
   if (blocs['4_accompagnement']) {
@@ -939,6 +1267,11 @@ function bloc9Methode(blocs, contexte) {
   if (blocs['8_conformite']) {
     ajouter('Alimentation du référent unique',
       "Points d'étape = entretiens de type « Point avec le référent » réalisés sur la période. Fiches transmises = fiches d'alimentation dont la REMISE au référent est tracée sur la période (une fiche générée et non remise n'est pas comptée).");
+    if (blocs['8_conformite'].semaines_sous_15h
+        && blocs['8_conformite'].semaines_sous_15h.nb_semaines_relevees === 0) {
+      ajouter("Semaines sous le plancher d'activité — non calculable",
+        "Aucune semaine n'a été relevée sur la période (aucun relevé de paie hebdomadaire pour la cohorte) : l'indicateur n'est pas rendu. Ce n'est PAS « zéro semaine sous le plancher » — l'activité n'a simplement pas pu être mesurée.");
+    }
     ajouter('Semaines sous le plancher d\'activité',
       `Nombre de semaines RELEVÉES dont l'activité cumulée (travail en CDDI, accompagnement, immersion) est inférieure au plancher paramétré (${contexte.seuilHeures} h). Une semaine sans relevé de paie n'est jamais comptée comme une semaine à zéro heure. L'indicateur est un nombre de semaines, jamais une moyenne.`);
     ajouter('Ruptures de droits évitées',
@@ -946,7 +1279,18 @@ function bloc9Methode(blocs, contexte) {
   }
 
   ajouter('Agrégats non rendus (k-anonymat)',
-    `Tout agrégat comptant entre 1 et ${contexte.k - 1} personnes est rendu vide pour empêcher une ré-identification par recoupement. Les valeurs nulles (« personne dans cette catégorie ») sont conservées telles quelles : elles ne désignent personne. La liste des agrégats concernés figure en fin de document.`);
+    `Tout agrégat comptant entre 1 et ${contexte.k - 1} personnes est rendu vide pour empêcher une ré-identification par recoupement — y compris les comptes d'actions, d'orientations, d'aides et de gestes de conformité, qui portent chacun sur au moins une personne. Les valeurs nulles (« personne dans cette catégorie ») sont conservées telles quelles : elles ne désignent personne. Le nombre d'indicateurs retirés est indiqué bloc par bloc en fin de document ; leur emplacement exact ne l'est pas, parce qu'il indiquerait la case à reconstituer.`);
+
+  ajouter('Suppression complémentaire',
+    "Quand une ventilation somme à un effectif publié et qu'une seule de ses cases a été retirée, cette case se retrouverait par soustraction : une seconde case (la plus petite publiée) est alors retirée elle aussi. C'est la raison pour laquelle deux lignes peuvent manquer là où une seule était sous le seuil.");
+
+  ajouter('Taux et effectifs retirés',
+    "Un taux dont le dénominateur est publié redonne son numérateur par multiplication : il est donc retiré en même temps que l'effectif qu'il reflète. À l'inverse, un taux dont le dénominateur est lui-même retiré ne reconstitue rien et reste rendu.");
+
+  if (contexte.sousSeuilTotal === 0) {
+    ajouter('Agrégats non rendus — résultat',
+      "Aucun agrégat n'a été retiré au titre du seuil de confidentialité sur cette période.");
+  }
 
   ajouter('Source des chiffres',
     "Tous les chiffres proviennent de l'ERP SOLIDATA. Les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi en cas d'écart.");
@@ -974,10 +1318,13 @@ async function composerDialogueGestion({ annee, trimestre = null, db = pool, use
   if (!p) throw Object.assign(new Error('Année invalide'), { code: 'ANNEE_INVALIDE' });
 
   const soft = faireSoft(db);
-  const sousSeuil = [];
-  const seuilBrut = await readInsertionSetting('insertion.k_anonymat_min');
-  const seuil = num(seuilBrut) != null && num(seuilBrut) >= 1 ? Math.round(num(seuilBrut)) : 5;
-  const k = faireKAnon(seuil, sousSeuil);
+  // CORRECTIF m-02 — PLANCHER à 5. Le réglage n'avait aucune borne basse : une
+  // valeur à 1 désactivait toute suppression EN SILENCE, pendant que le bloc 9
+  // continuait d'écrire « tout agrégat comptant entre 1 et 0 personnes est
+  // rendu vide ». Un seuil de confidentialité ne se baisse pas par un champ de
+  // réglage ; il se relève.
+  const seuilBrut = num(await readInsertionSetting('insertion.k_anonymat_min'));
+  const seuil = seuilBrut != null && seuilBrut > 5 ? Math.round(seuilBrut) : 5;
 
   const anneeDouble = num(await readInsertionSetting('insertion.sorties_methode_double_annee'));
   const seuilHeures = num(await readInsertionSetting('insertion.cer_heures_min')) ?? 15;
@@ -986,20 +1333,30 @@ async function composerDialogueGestion({ annee, trimestre = null, db = pool, use
   const allege = p.trimestre != null;
 
   if (!allege) blocs['1_effectifs_etp'] = await bloc1Effectifs(soft, db, p);
-  blocs['2_publics_entree'] = await bloc2Publics(soft, db, p, k);
+  blocs['2_publics_entree'] = await bloc2Publics(soft, db, p);
   if (!allege) {
-    blocs['3_freins'] = await bloc3Freins(soft, db, p, k);
+    blocs['3_freins'] = await bloc3Freins(soft, db, p);
     blocs['4_accompagnement'] = await bloc4Accompagnement(soft, db, p);
-    blocs['5_immersions'] = await bloc5Immersions(soft, db, p, k);
+    blocs['5_immersions'] = await bloc5Immersions(soft, db, p);
     blocs['6_sorties'] = await bloc6Sorties(soft, db, p, anneeDouble);
-    blocs['7_resultats'] = await bloc7Resultats(soft, db, p, k);
+    blocs['7_resultats'] = await bloc7Resultats(soft, db, p);
   }
-  blocs['8_conformite'] = await bloc8Conformite(soft, db, p, k);
+  blocs['8_conformite'] = await bloc8Conformite(soft, db, p);
+
+  // ═══ LA PASSE DE k-ANONYMAT ═══════════════════════════════════════════
+  // Elle vient APRÈS la composition et AVANT le bloc « Méthode », pour que
+  // celui-ci décrive le document tel qu'il part et non tel qu'il a été
+  // calculé. Elle porte sur TOUS les blocs, y compris ceux qui n'existent pas
+  // encore.
+  const sousSeuil = appliquerKAnonymat({ blocs }, seuil);
+  const sousSeuilTotal = sousSeuil.reduce((a, b) => a + b.nb, 0);
 
   const libellePeriode = p.trimestre
     ? `le ${p.trimestre}ᵉ trimestre ${p.annee} (du ${p.debut} au ${p.fin})`
     : `l'année ${p.annee}`;
-  blocs['9_methode'] = bloc9Methode(blocs, { libellePeriode, k: seuil, seuilHeures });
+  blocs['9_methode'] = bloc9Methode(blocs, {
+    libellePeriode, k: seuil, seuilHeures, sousSeuilTotal,
+  });
 
   return {
     en_tete: {
@@ -1020,7 +1377,12 @@ async function composerDialogueGestion({ annee, trimestre = null, db = pool, use
       k_anonymat: seuil,
     },
     blocs,
+    // Un COMPTE par bloc, jamais le chemin de la case retirée (voir
+    // `appliquerKAnonymat`). La forme reste un tableau : les appelants qui
+    // comptent (`.length`) comptent désormais des blocs, et `sous_seuil_total`
+    // dit combien d'indicateurs sont concernés.
     sous_seuil: sousSeuil,
+    sous_seuil_total: sousSeuilTotal,
   };
 }
 
@@ -1088,6 +1450,9 @@ function aplatirEnLignes(synthese) {
 
   if (B['4_accompagnement']) {
     const nom = '4. Accompagnement';
+    if (B['4_accompagnement'].aides_mobilisees == null) {
+      push(nom, 'Aides mobilisées', 'source non lisible — indicateur non rendu');
+    }
     for (const e of B['4_accompagnement'].entretiens || []) {
       push(nom, `${e.label} — réalisés`, e.realises);
       push(nom, `${e.label} — échus`, e.echus);
@@ -1162,13 +1527,23 @@ function aplatirEnLignes(synthese) {
     push(nom, 'Actualisations France Travail rappelées', b8.actualisations_ft_rappelees);
     push(nom, 'Semaines sous le plancher — personnes concernées', b8.semaines_sous_15h?.nb_personnes_concernees);
     push(nom, 'Semaines sous le plancher — nombre de semaines', b8.semaines_sous_15h?.nb_semaines);
+    if (b8.semaines_sous_15h && b8.semaines_sous_15h.nb_semaines_relevees === 0) {
+      push(nom, 'Semaines sous le plancher — note', b8.semaines_sous_15h.note);
+    }
     push(nom, 'Entretiens de conciliation', b8.conciliations);
     push(nom, 'Ruptures de droits évitées — total', b8.ruptures_droits_evitees?.total);
   }
 
   for (const m of B['9_methode'] || []) push('9. Méthode', m.indicateur, m.regle);
-  for (const chemin of synthese.sous_seuil || []) {
-    push('9. Méthode', 'Agrégat non rendu (moins de 5 personnes)', chemin);
+  // CORRECTIF D-06 — le libellé nommait « moins de 5 personnes » EN DUR alors
+  // que le seuil est paramétrable et que le bloc 9, lui, le composait
+  // correctement : le même fichier énonçait donc deux règles contradictoires
+  // sur sa propre méthode de suppression. Le seuil vient désormais de
+  // l'en-tête, source unique du document.
+  const seuil = Number(synthese?.en_tete?.k_anonymat) || 5;
+  for (const b of synthese.sous_seuil || []) {
+    push('9. Méthode',
+      `Agrégats non rendus (moins de ${seuil} personnes) — ${b.libelle || b.bloc}`, b.nb);
   }
 
   return out;
@@ -1189,19 +1564,23 @@ function aplatirEnLignes(synthese) {
  * chiffres pour le même indicateur, dans deux documents qui portent la même
  * signature.
  */
-async function composerBlocsInternes({ annee, db = pool } = {}) {
+async function composerBlocsInternes({ annee, db = pool, avecPublics = true } = {}) {
   const p = bornes(annee, null);
   if (!p) return null;
   const soft = faireSoft(db);
-  const k = (n) => (n == null ? null : Number(n)); // identité : aucune suppression
   const anneeDouble = num(await readInsertionSetting('insertion.sorties_methode_double_annee'));
 
+  // CORRECTIF B-02 — les blocs de STATUT SOCIAL ne sont pas composés hors
+  // ADMIN/RH : leur requête ne part pas. Un filtrage après lecture serait un
+  // refus d'affichage, pas un refus d'accès (doctrine `echeances-cip.js` en
+  // PR C). L'appelant décide, parce que la frontière est le RÔLE et que le
+  // service, lui, n'en connaît aucun.
   const [publics, freins, immersions, sorties, conformite, accompagnement, etp] = await Promise.all([
-    bloc2Publics(soft, db, p, k),
-    bloc3Freins(soft, db, p, k),
-    bloc5Immersions(soft, db, p, k),
+    avecPublics ? bloc2Publics(soft, db, p) : Promise.resolve(null),
+    bloc3Freins(soft, db, p),
+    bloc5Immersions(soft, db, p),
     bloc6Sorties(soft, db, p, anneeDouble),
-    bloc8Conformite(soft, db, p, k),
+    bloc8Conformite(soft, db, p),
     bloc4Accompagnement(soft, db, p),
     bloc1Effectifs(soft, db, p),
   ]);
@@ -1211,9 +1590,13 @@ async function composerBlocsInternes({ annee, db = pool } = {}) {
 module.exports = {
   composerDialogueGestion,
   composerBlocsInternes,
+  chargerSorties,
+  faireSoft,
   aplatirEnLignes,
+  appliquerKAnonymat,
   bornes,
   faireKAnon,
+  K_EFFECTIFS_PUBLIES,
   AXES_BLOC3,
   DEBOUCHES,
   DEBOUCHE_LABELS,

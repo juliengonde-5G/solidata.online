@@ -225,7 +225,12 @@ function calculerSorties({
     regles.push(`Exercice ${annee} : les deux méthodes sont imprimées côte à côte — le changement de dénominateur crée une rupture de série avec les chiffres présentés précédemment.`);
   }
   if (bilansSansFinParcours > 0) {
-    regles.push(`${bilansSansFinParcours} bilan(s) de sortie classé(s) ne se rattachent à aucune fin de parcours datée dans la période : ils comptent dans la méthode A, pas dans la méthode B.`);
+    // Le NOMBRE n'est pas recopié dans la phrase : elle est imprimée telle
+    // quelle dans un document soumis au k-anonymat, qui ne protège que les
+    // champs — un compte glissé dans une chaîne passerait à travers la passe
+    // (correctif B-01). Il vit dans `methode_b.bilans_sans_fin_parcours`, où
+    // il est protégé comme les autres.
+    regles.push("Des bilans de sortie classés peuvent ne se rattacher à aucune fin de parcours datée dans la période : ils comptent dans la méthode A et pas dans la méthode B, et leur nombre figure au bloc 6 — c'est ce qui explique l'écart entre les deux dénominateurs.");
   }
   if (ecartCible === null) {
     regles.push('Écart aux cibles : objectif non paramétré (les cibles conventionnelles de l’annexe financière ne sont pas saisies).');

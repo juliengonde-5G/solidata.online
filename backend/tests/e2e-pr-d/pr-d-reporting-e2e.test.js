@@ -361,9 +361,16 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       expect(b.etp_asp_moyen).toBeCloseTo(24.85, 2);
     });
 
-    test('V-03 — bloc 3 : ROW_NUMBER() OVER rend un partenaire principal par axe', () => {
+    test('V-03 — bloc 3 : ROW_NUMBER() OVER rend un partenaire principal par axe', async () => {
+      // Le SQL se vérifie sur l'ÉCRAN INTERNE (`/audit`), qui n'applique aucune
+      // suppression. Sur le DOCUMENT, le partenaire principal d'un axe portant
+      // moins de 5 actions est retiré depuis le correctif B-01/D-07 : un
+      // partenaire unique sur un axe à une action désigne le dossier.
+      const audit = (await auth(request(app).get(`/api/insertion/audit?year=${AN}`), 'ADMIN')).body;
+      const interne = (audit.freins_evolution.par_axe || []).find((a) => a.axe === 'mobilite');
+      expect(interne.partenaire_principal).toMatch(/CMS/i);
       const axe = synthese.blocs['3_freins'].par_axe.find((a) => a.axe === 'mobilite');
-      expect(axe.partenaire_principal).toMatch(/CMS/i);
+      expect(axe.partenaire_principal).toBeNull();
     });
 
     test('V-04 — bloc 3 : le LATERAL de dernière évaluation compte 5 levés (rendus) sur mobilité', () => {
@@ -372,13 +379,23 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       expect(synthese.blocs['3_freins'].nb_dossiers).toBe(12);
     });
 
-    test('V-05 — bloc 8 : aucun bloc indisponible, la complétude FSE+ est composée', () => {
+    test('V-05 — bloc 8 : aucun bloc indisponible, la complétude FSE+ est composée', async () => {
       const b = synthese.blocs['8_conformite'];
       expect(Array.isArray(b.completude_fse_par_projet)).toBe(true);
-      expect(b.points_etape_referent).toBe(3);
-      expect(b.fiches_referent_transmises).toBe(3);
-      expect(b.actualisations_ft_rappelees).toBe(4);
-      expect(b.conciliations).toBe(1);
+      // Les chiffres eux-mêmes se vérifient sur l'écran interne : sur le
+      // document, ces quatre compteurs portent chacun sur moins de 5 personnes
+      // et sont retirés depuis le correctif B-01 (« 1 entretien de conciliation »
+      // dit qu'UNE personne a fait l'objet d'une procédure contradictoire).
+      const audit = (await auth(request(app).get(`/api/insertion/audit?year=${AN}`), 'ADMIN')).body;
+      const i = audit.conformite;
+      expect(i.points_etape_referent).toBe(3);
+      expect(i.fiches_referent_transmises).toBe(3);
+      expect(i.actualisations_ft_rappelees).toBe(4);
+      expect(i.conciliations).toBe(1);
+      for (const cle of ['points_etape_referent', 'fiches_referent_transmises',
+        'actualisations_ft_rappelees', 'conciliations']) {
+        expect([cle, b[cle]]).toEqual([cle, null]);
+      }
     });
 
     // ── DÉFAUT D-04 : un mois sans aucun contrat CDDI vaut 1,00 ETP ──────
@@ -471,7 +488,15 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       expect(mbDoc.denominateur).toBe(mbAudit.denominateur);
       expect(mbDoc.documentees).toBe(mbAudit.documentees);
       expect(mbDoc.non_documentees).toBe(mbAudit.non_documentees);
-      expect(mbDoc.taux_pct).toEqual(mbAudit.taux_pct);
+      // Depuis le correctif B-01, le DOCUMENT en dit moins que l'écran : les
+      // taux dont la case de comptage est retirée le sont aussi, sans quoi un
+      // taux multiplié par un dénominateur publié rendrait le numérateur. La
+      // cohérence exigible n'est donc pas l'égalité terme à terme mais celle-ci :
+      // le document ne dit jamais AUTRE CHOSE que l'écran, il dit moins.
+      for (const [cle, v] of Object.entries(mbDoc.taux_pct)) {
+        if (v !== null) expect([cle, v]).toEqual([cle, mbAudit.taux_pct[cle]]);
+      }
+      expect(mbDoc.taux_pct.dynamiques).toBe(mbAudit.taux_pct.dynamiques);
       expect(syntheseJson.sorties.methode_b.denominateur).toBe(mbAudit.denominateur);
 
       expect(perf.status).toBe(200);
@@ -502,18 +527,45 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       s = (await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}`), 'ADMIN')).body;
     });
 
-    test('V-15 — un agrégat à 4 est retiré et listé ; à 5 il est rendu', () => {
+    test('V-15 — un agrégat à 4 est retiré et COMPTÉ ; à 5 il est rendu', () => {
       const refs = s.blocs['2_publics_entree'].par_referent_unique;
       expect(refs.cms).toBe(5);                    // 5 → rendu
       expect(refs.france_travail).toBeNull();      // 4 → retiré
-      expect(s.sous_seuil).toContain('blocs.2_publics_entree.par_referent_unique.france_travail');
-      expect(s.sous_seuil).not.toContain('blocs.2_publics_entree.par_referent_unique.cms');
+      // CORRECTIF B-01 — `sous_seuil` compte par BLOC et ne nomme plus le
+      // chemin de la case retirée : sur une ventilation qui somme à un effectif
+      // publié, ce chemin désignait la case à reconstituer par soustraction.
+      const bloc2 = s.sous_seuil.find((x) => x.bloc === '2_publics_entree');
+      expect(bloc2).toBeDefined();
+      expect(bloc2.nb).toBeGreaterThan(0);
+      expect(bloc2.libelle).toMatch(/Publics/);
+      expect(s.sous_seuil_total).toBeGreaterThanOrEqual(bloc2.nb);
+      expect(JSON.stringify(s.sous_seuil)).not.toMatch(/france_travail|par_referent_unique/);
+    });
+
+    test('V-15b — SUPPRESSION COMPLÉMENTAIRE : une seule case retirée se retrouverait par soustraction', () => {
+      // Référents : structure 1, cms 5, france_travail 4, autre 1, non_determine 1.
+      // Quatre cases sous le seuil → aucune reconstitution possible ; mais la
+      // règle est vérifiée là où elle mord : le nombre de cases RETIRÉES d'une
+      // ventilation qui somme à l'effectif publié n'est JAMAIS égal à 1.
+      const b2 = s.blocs['2_publics_entree'];
+      for (const cle of ['par_categorie_ft', 'par_referent_unique', 'sexe', 'tranches_age', 'niveaux_formation']) {
+        const retirees = Object.values(b2[cle] || {}).filter((v) => v === null).length;
+        expect([cle, retirees === 1]).toEqual([cle, false]);
+      }
     });
 
     test('V-16 — zéro reste zéro (il ne désigne personne)', () => {
       const ft = s.blocs['2_publics_entree'].par_categorie_ft;
       expect(ft.B).toBe(0);
-      expect(s.sous_seuil.filter((c) => c.endsWith('par_categorie_ft.B'))).toHaveLength(0);
+      // Le zéro n'est pas compté parmi les agrégats retirés : le total des
+      // retraits du bloc 2 égale le nombre de cases réellement nulles.
+      const nulles = [
+        ...Object.values(ft), ...Object.values(s.blocs['2_publics_entree'].par_referent_unique),
+        ...Object.values(s.blocs['2_publics_entree'].sexe),
+        ...Object.values(s.blocs['2_publics_entree'].tranches_age),
+        ...Object.values(s.blocs['2_publics_entree'].niveaux_formation),
+      ].filter((v) => v === null).length;
+      expect(nulles).toBeGreaterThan(0);
     });
 
     test('V-17 — les effectifs bruts globaux échappent au seuil', () => {
@@ -689,32 +741,52 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
     });
 
     // ── DÉFAUT D-06 : le CSV écrit un seuil en dur ────────────────────────
+    // Le seuil d'essai est 8 et non 3 : depuis le correctif m-02, un réglage
+    // SOUS 5 est refusé (plancher), un seuil de confidentialité ne se baissant
+    // pas par un champ de réglage. C'est au-dessus qu'il se règle.
     test("V-29b — DÉFAUT D-06 · le CSV doit nommer le seuil RÉEL, pas « moins de 5 » en dur", async () => {
       await pool.query(
-        `INSERT INTO settings (key, value) VALUES ('insertion.k_anonymat_min', '3')
-         ON CONFLICT (key) DO UPDATE SET value = '3'`
+        `INSERT INTO settings (key, value) VALUES ('insertion.k_anonymat_min', '8')
+         ON CONFLICT (key) DO UPDATE SET value = '8'`
       );
       try {
         const r = await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}&format=csv`), 'ADMIN');
         expect(r.status).toBe(200);
-        // Le bloc 9 du MÊME fichier dit « entre 1 et 2 personnes ».
-        expect(r.text).toMatch(/entre 1 et 2 personnes/);
-        // Les lignes de la liste, elles, annoncent encore « moins de 5 ».
-        expect(r.text).not.toMatch(/Agrégat non rendu \(moins de 5 personnes\)/);
+        // Le bloc 9 du MÊME fichier dit « entre 1 et 7 personnes ».
+        expect(r.text).toMatch(/entre 1 et 7 personnes/);
+        // Et les lignes de la liste ne peuvent plus annoncer « moins de 5 ».
+        expect(r.text).not.toMatch(/moins de 5 personnes/);
+        expect(r.text).toMatch(/moins de 8 personnes/);
       } finally {
         await pool.query("DELETE FROM settings WHERE key = 'insertion.k_anonymat_min'");
       }
     });
 
-    test("V-29c — le seuil paramétré est bien APPLIQUÉ (ce n'est que son libellé qui ment)", async () => {
+    test("V-29d — CORRECTIF m-02 · un seuil réglé SOUS 5 ne désactive rien : le plancher tient", async () => {
       await pool.query(
-        `INSERT INTO settings (key, value) VALUES ('insertion.k_anonymat_min', '3')
-         ON CONFLICT (key) DO UPDATE SET value = '3'`
+        `INSERT INTO settings (key, value) VALUES ('insertion.k_anonymat_min', '1')
+         ON CONFLICT (key) DO UPDATE SET value = '1'`
       );
       try {
         const r = await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}`), 'ADMIN');
-        expect(r.body.en_tete.k_anonymat).toBe(3);
-        expect(r.body.blocs['2_publics_entree'].par_referent_unique.france_travail).toBe(4); // 4 ≥ 3 → rendu
+        expect(r.body.en_tete.k_anonymat).toBe(5);
+        // 4 référents France Travail : le réglage à 1 ne les fait pas ressortir.
+        expect(r.body.blocs['2_publics_entree'].par_referent_unique.france_travail).toBeNull();
+      } finally {
+        await pool.query("DELETE FROM settings WHERE key = 'insertion.k_anonymat_min'");
+      }
+    });
+
+    test("V-29c — un seuil RELEVÉ est bien appliqué (le réglage ne sert qu'à durcir)", async () => {
+      await pool.query(
+        `INSERT INTO settings (key, value) VALUES ('insertion.k_anonymat_min', '8')
+         ON CONFLICT (key) DO UPDATE SET value = '8'`
+      );
+      try {
+        const r = await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}`), 'ADMIN');
+        expect(r.body.en_tete.k_anonymat).toBe(8);
+        // 5 référents CMS : rendus à k = 5, retirés à k = 8.
+        expect(r.body.blocs['2_publics_entree'].par_referent_unique.cms).toBeNull();
       } finally {
         await pool.query("DELETE FROM settings WHERE key = 'insertion.k_anonymat_min'");
       }

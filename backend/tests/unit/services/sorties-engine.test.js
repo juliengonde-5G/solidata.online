@@ -112,7 +112,12 @@ describe('méthode B — le dénominateur est le nombre de personnes parties', (
     expect(r.methode_b.denominateur).toBe(1);
     expect(r.methode_b.bilans_sans_fin_parcours).toBe(1);
     expect(r.methode_a.denominateur).toBe(2);
-    expect(r.regles.join(' ')).toMatch(/ne se rattachent à aucune fin de parcours datée/);
+    expect(r.regles.join(' ')).toMatch(/aucune fin de parcours datée/);
+    // CORRECTIF B-01 — le NOMBRE ne figure plus dans la phrase : elle est
+    // imprimée telle quelle dans un document soumis au k-anonymat, qui ne
+    // protège que les champs. Un « 1 bilan(s) » glissé dans une chaîne
+    // traverserait la passe de suppression sans être vu.
+    expect(r.regles.join(' ')).not.toMatch(/1 bilan/);
   });
 
   it('une classification hors nomenclature est comptée mais NOMMÉE, jamais rangée en silence', () => {
