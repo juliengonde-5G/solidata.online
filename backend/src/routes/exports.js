@@ -62,7 +62,10 @@ router.get('/collecte', async (req, res) => {
 // GET /api/exports/production — Export Excel production
 router.get('/production', async (req, res) => {
   try {
-    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    // Mois civil de PARIS par défaut (et non le mois UTC) : un export tiré le
+    // 1er janvier à 00 h 30 sortait sinon le mois de décembre. Dernière
+    // occurrence de cette conversion dans `exports.js`.
+    const month = req.query.month || aujourdhuiParis().slice(0, 7);
     const result = await pool.query(
       'SELECT * FROM production_daily WHERE date BETWEEN $1 AND $2 ORDER BY date',
       monthBounds(month)
