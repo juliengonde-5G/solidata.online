@@ -1444,7 +1444,9 @@ describe('CONTRAT GET /insertion/audit — blocs conventionnel/typologies/contr�
   it('typologies NON nominatives : RQTH (avec repli texte paie), ressources, niveaux, TRANCHES d’âge (jamais la date de naissance)', async () => {
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
-      if (/SELECT e.birth_date, e.disability_status, d.rqth, d.ressources, d.niveau_formation/.test(s)) {
+      // Le SELECT est composé selon le rôle depuis le correctif B-02 : on
+      // reconnaît la requête à ses colonnes, pas à sa mise en forme.
+      if (/d\.rqth, d\.ressources/.test(s)) {
         return Promise.resolve({ rows: [
           { birth_date: '2002-01-01', disability_status: null, rqth: true, ressources: ['RSA', 'APL'], niveau_formation: 'infra3' },
           { birth_date: '1970-06-15', disability_status: 'RQTH renouvelée', rqth: null, ressources: ['RSA'], niveau_formation: null },
@@ -1458,6 +1460,13 @@ describe('CONTRAT GET /insertion/audit — blocs conventionnel/typologies/contr�
     expect(res.body.typologies.rqth).toBe(2);
     expect(res.body.typologies.ressources).toEqual({ RSA: 2, APL: 1 });
     expect(res.body.typologies.niveaux_formation).toEqual({ infra3: 1 });
+    // CORRECTIF B-02 — un MANAGER n'obtient ni le compte RQTH ni les ressources
+    // perçues : ce sont des statuts sociaux, la requête ne les lit même pas.
+    const rm = await get('/api/insertion/audit?year=2026', 'MANAGER');
+    expect(rm.status).toBe(200);
+    expect('rqth' in rm.body.typologies).toBe(false);
+    expect('ressources' in rm.body.typologies).toBe(false);
+    expect(rm.body.typologies.tranches_age).toBeTruthy();  // ce qui n'est pas un statut social reste
     const tranches = Object.keys(res.body.typologies.tranches_age);
     expect(tranches.length).toBe(2);
     expect(JSON.stringify(res.body.typologies)).not.toMatch(/2002-01-01|1970-06-15/);

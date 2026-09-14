@@ -220,9 +220,13 @@ describe('3. k-anonymat', () => {
     const b = res.body.blocs['2_publics_entree'];
     expect(b.effectif).toBe(4);              // tête de chapitre : jamais masquée
     expect(b.par_categorie_ft.G).toBeNull(); // 4 personnes → sous le seuil
-    expect(res.body.sous_seuil).toEqual(expect.arrayContaining([
-      'blocs.2_publics_entree.par_categorie_ft.G',
-    ]));
+    // CORRECTIF B-01 — `sous_seuil` COMPTE par bloc : le chemin exact désignait
+    // la case à reconstituer par soustraction de l'effectif publié.
+    const bloc2 = res.body.sous_seuil.find((x) => x.bloc === '2_publics_entree');
+    expect(bloc2.nb).toBeGreaterThan(0);
+    expect(bloc2.libelle).toMatch(/Publics/);
+    expect(JSON.stringify(res.body.sous_seuil)).not.toMatch(/par_categorie_ft/);
+    expect(res.body.sous_seuil_total).toBeGreaterThanOrEqual(bloc2.nb);
   });
 
   it('à 5 personnes, l’agrégat est rendu et sous_seuil ne le liste pas', async () => {

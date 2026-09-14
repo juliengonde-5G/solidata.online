@@ -183,11 +183,27 @@ describe('rowToCells — valorisation des cellules', () => {
     expect(evolutionFrein('', '')).toBe('non évalué');
   });
 
-  it('PR D : les colonnes d’entrée et d’évolution lisent le diagnostic et la valeur courante', () => {
-    const c = rowToCells({ frein_mobilite: 2, frein_mobilite_entree: 4, frein_sante: 3, frein_sante_entree: 3 }, false);
+  it("PR D : l'évolution lit le diagnostic et la DERNIÈRE ÉVALUATION, jamais la valeur repliée", () => {
+    // CORRECTIF D-02 — `frein_<axe>` est la valeur COURANTE, déjà repliée sur
+    // le diagnostic par le `COALESCE(lm, d)` de la requête. La comparer à
+    // l'entrée revient à comparer le diagnostic avec lui-même : « stable »
+    // toujours. Le second terme est `frein_<axe>_actuel`, la dernière
+    // évaluation BRUTE.
+    const c = rowToCells({
+      frein_mobilite: 2, frein_mobilite_entree: 4, frein_mobilite_actuel: 2,
+      frein_sante: 3, frein_sante_entree: 3, frein_sante_actuel: 3,
+    }, false);
     expect(c.frein_mobilite_entree).toBe(4);
     expect(c.frein_mobilite_evolution).toBe('levé');
     expect(c.frein_sante_evolution).toBe('stable');
+  });
+
+  it("PR D / D-02 : jamais réévaluée → « non évalué », même si la valeur courante existe", () => {
+    // Le cas exact du défaut : un diagnostic à 3, AUCUN entretien réalisé. La
+    // valeur courante vaut 3 (repli), la dernière évaluation n'existe pas.
+    const c = rowToCells({ frein_mobilite: 3, frein_mobilite_entree: 3, frein_mobilite_actuel: null }, false);
+    expect(c.frein_mobilite).toBe(3);              // la valeur courante ne bouge pas
+    expect(c.frein_mobilite_evolution).toBe('non évalué');
   });
 
   it('PMSMP sans réalisation → vide ; niveau de formation replie sur qualification', () => {
@@ -232,7 +248,7 @@ describe('computeCompletude — % de renseigné par colonne (REC-UX-14)', () => 
     // que rien n'est mesurable — l'écran dirait « rien à compléter » là où il
     // faut précisément compléter les diagnostics.
     const rows = [
-      rowToCells({ last_name: 'A', frein_mobilite: 2, frein_mobilite_entree: 4 }, false),
+      rowToCells({ last_name: 'A', frein_mobilite: 2, frein_mobilite_entree: 4, frein_mobilite_actuel: 2 }, false),
       rowToCells({ last_name: 'B' }, false),
     ];
     const comp = computeCompletude(rows, false);

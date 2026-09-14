@@ -120,6 +120,24 @@ const CATEGORIE_ACTION_LABELS = {
   formation_fle: 'Cours de français',
 };
 
+/**
+ * Catégories d'action du RÉCAP — le document que la personne peut remettre à un
+ * employeur (correctif M-06, même motif que `TYPE_ENTRETIEN_LABELS_RECAP`).
+ *
+ * « Cours de français », daté, sur un document qui circule, dit que la personne
+ * a été identifiée comme ayant un frein linguistique : c'est exactement la
+ * classe de divulgation qui a fait regrouper « Entretien de conciliation » sous
+ * un libellé générique au correctif M-10 de la PR C. La catégorie retombe donc
+ * sur « Formation », qui est vrai et ne désigne rien.
+ *
+ * Elles restent NOMMÉES dans « Mon parcours en une page », qui ne circule pas.
+ * Neutralisation réversible par le même réglage `insertion.recap_neutralise`.
+ */
+const CATEGORIE_ACTION_LABELS_RECAP = {
+  ...CATEGORIE_ACTION_LABELS,
+  formation_fle: 'Formation',
+};
+
 /** Objet d'une PMSMP — liste fermée (CHECK de `insertion_pmsmp.objet`). */
 const OBJET_PMSMP_LABELS = {
   decouvrir_metier: 'Découverte d\'un métier',
@@ -447,6 +465,7 @@ async function composerMonRecap({ employeeId }) {
   const neutralise = !(reglage === false || reglage === 'false' || reglage === 0 || reglage === '0');
   const libelleEntretien = (t) => (neutralise ? TYPE_ENTRETIEN_LABELS_RECAP : TYPE_ENTRETIEN_LABELS)[t]
     || 'Entretien d\'accompagnement';
+  const libelleCategorie = (c) => (neutralise ? CATEGORIE_ACTION_LABELS_RECAP : CATEGORIE_ACTION_LABELS)[c];
 
   const [contrats, entretiens, pmsmp, actions, evaluations, objectifs, sortie] = await Promise.all([
     soft('contrats',
@@ -527,7 +546,7 @@ async function composerMonRecap({ employeeId }) {
     ...actions.map((a) => ({
       date: isoDate(a.date_realisation),
       type: 'action',
-      libelle: [CATEGORIE_ACTION_LABELS[a.category] || 'Action d\'accompagnement',
+      libelle: [libelleCategorie(a.category) || 'Action d\'accompagnement',
         a.partenaire_nom ? `avec ${a.partenaire_nom}` : null].filter(Boolean).join(' — '),
     })),
     ...evaluations.map((e) => ({
@@ -575,6 +594,7 @@ async function composerMonRecap({ employeeId }) {
 }
 
 module.exports = {
+  CATEGORIE_ACTION_LABELS_RECAP,
   composerMonParcours,
   composerMonRecap,
   MON_PARCOURS_CLES,

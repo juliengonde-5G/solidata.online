@@ -218,10 +218,31 @@ describe('bloc 2 — publics à l’entrée', () => {
     expect(b.par_categorie_ft.G).toBeNull();    // 1 personne → sous seuil
     expect(b.par_categorie_ft.B).toBe(0);       // zéro reste zéro
     expect(b.sexe.F).toBeNull();
-    expect(s.sous_seuil).toEqual(expect.arrayContaining([
-      'blocs.2_publics_entree.par_categorie_ft.G',
-      'blocs.2_publics_entree.sexe.F',
-    ]));
+    // CORRECTIF B-01 — `sous_seuil` COMPTE par bloc et ne nomme plus le chemin :
+    // sur une ventilation qui somme à un effectif publié, ce chemin désignait la
+    // case à reconstituer par soustraction.
+    const bloc2 = s.sous_seuil.find((x) => x.bloc === '2_publics_entree');
+    expect(bloc2.nb).toBeGreaterThan(0);
+    expect(JSON.stringify(s.sous_seuil)).not.toMatch(/par_categorie_ft|sexe\./);
+    expect(s.sous_seuil_total).toBeGreaterThanOrEqual(bloc2.nb);
+  });
+
+  it("SUPPRESSION COMPLÉMENTAIRE — une ventilation ne garde jamais UNE seule case retirée", async () => {
+    // 6 personnes dont UNE en catégorie A : l'effectif (6) est publié, la
+    // ventilation y somme, et « 6 − 5 = 1 » rendrait la case retirée. Une
+    // seconde case (la plus petite publiée) tombe donc avec elle.
+    branche({
+      cohorte: [
+        personne({ id: 1, ft_categorie: 'A' }),
+        ...Array.from({ length: 5 }, (_, i) => personne({ id: i + 2, ft_categorie: 'G' })),
+      ],
+    });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    const ft = s.blocs['2_publics_entree'].par_categorie_ft;
+    expect(s.blocs['2_publics_entree'].effectif).toBe(6);
+    expect(ft.A).toBeNull();                                   // 1 → retiré
+    expect(ft.G).toBeNull();                                   // complément
+    expect(Object.values(ft).filter((v) => v === null).length).toBeGreaterThanOrEqual(2);
   });
 
   it('les critères marqués art. 10 ne sont pas lus — le prédicat est DANS le SQL', async () => {
@@ -280,7 +301,7 @@ describe('bloc 3 — freins : le judiciaire est ABSENT, sans mention', () => {
     const mob = s.blocs['3_freins'].par_axe.find((a) => a.axe === 'mobilite');
     // Chacun des compteurs est sous le seuil de 5 → masqué, et listé.
     expect(mob.leves).toBeNull();
-    expect(s.sous_seuil).toEqual(expect.arrayContaining(['blocs.3_freins.par_axe.mobilite.leves']));
+    expect(s.sous_seuil.find((x) => x.bloc === '3_freins').nb).toBeGreaterThan(0);
     // « Concerné à l'entrée » = niveau 2 ou plus au diagnostic : 4 dossiers.
     expect(mob.concernes_entree).toBeNull();
     expect(s.blocs['3_freins'].nb_dossiers).toBe(5);
@@ -290,10 +311,36 @@ describe('bloc 3 — freins : le judiciaire est ABSENT, sans mention', () => {
 
 describe('bloc 4 — accompagnement', () => {
   it('une aide non chiffrée ne vaut pas zéro euro', async () => {
-    branche({ aides: [{ nature: 'mobilite', n: 3, montant_total: null, n_chiffrees: 0 }] });
+    branche({ aides: [{ nature: 'mobilite', n: 7, montant_total: null, n_chiffrees: 0 }] });
     const s = await composerDialogueGestion({ annee: 2026 });
     const aide = s.blocs['4_accompagnement'].aides_mobilisees[0];
-    expect(aide).toEqual({ nature: 'mobilite', label: 'Mobilité', n: 3, montant_total: null, nb_montants_saisis: 0 });
+    expect(aide).toEqual({ nature: 'mobilite', label: 'Mobilité', n: 7, montant_total: null, nb_montants_saisis: 0 });
+  });
+
+  it("CORRECTIF D-07 — une aide portée par moins de k personnes ne sort PAS, montant compris", async () => {
+    // Le montant exact d'une aide financière d'urgence unique se retrouve dans
+    // les propres dossiers du Département : publier « 1 aide, 340 € » désigne
+    // un dossier. Le montant tombe AVEC l'effectif — un montant sans effectif
+    // serait pire.
+    branche({ aides: [{ nature: 'financiere_urgence', n: 1, montant_total: 340, n_chiffrees: 1 }] });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    const aide = s.blocs['4_accompagnement'].aides_mobilisees[0];
+    expect(aide.n).toBeNull();
+    expect(aide.montant_total).toBeNull();
+    expect(aide.nb_montants_saisis).toBeNull();
+  });
+
+  it("CORRECTIF M-04 — une source ILLISIBLE ne s'imprime pas « 0 aide »", async () => {
+    mockQuery.mockImplementation((sql) => {
+      if (/aide_nature AS nature/.test(String(sql))) {
+        return Promise.reject(Object.assign(new Error('column does not exist'), { code: '42703' }));
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    expect(s.blocs['4_accompagnement'].aides_mobilisees).toBeNull();
+    const methode = s.blocs['9_methode'].map((m) => `${m.indicateur} ${m.regle}`).join(' | ');
+    expect(methode).toMatch(/Indicateur non rendu.*aides mobilisées/i);
   });
 
   it('les huit types d’entretien sont rendus, même à zéro, avec un taux null sans échéance passée', async () => {
@@ -306,25 +353,49 @@ describe('bloc 4 — accompagnement', () => {
 });
 
 describe('bloc 5 — immersions', () => {
+  // 12 conventions : 1 embauche chez l'accueillant, 5 sans débouché, 6 entrées
+  // en formation — de quoi exercer À LA FOIS le seuil, la suppression
+  // complémentaire et une case publiée.
+  const douzeImmersions = () => [
+    { entreprise: 'Atelier Nord', debouche: 'embauche_accueillant', embauche_accueillant: true, jours: 10 },
+    ...Array.from({ length: 5 }, () => ({ entreprise: 'Garage Sud', debouche: 'aucun', embauche_accueillant: false, jours: 5 })),
+    ...Array.from({ length: 6 }, () => ({ entreprise: 'Garage Sud', debouche: 'formation', embauche_accueillant: false, jours: 5 })),
+  ];
+
   it('débouchés comptés, raison sociale listée, jamais un compte par entreprise', async () => {
-    branche({
-      pmsmp: [
-        { entreprise: 'Atelier Nord', debouche: 'embauche_accueillant', embauche_accueillant: true, jours: 10 },
-        { entreprise: 'Atelier Nord', debouche: 'aucun', embauche_accueillant: false, jours: 5 },
-        { entreprise: 'Garage Sud', debouche: null, embauche_accueillant: null, jours: 7 },
-      ],
-    });
+    branche({ pmsmp: douzeImmersions() });
     const s = await composerDialogueGestion({ annee: 2026 });
     const b = s.blocs['5_immersions'];
-    expect(b.conventions).toBe(3);   // tête de chapitre : jamais masquée
-    expect(b.jours).toBe(22);
+    expect(b.conventions).toBe(12);  // tête de chapitre : jamais masquée
+    expect(b.jours).toBe(65);
     expect(b.entreprises_distinctes).toBe(2);
     expect(b.liste_entreprises).toEqual(['Atelier Nord', 'Garage Sud']);
     // Un compte PAR entreprise rapproché des débouchés désignerait une personne.
     expect(JSON.stringify(b.liste_entreprises)).not.toMatch(/\d/);
-    expect(b.par_debouche.embauche_accueillant).toBeNull(); // 1 → sous seuil
-    expect(b.par_debouche.formation).toBe(0);               // zéro reste zéro
-    expect(b.par_debouche.non_renseigne).toBeNull();
+    expect(b.par_debouche.formation).toBe(6);                // 6 → rendu
+    expect(b.par_debouche.poursuite_parcours).toBe(0);       // zéro reste zéro
+    expect(b.par_debouche.embauche_accueillant).toBeNull();  // 1 → sous seuil
+    // SUPPRESSION COMPLÉMENTAIRE : la ventilation somme aux 12 conventions
+    // publiées ; « 12 − 6 − 5 = 1 » rendrait la case retirée, la plus petite
+    // case publiée tombe donc avec elle.
+    expect(b.par_debouche.aucun).toBeNull();
+  });
+
+  it("CORRECTIF B-01 — sous le seuil, la RAISON SOCIALE et les jours ne sortent pas", async () => {
+    // Une période à UNE immersion : le nom de l'unique entreprise d'accueil et
+    // la durée exacte du stage désignent la personne pour un destinataire qui
+    // reçoit par ailleurs les déclarations d'Immersion Facilitée. Le nombre de
+    // conventions, lui, reste publié : il ne ventile personne.
+    branche({
+      pmsmp: [{ entreprise: 'GARAGE MARTIN SARL (Darnétal)', debouche: 'embauche_accueillant', embauche_accueillant: true, jours: 12 }],
+    });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    const b = s.blocs['5_immersions'];
+    expect(b.conventions).toBe(1);
+    expect(b.liste_entreprises).toBeNull();
+    expect(b.jours).toBeNull();
+    expect(b.entreprises_distinctes).toBeNull();
+    expect(JSON.stringify(s)).not.toMatch(/GARAGE MARTIN/);
   });
 });
 
@@ -362,8 +433,11 @@ describe('bloc 7 — résultats à +6 mois', () => {
     const s = await composerDialogueGestion({ annee: 2026 });
     const sit = s.blocs['7_resultats'].situation_6_mois;
     expect(sit.injoignable).toBe(6);
-    expect(sit.non_renseigne).toBe(5);
-    expect(sit.recherche_emploi).toBeNull(); // 1 → sous seuil
+    // 5 « non renseigné » et 1 « recherche d'emploi » : le second est sous le
+    // seuil, et comme la ventilation somme à `nb_sorties_suivies` (12), la
+    // suppression complémentaire emporte la plus petite case publiée.
+    expect(sit.recherche_emploi).toBeNull();
+    expect(sit.non_renseigne).toBeNull();
     expect(sit.emploi_durable).toBe(0);
   });
 
@@ -385,8 +459,11 @@ describe('bloc 8 — conformité et ruptures de droits évitées', () => {
   it('semaines sous le plancher : un NOMBRE DE SEMAINES, jamais une moyenne', async () => {
     const s = await composerDialogueGestion({ annee: 2026 });
     const sem = s.blocs['8_conformite'].semaines_sous_15h;
-    expect(sem.nb_semaines).toBe(3);
-    expect(sem.nb_personnes_concernees).toBeNull(); // 1 personne → sous seuil
+    // 1 personne concernée → sous le seuil ; le NOMBRE DE SEMAINES suit
+    // (dépendance déclarée : un nombre de semaines rattaché à une seule
+    // personne est une donnée de cette personne).
+    expect(sem.nb_personnes_concernees).toBeNull();
+    expect(sem.nb_semaines).toBeNull();
     expect(sem).not.toHaveProperty('moyenne');
   });
 });
@@ -456,6 +533,101 @@ describe('ETP — une seule base, l’ASP en premier', () => {
     expect(s.blocs['1_effectifs_etp'].etp_conventionnes).toBe(25.17);
     expect(s.blocs['1_effectifs_etp'].taux_realisation_pct).toBe(100);
     expect(s.blocs['1_effectifs_etp'].source_convention).toBe('annexe_financiere');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSERTION STRUCTURELLE — la seule qui couvrira le bloc 10 écrit l'an prochain
+// ───────────────────────────────────────────────────────────────────────────
+// Les tests ponctuels du lot n'exerçaient le k-anonymat que sur les deux blocs
+// où il était appliqué : ils mesuraient sa couverture là où il existait, pas son
+// absence ailleurs. Celui-ci sérialise le document ENTIER composé sur une
+// cohorte d'UNE personne et échoue si un entier compris entre 1 et k−1 apparaît
+// hors de la liste blanche déclarée. Un champ ajouté demain sans protection le
+// fera tomber, sans que personne n'ait eu à y penser.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('k-anonymat structurel — aucun compte de 1 à k−1 hors liste blanche', () => {
+  const { K_EFFECTIFS_PUBLIES } = require('../../../src/services/dialogue-gestion');
+
+  /** Tous les nombres du document, avec leur chemin. */
+  function nombres(noeud, chemin, out = []) {
+    if (Array.isArray(noeud)) {
+      noeud.forEach((v, i) => nombres(v, `${chemin}[${i}]`, out));
+      return out;
+    }
+    if (!noeud || typeof noeud !== 'object') return out;
+    for (const [cle, v] of Object.entries(noeud)) {
+      const c = `${chemin}.${cle}`;
+      if (v && typeof v === 'object') nombres(v, c, out);
+      else if (typeof v === 'number') out.push([c, v, cle]);
+    }
+    return out;
+  }
+
+  /** Le chemin, débarrassé des index de tableau — la liste blanche est stable. */
+  const sansIndex = (c) => c.replace(/\[\d+\]/g, '');
+
+  it("une cohorte d'UNE personne ne laisse sortir aucun compte identifiant", async () => {
+    branche({
+      cohorte: [personne({ id: 1 })],
+      criteres: [{ code: 'TH', libelle: 'Travailleur handicapé (RQTH)', ordre: 1, n: 1 }],
+      freins: [{ id: 1, entree_frein_mobilite: 4, actuel_frein_mobilite: 2 }],
+      actionsAxe: [{ axe: 'mobilite', n_actions: 1, n_dora: 1, dora_oriente: 0, dora_pris_en_charge: 1, dora_refuse: 0, dora_sans_suite: 0 }],
+      partenaires: [{ axe: 'mobilite', nom: 'CMS de Darnétal — Mme R.' }],
+      aides: [{ nature: 'financiere_urgence', n: 1, montant_total: 340, n_chiffrees: 1 }],
+      pmsmp: [{ entreprise: 'GARAGE MARTIN SARL (Darnétal)', debouche: 'embauche_accueillant', embauche_accueillant: true, jours: 12 }],
+      fins: [{ employee_id: 1, parcours_num: 1 }],
+      bilans: [{ employee_id: 1, parcours_num: 1, sortie_classification: 'emploi_durable', sortie_type: 'CDI' }],
+      fse: [{ situation_6mois: 'emploi_durable' }],
+      satisfaction: [{ nb: 1, moyenne: 3.5 }],
+      entretiens: [{ type: 'diagnostic_accueil', realises: 1, echus: 1, realises_echus: 1 }],
+      compteurs: [{ n: 1 }],
+    });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    const k = s.en_tete.k_anonymat;
+
+    const fautifs = nombres(s.blocs, 'blocs')
+      .filter(([, v]) => Number.isInteger(v) && Math.abs(v) >= 1 && Math.abs(v) < k)
+      .filter(([c, , cle]) => !K_EFFECTIFS_PUBLIES.has(sansIndex(c))
+        // Les MESURES déclarées ne comptent pas des personnes (taux, heures,
+        // euros, ETP, base de calcul, nombre d'organisations) : elles sont
+        // retirées par dépendance, pas pour leur propre valeur.
+        && !['base_heures', 'nb_mois_asp_valides', 'etp_asp', 'effectif_pondere', 'etp_asp_moyen',
+          'etp_conventionnes', 'taux_realisation_pct', 'part_pct', 'taux_pct', 'pct', 'total_h',
+          'moyenne_par_personne_h', 'moyenne_globale', 'delai_moyen_diagnostic_jours',
+          'montant_total', 'jours', 'annee', 'trimestre', 'k_anonymat', 'seuil',
+          'entreprises_distinctes'].includes(cle));
+
+    expect({ comptes_identifiants: fautifs }).toEqual({ comptes_identifiants: [] });
+  });
+
+  it('et les textes qui désignent (raison sociale, partenaire) ne sortent pas non plus', async () => {
+    branche({
+      cohorte: [personne({ id: 1 })],
+      partenaires: [{ axe: 'mobilite', nom: 'CMS de Darnétal — Mme R.' }],
+      actionsAxe: [{ axe: 'mobilite', n_actions: 1, n_dora: 1, dora_oriente: 1, dora_pris_en_charge: 0, dora_refuse: 0, dora_sans_suite: 0 }],
+      pmsmp: [{ entreprise: 'GARAGE MARTIN SARL (Darnétal)', debouche: 'aucun', embauche_accueillant: false, jours: 12 }],
+    });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    const brut = JSON.stringify(s);
+    expect(brut).not.toMatch(/GARAGE MARTIN/);
+    expect(brut).not.toMatch(/Mme R\./);
+  });
+
+  it('au-dessus du seuil, le document dit tout ce qu’il doit dire (on ne vide pas la pièce)', async () => {
+    branche({
+      cohorte: Array.from({ length: 40 }, (_, i) => personne({ id: i + 1, ft_categorie: 'A' })),
+      criteres: [{ code: 'brsa', libelle: 'Bénéficiaire du RSA', ordre: 1, n: 30 }],
+    });
+    const s = await composerDialogueGestion({ annee: 2026 });
+    const b = s.blocs['2_publics_entree'];
+    expect(b.effectif).toBe(40);
+    expect(b.par_categorie_ft.A).toBe(40);
+    expect(b.par_critere_eligibilite[0].n).toBe(30);
+    expect(b.par_critere_eligibilite[0].part_pct).toBe(75);
+    // Le seul retrait vient du bloc 8, dont le jeu d'essai simulé porte une
+    // seule personne sous le plancher d'activité : le bloc 2, lui, sort entier.
+    expect(s.sous_seuil.find((x) => x.bloc === '2_publics_entree')).toBeUndefined();
   });
 });
 

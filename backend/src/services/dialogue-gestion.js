@@ -286,6 +286,11 @@ const K_MESURES = new Set([
   'etp_conventionnes', 'taux_realisation_pct', 'part_pct', 'taux_pct', 'pct',
   'total_h', 'moyenne_par_personne_h', 'moyenne_globale', 'delai_moyen_diagnostic_jours',
   'montant_total', 'jours', 'annee', 'trimestre', 'k_anonymat', 'seuil',
+  // Un nombre d'ORGANISATIONS n'est pas un nombre de personnes : « deux
+  // entreprises d'accueil distinctes » ne ventile personne. Il devient
+  // identifiant quand les conventions sont peu nombreuses — ce cas-là est
+  // couvert par la dépendance `conventions → entreprises_distinctes`.
+  'entreprises_distinctes',
 ]);
 
 /**
@@ -452,13 +457,28 @@ function appliquerKAnonymat(document, seuil) {
     if (total == null) continue;              // total retiré : aucune soustraction possible
     const dist = lireChemin(document, d.chemin);
     if (!dist || typeof dist !== 'object') continue;
+    // Une case publiée PAR MANDAT ne peut pas servir de victime : la retirer
+    // reprendrait d'une main ce que l'exigence de l'autorité donne de l'autre.
+    const candidates = Object.keys(dist)
+      .filter((c) => typeof dist[c] === 'number' && dist[c] > 0)
+      .filter((c) => !K_EFFECTIFS_PUBLIES.has(`${d.chemin}.${c}`))
+      .sort((a, b) => dist[a] - dist[b]);
+
+    // Quand le TOTAL publié est lui-même sous le seuil, la ventilation entière
+    // se reconstitue par élimination (les cases à zéro sont publiées) : aucune
+    // suppression partielle ne tient, on retire toutes les cases non blanchies.
+    // Les trois nombres que l'indicateur n° 15 réclame — dénominateur, sorties
+    // documentées, sorties non documentées — restent publiés : c'est la
+    // demande de l'autorité, et elle ne ventile personne.
+    if (total < s) {
+      for (const c of candidates) { dist[c] = null; marquer(`${d.chemin}.${c}`); }
+      continue;
+    }
+
     const supprimees = Object.keys(dist).filter((c) => dist[c] === null);
     if (supprimees.length !== 1) continue;    // zéro (rien à faire) ou deux (déjà sûr)
     // La plus PETITE case publiée strictement positive : c'est celle dont la
     // perte coûte le moins d'information au lecteur.
-    const candidates = Object.keys(dist)
-      .filter((c) => typeof dist[c] === 'number' && dist[c] > 0)
-      .sort((a, b) => dist[a] - dist[b]);
     if (candidates.length === 0) continue;    // que des zéros : le complément est le total lui-même
     dist[candidates[0]] = null;
     marquer(`${d.chemin}.${candidates[0]}`);

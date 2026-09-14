@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 // Moteur PUR du dénominateur des sorties — une seule règle pour les quatre
 // surfaces qui publient ce taux (contrat 25 § 2.6).
-const { calculerSorties, CLASSES_DYNAMIQUES: DYNAMIQUES_SORTIE } = require('../services/sorties-engine');
+const { CLASSES_DYNAMIQUES: DYNAMIQUES_SORTIE } = require('../services/sorties-engine');
 const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(authenticate);
@@ -341,26 +341,23 @@ router.get('/industrial-kpis', async (req, res) => {
     // calcul : c'est ce taux-là que la synthèse de dialogue de gestion imprime,
     // et les deux ne peuvent pas diverger. Résilient : une source absente rend
     // `null`, le reste des KPI industriels s'affiche entier.
+    // CORRECTIF M-07 — le CHARGEMENT est partagé, pas seulement la règle.
+    //
+    // `sorties-engine` documente une précondition : « deux bilans pour un même
+    // parcours : le PREMIER rencontré fait foi — la requête appelante les
+    // ordonne ». Les deux requêtes avaient bien été recopiées ici, mais SANS
+    // l'`ORDER BY` : sur un parcours réouvert puis repris — le cas même que le
+    // commentaire décrit —, PostgreSQL ne garantit aucun ordre, et le reporting
+    // RH pouvait classer « emploi de transition » ce que la synthèse transmise à
+    // l'autorité appelle « emploi durable ». La règle vivait à un seul endroit ;
+    // sa PRÉCONDITION s'était perdue en chemin. Une précondition ne se transmet
+    // pas par commentaire : on appelle la fonction de chargement au lieu de la
+    // recopier une troisième fois.
     let sortiesAnnee = null;
     try {
       const annee = new Date().getFullYear();
-      const [fins, bilans] = await Promise.all([
-        pool.query(`SELECT id AS employee_id, COALESCE(parcours_num, 1) AS parcours_num
-                    FROM employees
-                    WHERE insertion_end_date BETWEEN $1::date AND $2::date
-                      AND COALESCE(insertion_status, 'none') <> 'none'`,
-        [`${annee}-01-01`, `${annee}-12-31`]),
-        pool.query(`SELECT employee_id, COALESCE(parcours_num, 1) AS parcours_num,
-                           sortie_classification, sortie_type
-                    FROM insertion_milestones
-                    WHERE milestone_type = 'bilan_sortie' AND status = 'realise'
-                      AND sortie_classification IS NOT NULL
-                      AND COALESCE(completed_date, updated_at::date) BETWEEN $1::date AND $2::date`,
-        [`${annee}-01-01`, `${annee}-12-31`]),
-      ]);
-      sortiesAnnee = calculerSorties({
-        finsParcours: fins.rows, bilansClasses: bilans.rows, annee,
-      });
+      const { chargerSorties, faireSoft, bornes } = require('../services/dialogue-gestion');
+      sortiesAnnee = await chargerSorties(faireSoft(pool), pool, bornes(annee, null), null);
     } catch (err) {
       console.error('[PERFORMANCE] sorties insertion ignorées :', err.message);
     }
