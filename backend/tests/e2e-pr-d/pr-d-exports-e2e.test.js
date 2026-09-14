@@ -468,6 +468,37 @@ async function ins(table, obj) {
       expect(l3.rows[0].embauche_accueillant).toBeNull();   // « on ne sait pas » ≠ « non »
     });
 
+    // ── CORRECTIF m-12 — un débouché est un CONSTAT, pas une prévision ───
+    test("V-58b — CORRECTIF m-12 · un débouché sur une immersion NON TERMINÉE est refusé (409)", async () => {
+      const dans30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+      const dans20 = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+      const avant = await pool.query('SELECT COUNT(*)::int AS n FROM insertion_pmsmp WHERE employee_id = $1', [E.b]);
+      const r = await auth(request(app).post('/api/insertion/pmsmp'), 'ADMIN').send({
+        employee_id: E.b, entreprise: 'Gamma', objet: 'decouvrir_metier',
+        date_debut: dans20, date_fin: dans30, debouche: 'embauche_accueillant',
+      });
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('PMSMP_NON_TERMINEE');
+      // Refus AVANT écriture : aucune ligne n'a été posée.
+      const apres = await pool.query('SELECT COUNT(*)::int AS n FROM insertion_pmsmp WHERE employee_id = $1', [E.b]);
+      expect(apres.rows[0].n).toBe(avant.rows[0].n);
+
+      // La même immersion SANS débouché passe : la garde ne bloque que le constat.
+      const ok = await auth(request(app).post('/api/insertion/pmsmp'), 'ADMIN').send({
+        employee_id: E.b, entreprise: 'Gamma', objet: 'decouvrir_metier',
+        date_debut: dans20, date_fin: dans30,
+      });
+      expect(ok.status).toBe(201);
+      await pool.query('DELETE FROM insertion_pmsmp WHERE id = $1', [ok.body.id]);
+    });
+
+    test("V-58c — CORRECTIF m-12 · une date de débouché ANTÉRIEURE à la fin de l'immersion est refusée", async () => {
+      const r = await auth(request(app).put(`/api/insertion/pmsmp/${pmsmpId}`), 'ADMIN')
+        .send({ debouche: 'formation', debouche_date: `${AN}-05-02` }); // fin = 05-10
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('DEBOUCHE_AVANT_FIN');
+    });
+
     test('V-59 — GET /insertion/:id rend le débouché et l\'orientation DORA', async () => {
       const r = await auth(request(app).get(`/api/insertion/${E.a}`), 'ADMIN');
       expect(r.status).toBe(200);

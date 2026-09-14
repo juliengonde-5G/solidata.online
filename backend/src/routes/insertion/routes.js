@@ -120,7 +120,22 @@ async function snapshotMilestone(db, row, action, userId, motif = null) {
 //    habilité, jamais nullifiés).
 // Le filtre judiciaire est doublé côté SQL dans les listes paginées pour que
 // le total affiché corresponde aux lignes rendues.
-const ACTIONS_TEXTE_LIBRE = ['notes', 'resultat'];
+//
+// ═══ CORRECTIF B-03 (bloquant) — le dictionnaire suit les colonnes ═══════
+// La PR D ajoute trois champs LIBRES à `cip_action_plans` : `dora_service`
+// (« CSAPA de Rouen — addictologie »), `dora_url` (qui porte le même nom dans
+// son chemin) et `aide_organisme` (le financeur d'une aide santé). Ils
+// échappaient au masquage : sur une action de l'axe SANTÉ, un MANAGER perdait
+// `notes` et `resultat` et recevait le nom du service de soin. C'est la
+// réouverture d'une fuite fermée par un correctif nommé (2.43.0, audit
+// d'isolement § B.3) sur une donnée d'article 9 — et le mécanisme est
+// exactement celui du `SELECT im.*` de la PR C : un dictionnaire de champs
+// sensibles qui ne suit pas les colonnes qu'on ajoute à la table.
+// Une garde statique (`tests/unit/actions-texte-libre.test.js`) recense
+// désormais les colonnes texte posées par les migrations et échoue si l'une
+// d'elles n'est ni ici ni dans la liste blanche explicite des champs réputés
+// non sensibles : la liste ne peut plus redevenir fausse en silence.
+const ACTIONS_TEXTE_LIBRE = ['notes', 'resultat', 'dora_service', 'dora_url', 'aide_organisme'];
 function maskActionPlansForRole(rows, baseRole) {
   if (!Array.isArray(rows) || baseRole !== 'MANAGER') return rows;
   return rows
@@ -1021,8 +1036,15 @@ router.post('/milestones/:id/close', [
   body('next.due_date').optional().isISO8601().withMessage('next.due_date invalide'),
   ...assiduiteValidators,
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const cur = await client.query('SELECT * FROM insertion_milestones WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (cur.rows.length === 0) {
@@ -1272,11 +1294,11 @@ router.post('/milestones/:id/close', [
       : null;
     res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: stripSecrets(createdNext), resync, sortie_fse: sortieFseProjetee });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur close milestone :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -1288,8 +1310,15 @@ router.post('/milestones/:id/reopen', authorize('ADMIN', 'RH'), [
   param('id').isInt().withMessage('ID invalide'),
   body('motif').isString().trim().notEmpty().withMessage('Motif de réouverture obligatoire'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const cur = await client.query('SELECT * FROM insertion_milestones WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (cur.rows.length === 0) {
@@ -1314,11 +1343,11 @@ router.post('/milestones/:id/reopen', authorize('ADMIN', 'RH'), [
     await client.query('COMMIT');
     res.json(maskInsertionRow(reopened.rows[0], baseRoleOf(req)));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur reopen milestone :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -1474,8 +1503,13 @@ const VALIDATEURS_DORA_AIDE = [
   body('aide_nature').optional({ nullable: true, checkFalsy: true })
     .isIn(AIDE_NATURES).withMessage(`aide_nature invalide (${AIDE_NATURES.join(', ')})`),
   body('aide_organisme').optional({ nullable: true }).isLength({ max: 150 }).withMessage('aide_organisme trop long (150 max)'),
+  // CORRECTIF D-05 / m-01 — la borne HAUTE est celle de la colonne.
+  // `NUMERIC(9,2)` déborde en 22003, code que ni le POST ni le PUT ne
+  // traduisaient : la conseillère recevait « Erreur serveur » sans savoir quoi
+  // corriger. Un dépassement de capacité est une saisie invalide, pas une panne.
   body('aide_montant').optional({ nullable: true, checkFalsy: true })
-    .isFloat({ min: 0 }).withMessage('aide_montant invalide (nombre positif ou vide)'),
+    .isFloat({ min: 0, max: 9999999.99 })
+    .withMessage('aide_montant invalide (nombre positif, 9 999 999,99 € au plus, ou vide)'),
 ];
 
 // GET /api/insertion/action-plans/:employeeId — Tous les plans d'action
@@ -1546,6 +1580,9 @@ router.post('/action-plans', [
     if (err.code === '23503') {
       return res.status(400).json({ error: 'Référence invalide (entretien, objectif ou partenaire inexistant).' });
     }
+    if (err.code === '23514' || err.code === '22003') {
+      return res.status(400).json({ error: 'Valeur invalide (hors liste ou hors capacité de la colonne).', code: err.code });
+    }
     console.error('[INSERTION] Erreur action-plans POST :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -1600,7 +1637,7 @@ router.put('/action-plans/:id', [
     if (result.rows.length === 0) return res.status(404).json({ error: 'Action non trouvee' });
     res.json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23503' || err.code === '23514') {
+    if (err.code === '23503' || err.code === '23514' || err.code === '22003') {
       return res.status(400).json({ error: 'Valeur ou référence invalide.', code: err.code });
     }
     console.error('[INSERTION] Erreur action-plans PUT :', err);
@@ -1815,8 +1852,15 @@ router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
   body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
   body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const avant = await client.query('SELECT * FROM insertion_notes_suivi WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (avant.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Note non trouvée' }); }
@@ -1845,12 +1889,12 @@ router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
     });
     res.json(composerNoteSuivi(r.rows[0]));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (entretien ou objectif inexistant).' });
     console.error('[INSERTION] Erreur notes-suivi PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -1860,8 +1904,15 @@ router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
 router.delete('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
   param('id').isInt().withMessage('ID invalide'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const avant = await client.query('SELECT * FROM insertion_notes_suivi WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (avant.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Note non trouvée' }); }
@@ -1873,11 +1924,11 @@ router.delete('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
     });
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur notes-suivi DELETE :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -2652,6 +2703,48 @@ function embaucheAccueillantDepuisDebouche(debouche) {
   return false;
 }
 
+/**
+ * CORRECTIF m-12 — un débouché se constate à la CLÔTURE de l'immersion.
+ *
+ * La garde n'existait que dans `PmsmpPanel.jsx` : le serveur acceptait un
+ * débouché sur une immersion encore en cours, et ne confrontait jamais
+ * `debouche_date` à `date_fin`. L'indicateur S7 — « immersions ayant donné lieu
+ * à une embauche chez l'accueillant », la phrase qui justifie un financement —
+ * pouvait donc être alimenté avant la fin de l'immersion qu'il décrit. Une
+ * garde d'écran n'est pas une règle : elle ne protège que le chemin qui passe
+ * par l'écran.
+ *
+ * @returns {{status:number, body:object}|null} le refus, ou `null` si tout va bien.
+ */
+function refusDebouche(d, dateFinEffective) {
+  const debouche = d.debouche === '' ? null : d.debouche;
+  if (!debouche) return null;
+  const fin = isoDate(dateFinEffective);
+  const aujourdhui = aujourdhuiParis();
+  if (fin && fin > aujourdhui) {
+    return {
+      status: 409,
+      body: {
+        error: `Cette immersion se termine le ${fin} : son débouché ne peut être saisi qu'à sa clôture.`,
+        code: 'PMSMP_NON_TERMINEE',
+        hint: "Le débouché est un constat, pas une prévision — l'indicateur « embauche chez l'accueillant » est transmis à l'autorité.",
+      },
+    };
+  }
+  const dDeb = d.debouche_date === '' ? null : isoDate(d.debouche_date);
+  if (dDeb && fin && dDeb < fin) {
+    return {
+      status: 409,
+      body: {
+        error: `La date du débouché (${dDeb}) précède la fin de l'immersion (${fin}).`,
+        code: 'DEBOUCHE_AVANT_FIN',
+        hint: "Corrigez la date du débouché, ou la date de fin de l'immersion si c'est elle qui est fausse.",
+      },
+    };
+  }
+  return null;
+}
+
 const VALIDATEURS_DEBOUCHE = [
   body('debouche').optional({ nullable: true, checkFalsy: true })
     .isIn(PMSMP_DEBOUCHES).withMessage(`debouche invalide (${PMSMP_DEBOUCHES.join(', ')})`),
@@ -2678,8 +2771,15 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
   // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74) : le
   // contrôle de cumul et l'insertion sont sérialisés, sinon deux saisies
   // concurrentes pourraient chacune passer le plafond 60 j puis totaliser > 60 j.
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     await client.query('BEGIN');
     const emp = await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [d.employee_id]);
@@ -2690,6 +2790,9 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
       autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
     });
     if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
+
+    const refusD = refusDebouche(d, d.date_fin);
+    if (refusD) { await client.query('ROLLBACK'); return res.status(refusD.status).json(refusD.body); }
 
     let bilan = (d.bilan != null && d.bilan !== '') ? String(d.bilan) : null;
     if (check.forced) bilan = `${bilan ? bilan + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
@@ -2711,12 +2814,12 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
     if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
     res.status(201).json(out);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié inexistant).' });
     console.error('[INSERTION] Erreur pmsmp POST :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -2738,8 +2841,15 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
 ], validate, async (req, res) => {
   // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74), même
   // motif que le POST : contrôle de cumul et écriture sérialisés.
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     await client.query('BEGIN');
     const cur = await client.query('SELECT * FROM insertion_pmsmp WHERE id = $1', [req.params.id]);
@@ -2755,6 +2865,9 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
       autresJoursConnus: d.autres_jours_connus, force: d.force === true, motifDepassement: d.motif_depassement,
     });
     if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
+
+    const refusD = refusDebouche(d, dateFin);
+    if (refusD) { await client.query('ROLLBACK'); return res.status(refusD.status).json(refusD.body); }
 
     const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan',
       'saisie_outil_officiel', 'convention_ref', 'debouche', 'debouche_date'];
@@ -2790,12 +2903,12 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
     if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
     res.json(out);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
     console.error('[INSERTION] Erreur pmsmp PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -4364,11 +4477,20 @@ router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
   body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
   body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     const emp = await client.query('SELECT id FROM employees WHERE id = $1', [d.employee_id]);
-    if (emp.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Salarié non trouvé' }); }
+    // Pas de `client.release()` ici : le `finally` s'en charge. Relâcher deux
+    // fois lève une erreur DEPUIS le `finally`, hors de tout `catch`.
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
     const pn = await currentParcoursNum(client, d.employee_id);
     await client.query('BEGIN');
     const ev = await client.query(
@@ -4385,13 +4507,13 @@ router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
     const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [evaluation.id]);
     res.status(201).json({ ...evaluation, scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié ou item de référentiel inexistant).' });
     console.error('[INSERTION] Erreur competences POST :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -4405,11 +4527,18 @@ router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
   body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
   body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     const cur = await client.query('SELECT id FROM insertion_competence_evaluations WHERE id = $1', [req.params.id]);
-    if (cur.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Évaluation non trouvée' }); }
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Évaluation non trouvée' });
     await client.query('BEGIN');
     const editable = ['filiere', 'periode', 'date_evaluation', 'statut', 'synthese'];
     const sets = []; const vals = [];
@@ -4428,13 +4557,13 @@ router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
     const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [req.params.id]);
     res.json({ ...ev.rows[0], scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (item de référentiel inexistant).' });
     console.error('[INSERTION] Erreur competences PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
