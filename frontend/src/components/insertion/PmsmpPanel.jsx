@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../../services/api';
-import { frDate } from './freins';
+import { ConfirmDialog } from '../index';
+import { PMSMP_DEBOUCHE_LABELS, frDate } from './freins';
 
 /**
  * PMSMP du salarié (EXG-05, PR 2) — Périodes de Mise en Situation en Milieu
@@ -12,6 +13,14 @@ import { frDate } from './freins';
  *        409 { error, code:'pmsmp_duree'|'pmsmp_cumul', detail, cumul } —
  *        seul le CUMUL est forçable (force + motif_depassement) ;
  *   DELETE /insertion/pmsmp/:id (ADMIN/RH).
+ *
+ * PR D lot 6 — le DÉBOUCHÉ de l'immersion (exigence S1 / S7 de l'autorité :
+ * « PMSMP ayant donné lieu à une embauche chez l'accueillant — c'est la phrase
+ * qui justifie un financement »). Le champ n'apparaît qu'une fois l'immersion
+ * TERMINÉE : demander son débouché à une immersion qui commence n'aurait aucun
+ * sens, et la case remplie au hasard vaudrait moins que la case vide.
+ * `embauche_accueillant` est DÉDUIT côté serveur du débouché choisi — deux
+ * champs qui disent la même chose finissent par se contredire.
  */
 
 const OBJET_LABELS = {
@@ -23,6 +32,14 @@ const OBJET_LABELS = {
 const EMPTY_FORM = {
   entreprise: '', siret: '', objet: 'decouvrir_metier', date_debut: '', date_fin: '',
   tuteur: '', convention_ref: '', bilan: '', saisie_outil_officiel: false, autres_jours_connus: '',
+  debouche: '', debouche_date: '',
+};
+
+/** Une immersion dont la date de fin est passée : son débouché se saisit. */
+const estTerminee = (dateFin) => {
+  if (!dateFin) return false;
+  const d = new Date(dateFin);
+  return !Number.isNaN(d.getTime()) && d <= new Date();
 };
 
 function Jauge({ value, max }) {
@@ -44,6 +61,7 @@ export default function PmsmpPanel({ employeeId, canEdit = false }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null); // { form, id?, conflit? }
   const [rappel, setRappel] = useState(null);
+  const [aSupprimer, setASupprimer] = useState(null);
 
   const load = useCallback(() => {
     let alive = true;
@@ -67,11 +85,17 @@ export default function PmsmpPanel({ employeeId, canEdit = false }) {
       date_fin: p.date_fin ? String(p.date_fin).slice(0, 10) : '',
       tuteur: p.tuteur || '', convention_ref: p.convention_ref || '', bilan: p.bilan || '',
       saisie_outil_officiel: p.saisie_outil_officiel === true, autres_jours_connus: '',
+      debouche: p.debouche || '',
+      debouche_date: p.debouche_date ? String(p.debouche_date).slice(0, 10) : '',
     },
   });
 
-  const remove = async (p) => {
-    if (!window.confirm(`Supprimer la PMSMP « ${p.entreprise} » (${frDate(p.date_debut)} → ${frDate(p.date_fin)}) ?`)) return;
+  // Aucune boîte native : `ConfirmDialog` partagé (règle du module depuis la
+  // PR C — une `window.confirm` n'est ni stylée, ni traduisible, ni accessible).
+  const confirmerSuppression = async () => {
+    const p = aSupprimer;
+    setASupprimer(null);
+    if (!p) return;
     setError(null);
     try {
       await api.delete(`/insertion/pmsmp/${p.id}`);
@@ -141,18 +165,37 @@ export default function PmsmpPanel({ employeeId, canEdit = false }) {
                   {p.tuteur ? ` · tuteur : ${p.tuteur}` : ''}
                   {p.convention_ref ? ` · convention ${p.convention_ref}` : ''}
                 </div>
+                {p.debouche && (
+                  <div className="text-xs mt-1">
+                    <span className={`px-1.5 py-0.5 rounded ${p.embauche_accueillant === true ? 'bg-teal-100 text-teal-800 font-medium' : 'bg-slate-100 text-slate-600'}`}>
+                      Débouché : {PMSMP_DEBOUCHE_LABELS[p.debouche] || p.debouche}
+                    </span>
+                    {p.debouche_date && <span className="text-gray-400 ml-1.5">au {frDate(p.debouche_date)}</span>}
+                  </div>
+                )}
                 {p.bilan && <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap">{p.bilan}</p>}
               </div>
               {canEdit && (
                 <div className="flex gap-1.5 flex-shrink-0">
                   <button type="button" onClick={() => openEdit(p)} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Modifier</button>
-                  <button type="button" onClick={() => remove(p)} className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50">Supprimer</button>
+                  <button type="button" onClick={() => setASupprimer(p)} className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50">Supprimer</button>
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={!!aSupprimer}
+        onCancel={() => setASupprimer(null)}
+        onConfirm={confirmerSuppression}
+        title="Supprimer cette immersion ?"
+        message={aSupprimer
+          ? `PMSMP « ${aSupprimer.entreprise} » du ${frDate(aSupprimer.date_debut)} au ${frDate(aSupprimer.date_fin)}. Cette suppression est définitive et retire l'immersion des comptages transmis à l'autorité.`
+          : ''}
+        confirmLabel="Supprimer"
+      />
 
       {modal && (
         <PmsmpModal
@@ -196,6 +239,13 @@ function PmsmpModal({ employeeId, modal, setModal, regles, onSaved }) {
       bilan: f.bilan.trim() || null,
       saisie_outil_officiel: f.saisie_outil_officiel,
     };
+    // Le débouché n'est envoyé QUE s'il est renseigné : une chaîne vide vaut
+    // « non renseigné » et ne doit pas écraser une valeur déjà saisie par
+    // inadvertance depuis un formulaire rouvert.
+    if (f.debouche) {
+      body.debouche = f.debouche;
+      if (f.debouche_date) body.debouche_date = f.debouche_date;
+    }
     if (f.autres_jours_connus !== '' && f.autres_jours_connus != null) {
       body.autres_jours_connus = parseInt(f.autres_jours_connus, 10);
     }
@@ -298,6 +348,32 @@ function PmsmpModal({ employeeId, modal, setModal, regles, onSaved }) {
             <input type="checkbox" checked={f.saisie_outil_officiel} onChange={(e) => setF({ saisie_outil_officiel: e.target.checked })} className="rounded border-gray-300" />
             Convention saisie sur Immersion Facilitée (outil officiel)
           </label>
+
+          {/* Débouché — seulement une fois l'immersion terminée. */}
+          {estTerminee(f.date_fin) && (
+            <div className="sm:col-span-2 rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
+              <p className="text-xs font-semibold text-teal-800 mb-1">Débouché de l'immersion</p>
+              <p className="text-[11px] text-teal-700 mb-1.5">
+                C'est la ligne que l'autorité regarde en premier : « immersion ayant donné lieu à une embauche
+                chez l'entreprise d'accueil ». <strong>« Non connu à ce jour » n'est pas « aucun débouché »</strong> —
+                laissez-le tant que la suite n'est pas connue.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-0.5">Débouché</label>
+                  <select value={f.debouche} onChange={(e) => setF({ debouche: e.target.value })} className="input-modern py-1.5 w-full">
+                    <option value="">Non renseigné</option>
+                    {Object.entries(PMSMP_DEBOUCHE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-0.5">Date du constat</label>
+                  <input type="date" value={f.debouche_date} onChange={(e) => setF({ debouche_date: e.target.value })}
+                    className="input-modern py-1.5 w-full" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 pt-1">
