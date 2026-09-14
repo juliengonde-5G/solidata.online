@@ -408,6 +408,27 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       expect(mois.map((m) => m.effectif_pondere)).toEqual(new Array(12).fill(0));
     });
 
+    // ── DÉFAUT D-04, constat connexe : deux avenants ouverts = deux ETP ──
+    test("V-05c — CORRECTIF D-04 · deux avenants d'un même salarié laissés ouverts ne pèsent pas deux ETP", async () => {
+      // Une reprise manuelle peut laisser deux lignes `employee_contracts` sans
+      // date de fin pour la même personne. Le LEFT JOIN les comptait toutes les
+      // deux : une seule personne pesait 1,49 ETP.
+      const avant = (await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}`), 'ADMIN'))
+        .body.blocs['1_effectifs_etp'].mois[5].effectif_pondere;
+      const r = await pool.query(
+        `INSERT INTO employee_contracts (employee_id, contract_type, weekly_hours, start_date, end_date, is_current)
+         VALUES ($1, 'CDDI', 26, $2, NULL, false) RETURNING id`,
+        [E.f1, `${AN}-02-01`]
+      );
+      try {
+        const apres = (await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}`), 'ADMIN'))
+          .body.blocs['1_effectifs_etp'].mois[5].effectif_pondere;
+        expect(apres).toBeCloseTo(avant, 2);
+      } finally {
+        await pool.query('DELETE FROM employee_contracts WHERE id = $1', [r.rows[0].id]);
+      }
+    });
+
     test('V-06 — aucun bloc ne porte `indisponible` (une requête fautive dégraderait en silence)', () => {
       for (const [nom, bloc] of Object.entries(synthese.blocs)) {
         if (bloc && typeof bloc === 'object' && !Array.isArray(bloc)) {

@@ -564,18 +564,42 @@ async function bloc1Effectifs(soft, db, p) {
   // ETP, qui n'est pas exportable depuis un routeur). Inventer ici une valeur
   // `'CDI INCLUSION'` qui n'existe dans aucune ligne aurait donné l'illusion
   // d'un périmètre complet en comptant exactement les mêmes contrats.
+  //
+  // CORRECTIF D-04 — deux pièges du `LEFT JOIN`, tous deux reproduits sur base
+  // réelle :
+  //   1. un mois SANS le moindre contrat produisait une ligne à NULL, que le
+  //      `COALESCE(..., 35)` intérieur transformait en 35 h, soit 1,00 ETP
+  //      « sorti de rien » — et le `COALESCE(SUM(...), 0)` extérieur ne pouvait
+  //      pas l'attraper puisque SUM rendait 1 et non NULL. Toute synthèse
+  //      générée en cours d'exercice imprimait donc 1,00 ETP par mois à venir,
+  //      sur la colonne de CONTRÔLE d'un document de conventionnement. Le
+  //      `FILTER (WHERE ec.id IS NOT NULL)` rend la seule valeur vraie : 0.
+  //   2. deux avenants d'un même salarié laissés tous deux ouverts (`end_date`
+  //      nulle après une reprise manuelle) le comptaient DEUX fois — une
+  //      personne pouvait peser deux ETP. Le `DISTINCT ON (employee_id)` ne
+  //      retient que le contrat le plus récent qui couvre le 15 du mois, ce qui
+  //      est la règle appliquée partout ailleurs (`is_current` d'abord, puis la
+  //      date de début la plus récente).
   const pondere = await soft('effectif_pondere', `
     WITH mois AS (
       SELECT generate_series(1, 12) AS m
+    ),
+    couvrants AS (
+      SELECT DISTINCT ON (mois.m, ec.employee_id)
+             mois.m AS mois,
+             COALESCE(ec.weekly_hours, e.weekly_hours, 35)::numeric AS heures
+      FROM mois
+      JOIN employee_contracts ec
+        ON UPPER(COALESCE(ec.contract_type, '')) = 'CDDI'
+       AND ec.start_date <= make_date($1::int, mois.m, 15)
+       AND (ec.end_date IS NULL OR ec.end_date >= make_date($1::int, mois.m, 15))
+      LEFT JOIN employees e ON e.id = ec.employee_id
+      ORDER BY mois.m, ec.employee_id, ec.is_current DESC NULLS LAST, ec.start_date DESC, ec.id DESC
     )
     SELECT mois.m AS mois,
-           COALESCE(SUM(COALESCE(ec.weekly_hours, e.weekly_hours, 35)::numeric / 35), 0)::float AS etp
+           COALESCE(SUM(c.heures / 35), 0)::float AS etp
     FROM mois
-    LEFT JOIN employee_contracts ec
-      ON UPPER(COALESCE(ec.contract_type, '')) = 'CDDI'
-     AND ec.start_date <= make_date($1::int, mois.m, 15)
-     AND (ec.end_date IS NULL OR ec.end_date >= make_date($1::int, mois.m, 15))
-    LEFT JOIN employees e ON e.id = ec.employee_id
+    LEFT JOIN couvrants c ON c.mois = mois.m
     GROUP BY mois.m ORDER BY mois.m`, [p.annee]);
 
   const aspParMois = new Map((asp || []).map((r) => [Number(r.mois), r]));
