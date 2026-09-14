@@ -152,7 +152,16 @@ async function ins(table, obj) {
     beforeAll(async () => {
       const r = await auth(request(app).get(`/api/exports/insertion-freins?format=csv&cip=${CIP_ID}`), 'ADMIN');
       expect(r.status).toBe(200);
-      const brut = r.text.replace(/^﻿/, '').trim().split('\n');
+      // CORRECTIF m-08 — le fichier porte désormais son en-tête de traçabilité
+      // en lignes COMMENTÉES (`#`), que tout import filtre : on les écarte
+      // comme le ferait un tableur, et on vérifie qu'elles sont bien là.
+      const toutes = r.text.replace(/^﻿/, '').trim().split('\n');
+      const meta = toutes.filter((l) => l.startsWith('#'));
+      expect(meta.join(' ')).toMatch(/Généré le/);
+      expect(meta.join(' ')).toMatch(/Périmètre/);
+      expect(meta.join(' ')).toMatch(/Version de l'outil/);
+      expect(meta.join(' ')).not.toMatch(/1\.0\.0/);   // M-05 : plus la version de squelette
+      const brut = toutes.filter((l) => !l.startsWith('#') && l.trim() !== '');
       entetes = cellules(brut[0]);
       lignes = brut.slice(1).map(cellules);
     });
@@ -241,7 +250,8 @@ async function ins(table, obj) {
     test('V-44 — le judiciaire n\'existe qu\'en variante réservée (48 colonnes)', async () => {
       expect(entetes.filter((h) => /judiciaire/i.test(h))).toHaveLength(0);
       const r = await auth(request(app).get(`/api/exports/insertion-freins?format=csv&sensibles=1&cip=${CIP_ID}`), 'ADMIN');
-      const h = cellules(r.text.replace(/^﻿/, '').split('\n')[0]);
+      const h = cellules(r.text.replace(/^﻿/, '').split('\n')
+        .filter((l) => !l.startsWith('#') && l.trim() !== '')[0]);
       expect(h).toHaveLength(48);
       expect(h.filter((x) => /judiciaire/i.test(x))).toHaveLength(3); // valeur + entrée + évolution
     });

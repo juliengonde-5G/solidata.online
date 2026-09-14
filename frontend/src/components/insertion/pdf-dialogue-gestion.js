@@ -211,9 +211,11 @@ export function exportDialogueGestionPDF(contenu) {
         + lig("Dont embauche chez l'entreprise d'accueil", b5.embauches_chez_accueillant)
         + '</tbody></table>'
         + `<div class="mini-h" style="margin-top:6px">Débouché</div>${tableauComptes(b5.par_debouche, lbl)}`
-        + ((b5.liste_entreprises || []).length
-          ? `<div class="note"><strong>Entreprises d'accueil :</strong> ${esc(b5.liste_entreprises.join(' · '))}</div>`
-          : ''));
+        + (b5.liste_entreprises === null
+          ? '<div class="note">Entreprises d\'accueil : non rendues — moins de conventions que le seuil de confidentialité.</div>'
+          : ((b5.liste_entreprises || []).length
+            ? `<div class="note"><strong>Entreprises d'accueil :</strong> ${esc(b5.liste_entreprises.join(' · '))}</div>`
+            : '')));
     }
   }
 
@@ -301,10 +303,18 @@ export function exportDialogueGestionPDF(contenu) {
     + methode.map((m) => `<tr><td><strong>${esc(m.indicateur)}</strong></td><td>${esc(m.regle)}</td></tr>`).join('')
     + '</tbody></table>';
 
+  // CORRECTIF B-01 — un COMPTE par bloc, jamais le chemin de la case retirée :
+  // sur une ventilation qui somme à un effectif publié, ce chemin désignait la
+  // case à reconstituer par soustraction, et transformait une bonne intention
+  // — « le document dit ce qu'il ne dit pas » — en mode d'emploi.
   const sousSeuil = contenu.sous_seuil || [];
-  body += sousSeuil.length
-    ? `<div class="note" style="margin-top:8px"><strong>${sousSeuil.length} agrégat(s) non rendu(s)</strong> `
-      + `(moins de ${esc(String(e.k_anonymat || 5))} personnes concernées) : ${esc(sousSeuil.join(' · '))}.</div>`
+  const totalSeuil = contenu.sous_seuil_total
+    ?? sousSeuil.reduce((a, b) => a + (Number(b && b.nb) || 0), 0);
+  body += totalSeuil
+    ? `<div class="note" style="margin-top:8px"><strong>${esc(String(totalSeuil))} agrégat(s) non rendu(s)</strong> `
+      + `(moins de ${esc(String(e.k_anonymat || 5))} personnes concernées), répartis ainsi : `
+      + esc(sousSeuil.map((b) => `${b.libelle || b.bloc} : ${b.nb}`).join(' · '))
+      + '. Leur emplacement exact n\'est pas indiqué : il permettrait de les reconstituer par soustraction.</div>'
     : '<div class="note" style="margin-top:8px">Aucun agrégat n\'a été retiré au titre du seuil de confidentialité.</div>';
   body += '</div>';
 

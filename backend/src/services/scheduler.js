@@ -1490,6 +1490,7 @@ const {
   purgeArretsGps,
   purgeBordereauxDecheterie,
   purgeRappelsRdv,
+  purgeDialoguesGestion,
   purgeExpiredRefreshTokens,
 } = require('./rgpd-purges');
 
@@ -2144,6 +2145,11 @@ async function runAllJobs() {
     // l'accompagnement, et elle repose sur un CONSENTEMENT que la personne peut
     // retirer — raison de plus pour que sa conservation soit bornée et visible.
     await runInstrumented('purgeRappelsRdv', purgeRappelsRdv);
+    // PR D lot 6 — synthèses de dialogue de gestion enregistrées (6 ans par
+    // défaut). Le document est agrégé et non nominatif ; c'est une PIÈCE DE
+    // CONVENTIONNEMENT, donc une durée longue — mais écrite (correctif m-09 :
+    // la table n'avait aucune règle de conservation).
+    await runInstrumented('purgeDialoguesGestion', purgeDialoguesGestion);
     await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
     await runInstrumented('purgeMessagerieRetention', () => messagerie().purgeMessagerieRetention());
     // `notifier: true` — c'est le SEUL chemin réellement automatique : une
@@ -2214,6 +2220,7 @@ module.exports = {
   purgeArretsGps,
   purgeBordereauxDecheterie,
   purgeRappelsRdv,
+  purgeDialoguesGestion,
   purgePcmNonRecrute,
   purgeExpiredCandidates,
   purgeInsertionDossiers,

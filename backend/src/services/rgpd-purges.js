@@ -800,6 +800,69 @@ const RAPPELS_RDV_RETENTION_DEFAUT_JOURS = (() => {
  * Le délai court depuis l'envoi (`envoye_le`), c'est-à-dire depuis le seul fait
  * que la ligne atteste.
  */
+/**
+ * Rétention par défaut des synthèses de dialogue de gestion enregistrées.
+ *
+ * CORRECTIF m-09 — `insertion_dialogues_gestion` n'avait NI rétention, NI
+ * purge, NI entrée au registre : défendable tant que son contenu est purement
+ * agrégé, indéfendable dès lors que la revue et le debug ont montré que des
+ * comptes identifiants et un texte libre (`sortie_type`) pouvaient y être
+ * FIGÉS. Les deux fuites sont corrigées (B-01, D-07, M-03), mais une durée
+ * écrite vaut mieux qu'une absence de règle : c'est une pièce de
+ * conventionnement, elle se conserve LONGTEMPS — six ans, la durée de
+ * conservation des pièces justificatives d'un cofinancement — et pas
+ * indéfiniment.
+ */
+const DIALOGUE_GESTION_RETENTION_DEFAUT_JOURS = 2190;   // 6 ans
+
+async function purgeDialoguesGestion({ trigger = 'auto', userId = null } = {}) {
+  const manuel = trigger === 'manual';
+  const retentionJours = await readSetting(
+    'rgpd.dialogues_gestion_retention_jours', DIALOGUE_GESTION_RETENTION_DEFAUT_JOURS
+  );
+  try {
+    const result = await pool.query(
+      "DELETE FROM insertion_dialogues_gestion WHERE genere_le < NOW() - ($1 || ' days')::interval",
+      [String(retentionJours)]
+    );
+    const supprimes = result.rowCount || 0;
+    if (supprimes > 0) {
+      console.log(`[RGPD-PURGES] Synthèses de dialogue de gestion : ${supprimes} supprimée(s) (> ${retentionJours} jours)`);
+    }
+    let journalise = false;
+    if (manuel || supprimes > 0) {
+      journalise = await journaliserSynthese({
+        action: manuel ? 'PURGE_DIALOGUES_GESTION' : 'AUTO_PURGE_DIALOGUES_GESTION',
+        entiteAudit: 'insertion_dialogues_gestion',
+        userId: manuel ? userId : null,
+        details: {
+          trigger, rows_deleted: supprimes, retention_days: retentionJours,
+          supprimes: { insertion_dialogues_gestion: supprimes },
+        },
+      });
+    }
+    return resume('dialogues_gestion', { insertion_dialogues_gestion: supprimes }, retentionJours, journalise,
+      { ok: true, syntheses_supprimees: supprimes });
+  } catch (err) {
+    const absente = err && err.code === '42P01';
+    if (absente) {
+      console.warn('[RGPD-PURGES] Table insertion_dialogues_gestion absente (base non migrée) — purge ignorée.');
+    } else {
+      console.error('[RGPD-PURGES] Erreur purgeDialoguesGestion :', err.message);
+    }
+    const motif = absente ? 'table insertion_dialogues_gestion absente' : err.message;
+    let journalise = false;
+    if (manuel) {
+      journalise = await journaliserSynthese({
+        action: 'PURGE_DIALOGUES_GESTION', entiteAudit: 'insertion_dialogues_gestion', userId,
+        details: { trigger, rows_deleted: 0, retention_days: retentionJours, echec: motif },
+      });
+    }
+    return resume('dialogues_gestion', { insertion_dialogues_gestion: 0 }, retentionJours, journalise,
+      { ok: false, motif, syntheses_supprimees: 0 });
+  }
+}
+
 async function purgeRappelsRdv({ trigger = 'auto', userId = null } = {}) {
   const manuel = trigger === 'manual';
   const retentionJours = await readSetting('insertion.rappels_retention_jours', RAPPELS_RDV_RETENTION_DEFAUT_JOURS);
@@ -974,6 +1037,19 @@ const PURGES_RGPD = [
     retentionUnite: 'jours',
   },
   {
+    cle: 'dialogues_gestion',
+    libelle: 'Synthèses de dialogue de gestion enregistrées',
+    description: "Supprime les synthèses de dialogue de gestion générées et figées en snapshot au-delà du délai. Le document est strictement AGRÉGÉ et non nominatif (k-anonymat appliqué à tout le document avant enregistrement), mais c'est une pièce de conventionnement : elle se conserve longtemps — six ans, durée des pièces justificatives d'un cofinancement européen — et pas indéfiniment. DELETE : un snapshot amputé ne prouverait plus ce qui a été transmis.",
+    fn: purgeDialoguesGestion,
+    actionAuto: 'AUTO_PURGE_DIALOGUES_GESTION',
+    actionManuelle: 'PURGE_DIALOGUES_GESTION',
+    jobName: 'purgeDialoguesGestion',
+    entiteAudit: 'insertion_dialogues_gestion',
+    retentionSetting: 'rgpd.dialogues_gestion_retention_jours',
+    retentionDefaut: DIALOGUE_GESTION_RETENTION_DEFAUT_JOURS,
+    retentionUnite: 'jours',
+  },
+  {
     cle: 'refresh_tokens',
     libelle: 'Jetons de rafraîchissement expirés',
     description: "Supprime les jetons de session expirés, qui s'accumulaient sinon en base entre deux redémarrages. Aucune donnée personnelle exploitable : ce sont des jetons techniquement morts.",
@@ -1027,6 +1103,7 @@ module.exports = {
   purgeMessagerie,
   purgeExpiredRefreshTokens,
   purgeRappelsRdv,
+  purgeDialoguesGestion,
   // Exposés pour les tests et pour la politique affichée à l'écran.
   readSetting,
   PCM_RETENTION_DEFAUT_JOURS,
@@ -1036,4 +1113,5 @@ module.exports = {
   CANDIDATS_RETENTION_MOIS,
   INSERTION_RETENTION_DEFAUT_MOIS,
   RAPPELS_RDV_RETENTION_DEFAUT_JOURS,
+  DIALOGUE_GESTION_RETENTION_DEFAUT_JOURS,
 };

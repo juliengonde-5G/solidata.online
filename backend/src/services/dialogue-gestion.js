@@ -114,6 +114,27 @@ const REFERENT_TYPES = ['structure', 'cms', 'france_travail', 'autre', 'non_dete
 const FT_CATEGORIES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
 /**
+ * Niveaux de formation — nomenclature FERMÉE (miroir du sélecteur du diagnostic,
+ * `DiagnosticForm.jsx`).
+ *
+ * CORRECTIF m-06 : `insertion_diagnostics.niveau_formation` est un `VARCHAR(10)`
+ * dont la nomenclature n'est « contrôlée qu'applicativement côté front » (le
+ * dictionnaire des champs le dit lui-même). Dix caractères libres devenaient
+ * donc un INTITULÉ DE LIGNE du document transmis et du CSV. Une valeur hors
+ * liste est rangée sous « non renseigné » : on ne recopie pas dans une pièce de
+ * conventionnement un texte que personne n'a validé.
+ */
+const NIVEAUX_FORMATION = ['infra3', 'niv3', 'niv4', 'niv5', 'niv6plus'];
+const NIVEAU_FORMATION_LABELS = {
+  infra3: 'Infra niveau 3 (sans diplôme)',
+  niv3: 'Niveau 3 (CAP/BEP)',
+  niv4: 'Niveau 4 (Bac)',
+  niv5: 'Niveau 5 (Bac+2)',
+  niv6plus: 'Niveau 6 et plus (Bac+3 et au-delà)',
+  non_renseigne: 'Non renseigné',
+};
+
+/**
  * Situations à +6 mois rendues par le document, et la correspondance avec les
  * valeurs stockées. « Non renseigné » et « injoignable » sont DEUX lignes
  * distinctes, exigence explicite de l'autorité (§ 2 (b) 5) : une personne qu'on
@@ -740,7 +761,11 @@ async function bloc2Publics(soft, db, p) {
     par_referent_unique: compte(cohorte.map((r) => r.referent_unique_type), REFERENT_TYPES, null),
     sexe: compte(cohorte.map((r) => r.gender), ['F', 'M'], 'non_renseigne'),
     tranches_age: tranches,
-    niveaux_formation: compte(cohorte.map((r) => r.niveau_formation), [], 'non_renseigne'),
+    niveaux_formation: compte(
+      cohorte.map((r) => (NIVEAUX_FORMATION.includes(String(r.niveau_formation)) ? r.niveau_formation : null)),
+      NIVEAUX_FORMATION, 'non_renseigne'
+    ),
+    niveaux_formation_labels: NIVEAU_FORMATION_LABELS,
   };
 }
 
@@ -1472,7 +1497,9 @@ function aplatirEnLignes(synthese) {
     for (const [t, n] of Object.entries(b2.par_referent_unique || {})) push(nom, `Référent unique — ${t}`, n);
     for (const [s, n] of Object.entries(b2.sexe || {})) push(nom, `Sexe — ${s}`, n);
     for (const [t, n] of Object.entries(b2.tranches_age || {})) push(nom, `Tranche d'âge — ${t}`, n);
-    for (const [f, n] of Object.entries(b2.niveaux_formation || {})) push(nom, `Niveau de formation — ${f}`, n);
+    for (const [f, n] of Object.entries(b2.niveaux_formation || {})) {
+      push(nom, `Niveau de formation — ${(b2.niveaux_formation_labels || {})[f] || f}`, n);
+    }
   }
 
   if (B['3_freins']) {
@@ -1648,6 +1675,8 @@ module.exports = {
   AIDE_LABELS,
   DORA_RESULTATS,
   SITUATIONS_6_MOIS,
+  NIVEAUX_FORMATION,
+  NIVEAU_FORMATION_LABELS,
   MENTION,
   PERIMETRE,
   APP_VERSION,

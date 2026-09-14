@@ -147,15 +147,24 @@ router.get('/dialogue-gestion/historique', [
        ORDER BY d.genere_le DESC
        LIMIT $1`, params
     );
+    // CORRECTIF m-07 — le prénom et l'initiale du générateur ne sont rendus
+    // qu'à ADMIN/RH. Le document lui-même ne porte que le RÔLE (« l'autorité
+    // veut savoir à quel titre il a été produit, pas recevoir un répertoire du
+    // personnel ») : son historique n'a pas de raison d'en dire plus à un
+    // encadrant que la pièce qu'il retrace.
+    const { baseRoleOf } = require('./routes');
+    const nominatif = ['ADMIN', 'RH'].includes(baseRoleOf(req));
     res.json(r.rows.map((row) => ({
       id: row.id,
       annee: row.annee,
       trimestre: row.trimestre,
       genere_le: row.genere_le,
       version: row.version_application,
-      genere_par: row.genere_prenom
-        ? `${row.genere_prenom} ${row.genere_initiale ? `${row.genere_initiale}.` : ''}`.trim()
-        : null,
+      ...(nominatif ? {
+        genere_par: row.genere_prenom
+          ? `${row.genere_prenom} ${row.genere_initiale ? `${row.genere_initiale}.` : ''}`.trim()
+          : null,
+      } : {}),
       genere_par_role: row.genere_role || null,
       type: row.trimestre ? 'trimestrielle_allegee' : 'annuelle',
     })));

@@ -173,6 +173,9 @@ export default function DialogueGestionPanel({ year, canGenerer = false }) {
   const b2 = contenu?.blocs?.['2_publics_entree'];
   const b1 = contenu?.blocs?.['1_effectifs_etp'];
   const sousSeuil = contenu?.sous_seuil || [];
+  // `sous_seuil` compte par BLOC depuis le correctif B-01 ; `sous_seuil_total`
+  // dit combien d'indicateurs sont concernés en tout.
+  const total = contenu?.sous_seuil_total ?? sousSeuil.reduce((a, b) => a + (b.nb || 0), 0);
 
   return (
     <div className="space-y-4">
@@ -286,20 +289,27 @@ export default function DialogueGestionPanel({ year, canGenerer = false }) {
 
           {/* Les agrégats retirés sont DITS : un document qui masque sans le
               dire laisse croire à un chiffre à zéro. */}
-          <div className={`rounded-lg border p-3 text-xs ${sousSeuil.length ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-            {sousSeuil.length === 0 ? (
+          <div className={`rounded-lg border p-3 text-xs ${total ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+            {total === 0 ? (
               <>Aucun agrégat n'a été retiré au titre du seuil de confidentialité.</>
             ) : (
               <>
-                <strong>{sousSeuil.length} indicateur(s) non rendu(s)</strong> : moins de{' '}
+                <strong>{total} indicateur(s) non rendu(s)</strong> : moins de{' '}
                 {contenu.en_tete?.k_anonymat || 5} personnes concernées. Les valeurs à zéro, elles, sont conservées —
                 « personne dans cette catégorie » ne désigne personne.
-                <details className="mt-1.5">
-                  <summary className="cursor-pointer underline">Voir la liste</summary>
-                  <ul className="mt-1 ml-4 list-disc space-y-0.5">
-                    {sousSeuil.map((c) => <li key={c} className="font-mono text-[10px]">{c}</li>)}
-                  </ul>
-                </details>
+                <ul className="mt-1.5 ml-4 list-disc space-y-0.5">
+                  {sousSeuil.map((b) => (
+                    <li key={b.bloc}>{b.libelle || b.bloc} : <strong>{b.nb}</strong></li>
+                  ))}
+                </ul>
+                {/* Le CHEMIN exact de la case retirée n'est pas publié : sur une
+                    ventilation qui somme à un effectif publié, il désignerait la
+                    case à reconstituer par soustraction. Le détail non masqué se
+                    lit dans l'onglet « Pilotage », qui n'applique aucun seuil. */}
+                <p className="mt-1.5 text-[10px] opacity-80">
+                  Le détail chiffré, sans suppression, se consulte dans l'onglet « Pilotage » — il ne sort
+                  pas de la structure.
+                </p>
               </>
             )}
           </div>

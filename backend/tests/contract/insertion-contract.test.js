@@ -1510,7 +1510,11 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
     const res = await getX('/api/exports/insertion-freins?format=csv', 'RH');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
-    const lines = res.text.replace(/^﻿/, '').trim().split('\n');
+    // CORRECTIF m-08 — le CSV porte désormais son en-tête de traçabilité en
+    // lignes COMMENTÉES (`#`), que tout import filtre.
+    const toutes = res.text.replace(/^﻿/, '').trim().split('\n');
+    expect(toutes.filter((l) => l.startsWith('#')).join(' ')).toMatch(/Généré le.*Périmètre|Périmètre/s);
+    const lines = toutes.filter((l) => !l.startsWith('#') && l.trim() !== '');
     const headers = lines[0].split(';');
     // PR D : 23 (CDC) + 10 (cadre 2026) + 6 axes × 2 (entrée / évolution).
     expect(headers).toHaveLength(45);
@@ -1541,7 +1545,8 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
     const calls = wireFreins();
     const res = await getX('/api/exports/insertion-freins?format=csv&sensibles=1', 'ADMIN');
     expect(res.status).toBe(200);
-    const headers = res.text.replace(/^﻿/, '').split('\n')[0].split(';');
+    const headers = res.text.replace(/^﻿/, '').split('\n')
+      .filter((l) => !l.startsWith('#') && l.trim() !== '')[0].split(';');
     expect(headers).toHaveLength(48); // 24 + 10 + 7 axes × 2
     expect(headers[headers.indexOf('Frein financier') + 1]).toBe('Frein judiciaire');
     const log = calls.find((c) => /INSERT INTO rgpd_audit_log/.test(c.sql));

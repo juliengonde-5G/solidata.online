@@ -869,10 +869,29 @@ router.get('/insertion-freins', authorize('ADMIN', 'RH'), [
       // de l'instructrice. La fonction locale qui vivait ici ne faisait que du
       // guillemetage : même famille que le constat M-04 de la PR A.
       const esc = (v) => escCsv(v);
-      // CSV STRICT (pas de ligne de méta : le tableau doit rester importable
-      // colonne à colonne — la traçabilité vit dans rgpd_audit_log).
+      // CORRECTIF m-08 — en-tête de traçabilité EN LIGNES COMMENTÉES.
+      // La règle commune de la matrice (09 § 2) l'impose « en première feuille
+      // (tableur) OU en première ligne (CSV) », et le rapport de lot annonçait
+      // « en-tête de traçabilité complet » : la variante CSV n'en avait aucun.
+      // Le préfixe `#` la rend ignorable par tout import qui le filtre, ce qui
+      // préserve l'argument d'origine — « le tableau doit rester importable
+      // colonne à colonne » — sans laisser partir un fichier de contrôle sans
+      // date, sans périmètre et sans version.
+      const perimetre = `${PERIMETRES_FREINS[filtres.statut] || filtres.statut}`
+        + `${filtres.annee ? ` — année ${filtres.annee}` : ' — toutes années'}`
+        + `${filtres.cip ? ' — un seul CIP référent' : ' — tous CIP référents'}`;
+      const meta = [
+        '# Export;Tableau des freins — cadre 2026 (23 colonnes du CDC + colonnes du cadre 2026)',
+        `# Généré le;${new Date().toLocaleString('fr-FR')};Généré par;${esc(nomGenerateur(req.user))}`,
+        `# Périmètre;${esc(perimetre)}`,
+        `# Nombre de lignes;${cellRows.length};Version de l'outil;${esc(APP_VERSION_EXPORTS)}`,
+        `# Colonnes sensibles;${filtres.sensibles ? 'OUI — frein judiciaire inclus (art. 10 RGPD, diffusion interdite hors ADMIN/RH)' : 'Non (frein judiciaire exclu)'}`,
+        '# Cellule vide;Champ non renseigné — jamais un zéro, jamais une valeur par défaut',
+        "# Mention;Document de travail ERP — les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi",
+        '',
+      ].join('\n');
       const lines = cellRows.map((row) => cols.map((c) => esc(row[c.key])).join(';'));
-      const csv = '﻿' + cols.map((c) => c.header).join(';') + '\n'
+      const csv = '﻿' + meta + cols.map((c) => c.header).join(';') + '\n'
         + lines.join('\n') + (lines.length ? '\n' : '');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename=insertion_freins_${stamp}.csv`);

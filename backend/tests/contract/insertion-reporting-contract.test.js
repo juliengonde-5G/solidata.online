@@ -384,12 +384,29 @@ describe('7. historique et rejeu d’un snapshot', () => {
         version_application: '2.55.0', genere_prenom: 'Claire', genere_initiale: 'M', genere_role: 'RH',
       }],
     });
-    const res = await get('/api/insertion/reporting/dialogue-gestion/historique', 'MANAGER');
+    const res = await get('/api/insertion/reporting/dialogue-gestion/historique', 'RH');
     expect(res.status).toBe(200);
     expect(res.body[0]).toEqual(expect.objectContaining({
       id: 12, annee: 2026, genere_par: 'Claire M.', genere_par_role: 'RH', type: 'annuelle',
     }));
     expect(JSON.stringify(res.body)).not.toMatch(/MARTIN/);
+  });
+
+  it('CORRECTIF m-07 — au MANAGER, l’historique ne rend que le RÔLE du générateur', async () => {
+    // Le document lui-même ne porte que le rôle (« l'autorité veut savoir à
+    // quel titre il a été produit, pas recevoir un répertoire du personnel ») :
+    // son historique n'a pas de raison d'en dire plus que la pièce qu'il retrace.
+    branche({
+      historique: [{
+        id: 12, annee: 2026, trimestre: null, genere_le: '2026-01-15T09:00:00Z',
+        version_application: '2.55.0', genere_prenom: 'Claire', genere_initiale: 'M', genere_role: 'RH',
+      }],
+    });
+    const res = await get('/api/insertion/reporting/dialogue-gestion/historique', 'MANAGER');
+    expect(res.status).toBe(200);
+    expect('genere_par' in res.body[0]).toBe(false);
+    expect(res.body[0].genere_par_role).toBe('RH');
+    expect(JSON.stringify(res.body)).not.toMatch(/Claire/);
   });
 
   it('rejouer un snapshot rend ce qui a été ENREGISTRÉ, et journalise la consultation', async () => {

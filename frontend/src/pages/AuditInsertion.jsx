@@ -644,7 +644,14 @@ function BlocConformite({ conformite }) {
           {conformite.completude_fse_par_projet.map((c) => (
             <div key={c.code} className="flex items-center gap-2 py-1">
               <span className="w-40 text-xs text-gray-600 truncate" title={c.projet}>{c.projet}</span>
-              <div className="flex-1"><Bar pct={c.pct ?? 0} tone={c.pct == null ? 'teal' : c.pct >= 80 ? 'green' : c.pct >= 50 ? 'amber' : 'red'} /></div>
+              {/* CORRECTIF m-13 — une complétude NON CALCULABLE ne peint pas une
+                  barre vide, qui se lit « 0 % » à côté d'un texte qui dit « — ».
+                  Un trait neutre dit « pas de mesure », un vide dit « zéro ». */}
+              <div className="flex-1">
+                {c.pct == null
+                  ? <div className="h-2 rounded-full bg-slate-100 border border-dashed border-slate-300" title="Complétude non calculable" />
+                  : <Bar pct={c.pct} tone={c.pct >= 80 ? 'green' : c.pct >= 50 ? 'amber' : 'red'} />}
+              </div>
               <span className="w-24 text-right text-[11px] text-gray-500">
                 {nb(c.pct, ' %')} ({c.complets}/{c.participants})
               </span>
@@ -661,6 +668,15 @@ function BlocConformite({ conformite }) {
         conformite.semaines_sous_15h?.nb_personnes_concernees,
         'Une semaine sans relevé de paie n\'est jamais comptée comme une semaine à zéro heure.')}
       {ligne('Nombre total de semaines sous le plancher', conformite.semaines_sous_15h?.nb_semaines)}
+      {/* CORRECTIF D-03 — « aucune semaine relevée » se DIT. Sans cette ligne,
+          deux tirets se lisent « rien à signaler » là où l'activité n'a
+          simplement pas pu être mesurée. */}
+      {conformite.semaines_sous_15h?.nb_semaines_relevees === 0 && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-1">
+          {conformite.semaines_sous_15h.note
+            || "Aucune semaine relevée sur la période : l'indicateur n'est pas calculable — ce n'est PAS « zéro semaine sous le plancher »."}
+        </p>
+      )}
       <div className="mt-3 rounded-lg bg-teal-50 border border-teal-100 p-2.5">
         <p className="text-xs font-semibold text-teal-800">Ruptures de droits évitées : {nb(r.total)}</p>
         <p className="text-[11px] text-teal-700 mt-0.5">
