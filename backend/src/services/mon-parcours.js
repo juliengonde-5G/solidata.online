@@ -114,6 +114,10 @@ const CATEGORIE_ACTION_LABELS = {
   frein: 'Levée d\'une difficulté',
   job_dating: 'Rencontre avec des employeurs',
   formation: 'Formation',
+  // PR D (amendement S5) : la formation linguistique se compte à part d'une
+  // formation qualifiante — c'est l'indicateur que l'autorité regarde sur un
+  // public dont le frein linguistique est le premier axe.
+  formation_fle: 'Cours de français',
 };
 
 /** Objet d'une PMSMP — liste fermée (CHECK de `insertion_pmsmp.objet`). */

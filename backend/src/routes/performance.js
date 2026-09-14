@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
+// Moteur PUR du dénominateur des sorties — une seule règle pour les quatre
+// surfaces qui publient ce taux (contrat 25 § 2.6).
+const { calculerSorties, CLASSES_DYNAMIQUES: DYNAMIQUES_SORTIE } = require('../services/sorties-engine');
 const { authenticate, authorize } = require('../middleware/auth');
 
 router.use(authenticate);
@@ -314,6 +317,14 @@ router.get('/industrial-kpis', async (req, res) => {
       // Insertion KPIs — la source du statut de parcours est
       // employees.insertion_status (insertion_diagnostics n'a pas de colonne
       // status ; même correctif que le hotfix V1.5.1 sur le dashboard).
+      //
+      // PR D lot 6 (item 6.5) : `parcours_termines / total` était l'indicateur
+      // legacy, et les deux écrans qui le consommaient en tiraient un « taux de
+      // sorties positives » qui n'en était pas un — c'était le rapport entre
+      // les parcours terminés DEPUIS TOUJOURS et l'ensemble des parcours connus,
+      // sans classification de sortie ni borne de temps. Il est remplacé par la
+      // nomenclature de la convention, calculée par le moteur PARTAGÉ
+      // `services/sorties-engine.js` (§ 5.5 du contrat).
       pool.query(`
         SELECT COUNT(*)::int as total,
           COUNT(CASE WHEN insertion_status = 'termine' THEN 1 END)::int as termines,
@@ -325,6 +336,34 @@ router.get('/industrial-kpis', async (req, res) => {
 
     const cs = collecteStats.rows[0];
     const ps = prodStats.rows[0];
+
+    // Sorties de l'ANNÉE CIVILE par le moteur PARTAGÉ — jamais un second
+    // calcul : c'est ce taux-là que la synthèse de dialogue de gestion imprime,
+    // et les deux ne peuvent pas diverger. Résilient : une source absente rend
+    // `null`, le reste des KPI industriels s'affiche entier.
+    let sortiesAnnee = null;
+    try {
+      const annee = new Date().getFullYear();
+      const [fins, bilans] = await Promise.all([
+        pool.query(`SELECT id AS employee_id, COALESCE(parcours_num, 1) AS parcours_num
+                    FROM employees
+                    WHERE insertion_end_date BETWEEN $1::date AND $2::date
+                      AND COALESCE(insertion_status, 'none') <> 'none'`,
+        [`${annee}-01-01`, `${annee}-12-31`]),
+        pool.query(`SELECT employee_id, COALESCE(parcours_num, 1) AS parcours_num,
+                           sortie_classification, sortie_type
+                    FROM insertion_milestones
+                    WHERE milestone_type = 'bilan_sortie' AND status = 'realise'
+                      AND sortie_classification IS NOT NULL
+                      AND COALESCE(completed_date, updated_at::date) BETWEEN $1::date AND $2::date`,
+        [`${annee}-01-01`, `${annee}-12-31`]),
+      ]);
+      sortiesAnnee = calculerSorties({
+        finsParcours: fins.rows, bilansClasses: bilans.rows, annee,
+      });
+    } catch (err) {
+      console.error('[PERFORMANCE] sorties insertion ignorées :', err.message);
+    }
 
     const totalEntreeKg = parseFloat(ps.total_entree_kg);
     const totalSortieKg = parseFloat(ps.total_sortie_kg);
@@ -350,9 +389,25 @@ router.get('/industrial-kpis', async (req, res) => {
         employes_actifs: rhStats.rows[0].actifs,
       },
       insertion: {
+        // Clés conservées : d'autres écrans (Dashboard) les lisent encore.
         parcours_actifs: insertionStats.rows[0].actifs,
         parcours_termines: insertionStats.rows[0].termines,
         total: insertionStats.rows[0].total,
+        // Nomenclature de la convention (PR D lot 6).
+        en_parcours: insertionStats.rows[0].actifs,
+        fins_parcours_annee: sortiesAnnee ? sortiesAnnee.methode_b.denominateur : null,
+        sorties: sortiesAnnee ? {
+          documentees: sortiesAnnee.methode_b.documentees,
+          non_documentees: sortiesAnnee.methode_b.non_documentees,
+          dynamiques: DYNAMIQUES_SORTIE.reduce(
+            (a, c) => a + (Number(sortiesAnnee.methode_b.par_classification[c]) || 0), 0),
+          // `null` et jamais 0 % : aucune fin de parcours dans l'année n'est pas
+          // un taux de 0 %, c'est l'absence de quoi que ce soit à mesurer.
+          taux_dynamiques_pct: sortiesAnnee.methode_b.taux_pct.dynamiques,
+        } : null,
+        methode: sortiesAnnee
+          ? "Dénominateur = toutes les fins de parcours de l'année civile ; les départs sans bilan de sortie classé apparaissent en « sorties non documentées »."
+          : null,
       },
     });
   } catch (err) {

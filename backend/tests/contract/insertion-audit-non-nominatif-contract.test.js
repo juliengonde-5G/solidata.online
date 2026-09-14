@@ -131,8 +131,26 @@ describe('B-02 — les indicateurs d’audit ne transportent aucune ventilation 
   });
 
   test('GET /exports/insertion-synthese (CSV) — aucun patronyme non plus', async () => {
+    // PR D : le CSV est désormais la SYNTHÈSE DE DIALOGUE DE GESTION, et elle
+    // refuse (409) une période sans aucune donnée. On pose donc une cohorte
+    // d'une personne — le point du test reste le même : la ventilation
+    // NOMINATIVE des heures d'accompagnement ne doit pas ressortir par le
+    // fichier, alors même que le service simulé la rend en entier.
+    mockQuery.mockImplementation((sql) => {
+      if (/FROM employees e\s+LEFT JOIN insertion_diagnostics d/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ id: 1, gender: 'F', birth_date: '1985-04-02', brsa: null, ft_categorie: null, referent_unique_type: 'non_determine', niveau_formation: null }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
     const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
     expect(res.status).toBe(200);
     expect(String(res.text)).not.toMatch(PATRONYMES);
+    expect(String(res.text)).not.toMatch(/par_salarie|par_intervenant/);
+  });
+
+  test('GET /exports/insertion-synthese (CSV) — période vide → 409, jamais un fichier vide', async () => {
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EXPORT_VIDE');
   });
 });

@@ -1444,6 +1444,40 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
 // PLAN D'ACTION CIP
 // ══════════════════════════════════════════════════════════════
 
+// Listes fermées de l'action CIP — MIROIR des CHECK posés en base
+// (`migrations/insertion-cadre.js` § 7 pour les six premières catégories,
+// `migrations/insertion-reporting.js` pour `formation_fle` et pour les champs
+// DORA / aide). Importées de la migration plutôt que recopiées : une valeur
+// ajoutée en base sans l'être ici serait refusée par le validateur, et
+// l'inverse produirait un 500 au lieu d'un 400 lisible.
+const {
+  ACTION_CATEGORIES, DORA_RESULTATS, AIDE_NATURES,
+} = require('../../scripts/migrations/insertion-reporting');
+
+/**
+ * Validateurs des six champs de la PR D sur une action CIP (orientation DORA,
+ * aide mobilisée). Partagés par le POST et le PUT : écrits deux fois, ils
+ * finiraient par diverger sur la borne qui compte.
+ *
+ * `dora_url` en **https uniquement** : le champ est rendu sous forme de lien
+ * cliquable dans la fiche, et un `javascript:` ou un `data:` y serait une porte
+ * d'entrée. Un montant d'aide est ≥ 0 ou absent — jamais négatif, il serait
+ * soustrait d'un total transmis au Département.
+ */
+const VALIDATEURS_DORA_AIDE = [
+  body('dora_service').optional({ nullable: true }).isLength({ max: 150 }).withMessage('dora_service trop long (150 max)'),
+  body('dora_url').optional({ nullable: true, checkFalsy: true })
+    .isURL({ protocols: ['https'], require_protocol: true })
+    .withMessage('dora_url invalide (une adresse https est attendue)'),
+  body('dora_resultat').optional({ nullable: true, checkFalsy: true })
+    .isIn(DORA_RESULTATS).withMessage(`dora_resultat invalide (${DORA_RESULTATS.join(', ')})`),
+  body('aide_nature').optional({ nullable: true, checkFalsy: true })
+    .isIn(AIDE_NATURES).withMessage(`aide_nature invalide (${AIDE_NATURES.join(', ')})`),
+  body('aide_organisme').optional({ nullable: true }).isLength({ max: 150 }).withMessage('aide_organisme trop long (150 max)'),
+  body('aide_montant').optional({ nullable: true, checkFalsy: true })
+    .isFloat({ min: 0 }).withMessage('aide_montant invalide (nombre positif ou vide)'),
+];
+
 // GET /api/insertion/action-plans/:employeeId — Tous les plans d'action
 // (le rattachement à un entretien est désormais OPTIONNEL → LEFT JOIN)
 router.get('/action-plans/:employeeId', async (req, res) => {
@@ -1479,25 +1513,33 @@ router.post('/action-plans', [
   body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('action_label').notEmpty().withMessage('Libellé de l\'action requis'),
-  body('category').isIn(['competence', 'insertion', 'socialisation', 'frein']).withMessage('Catégorie invalide'),
+  body('category').isIn(ACTION_CATEGORIES).withMessage(`Catégorie invalide (${ACTION_CATEGORIES.join(', ')})`),
   body('priority').optional({ nullable: true }).isIn(['haute', 'moyenne', 'basse']).withMessage('Criticité invalide'),
   body('echeance').optional({ nullable: true }).isISO8601().withMessage('Échéance invalide'),
   body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
   body('partenaire_id').optional({ nullable: true }).isInt().withMessage('partenaire_id invalide'),
   body('duree_minutes').optional({ nullable: true }).isInt({ min: 0 }).withMessage('duree_minutes invalide'),
+  ...VALIDATEURS_DORA_AIDE,
 ], validate, async (req, res) => {
   try {
     const { milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes,
-      objectif_id, partenaire_id, resultat, duree_minutes } = req.body;
+      objectif_id, partenaire_id, resultat, duree_minutes,
+      dora_service, dora_url, dora_resultat, aide_nature, aide_organisme, aide_montant } = req.body;
+    // Chaîne vide → NULL : « non renseigné » ne doit pas s'écrire comme une
+    // valeur vide qui passerait les CHECK et fausserait les comptages.
+    const vide = (v) => (v === '' || v === undefined ? null : v);
     const result = await pool.query(
       `INSERT INTO cip_action_plans
          (milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes,
-          objectif_id, partenaire_id, resultat, duree_minutes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+          objectif_id, partenaire_id, resultat, duree_minutes, created_by,
+          dora_service, dora_url, dora_resultat, aide_nature, aide_organisme, aide_montant)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
       [milestone_id || null, employee_id, action_label, category, frein_type || null,
         priority || 'moyenne', echeance || null, notes || null,
         objectif_id || null, partenaire_id || null, resultat || null,
-        duree_minutes != null && duree_minutes !== '' ? duree_minutes : null, req.user.id]
+        duree_minutes != null && duree_minutes !== '' ? duree_minutes : null, req.user.id,
+        vide(dora_service), vide(dora_url), vide(dora_resultat),
+        vide(aide_nature), vide(aide_organisme), vide(aide_montant)]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1521,12 +1563,16 @@ router.put('/action-plans/:id', [
   // l'action dans la semaine où elle s'est déroulée, pas dans celle où on l'a
   // notée. `updated_at` ne pouvait pas servir (elle bouge à chaque retouche).
   body('date_realisation').optional({ nullable: true }).isISO8601().withMessage('date_realisation invalide (AAAA-MM-JJ)'),
+  body('category').optional().isIn(ACTION_CATEGORIES).withMessage(`Catégorie invalide (${ACTION_CATEGORIES.join(', ')})`),
+  ...VALIDATEURS_DORA_AIDE,
 ], validate, async (req, res) => {
   try {
     const d = req.body;
     const editable = ['action_label', 'status', 'priority', 'echeance', 'notes',
       'category', 'frein_type', 'milestone_id', 'objectif_id', 'partenaire_id', 'resultat', 'duree_minutes',
-      'date_realisation'];
+      'date_realisation',
+      // PR D lot 6 — orientation DORA et aide mobilisée (P2 / C5).
+      'dora_service', 'dora_url', 'dora_resultat', 'aide_nature', 'aide_organisme', 'aide_montant'];
     const sets = [];
     const vals = [];
     for (const field of editable) {
@@ -2020,7 +2066,14 @@ router.delete('/objectifs/:id', authorize('ADMIN', 'RH'), [
 // Lecture tous rôles du module ; écriture A/RH. AVANT /:employeeId.
 // ══════════════════════════════════════════════════════════════
 
-const PARTENAIRE_CATEGORIES = ['administratif', 'emploi', 'logement', 'sante', 'justice', 'formation', 'mobilite', 'autre'];
+// Catégories de partenaires — liste fermée de la validation applicative.
+// PR D : ajout de `cms` (amendement A5 : le référent unique d'un bénéficiaire du
+// RSA est le plus souvent un travailleur social du centre médico-social, et sans
+// la catégorie les actions prises avec lui sortent des statistiques par
+// partenaire) et de `social`, que l'écran d'administration proposait DÉJÀ alors
+// que le serveur la refusait en 400 — divergence préexistante, corrigée ici
+// parce que le seed du CMS posé par la PR A porte précisément cette valeur.
+const PARTENAIRE_CATEGORIES = ['administratif', 'emploi', 'logement', 'sante', 'social', 'cms', 'justice', 'formation', 'mobilite', 'autre'];
 
 // GET /api/insertion/partenaires?actifs=1&categorie=
 router.get('/partenaires', async (req, res) => {
@@ -2578,6 +2631,34 @@ router.get('/pmsmp/:employeeId', [
   }
 });
 
+/**
+ * Débouché d'une immersion — liste fermée, MIROIR du CHECK
+ * (`migrations/insertion-reporting.js`). C'est la donnée que l'autorité réclame
+ * depuis son rapport 06 (exigence S7) : « PMSMP ayant donné lieu à une embauche
+ * chez l'accueillant — c'est la phrase qui justifie un financement ».
+ */
+const { PMSMP_DEBOUCHES } = require('../../scripts/migrations/insertion-reporting');
+
+/**
+ * `embauche_accueillant` est DÉDUIT du débouché, jamais saisi deux fois — deux
+ * champs qui disent la même chose finissent par se contredire. Trois états :
+ * `true` (embauche chez l'accueillant), `false` (on sait que non), `null` quand
+ * le débouché est « inconnu » ou n'est pas renseigné — « on ne sait pas encore »
+ * n'est pas « non », et une immersion close hier n'a pas encore de réponse.
+ */
+function embaucheAccueillantDepuisDebouche(debouche) {
+  if (debouche === 'embauche_accueillant') return true;
+  if (debouche == null || debouche === '' || debouche === 'inconnu') return null;
+  return false;
+}
+
+const VALIDATEURS_DEBOUCHE = [
+  body('debouche').optional({ nullable: true, checkFalsy: true })
+    .isIn(PMSMP_DEBOUCHES).withMessage(`debouche invalide (${PMSMP_DEBOUCHES.join(', ')})`),
+  body('debouche_date').optional({ nullable: true, checkFalsy: true })
+    .isISO8601().withMessage('debouche_date invalide (AAAA-MM-JJ)'),
+];
+
 // POST /api/insertion/pmsmp — créer (ADMIN/RH)
 router.post('/pmsmp', authorize('ADMIN', 'RH'), [
   body('employee_id').isInt().withMessage('ID employé requis'),
@@ -2592,6 +2673,7 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
   body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
   body('force').optional().isBoolean().withMessage('force invalide'),
   body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+  ...VALIDATEURS_DEBOUCHE,
 ], validate, async (req, res) => {
   // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74) : le
   // contrôle de cumul et l'insertion sont sérialisés, sinon deux saisies
@@ -2614,12 +2696,14 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
 
     const r = await client.query(
       `INSERT INTO insertion_pmsmp
-         (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11)
+         (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by,
+          debouche, debouche_date, embauche_accueillant)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11, $12, $13, $14)
        RETURNING *`,
       [d.employee_id, d.entreprise.trim(), d.siret || null, d.objet, d.date_debut, d.date_fin,
         d.tuteur || null, bilan, typeof d.saisie_outil_officiel === 'boolean' ? d.saisie_outil_officiel : null,
-        d.convention_ref || null, req.user.id]
+        d.convention_ref || null, req.user.id,
+        d.debouche || null, d.debouche_date || null, embaucheAccueillantDepuisDebouche(d.debouche)]
     );
     await client.query('COMMIT');
     const row = r.rows[0];
@@ -2650,6 +2734,7 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
   body('saisie_outil_officiel').optional({ nullable: true }).isBoolean().withMessage('saisie_outil_officiel invalide'),
   body('force').optional().isBoolean().withMessage('force invalide'),
   body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+  ...VALIDATEURS_DEBOUCHE,
 ], validate, async (req, res) => {
   // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74), même
   // motif que le POST : contrôle de cumul et écriture sérialisés.
@@ -2671,13 +2756,19 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
     });
     if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
 
-    const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan', 'saisie_outil_officiel', 'convention_ref'];
+    const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan',
+      'saisie_outil_officiel', 'convention_ref', 'debouche', 'debouche_date'];
     const sets = [];
     const vals = [];
     for (const field of editable) {
       if (!(field in d)) continue;
       vals.push(d[field] === '' ? null : d[field]);
       sets.push(`${field} = $${vals.length}`);
+    }
+    // `embauche_accueillant` suit le débouché et n'est jamais saisi à part.
+    if ('debouche' in d) {
+      vals.push(embaucheAccueillantDepuisDebouche(d.debouche === '' ? null : d.debouche));
+      sets.push(`embauche_accueillant = $${vals.length}`);
     }
     if (check.forced) {
       // Trace du dépassement assumé dans le bilan (même si `bilan` absent du body).
@@ -3901,6 +3992,33 @@ async function gatherAuditKpis(year) {
     console.error(`[INSERTION][AUDIT] « heures_accompagnement » ignorée : ${err.message}`);
   }
 
+  // ═══ PR D lot 6 — blocs du reporting autorité ═══════════════════════════
+  //
+  // Ils sont composés par les MÊMES fonctions que la synthèse de dialogue de
+  // gestion (`services/dialogue-gestion.composerBlocsInternes`), avec une seule
+  // différence : aucune suppression k-anonymat, parce qu'il s'agit ici d'un
+  // ÉCRAN INTERNE consulté par les personnes qui tiennent les dossiers. Les
+  // recopier aurait produit deux chiffres pour le même indicateur — celui de
+  // l'écran de pilotage et celui du document signé transmis au financeur.
+  //
+  // Résilient : une base non migrée fait dégrader ces blocs à `null`, l'audit
+  // existant continue de s'afficher entier.
+  let blocsAutorite = null;
+  try {
+    blocsAutorite = await require('../../services/dialogue-gestion').composerBlocsInternes({ annee: year });
+  } catch (err) {
+    console.error(`[INSERTION][AUDIT] blocs reporting autorité ignorés : ${err.message}`);
+  }
+
+  // ── Sorties : la MÉTHODE B vient du moteur PUR partagé ────────────────────
+  //
+  // Les clés historiques (`total`, `dynamiques`, `taux_dynamiques`…) restent
+  // celles de la MÉTHODE A — elles alimentent des écrans et des exports qui
+  // existent depuis 2026-07 et dont la série ne doit pas bouger sans préavis.
+  // Le nouveau dénominateur arrive À CÔTÉ, dans `methode_b`, et c'est lui que
+  // l'écran affiche en premier depuis la PR D.
+  const sortiesB = blocsAutorite && blocsAutorite.sorties ? blocsAutorite.sorties : null;
+
   return {
     annee: year,
     nb_en_parcours: nbEnParcours,
@@ -3911,6 +4029,7 @@ async function gatherAuditKpis(year) {
     frein_dominant: freinDominant,
     actions,
     sorties: {
+      // ── Méthode A (historique) — clés INCHANGÉES ──
       total: totalSorties,
       dynamiques: nbDynamiques,
       autres: nbAutres,
@@ -3918,6 +4037,12 @@ async function gatherAuditKpis(year) {
       par_classification: parClassification,
       taux_par_classification: tauxParClassification,
       par_type: parType,
+      // ── PR D lot 6 — méthode B et ce qu'elle rend visible ──
+      methode_b: sortiesB ? sortiesB.methode_b : null,
+      methode_a_imprimee: sortiesB ? sortiesB.methode_a : null,
+      non_documentees: sortiesB && sortiesB.methode_b ? sortiesB.methode_b.non_documentees : null,
+      rapprochement_asp: sortiesB ? sortiesB.rapprochement_asp : null,
+      regles: sortiesB ? sortiesB.regles : null,
     },
     // ── Blocs PR 2 (EXG-10/14/24/47) ──
     conventionnel,
@@ -3926,6 +4051,29 @@ async function gatherAuditKpis(year) {
     etp_realises_approx: etpRealisesApprox,
     pmsmp,
     satisfaction,
+    // ── Blocs PR D lot 6 « Reporting autorité » (non nominatifs) ──
+    // `null` quand la source n'a pas pu être lue — jamais un objet vide qui se
+    // lirait « rien à signaler ».
+    freins_evolution: blocsAutorite ? blocsAutorite.freins : null,
+    publics_entree: blocsAutorite ? blocsAutorite.publics : null,
+    immersions: blocsAutorite ? blocsAutorite.immersions : null,
+    conformite: blocsAutorite ? blocsAutorite.conformite : null,
+    accompagnement: blocsAutorite ? blocsAutorite.accompagnement : null,
+    etp_asp: blocsAutorite ? blocsAutorite.etp : null,
+    aides_mobilisees: blocsAutorite && blocsAutorite.accompagnement
+      ? blocsAutorite.accompagnement.aides_mobilisees : null,
+    dora: blocsAutorite && blocsAutorite.freins
+      ? (blocsAutorite.freins.par_axe || []).map((a) => ({
+        axe: a.axe, label: a.label, orientations: a.orientations_dora, resultats: a.dora_resultats,
+      }))
+      : null,
+    actions_partenaires: blocsAutorite && blocsAutorite.freins
+      ? (blocsAutorite.freins.par_axe || [])
+        .filter((a) => a.partenaire_principal)
+        .map((a) => ({ axe: a.axe, label: a.label, partenaire_principal: a.partenaire_principal, actions: a.actions_engagees }))
+      : null,
+    ruptures_droits_evitees: blocsAutorite && blocsAutorite.conformite
+      ? blocsAutorite.conformite.ruptures_droits_evitees : null,
     // Convergence (CVG, §6bis-2) : bloc réservé — le paramétrage précis attend
     // la trame de reporting CVG demandée à la direction ; les indicateurs
     // génériques (freins, sorties, actions) sont déjà couverts ci-dessus.

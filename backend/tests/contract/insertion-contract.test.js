@@ -1492,26 +1492,36 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
     expect((await getX('/api/exports/insertion-freins/completude', 'MANAGER')).status).toBe(403);
   });
 
-  it('CSV (RH) : 23 colonnes dans l’ordre CDC, SANS frein judiciaire par défaut ; génération JOURNALISÉE (rgpd_audit_log)', async () => {
+  it('CSV (RH) : les 23 colonnes du CDC EN TÊTE, SANS frein judiciaire ; génération JOURNALISÉE (rgpd_audit_log)', async () => {
     const calls = wireFreins();
     const res = await getX('/api/exports/insertion-freins?format=csv', 'RH');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     const lines = res.text.replace(/^﻿/, '').trim().split('\n');
     const headers = lines[0].split(';');
-    expect(headers).toHaveLength(23);
-    expect(headers[0]).toBe('NOM');
-    expect(headers[1]).toBe('Prénom');
+    // PR D : 23 (CDC) + 10 (cadre 2026) + 6 axes × 2 (entrée / évolution).
+    expect(headers).toHaveLength(45);
+    expect(headers.slice(0, 5)).toEqual(['NOM', 'Prénom', 'Nationalité', "Date d'entrée ACI", 'Fin PASS IAE']);
+    expect(headers[22]).toBe('Emploi visé'); // la 23e du CDC reste la 23e
     expect(headers).not.toContain('Frein judiciaire');
+    expect(headers).not.toContain('Frein judiciaire — évolution');
     expect(lines[1]).toContain('X;Y;Française');
     expect(lines[1]).toContain('Oui'); // RQTH depuis le texte paie
     expect(lines[1]).toContain('2 (dern. 2026-05-12)');
     // EXG-43 : journal AVANT l'envoi, format rgpd.js
     const log = calls.find((c) => /INSERT INTO rgpd_audit_log/.test(c.sql));
     expect(log).toBeTruthy();
-    expect(log.params[1]).toBe('EXPORT_INSERTION_FREINS');
+    expect(log.params[1]).toBe('EXPORT_INSERTION_FREINS_ENRICHI');
     expect(log.params[2]).toBe('insertion_freins');
     expect(JSON.parse(log.params[4])).toEqual(expect.objectContaining({ format: 'csv', sensibles: false, lignes: 1 }));
+  });
+
+  it('PR D : refus 409 EXPORT_VIDE quand aucune fiche n’entre dans le périmètre (jamais un fichier vide)', async () => {
+    mockQuery.mockResolvedValue({ rows: [] });
+    const res = await getX('/api/exports/insertion-freins?format=csv', 'RH');
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EXPORT_VIDE');
+    expect(res.body.error).toMatch(/Aucune fiche/);
   });
 
   it('sensibles=1 : colonne « Frein judiciaire » à sa position CDC + action de journal DISTINCTE', async () => {
@@ -1519,7 +1529,7 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
     const res = await getX('/api/exports/insertion-freins?format=csv&sensibles=1', 'ADMIN');
     expect(res.status).toBe(200);
     const headers = res.text.replace(/^﻿/, '').split('\n')[0].split(';');
-    expect(headers).toHaveLength(24);
+    expect(headers).toHaveLength(48); // 24 + 10 + 7 axes × 2
     expect(headers[headers.indexOf('Frein financier') + 1]).toBe('Frein judiciaire');
     const log = calls.find((c) => /INSERT INTO rgpd_audit_log/.test(c.sql));
     expect(log.params[1]).toBe('EXPORT_INSERTION_FREINS_SENSIBLE');
@@ -1544,7 +1554,7 @@ describe('CONTRAT GET /exports/insertion-freins (PR 2 — EXG-25/38/43)', () => 
     const res = await getX('/api/exports/insertion-freins/completude', 'RH');
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(1);
-    expect(res.body.colonnes).toHaveLength(23);
+    expect(res.body.colonnes).toHaveLength(45);
     const byKey = Object.fromEntries(res.body.colonnes.map((c) => [c.cle, c]));
     expect(byKey.nom.pct).toBe(100);
     expect(byKey.frein_finances.pct).toBe(0); // non évalué
@@ -1564,16 +1574,41 @@ describe('CONTRAT GET /exports/insertion-synthese (PR 2 — EXG-14)', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/first_name|last_name/);
   });
 
-  it('CSV : 1re ligne = la mention, puis Section;Indicateur;Valeur (cibles absentes → « objectif non paramétré »)', async () => {
+  it('PR D — CSV : refus 409 EXPORT_VIDE quand la période ne porte aucune donnée (jamais un fichier vide)', async () => {
+    // Le CSV est désormais la SYNTHÈSE DE DIALOGUE DE GESTION (contrat 25 § 5.1) :
+    // il applique les trois règles communes des exports de l'autorité.
     mockQuery.mockResolvedValue({ rows: [] });
+    const res = await getX('/api/exports/insertion-synthese?year=2026&format=csv', 'RH');
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EXPORT_VIDE');
+  });
+
+  it('PR D — CSV : en-tête de traçabilité, colonnes Bloc;Indicateur;Valeur, bloc « 9. Méthode », journal BLOQUANT', async () => {
+    const calls = [];
+    mockQuery.mockImplementation((sql) => {
+      calls.push({ sql: String(sql) });
+      // Une cohorte d'une personne suffit à rendre le document non vide.
+      if (/FROM employees e\s+LEFT JOIN insertion_diagnostics d/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ id: 1, gender: 'F', birth_date: '1985-04-02', brsa: true, ft_categorie: 'G', referent_unique_type: 'cms', niveau_formation: 'niv3' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
     const res = await getX('/api/exports/insertion-synthese?year=2026&format=csv', 'RH');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
-    const lines = res.text.replace(/^﻿/, '').split('\n');
-    expect(lines[0]).toBe('Document agrégé non nominatif — comité de pilotage');
-    expect(lines[1]).toBe('Section;Indicateur;Valeur');
-    expect(res.text).toContain('objectif non paramétré');
-    expect(res.text).toContain('saisie officielle : ASP');
+    const texte = res.text.replace(/^﻿/, '');
+    const lines = texte.split('\n');
+    expect(lines[0]).toMatch(/^# Export;Synthèse de dialogue de gestion/);
+    expect(texte).toMatch(/# Généré le;.*Généré par \(rôle\);RH/);
+    expect(texte).toContain("# Document agrégé non nominatif — dialogue de gestion");
+    expect(texte).toContain("les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi");
+    expect(lines.find((l) => l === 'Bloc;Indicateur;Valeur')).toBeTruthy();
+    expect(texte).toContain('9. Méthode');
+    // Journal BLOQUANT écrit AVANT l'envoi.
+    const log = calls.find((c) => /INSERT INTO rgpd_audit_log/.test(c.sql));
+    expect(log).toBeTruthy();
+    // Aucun patronyme ne peut sortir : le document n'en projette aucun.
+    expect(texte).not.toMatch(/first_name|last_name/);
   });
 });
 
