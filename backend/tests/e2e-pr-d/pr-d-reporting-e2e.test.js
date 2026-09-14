@@ -575,6 +575,43 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       }
     });
 
+    test("V-15c — un TAUX dont la case de comptage est retirée ne le trahit pas par multiplication", () => {
+      // Dénominateur publié (5, indicateur n° 15) et « emploi durable » à 1 :
+      // publier « 20 % » rendrait exactement la case retirée. Le taux tombe
+      // donc avec elle. `dynamiques`, lui, se déduit déjà des deux nombres que
+      // l'autorité EXIGE (dénominateur et sorties non documentées) : le masquer
+      // serait une protection que le document défait trois lignes plus haut.
+      const mb = s.blocs['6_sorties'].methode_b;
+      expect(mb.denominateur).toBe(5);
+      expect(mb.par_classification.emploi_durable).toBeNull();
+      expect(mb.taux_pct.emploi_durable).toBeNull();
+      expect(mb.taux_pct.emploi_transition).toBeNull();
+      expect(mb.taux_pct.sortie_positive).toBeNull();
+      expect(mb.taux_pct.dynamiques).toBe(60);
+      // La règle est ÉCRITE au bloc 9 : un taux retiré sans explication se lit
+      // comme un défaut de calcul.
+      const methode = s.blocs['9_methode'].map((m) => `${m.indicateur} ${m.regle}`).join(' | ');
+      expect(methode).toMatch(/redonne son numérateur par multiplication/);
+    });
+
+    test("V-15d — une ventilation ne laisse jamais UNE seule case retirée quand son total est publié", () => {
+      // `par_debouche` somme aux conventions publiées ; `par_classification` au
+      // dénominateur. Une case seule s'y retrouverait par soustraction.
+      const cas = [
+        [s.blocs['5_immersions'].par_debouche, s.blocs['5_immersions'].conventions],
+        [s.blocs['6_sorties'].methode_b.par_classification, s.blocs['6_sorties'].methode_b.denominateur],
+      ];
+      for (const [dist, total] of cas) {
+        if (total == null) continue;
+        const retirees = Object.values(dist).filter((v) => v === null).length;
+        expect(retirees === 1).toBe(false);
+      }
+      // Et le bloc 9 dit pourquoi deux lignes peuvent manquer là où une seule
+      // était sous le seuil.
+      const methode = s.blocs['9_methode'].map((m) => m.indicateur).join(' | ');
+      expect(methode).toMatch(/Suppression complémentaire/);
+    });
+
     test('V-16 — zéro reste zéro (il ne désigne personne)', () => {
       const ft = s.blocs['2_publics_entree'].par_categorie_ft;
       expect(ft.B).toBe(0);

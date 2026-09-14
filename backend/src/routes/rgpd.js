@@ -276,6 +276,9 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
     // une durée que le code n'applique pas.
     const purgeRappels = trouverPurge('rappels_rdv');
     const retentionRappels = purgeRappels ? await retentionEffective(purgeRappels) : { valeur: 365, source: 'code' };
+    const purgeDialogues = trouverPurge('dialogues_gestion');
+    const retentionDialogues = purgeDialogues
+      ? await retentionEffective(purgeDialogues) : { valeur: 2190, source: 'code' };
 
     let registreCount = null;
     try {
@@ -345,6 +348,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             source: retentionRappels.source === 'code' ? 'code' : 'insertion.rappels_retention_jours',
             reference: 'backend/src/services/rgpd-purges.js (purgeRappelsRdv), backend/src/services/rappels-rdv.js, backend/src/services/anonymization.js',
           },
+          {
+            titre: 'Synthèses de dialogue de gestion enregistrées',
+            description: "La synthèse transmise à l'autorité est figée en snapshot au moment où elle est produite — c'est ce qui permet de répondre à « qu'avons-nous transmis le 15 janvier ? » quand le dossier a changé depuis. Le document est STRICTEMENT AGRÉGÉ : aucun nom, aucun identifiant, et tout agrégat portant sur moins de cinq personnes est retiré du document ENTIER avant enregistrement. C'est une pièce de conventionnement : elle se conserve longtemps — la durée des pièces justificatives d'un cofinancement européen — et pas indéfiniment.",
+            valeur: `${retentionDialogues.valeur} jours`,
+            source: retentionDialogues.source === 'code' ? 'code' : 'rgpd.dialogues_gestion_retention_jours',
+            reference: 'backend/src/services/rgpd-purges.js (purgeDialoguesGestion), backend/src/services/dialogue-gestion.js (appliquerKAnonymat)',
+          },
         ],
       },
       {
@@ -354,8 +364,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
         regles: [
           {
             titre: 'Purges automatiques planifiées',
-            description: "10 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, réponses détaillées au questionnaire PCM, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, bordereaux de collecte en déchèterie (signatures manuscrites), messagerie interne, rappels de rendez-vous envoyés aux salariés, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
-            valeur: '10 purges, 3×/jour',
+            // Le nombre vient du REGISTRE, pas d'un compte recopié : la règle
+            // affichée à l'écran RGPD ne peut plus se désynchroniser du code
+            // qu'elle décrit (une onzième purge est arrivée en PR D).
+            description: `${PURGES_RGPD.length} purges de rétention tournent plusieurs fois par jour : `
+              + `${PURGES_RGPD.map((p) => p.libelle.charAt(0).toLowerCase() + p.libelle.slice(1)).join(', ')}. `
+              + "Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
+            valeur: `${PURGES_RGPD.length} purges, 3×/jour`,
             source: 'code',
             reference: 'backend/src/services/rgpd-purges.js (registre PURGES_RGPD), backend/src/services/scheduler.js (runAllJobs)',
           },

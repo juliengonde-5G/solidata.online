@@ -114,8 +114,18 @@ router.get('/dialogue-gestion', [
       return envoyerCsv(res, synthese, annee, trimestre, req);
     }
 
-    await journaliser(pool, req, 'INSERTION_DIALOGUE_GESTION_APERCU', null,
-      detailsTrace(annee, trimestre, { sous_seuil: synthese.sous_seuil.length }));
+    // CORRECTIF m-05 — la trace de l'APERÇU devient BLOQUANTE.
+    //
+    // L'aperçu rend le document COMPLET, identique au CSV : depuis le navigateur,
+    // il se copie. Le raisonnement d'origine — « empêcher la direction de relire
+    // sa synthèse parce que le journal est indisponible serait pire que perdre
+    // la trace d'une lecture d'écran » — ne tient pas à l'examen : le journal
+    // et la synthèse vivent dans la MÊME base, et si l'écriture du registre
+    // échoue, aucune des vingt requêtes de composition n'aurait abouti non plus.
+    // Le prix de disponibilité est donc théorique ; celui de la trace perdue ne
+    // l'est pas, c'est la seule preuve que la pièce est sortie.
+    await journaliserDocument(pool, req, 'INSERTION_DIALOGUE_GESTION_APERCU', null,
+      detailsTrace(annee, trimestre, { sous_seuil: synthese.sous_seuil_total ?? null }));
     return res.json(synthese);
   } catch (err) {
     console.error('[INSERTION][REPORTING] dialogue-gestion :', err.message, err.code || '');
@@ -236,7 +246,7 @@ router.post('/dialogue-gestion', authorize('ADMIN', 'RH'), [
     // Trace BLOQUANTE, DANS la transaction : le snapshot et sa preuve tombent
     // ou passent ensemble.
     await journaliserDocument(client, req, 'INSERTION_DIALOGUE_GESTION_GENERATION', null,
-      detailsTrace(annee, trimestre, { snapshot_id: ins.rows[0].id, sous_seuil: synthese.sous_seuil.length }));
+      detailsTrace(annee, trimestre, { snapshot_id: ins.rows[0].id, sous_seuil: synthese.sous_seuil_total ?? null }));
     await client.query('COMMIT');
 
     res.status(201).json({

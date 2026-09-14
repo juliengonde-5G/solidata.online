@@ -159,7 +159,7 @@ describe('1. habilitations', () => {
   });
 });
 
-describe('2. aperçu (GET) — journal TOLÉRANT, document non nominatif', () => {
+describe('2. aperçu (GET) — journal BLOQUANT (m-05), document non nominatif', () => {
   it('journalise l’aperçu sans le contenu du document', async () => {
     const res = await get('/api/insertion/reporting/dialogue-gestion?annee=2026', 'RH');
     expect(res.status).toBe(200);
@@ -171,10 +171,19 @@ describe('2. aperçu (GET) — journal TOLÉRANT, document non nominatif', () =>
     expect(JSON.stringify(details)).not.toMatch(/blocs|effectif|taux/);
   });
 
-  it('un journal indisponible n’empêche PAS de relire l’écran (tolérant)', async () => {
+  it("CORRECTIF m-05 — un journal indisponible EMPÊCHE l'aperçu : la pièce ne sort pas sans sa trace", async () => {
+    // L'aperçu rend le document COMPLET, identique au CSV : depuis le
+    // navigateur, il se copie. Le raisonnement d'origine — « empêcher la
+    // direction de relire sa synthèse parce que le journal est indisponible
+    // serait pire que perdre la trace d'une lecture d'écran » — ne tient pas à
+    // l'examen : le registre et la synthèse vivent dans la MÊME base, et si
+    // l'écriture du journal échoue, aucune des vingt requêtes de composition
+    // n'aurait abouti. Le prix de disponibilité est théorique ; celui de la
+    // trace perdue ne l'est pas.
     branche({ journalEnEchec: true });
     const res = await get('/api/insertion/reporting/dialogue-gestion?annee=2026', 'RH');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
+    expect(res.body.blocs).toBeUndefined();
   });
 
   it('aucune clé nominative dans la réponse, quel que soit le rôle', async () => {
