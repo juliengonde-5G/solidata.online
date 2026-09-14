@@ -382,3 +382,22 @@ de rendez-vous **tourne quand même** — il ne prétend jamais avoir envoyé ce
 et marque chaque ligne `insertion_rappels_rdv.statut = 'dry_run'` plutôt que `'envoye'`. Aucun
 rappel ne part de toute façon sans le **consentement individuel** de la personne
 (`employees.rappel_rdv_consent = true`), recueilli dans l'onglet Dossier administratif de sa fiche.
+
+### Reporting autorité — PR D (2.55.0, 14 septembre 2026, en cours de livraison)
+
+Chantier `rapports/cip-refonte-2026-09-12/` (contrat `25-contrats-techniques-PR-D.md` § 4). Ces trois
+réglages gouvernent la **synthèse de dialogue de gestion** et le nouveau calcul du dénominateur des
+sorties — le calcul serveur les consomme déjà (`services/sorties-engine.js`, `services/dialogue-gestion.js`),
+**aucun écran ne les fait encore lire ni modifier** au 14/09/2026 (pas d'onglet « Réglages insertion »
+dédié à cette date) : ils prennent leur valeur par défaut, en code, dans
+`backend/src/utils/insertion-settings.js`.
+
+| Clé `settings` | Défaut | Usage |
+|-----------------|--------|-------|
+| `insertion.sorties_methode_double_annee` | `2026` | Année pour laquelle les deux méthodes de calcul du dénominateur des sorties (l'historique et la nouvelle) sont imprimées côte à côte, pour que la rupture de série soit annoncée plutôt que découverte. Toute autre année ne reçoit que la nouvelle méthode (`methode_a: null`). |
+| `insertion.k_anonymat_min` | `5` | Effectif minimal en dessous duquel un agrégat de la synthèse de dialogue de gestion n'est **pas** restitué (`null` + `sous_seuil: true`) — même règle que la restitution des enquêtes anonymes du module RSE, appliquée ici à un document qui sort de la structure. |
+| `insertion.heures_annuelles_etp` | `1820` | Base horaire unique employée dans tout document de conventionnement produit par ce chantier. Repli si `effectifs.convention_<année>.heures_annuelles_etp` (module Effectifs ETP) n'est pas paramétré pour l'année demandée — **jamais deux bases différentes dans le même document**. |
+
+Réutilisés par ce chantier, déjà en place depuis des lots antérieurs : `insertion.cible_etp_conventionnes`,
+les cibles de sorties (`PUT /cibles`), `effectifs.convention_<année>`, `insertion.cer_heures_min` (15),
+`insertion.post_sortie_mois`.

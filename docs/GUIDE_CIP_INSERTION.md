@@ -6,6 +6,8 @@
 >
 > **Complété le 13/09/2026 (PR C « Section CIP et documents du salarié », v. 2.54.0) :** l'espace CIP est réorganisé autour de ce qu'il y a à faire — l'écran d'ouverture devient **« Mes échéances »** (cas 1, réécrit), la fiche passe de huit à **quatre onglets** (Situation / Suivi / Dossier administratif / Diagnostic — cas 25), l'écran de l'encadrant technique s'ouvre désormais **sans compte, par un lien** (cas 26), et deux nouveaux documents sont produits **pour la personne accompagnée** — « Mon parcours en une page » et « Mon Récap » — avec des **rappels de rendez-vous** par SMS ou e-mail sur son accord (cas 27 et 28). Rien de ce qui existait n'a été supprimé ; ce qui a changé de place est signalé au fil du texte.
 >
+> **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », en cours de livraison) :** quatre nouveaux repères (cas 29 à 32) sur ce que le dialogue de gestion avec l'autorité de tutelle regarde de plus près — la synthèse annuelle, le débouché d'une immersion, les orientations DORA et les aides mobilisées, et la nouvelle façon de compter les sorties. **Trois de ces quatre cas décrivent un écran qui n'existe pas encore** au 14 septembre 2026 : le calcul et l'enregistrement en base sont faits, la saisie et l'affichage à l'écran restent à livrer. Chaque cas concerné le dit en toutes lettres.
+>
 > Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
 - **Public** : conseillère/conseiller en insertion professionnelle (CIP) de Solidarité Textiles ; certains passages concernent les encadrants techniques (ETI) et la direction.
@@ -44,6 +46,10 @@
 26. [Le lien de l'encadrant technique, sans compte](#26-le-lien-de-lencadrant-technique-sans-compte)
 27. [Les documents que je remets à la personne : « Mon parcours » et « Mon Récap »](#27-les-documents-que-je-remets-à-la-personne--mon-parcours--et--mon-récap-)
 28. [Les rappels de rendez-vous par SMS ou e-mail](#28-les-rappels-de-rendez-vous-par-sms-ou-e-mail)
+29. [La synthèse de dialogue de gestion](#29-la-synthèse-de-dialogue-de-gestion)
+30. [Le débouché d'une immersion (PMSMP)](#30-le-débouché-dune-immersion-pmsmp)
+31. [Orienter vers DORA et noter une aide mobilisée](#31-orienter-vers-dora-et-noter-une-aide-mobilisée)
+32. [Sorties : la ligne non documentée](#32-sorties--la-ligne-non-documentée)
 
 ---
 
@@ -52,6 +58,15 @@
 **Objectif** : savoir en moins de deux minutes ce qui vous attend cette semaine, sans rien chercher.
 
 > **Depuis le 13/09/2026 (PR C)**, l'écran d'ouverture de l'**Espace CIP** s'appelle **« Mes échéances »**. Il remplace l'ancien tableau de bord à trois couleurs par **cinq blocs**, dans l'ordre où ils se traitent un lundi matin — et il distingue désormais deux choses qu'on confondait : ce qui **se contrôle** (une obligation réglementaire ou contractuelle) et ce qui **s'organise** (le rythme normal du suivi). La file active des salariés est à gauche de l'écran (cas 25) ; les échéances, décrites ici, occupent la colonne de droite.
+
+![Espace CIP — Mes échéances, un lundi chargé](../rapports/cip-refonte-2026-09-12/maquettes/captures/Main.jpg)
+*Maquette de travail (noms fictifs). Un lundi avec des obligations à traiter : le bloc 2 affiche
+6 lignes rouges et 2 orange, chacune avec son bouton d'action et son bouton « Reporter 48 h ».*
+
+![Espace CIP — Mes échéances, un lundi calme](../rapports/cip-refonte-2026-09-12/maquettes/captures/Echeances_Calme.jpg)
+*Maquette de travail (noms fictifs). Le même écran quand tout est à jour : chaque bloc vide affiche sa
+phrase verte plutôt qu'un cadre silencieux — « Aucune obligation en attente… », « Aucun entretien ni
+action en retard. »*
 
 **Pas à pas**
 
@@ -546,9 +561,18 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 **Objectif** : produire, en quelques clics, ce que le référent externe attend de vous — et rien de plus que ce qu'il doit recevoir.
 
+![Fiche pour le référent](../rapports/cip-refonte-2026-09-12/maquettes/captures/PDF_Referent.jpg)
+*Maquette de travail (noms fictifs). Neuf rubriques, dans l'ordre où le référent en a l'usage : cadre,
+contrat et Pass IAE, activité hebdomadaire, freins travaillés hors santé et judiciaire, projet
+professionnel, assiduité, prochaines étapes, engagements de la structure, remise.*
+
+![Relevé d'assiduité](../rapports/cip-refonte-2026-09-12/maquettes/captures/PDF_Assiduite.jpg)
+*Maquette de travail (noms fictifs). Rendez-vous, présences et motifs légitimes — jamais « injustifiée » —
+et l'activité hebdomadaire des 52 dernières semaines observées.*
+
 **Pas à pas**
 
-1. Dans le **Dossier administratif** (cas 20), section **« Fiche pour le référent »**, ou raccourci **« Fiche pour le référent »** / **« Relevé d'assiduité »** dans le menu **« Fiche PDF ▾ »** en en-tête de la fiche (sur les douze derniers mois).
+1. Dans le **Dossier administratif** (cas 20), section **« Fiche pour le référent »**, tout en bas de l'onglet.
 2. Choisissez la **période** et le **motif** (entrée en parcours, renouvellement, sortie, à la demande du référent). **« Voir ce qui serait transmis »** ouvre un aperçu qui **n'enregistre rien** — vous vérifiez avant de décider.
 3. **« Générer la fiche »** : enregistre une **copie exacte** de ce qui part, et l'imprime aussitôt. Ce qui a été transmis en mars reste ce qu'il était en mars, même si le dossier évolue ensuite.
 4. Dans l'historique, **« Tracer la remise »** : deux dates indépendantes — la remise au référent (avec le moyen employé) et **l'exemplaire remis à la personne concernée**. Une date future est refusée.
@@ -593,6 +617,11 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 ## 24. Ma feuille de temps
 
 **Objectif** : la pièce mensuelle que le cofinancement en coûts simplifiés (l'opération OCS) exige de chaque intervenant — signée, cohérente avec les congés, sans jamais divulguer l'identité des personnes accompagnées.
+
+![Temps d'accompagnement](../rapports/cip-refonte-2026-09-12/maquettes/captures/Temps_Accompagnement.jpg)
+*Maquette de travail (noms fictifs). Heures d'accompagnement par jour composées automatiquement,
+ventilation par activité et par projet, incohérence avec les congés signalée en tête sans bloquer la
+saisie.*
 
 **Pas à pas**
 
@@ -644,6 +673,11 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 **Objectif** : que l'encadrant reçoive un lien qu'il peut réellement ouvrir, sans mot de passe à retenir.
 
+![Écran ouvert par le lien de l'encadrant, sur téléphone](../rapports/cip-refonte-2026-09-12/maquettes/captures/ETI_Mobile.jpg)
+*Maquette de travail (noms fictifs). Ce que l'encadrant voit et rien d'autre : identité et poste, quatre
+questions notées de 1 à 5, un avis en trois choix, une durée proposée. Aucun champ ne s'affiche pour la
+santé, le judiciaire ou le statut social.*
+
 **Pas à pas**
 
 1. Dans **Mes échéances**, bloc « Organisation du suivi », sur la ligne du renouvellement à préparer : bouton **« Créer le lien encadrant »** (ou **« Copier le lien encadrant »** s'il en existe déjà un valide).
@@ -663,6 +697,10 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 ## 27. Les documents que je remets à la personne : « Mon parcours » et « Mon Récap »
 
 **Objectif** : donner à la personne accompagnée, à tout moment de son parcours, un document qu'elle peut lire, comprendre et montrer à un tiers si elle le souhaite — sans jamais y faire figurer ce qui ne la regarde pas de cette façon.
+
+![Mon parcours en une page](../rapports/cip-refonte-2026-09-12/maquettes/captures/PDF_MonParcours.jpg)
+*Maquette de travail (noms fictifs). Qui s'occupe de la personne, ses heures de la semaine sans aucun
+seuil, ses prochains rendez-vous, ses engagements et ceux de la structure, ses documents.*
 
 **Pas à pas**
 
@@ -711,4 +749,120 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique.*
+## 29. La synthèse de dialogue de gestion
+
+**Objectif** : produire, une fois par an, le document que vous transmettez à l'autorité de tutelle
+avant la séance de dialogue de gestion — sans le reconstituer à la main dans un tableur.
+
+> **Pas encore livré à l'écran au 14/09/2026.** Le calcul est écrit et déjà utilisé par les indicateurs
+> de reporting RH ; **aucun bouton ne le produit encore**. Ce qui suit décrit ce que fera l'écran une
+> fois branché — utilisez d'ici là la **« Synthèse comité (CSV) »**, disponible sur « Pilotage &
+> indicateurs » (cas 15), qui répond à la même intention sur un périmètre plus étroit.
+
+**Ce que ce document contiendra** : neuf blocs dans un ordre fixe — effectifs et ETP (le **chiffre
+validé par l'ASP en premier**, le calcul interne de contrôle en second et nommé comme tel), publics à
+l'entrée par critère d'éligibilité, freins (concernés à l'entrée, levés, stables, aggravés), heures
+d'accompagnement et aides mobilisées, immersions et leur débouché, **sorties** (voir cas 32), résultats
+à six mois, conformité (fiches transmises au référent, actualisations France Travail), et une dernière
+page qui écrit la règle de calcul de **chaque** taux en toutes lettres. **Strictement non nominatif** :
+tout agrégat portant sur moins de cinq personnes s'affiche `null` plutôt qu'un chiffre qui désignerait
+quelqu'un.
+
+**Pas à pas, une fois l'écran livré** : Pilotage & indicateurs → onglet **« Dialogue de gestion »** →
+choisir l'année (et, pour un point d'étape allégé, le trimestre) → **« Aperçu »** pour vérifier avant
+d'envoyer → **« Générer et enregistrer »** pour produire un instantané daté (ce que vous transmettez le
+15 janvier reste ce qu'il était le 15 janvier, même si le dossier évolue ensuite) → **« CSV »** pour la
+version tableur. Un historique liste les générations passées et permet de rejouer un instantané ancien
+en PDF.
+
+> **Points de vigilance**
+> - Cette synthèse est ouverte en lecture à **ADMIN, RH et MANAGER** — c'est le seul document du module
+>   qu'un encadrant technique peut consulter dans son intégralité, précisément parce qu'il ne contient
+>   **aucune** projection nominative : rien à lui masquer.
+> - Un périmètre sans aucune fin de parcours sur l'année sera **refusé**, comme tous les exports du
+>   module — jamais un document vide qui se lirait « rien à signaler ».
+
+---
+
+## 30. Le débouché d'une immersion (PMSMP)
+
+**Objectif** : dire ce qu'une immersion a produit, pas seulement qu'elle a eu lieu.
+
+> **Pas encore saisissable à l'écran au 14/09/2026.** Le champ existe et peut déjà être enregistré ;
+> **la fiche du salarié ne propose encore aucun sélecteur** pour le renseigner. Ce qui suit décrit ce
+> qui arrivera à la clôture d'une PMSMP.
+
+**Ce que vous choisirez** : à la date de fin d'une immersion passée, un sélecteur **« Débouché »** —
+embauche chez l'accueillant, embauche ailleurs, formation, poursuite du parcours, aucun débouché,
+inconnu — avec sa date. Choisir « embauche chez l'accueillant » alimente directement l'indicateur
+« immersions transformées en emploi » de la synthèse de dialogue de gestion (cas 29). **« Inconnu » est
+une réponse honnête**, pas un oubli : une immersion terminée dont vous n'avez jamais eu le retour ne
+doit pas se lire comme « aucun débouché ».
+
+> **Points de vigilance**
+> - **N'attendez pas d'avoir toutes les informations pour clôturer la PMSMP elle-même** : le débouché
+>   peut se compléter plus tard, la borne légale des 60 jours, elle, ne l'attend pas.
+
+---
+
+## 31. Orienter vers DORA et noter une aide mobilisée
+
+**Objectif** : garder la trace de ce que vous mobilisez réellement pour lever un frein, au-delà du seul
+partenaire nommé — et pouvoir le chiffrer au dialogue de gestion.
+
+> **Pas encore saisissable à l'écran au 14/09/2026.** Les deux champs existent côté serveur (avec leurs
+> propres règles : un lien DORA doit être une adresse sécurisée, un montant d'aide ne peut pas être
+> négatif) ; **aucun formulaire ne les propose encore** sur la page Actions CIP. Ce qui suit décrit ce
+> qui s'ajoutera au formulaire d'une action.
+
+**Orientation DORA** *(l'annuaire national des services d'insertion)* : un bloc repliable où noter le
+service consulté, le lien vers la fiche DORA, et le **résultat** — orienté, pris en charge, refusé,
+sans suite. Cela ne remplace pas la mobilisation d'un partenaire connu de votre référentiel (cas 10) :
+c'est un canal en plus, pour les cas où DORA a été la porte d'entrée.
+
+**Aide mobilisée** : un second bloc — la **nature** de l'aide dans une liste fermée (mobilité,
+logement, santé, numérique, garde d'enfants, formation, démarche administrative, aide financière
+d'urgence, autre), l'organisme qui la verse, et un **montant facultatif** (laissé vide plutôt qu'à zéro
+si vous ne le connaissez pas — un montant à zéro dirait qu'aucune aide n'a été versée, ce n'est pas la
+même chose que « je ne sais pas combien »).
+
+> **Points de vigilance**
+> - Ces deux blocs sont **facultatifs** sur chaque action : ne forcez rien à y entrer si l'action ne
+>   relève ni de l'un ni de l'autre.
+> - C'est cet indicateur, une fois alimenté, qui permettra à la direction de chiffrer devant l'autorité
+>   ce que l'accompagnement mobilise réellement — au-delà de la seule liste de partenaires.
+
+---
+
+## 32. Sorties : la ligne non documentée
+
+**Objectif** : comprendre pourquoi le taux de sorties dynamiques que vous connaissez va changer de
+mode de calcul, sans que rien n'ait changé dans votre façon de travailler.
+
+**Ce qui change, et pourquoi** : jusqu'ici, le taux se calculait sur les **bilans de sortie classés** —
+si une personne partait sans que vous ayez pu faire son entretien de sortie (départ du jour au
+lendemain, personne injoignable), elle **disparaissait du calcul**, numérateur et dénominateur compris,
+et le taux s'en trouvait mécaniquement meilleur qu'il n'aurait dû l'être. La direction a tranché : le
+dénominateur devient **toutes les fins de parcours de la période**, et une personne partie sans bilan
+classé apparaît désormais en clair sur une ligne **« sortie non documentée »**. **Ce n'est pas une
+faute qui vous est reprochée** — le document le dit explicitement — c'est un indicateur de qualité qui
+doit rester visible plutôt que masqué par un calcul qui l'ignorait.
+
+**Ce que cela change pour vous, concrètement** : rien à saisir de plus. Continuez de classer la sortie
+dès que vous le pouvez (cas 13) — c'est ce geste, fait ou non fait, que la nouvelle ligne rend visible.
+**2026 est une année de transition** : les deux méthodes de calcul (l'ancienne et la nouvelle) seront
+imprimées **côte à côte** dans la synthèse de dialogue de gestion, pour que l'écart entre les deux ne
+se lise pas comme une erreur mais comme le changement de règle qu'il est.
+
+> **Où le voir aujourd'hui** : au 14/09/2026, ce nouveau calcul alimente déjà l'indicateur « sorties »
+> du reporting RH ; **l'écran « Pilotage & indicateurs » affiche encore l'ancien dénominateur**, en
+> attendant que l'onglet « Dialogue de gestion » (cas 29) soit branché.
+
+> **Points de vigilance**
+> - **Une sortie « non documentée » se corrige** : si vous parvenez, même après coup, à joindre la
+>   personne et à classer sa situation, la ligne se réduit d'autant à la prochaine génération de la
+>   synthèse. Rien n'est figé au 15 du mois suivant, contrairement à une feuille de temps.
+
+---
+
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », lot 8)** : quatre nouveaux cas (29 à 32 — la synthèse de dialogue de gestion, le débouché d'une immersion, les orientations DORA et aides mobilisées, la nouvelle ligne « sortie non documentée »), sept captures d'écran ajoutées (cas 1, 22, 24, 26, 27), aucun cas existant modifié. Trois des quatre nouveaux cas décrivent, à cette date, un calcul déjà en place côté serveur mais **encore sans écran de saisie ou d'affichage** — chacun le dit en toutes lettres ; ce guide sera repris dès que ces écrans seront livrés.*

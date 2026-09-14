@@ -2,7 +2,7 @@
 
 > **Pour** : Tous les utilisateurs de Solidarité Textile
 > **Version** : 1.2.1 | **Date** : 24 mars 2026
-> **Révision du 13/09/2026** — section 4.4 « Parcours Insertion » entièrement réécrite (elle décrivait encore 7 freins et trois jalons M1/M6/M12, et donnait **l'échelle des freins à l'envers**), numérotation du chapitre 4 corrigée (deux sections portaient le n° 4.4), puis **complétée le même jour** des écrans du cadre RSA et du temps d'accompagnement (nouveau menu « Temps d'accompagnement »). Le reste du guide n'a pas été revu à cette date.
+> **Révision du 13/09/2026** — section 4.4 « Parcours Insertion » entièrement réécrite (elle décrivait encore 7 freins et trois jalons M1/M6/M12, et donnait **l'échelle des freins à l'envers**), numérotation du chapitre 4 corrigée (deux sections portaient le n° 4.4), puis **complétée le même jour** des écrans du cadre RSA et du temps d'accompagnement (nouveau menu « Temps d'accompagnement »). **Complétée le 14/09/2026** d'une phrase sur la synthèse de dialogue de gestion (chantier D, en cours de livraison, § 4.4). Le reste du guide n'a pas été revu à cette date.
 >
 > **Voir aussi les guides de formation par profil** :
 > - [Formation Chauffeurs](FORMATION_CHAUFFEURS.md) — Guide visuel simplifié
@@ -319,7 +319,7 @@ Espace de travail de la **CIP** (Conseillère en Insertion Professionnelle) pour
 
 **Échéances** : depuis le 13/09/2026, l'espace CIP s'ouvre sur **« Mes échéances »**, qui distingue les **obligations** (Pass IAE proche de son terme, cumul CDDI ≥ 23 mois, diagnostic hors délai, sortie FSE+ non renseignée, référent unique non déterminé, etc.) — reportables **48 heures**, un motif étant exigé à partir du deuxième report — de l'**organisation du suivi** (bilan en retard, rendez-vous non planifié, action critique en retard), qui reste **acquittable sept jours** (« Vu — me le rappeler dans 7 jours », enregistré en base et partagé entre CIP).
 
-**Pilotage & indicateurs** (`/insertion/audit`) : taux de sorties par catégorie comparés aux **cibles conventionnelles** — affichées « objectif non paramétré » tant que la direction ne les a pas confirmées, jamais une valeur inventée —, ETP « contrôle » (la saisie ASP fait foi), typologies de publics non nominatives, délai moyen des diagnostics, cartographie des freins.
+**Pilotage & indicateurs** (`/insertion/audit`) : taux de sorties par catégorie comparés aux **cibles conventionnelles** — affichées « objectif non paramétré » tant que la direction ne les a pas confirmées, jamais une valeur inventée —, ETP « contrôle » (la saisie ASP fait foi), typologies de publics non nominatives, délai moyen des diagnostics, cartographie des freins. *Le document annuel transmis à l'autorité de tutelle avant le dialogue de gestion (« synthèse de dialogue de gestion », neuf blocs strictement non nominatifs) est en cours de livraison depuis le 14 septembre 2026 : le nouveau calcul des sorties existe déjà côté serveur, l'écran qui le présente n'est pas encore construit.*
 
 **Exports** : extraction complète (Excel 5 feuilles ou CSV par jeu de données), **tableau des freins 23 colonnes** (avec sa complétude affichée avant génération, et le frein judiciaire exclu par défaut), synthèse de comité agrégée non nominative, export **FSE+** trimestriel des participants.
 

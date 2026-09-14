@@ -3,6 +3,9 @@
 > **SOLIDATA ERP** — Guide Complet
 > **Version** : 1.2.1 | **Date** : 24 mars 2026
 > **Pour** : Responsable des Ressources Humaines et de l'Insertion
+> **Note du 14/09/2026** : la Partie 6 (Parcours d'Insertion) décrit une version du module abandonnée
+> depuis juillet 2026 ; elle renvoie désormais vers les guides à jour — voir l'encadré en tête de
+> cette partie.
 
 ---
 
@@ -241,117 +244,30 @@ La matrice met en évidence :
 
 ## Partie 6 — Parcours d'Insertion (Module Clé)
 
-### 6.1 Qu'est-ce que le Parcours d'Insertion ?
-
-Le parcours d'insertion concerne les **salariés en CDDI** (Contrat d'Insertion).
-
-Objectif : **lever les freins à l'emploi durable** en accompagnant chaque personne individuellement pendant la durée de son contrat (max 24 mois).
-
-```
-Entrée CDDI → Diagnostic → Jalon M1 → Jalon M6 → Jalon M12 → Sortie
-                (7 freins)    (1 mois)   (6 mois)   (12 mois)
-```
-
-**3 jalons obligatoires** : M1 (1 mois), M6 (6 mois), M12 (12 mois)
-
-### 6.2 Le Diagnostic Initial
-
-**Accès** : Menu → Gestion Équipe → **Parcours insertion** → Sélectionner le collaborateur
-
-Le diagnostic évalue **7 freins périphériques** :
-
-| # | Frein | Exemples |
-|---|-------|----------|
-| 1 | **Logement** | Sans domicile, hébergement précaire, logement insalubre |
-| 2 | **Mobilité** | Pas de permis, pas de véhicule, transport en commun limité |
-| 3 | **Santé** | Problèmes de santé, addictions, suivi médical insuffisant |
-| 4 | **Administratif** | Papiers manquants, droits non ouverts, dettes admin |
-| 5 | **Financier** | Surendettement, absence de compte bancaire, dettes |
-| 6 | **Famille** | Garde d'enfants, violences, isolement familial |
-| 7 | **Justice** | Casier judiciaire, contrôle judiciaire, obligations légales |
-
-**Notation** : de **1** (bloquant) à **5** (résolu) pour chaque frein
-
-Le résultat est affiché sous forme de **radar** (diagramme en étoile) :
-
-```
-              Logement (4)
-                 ╱╲
-    Justice    ╱    ╲   Mobilité
-      (3)    ╱   ████ ╲   (2)
-           ╱  ████████  ╲
-         ╱  ████████████  ╲
-Famille ────████████████████──── Santé
-  (4)     ╲  ████████████  ╱     (3)
-           ╲  ████████  ╱
-    Financier ╲  ████ ╱  Administratif
-      (3)       ╲  ╱       (4)
-                 ╲╱
-```
-
-### 6.3 Les Jalons M1 / M6 / M12
-
-À chaque jalon, le CIP (Conseiller en Insertion Professionnelle) :
-
-1. **Programme un entretien** avec le collaborateur
-2. **Met à jour le radar** des 7 freins (nouvelle notation)
-3. **Fait le bilan** des actions réalisées depuis le dernier jalon
-4. **Compare** avec le diagnostic initial (évolution positive/négative)
-5. **Définit** les objectifs pour la période suivante
-
-**Le système affiche l'évolution** :
-
-```
-Frein Mobilité :  Diagnostic: 2 → M1: 2 → M6: 3 → M12: 4  ✅ Progression
-Frein Santé :     Diagnostic: 3 → M1: 3 → M6: 2 → M12: 3  ⚠️ Stagnation
-```
-
-### 6.4 Plans d'Action CIP
-
-Pour chaque frein identifié, le CIP crée des **actions concrètes** :
-
-| Champ | Description | Exemple |
-|-------|------------|---------|
-| **Frein** | Le frein concerné | Mobilité |
-| **Action** | L'action à réaliser | Inscription auto-école |
-| **Responsable** | Qui s'en charge | CIP + collaborateur |
-| **Échéance** | Date limite | 15 avril 2026 |
-| **Statut** | État d'avancement | À faire / En cours / Fait |
-
-**Exemples de plans d'action par frein** :
-
-| Frein | Actions types |
-|-------|-------------|
-| **Mobilité** | Auto-école, aide au permis, covoiturage, abonnement transport |
-| **Logement** | Demande logement social, aide au 1er loyer, hébergement d'urgence |
-| **Santé** | Médecin traitant, bilan de santé, suivi addictologie, CPAM |
-| **Administratif** | Renouvellement papiers, ouverture droits, accompagnement CAF |
-| **Financier** | Dossier surendettement, ouverture compte, micro-crédit |
-| **Famille** | Aide à la garde d'enfants, médiation familiale |
-| **Justice** | Aide juridictionnelle, suivi SPIP, réhabilitation |
-
-### 6.5 Alertes Entretiens
-
-Le système génère des **alertes automatiques** :
-
-| Alerte | Quand | Action |
-|--------|-------|--------|
-| **Jalon M1 approche** | 7 jours avant la date | Programmer l'entretien |
-| **Jalon M6 approche** | 14 jours avant | Programmer l'entretien |
-| **Jalon M12 approche** | 14 jours avant | Programmer l'entretien |
-| **Entretien non programmé** | Quand un jalon est dépassé | Programmer en urgence |
-| **Action CIP en retard** | Quand une action dépasse l'échéance | Relancer |
-| **Contrat CDDI expire** | 30 jours avant | Décider (renouvellement ou sortie) |
-
-### 6.6 Indicateurs d'Insertion
-
-| Indicateur | Ce qu'il mesure | Objectif |
-|-----------|----------------|---------|
-| **Nombre de parcours actifs** | CDDI en cours | — |
-| **Taux de jalons atteints** | Jalons M1/M6/M12 réalisés à temps | > 90% |
-| **Évolution radar** | Progression moyenne des 7 freins | Positive |
-| **Actions réalisées** | % des plans CIP terminés | > 70% |
-| **Taux de sortie dynamique** | Emploi, formation, création après CDDI | > 50% |
+> **Cette partie est dépassée et n'a pas été réécrite dans ce guide.** Le module Insertion a été
+> entièrement refondu entre juillet et septembre 2026 (six chantiers livrés, un septième en cours au
+> 14 septembre 2026). Les pages 6.1 à 6.6 ci-dessous datent de la toute première version du module et
+> décrivent un fonctionnement qui **n'existe plus** : 7 freins au lieu de 9, une échelle **inversée**
+> (elles écrivent « 1 = bloquant, 5 = résolu » — c'est l'exact contraire de la règle actuelle, **1 =
+> pas de difficulté, 5 = bloquant**), et trois jalons fixes M1/M6/M12 remplacés depuis longtemps par
+> six types d'entretien en nombre libre, calés sur les dates réelles du contrat.
+>
+> **Pour vous former sur le module tel qu'il fonctionne aujourd'hui, utilisez** :
+> - [Guide CIP — Le module Insertion au quotidien](GUIDE_CIP_INSERTION.md) — le mode d'emploi pas à
+>   pas, cas d'usage par cas d'usage (diagnostic, entretiens, 9 freins, objectifs, actions, sortie,
+>   Pass IAE, renouvellements, PMSMP, cadre RSA, temps d'accompagnement, documents pour le salarié).
+> - [Guide CIP — Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) — éligibilité
+>   IAE, Pass IAE, cofinancement européen, référent unique, feuille de temps.
+> - [DOCUMENTATION_APPLICATIVE.md](DOCUMENTATION_APPLICATIVE.md) § 2.3.4 — la description technique
+>   complète, module par module de livraison.
+>
+> Ce qui reste vrai et utile de cette partie, en résumé pour un manager RH pressé : le module tient un
+> **dossier unique par salarié en insertion**, organisé autour d'entretiens datés et d'un plan d'action
+> partagé avec la conseillère en insertion professionnelle (CIP) ; **9** axes de difficulté sont suivis
+> (pas 7), notés de 1 (pas de difficulté) à 5 (bloquant) ; les entretiens ne sont plus à des échéances
+> fixes mais s'enchaînent selon le rythme réel de l'accompagnement et la durée du contrat ; et un
+> tableau de bord dédié (« Pilotage & indicateurs ») consolide les taux de sortie, les délais et les
+> plans d'action pour la direction.
 
 ---
 
