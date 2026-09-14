@@ -1432,7 +1432,11 @@ describe('CONTRAT GET /insertion/audit — blocs conventionnel/typologies/contr�
     expect(res.body.etp_realises_approx.source).toBe('controle_erp');
     expect(res.body.etp_realises_approx.note).toMatch(/ASP/);
     expect(res.body.delai_moyen_diagnostic_jours).toBeNull();
-    expect(res.body.pmsmp).toEqual({ nb: 0, jours: 0, nb_salaries: 0 });
+    // PR D lot 6 : les trois clés historiques sont CONSERVÉES, enrichies des
+    // indicateurs S1/S7 (débouché, embauche chez l'accueillant, entreprises).
+    expect(res.body.pmsmp).toEqual(expect.objectContaining({ nb: 0, jours: 0, nb_salaries: 0 }));
+    expect(res.body.pmsmp).toHaveProperty('par_debouche');
+    expect(res.body.pmsmp).toHaveProperty('embauches_chez_accueillant');
     expect(res.body.satisfaction).toEqual({ nb_reponses: 0, moyenne_globale: null });
     expect(res.body.cvg.statut).toBe('trame_en_attente');
   });

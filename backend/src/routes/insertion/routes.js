@@ -4049,7 +4049,16 @@ async function gatherAuditKpis(year) {
     typologies,
     delai_moyen_diagnostic_jours: delaiMoyenDiagnostic,
     etp_realises_approx: etpRealisesApprox,
-    pmsmp,
+    // PMSMP : clés historiques CONSERVÉES, enrichies des trois indicateurs que
+    // l'autorité réclame (S1 / S7) — débouché, embauche chez l'accueillant,
+    // entreprises d'accueil. `null` quand la source n'a pas pu être lue.
+    pmsmp: {
+      ...pmsmp,
+      par_debouche: blocsAutorite?.immersions?.par_debouche ?? null,
+      embauches_chez_accueillant: blocsAutorite?.immersions?.embauches_chez_accueillant ?? null,
+      entreprises: blocsAutorite?.immersions?.entreprises_distinctes ?? null,
+      liste_entreprises: blocsAutorite?.immersions?.liste_entreprises ?? null,
+    },
     satisfaction,
     // ── Blocs PR D lot 6 « Reporting autorité » (non nominatifs) ──
     // `null` quand la source n'a pas pu être lue — jamais un objet vide qui se
