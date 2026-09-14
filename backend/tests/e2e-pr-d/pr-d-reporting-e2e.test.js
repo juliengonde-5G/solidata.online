@@ -904,6 +904,30 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
   // 5 bis. Écran interne : ce que le MANAGER reçoit
   // ═════════════════════════════════════════════════════════════════════
   describe('écran interne /audit', () => {
+    // ── CORRECTIF B-02 (bloquant) ─────────────────────────────────────────
+    test("V-35d — CORRECTIF B-02 · un MANAGER ne reçoit AUCUN statut social, sur les deux routes", async () => {
+      for (const url of [`/api/insertion/audit?year=${AN}`, `/api/exports/insertion-synthese?year=${AN}&format=json`]) {
+        const r = await auth(request(app).get(url), 'MANAGER');
+        expect([url, r.status]).toEqual([url, 200]);
+        expect([url, 'publics_entree' in r.body]).toEqual([url, false]);
+        const { projection_role: _n, ...donnees } = r.body;
+        const brut = JSON.stringify(donnees);
+        // La cohorte de recette porte 5 BRSA, 3 RQTH et des catégories FT.
+        expect([url, /"brsa"/.test(brut)]).toEqual([url, false]);
+        expect([url, /Travailleur handicapé|par_categorie_ft|par_referent_unique/i.test(brut)]).toEqual([url, false]);
+        expect([url, 'rqth' in r.body.typologies]).toEqual([url, false]);
+        expect([url, 'ressources' in r.body.typologies]).toEqual([url, false]);
+        expect([url, r.body.projection_role.applique]).toEqual([url, true]);
+      }
+    });
+
+    test("V-35e — CORRECTIF B-02 · un ADMIN les reçoit toujours (la CIP n'est pas appauvrie)", async () => {
+      const r = await auth(request(app).get(`/api/insertion/audit?year=${AN}`), 'ADMIN');
+      expect(r.body.publics_entree).toBeTruthy();
+      expect(r.body.publics_entree.brsa.n).toBe(5);
+      expect(r.body.projection_role).toBeUndefined();
+    });
+
     test('V-35b — MANAGER : /audit répond 200 et ne porte AUCUNE ventilation par salarié', async () => {
       const r = await auth(request(app).get(`/api/insertion/audit?year=${AN}`), 'MANAGER');
       expect(r.status).toBe(200);

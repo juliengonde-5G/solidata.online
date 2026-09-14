@@ -1025,9 +1025,16 @@ router.get('/insertion-synthese', [
     // tels quels depuis la PR 2). C'est le FICHIER qui change, pas l'API.
     // Require paresseux : routes.js vérifie PCM_ENCRYPTION_KEY/JWT_SECRET au
     // chargement — on ne le charge qu'à l'usage (env déjà posé à ce stade).
-    const { gatherAuditKpis } = require('./insertion/routes');
-    const k = await gatherAuditKpis(year);
-    res.json({ mention: SYNTHESE_MENTION, ...k });
+    // CORRECTIF B-02 — même frontière de rôle que `GET /insertion/audit` : ce
+    // JSON est servi à ADMIN/MANAGER/RH sous la bannière « document agrégé non
+    // nominatif », et il portait BRSA, catégorie France Travail, référent
+    // unique et critères d'éligibilité (dont RQTH) sans aucune suppression. Les
+    // blocs de statut social ne sont ni lus ni composés pour un MANAGER, et la
+    // projection est reposée avant l'envoi.
+    const { gatherAuditKpis, baseRoleOf, projeterAuditPourRole } = require('./insertion/routes');
+    const baseRole = baseRoleOf(req);
+    const k = await gatherAuditKpis(year, { baseRole });
+    res.json({ mention: SYNTHESE_MENTION, ...projeterAuditPourRole(k, baseRole) });
   } catch (err) {
     console.error('[EXPORTS] Erreur insertion-synthese :', err);
     res.status(500).json({ error: 'Erreur serveur' });

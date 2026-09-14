@@ -3843,7 +3843,19 @@ const FREIN_AXES = freinColumns(); // 9 axes du registre unique
 
 // Agrège les indicateurs chiffrés de l'audit. Résilient : chaque requête qui
 // échoue (colonne absente sur base ancienne) dégrade au lieu de tout casser.
-async function gatherAuditKpis(year) {
+/**
+ * Indicateurs chiffrés de l'audit d'insertion.
+ *
+ * @param {number} year année civile.
+ * @param {object} [opts]
+ * @param {string} [opts.baseRole] rôle de base de l'appelant. Les blocs de
+ *   STATUT SOCIAL (BRSA, catégorie France Travail, référent unique, critères
+ *   d'éligibilité dont RQTH, ressources perçues) ne sont ni lus ni composés
+ *   hors ADMIN/RH — voir le correctif B-02 plus bas. Par défaut ADMIN, pour que
+ *   les appelants internes (bilan RSE, rapport IA) gardent le comportement
+ *   qu'ils avaient ; les deux routes ouvertes au MANAGER passent le rôle.
+ */
+async function gatherAuditKpis(year, { baseRole = 'ADMIN' } = {}) {
   const soft = async (label, text, params = []) => {
     try { return (await pool.query(text, params)).rows; }
     catch (err) { console.error(`[INSERTION][AUDIT] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
@@ -3963,20 +3975,36 @@ async function gatherAuditKpis(year) {
   // l'import paie), ressources perçues, niveaux de formation (nomenclature
   // officielle du diagnostic), tranches d'âge NON nominatives (ageBracket de
   // pii-pseudonymize — jamais la date de naissance en restitution).
+  // CORRECTIF B-02 (étendu) — `typologies` porte `rqth` (compte de travailleurs
+  // handicapés, nommé par l'exigence) et `ressources` (les prestations sociales
+  // perçues). Les deux colonnes ne sont pas LUES hors ADMIN/RH ; les tranches
+  // d'âge et les niveaux de formation, qui ne sont pas des statuts sociaux,
+  // restent servis à l'encadrant.
+  const adminRhTypo = ['ADMIN', 'RH'].includes(baseRole);
   const typoRows = await soft('typologies', `
-    SELECT e.birth_date, e.disability_status, d.rqth, d.ressources, d.niveau_formation
+    SELECT e.birth_date,
+           ${adminRhTypo ? 'e.disability_status, d.rqth, d.ressources,' : 'NULL AS disability_status, NULL::boolean AS rqth, NULL::text[] AS ressources,'}
+           d.niveau_formation
     FROM employees e
     LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
       AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
     WHERE e.insertion_status = 'en_parcours' AND e.is_active = true`);
-  const typologies = { effectif: typoRows.length, rqth: 0, ressources: {}, niveaux_formation: {}, tranches_age: {} };
+  const typologies = {
+    effectif: typoRows.length,
+    rqth: adminRhTypo ? 0 : null,
+    ressources: adminRhTypo ? {} : null,
+    niveaux_formation: {},
+    tranches_age: {},
+  };
   for (const r of typoRows) {
-    const rqth = r.rqth === true
-      || (r.rqth == null && r.disability_status != null && String(r.disability_status).trim() !== '');
-    if (rqth) typologies.rqth += 1;
-    if (Array.isArray(r.ressources)) {
-      for (const src of r.ressources) {
-        if (src) typologies.ressources[src] = (typologies.ressources[src] || 0) + 1;
+    if (adminRhTypo) {
+      const rqth = r.rqth === true
+        || (r.rqth == null && r.disability_status != null && String(r.disability_status).trim() !== '');
+      if (rqth) typologies.rqth += 1;
+      if (Array.isArray(r.ressources)) {
+        for (const src of r.ressources) {
+          if (src) typologies.ressources[src] = (typologies.ressources[src] || 0) + 1;
+        }
       }
     }
     if (r.niveau_formation) {
@@ -4116,9 +4144,32 @@ async function gatherAuditKpis(year) {
   //
   // Résilient : une base non migrée fait dégrader ces blocs à `null`, l'audit
   // existant continue de s'afficher entier.
+  //
+  // ═══ CORRECTIF B-02 (bloquant) — LA FRONTIÈRE EST LE RÔLE ════════════════
+  //
+  // `publics_entree` porte le statut BRSA, la catégorie France Travail, le type
+  // de référent unique et les critères d'éligibilité IAE — dont « Travailleur
+  // handicapé (RQTH) ». `CLAUDE.md` réserve les statuts sociaux à ADMIN/RH
+  // strict, la PR C écrit « brsa jamais LU pour un MANAGER », et le constat
+  // bloquant de la PR A portait déjà sur la liste des critères d'éligibilité
+  // servie à l'encadrant avec ses libellés. Ces blocs partaient pourtant vers
+  // `GET /audit` et `GET /exports/insertion-synthese`, tous deux ouverts au
+  // MANAGER, sans aucune suppression — le chemin interne passant `k = identité`.
+  // Sur une période à UNE personne, l'encadrant lisait `brsa: 1` et « RQTH (1) »,
+  // c'est-à-dire la donnée individuelle elle-même, en regard d'une file active
+  // nominative qu'il a par ailleurs.
+  //
+  // Le contrat affirme que « les nouveaux blocs ne portent aucune clé par
+  // salarié » : c'est vrai au sens littéral, et c'est insuffisant. La protection
+  // dont ces données bénéficiaient n'était pas « pas de clé par salarié »,
+  // c'était LE RÔLE. La décision est donc prise ICI, dans la route, et le bloc
+  // n'est PAS COMPOSÉ hors ADMIN/RH : sa requête ne part pas. Un filtrage après
+  // lecture serait un refus d'affichage, pas un refus d'accès.
+  const adminRh = adminRhTypo;
   let blocsAutorite = null;
   try {
-    blocsAutorite = await require('../../services/dialogue-gestion').composerBlocsInternes({ annee: year });
+    blocsAutorite = await require('../../services/dialogue-gestion')
+      .composerBlocsInternes({ annee: year, avecPublics: adminRh });
   } catch (err) {
     console.error(`[INSERTION][AUDIT] blocs reporting autorité ignorés : ${err.message}`);
   }
@@ -4177,7 +4228,7 @@ async function gatherAuditKpis(year) {
     // `null` quand la source n'a pas pu être lue — jamais un objet vide qui se
     // lirait « rien à signaler ».
     freins_evolution: blocsAutorite ? blocsAutorite.freins : null,
-    publics_entree: blocsAutorite ? blocsAutorite.publics : null,
+    publics_entree: blocsAutorite ? blocsAutorite.publics : null,   // `null` hors ADMIN/RH (B-02)
     immersions: blocsAutorite ? blocsAutorite.immersions : null,
     conformite: blocsAutorite ? blocsAutorite.conformite : null,
     accompagnement: blocsAutorite ? blocsAutorite.accompagnement : null,
@@ -4224,12 +4275,39 @@ async function gatherAuditVerbatims() {
   return { observations_diagnostics: observations, bilans_jalons: bilans, notes_actions: notesActions };
 }
 
+/**
+ * Deuxième ceinture du correctif B-02 : la projection par rôle, posée à la
+ * FRONTIÈRE, juste avant l'envoi — comme `heures_accompagnement.par_salarie` en
+ * PR B. La première ceinture (ne pas composer le bloc) évite la lecture ; celle-ci
+ * garantit que rien ne revient par une clé dérivée écrite demain, et elle est ce
+ * que le test cherche : les clés interdites sont absentes de la RÉPONSE.
+ */
+function projeterAuditPourRole(kpis, baseRole) {
+  if (['ADMIN', 'RH'].includes(baseRole)) return kpis;
+  // Clé RETIRÉE, jamais nullifiée — doctrine du masquage de ce module
+  // (`maskActionPlansForRole`) : une clé absente dit « non habilité », une clé
+  // à `null` dit « nous n'avons pas su lire », et confondre les deux fait
+  // chercher une panne là où il y a une règle.
+  const out = { ...kpis };
+  delete out.publics_entree;
+  if (out.typologies) {
+    const { rqth, ressources, ...reste } = out.typologies;
+    out.typologies = reste;
+  }
+  out.projection_role = {
+    applique: true,
+    note: "Statuts sociaux (BRSA, catégorie France Travail, référent unique, critères d'éligibilité, RQTH, ressources) réservés aux profils ADMIN / RH.",
+  };
+  return out;
+}
+
 // GET /api/insertion/audit — Indicateurs chiffrés de l'audit (sans IA).
 // IMPORTANT: AVANT /:employeeId.
 router.get('/audit', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    res.json(await gatherAuditKpis(year));
+    const baseRole = baseRoleOf(req);
+    res.json(projeterAuditPourRole(await gatherAuditKpis(year, { baseRole }), baseRole));
   } catch (err) {
     console.error('[INSERTION][AUDIT] Erreur :', err.message);
     res.status(500).json({ error: 'Erreur serveur', detail: err.message });
@@ -4241,7 +4319,8 @@ router.get('/audit', async (req, res) => {
 router.get('/audit/ia', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    const [kpis, verbatims] = await Promise.all([gatherAuditKpis(year), gatherAuditVerbatims()]);
+    const [kpis, verbatims] = await Promise.all([
+      gatherAuditKpis(year, { baseRole: baseRoleOf(req) }), gatherAuditVerbatims()]);
     const { auditGlobalReport } = require('../../services/insertion-ai');
     res.json(await auditGlobalReport({ kpis, verbatims }));
   } catch (err) {
@@ -5181,3 +5260,4 @@ module.exports.gatherAuditKpis = gatherAuditKpis;
 module.exports.snapshotMilestone = snapshotMilestone;
 module.exports.managerOwnsEmployee = managerOwnsEmployee;
 module.exports.baseRoleOf = baseRoleOf;
+module.exports.projeterAuditPourRole = projeterAuditPourRole;
