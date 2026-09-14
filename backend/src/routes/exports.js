@@ -1,5 +1,5 @@
 const express = require('express');
-const { isoDate } = require('../utils/date-iso');
+const { isoDate, aujourdhuiParis } = require('../utils/date-iso');
 const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
@@ -532,7 +532,9 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     `);
 
     const genere = new Date();
-    const stamp = genere.toISOString().slice(0, 10);
+    // Jour civil de PARIS (et non le jour UTC) : un export tiré le 1er janvier
+    // à 00 h 30 porterait sinon la date du 31 décembre dans son nom de fichier.
+    const stamp = aujourdhuiParis();
     const horodatage = genere.toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
     const lead = ['matricule', 'nom', 'prenom'];
     const format = (req.query.format || 'xlsx').toLowerCase() === 'csv' ? 'csv' : 'xlsx';
@@ -703,6 +705,12 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
   const axes = sensibles ? freinColumns() : freinColumns().filter((c) => c !== 'frein_judiciaire');
   const lmCols = axes.map((c) => `im.${c}`).join(', ');
   const coalesced = axes.map((c) => `COALESCE(lm.${c}, d.${c}) AS ${c}`).join(', ');
+  // CORRECTIF D-02 — la dernière évaluation BRUTE, à côté de la valeur repliée.
+  // La colonne « évolution » comparait jusqu'ici l'entrée à `COALESCE(lm, d)`,
+  // c'est-à-dire le diagnostic à lui-même quand aucun entretien n'a été réalisé :
+  // elle rendait toujours « stable ». La valeur COURANTE (colonnes 14-20) reste
+  // repliée, comme le CDC le demande ; seule l'évolution change de source.
+  const actuels = axes.map((c) => `lm.${c} AS ${c}_actuel`).join(', ');
 
   const params = [];
   const where = [
@@ -735,6 +743,7 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
            d.situation_familiale, d.projet_formation, d.emploi_vise, d.emploi_vise_rome,
            ${coalesced},
            ${entrees},
+           ${actuels},
            e.brsa, e.brsa_date_constat, e.ft_categorie, e.pass_iae_statut,
            e.referent_unique_type, e.referent_unique_nom, e.eligibilite_source,
            elig.criteres_eligibilite, proj.projets_cofinances,
@@ -797,6 +806,11 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
     for (const r of rows) {
       const v = m.get(Number(r.id));
       r.semaines_sous_seuil = v && v.nb_semaines_sous_seuil != null ? v.nb_semaines_sous_seuil : null;
+      // CORRECTIF D-03 — le nombre de semaines RELEVÉES accompagne le compte :
+      // sans lui, « aucune semaine relevée » et « aucune semaine sous le
+      // plancher » s'écrivent tous deux « 0 » dans la colonne d'un document de
+      // contrôle, et disent le contraire l'un de l'autre.
+      r.semaines_relevees = v && v.nb_semaines_relevees != null ? v.nb_semaines_relevees : null;
     }
   } catch (err) {
     console.error('[EXPORTS] « semaines sous seuil » ignorées :', err.message);
@@ -846,7 +860,7 @@ router.get('/insertion-freins', authorize('ADMIN', 'RH'), [
     // l'export (jamais de fichier nominatif non tracé).
     await logExportFreins(req, { format, ...filtres, lignes: cellRows.length });
 
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = aujourdhuiParis();
 
     if (format === 'csv') {
       // Échappement PARTAGÉ (`utils/export-csv.js`) : il neutralise en plus les
@@ -893,7 +907,7 @@ router.get('/insertion-freins', authorize('ADMIN', 'RH'), [
       { k: 'Règle des freins (valeur courante)', v: "Dernière évaluation en date : dernier entretien réalisé du parcours courant portant au moins un frein, repli axe par axe sur le diagnostic d'accueil. Vide = non évalué." },
       { k: "Règle des colonnes « entrée » et « évolution »", v: "« Entrée » = niveau relevé au diagnostic d'accueil. « Évolution » compare l'entrée et la valeur courante sur une échelle de 1 (pas de difficulté) à 5 (bloquant) : levé = baisse d'au moins un niveau, aggravé = hausse d'au moins un niveau, stable sinon, « non évalué » dès qu'une des deux valeurs manque." },
       { k: 'Règle « Heures par semaine »', v: "Quotité CONTRACTUELLE (contrat en cours, repli fiche salarié) — ce n'est pas l'activité constatée. L'activité réelle se lit dans la colonne « Semaines sous 15 h (année) »." },
-      { k: 'Règle « Semaines sous 15 h »', v: "Nombre de semaines RELEVÉES dont l'activité cumulée (travail en CDDI, accompagnement, immersion) est inférieure au plancher paramétré. Une semaine sans relevé de paie n'est jamais comptée comme une semaine à zéro heure ; cellule vide = activité non calculable." },
+      { k: 'Règle « Semaines sous 15 h »', v: "Nombre de semaines RELEVÉES dont l'activité cumulée (travail en CDDI, accompagnement, immersion) est inférieure au plancher paramétré. Une semaine sans relevé de paie n'est jamais comptée comme une semaine à zéro heure. Cellule VIDE = aucune semaine relevée sur l'année, ou activité non calculable : ce n'est PAS « zéro semaine sous le plancher »." },
       { k: 'Cellule vide', v: "Champ non renseigné. Jamais un zéro, jamais une valeur par défaut." },
       { k: 'Confidentialité', v: 'Données personnelles (dont santé). Diffusion restreinte ADMIN/RH — génération journalisée (registre RGPD). Toute transmission externe passe par la synthèse agrégée non nominative.' },
       { k: 'Mention', v: "Document de travail ERP — les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi" },

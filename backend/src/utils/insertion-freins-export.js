@@ -136,10 +136,26 @@ function evolutionFrein(entree, actuel) {
   return 'stable';
 }
 
+/**
+ * CORRECTIF D-01 / M-01 — une date civile ne repasse JAMAIS par UTC.
+ *
+ * `node-pg` rend une colonne `DATE` sous forme d'objet `Date` à minuit LOCAL ;
+ * `toISOString()` le relit en UTC, et sous un fuseau à offset positif il
+ * retombe la veille à 22 h ou 23 h — le `slice(0, 10)` rendait donc le jour
+ * précédent. Cinq colonnes de l'export (d) étaient concernées, dont la date de
+ * naissance qui sert à APPARIER des personnes chez l'instructrice, et la fin de
+ * Pass IAE dont un jour de recul change un statut. C'est exactement la famille
+ * D-05 de la PR B, dont le correctif de fond — `utils/date-iso.js`, helper PUR
+ * qui lit les composantes locales — existait déjà dans le dépôt sans avoir été
+ * porté ici. En production les conteneurs tournent en UTC : le défaut était
+ * latent, à une variable `TZ` près.
+ */
+const { isoDate } = require('./date-iso');
 const fmtDate = (v) => {
   if (!v) return '';
-  const d = v instanceof Date ? v : new Date(v);
-  return isNaN(d.getTime()) ? String(v) : d.toISOString().slice(0, 10);
+  // Repli sur la valeur brute plutôt qu'une chaîne tronquée : une cellule
+  // illisible se voit, une date fausse non.
+  return isoDate(v) || String(v);
 };
 
 /**
@@ -207,12 +223,31 @@ function rowToCells(r, sensibles = false) {
   cells.prescripteur_habilite = PRESCRIPTEUR_LABELS[r.eligibilite_source] || '';
   // `null` ≠ 0 : « aucune semaine sous le plancher » et « activité non relevée »
   // ne se lisent pas pareil sur un document de contrôle.
-  cells.semaines_sous_seuil = r.semaines_sous_seuil == null ? '' : Number(r.semaines_sous_seuil);
+  // CORRECTIF D-03 — « 0 semaine sous 15 h » et « aucune semaine relevée » sont
+  // deux affirmations différentes, et sur un document de contrôle un 0 dans une
+  // colonne intitulée « Semaines sous 15 h » se lit « cette personne n'est
+  // jamais passée sous le plancher », c'est-à-dire l'exact contraire de ce qui
+  // est su. Le moteur d'activité le DIT (`nb_semaines_relevees`) ; il n'y avait
+  // qu'à le lire. Même doctrine que le relevé d'assiduité de la PR B : une
+  // semaine sans relevé est vide, jamais 0 h.
+  cells.semaines_sous_seuil = (r.semaines_sous_seuil == null || r.semaines_relevees === 0)
+    ? '' : Number(r.semaines_sous_seuil);
 
+  // ── CORRECTIF D-02 — l'évolution se mesure sur la DERNIÈRE ÉVALUATION ────
+  // `r[f.column]` est la valeur COURANTE, déjà repliée sur le diagnostic par le
+  // `COALESCE(lm, d)` de la requête : c'est la bonne règle de valorisation pour
+  // la colonne de valeur, et la mauvaise pour l'évolution. Comparer le
+  // diagnostic avec lui-même rendait toujours « stable » — donc « l'accompagne-
+  // ment n'a rien changé » là où la lecture juste est « nous ne l'avons pas
+  // remesuré ». Deux documents transmis à la même instructrice, sur la même
+  // année, se contredisaient sur la même personne : le bloc 3 de la synthèse
+  // disait « non évalué », l'export (d) disait « stable ». Le second terme est
+  // désormais la dernière évaluation BRUTE (`<col>_actuel`, projetée par
+  // `fetchFreinsRows`), et les deux surfaces disent la même chose.
   for (const f of axesExport(sensibles)) {
     const entree = r[`${f.column}_entree`];
     cells[`${f.column}_entree`] = entree == null ? '' : Number(entree);
-    cells[`${f.column}_evolution`] = evolutionFrein(entree, r[f.column]);
+    cells[`${f.column}_evolution`] = evolutionFrein(entree, r[`${f.column}_actuel`]);
   }
   return cells;
 }

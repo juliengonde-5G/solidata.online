@@ -222,14 +222,17 @@ async function ins(table, obj) {
       expect(par.Zzb[idx]).toBe('non évalué');
     });
 
-    test("V-43c — DÉFAUT D-02 · et les deux documents transmis à l'autorité se contredisent", async () => {
-      const { composerDialogueGestion } = require('../../src/services/dialogue-gestion');
-      const s = await composerDialogueGestion({ annee: AN, trimestre: null });
-      const axe = s.blocs['3_freins'].par_axe.find((a) => a.axe === 'mobilite');
+    test("V-43c — DÉFAUT D-02 · les deux documents transmis à l'autorité disent la MÊME chose", async () => {
+      // Le compte se lit sur les blocs INTERNES (le document, lui, retire un
+      // compteur de moins de 5 personnes depuis le correctif B-01) : c'est bien
+      // la MÊME fonction de composition, donc la même règle d'évolution.
+      const { composerBlocsInternes } = require('../../src/services/dialogue-gestion');
+      const interne = await composerBlocsInternes({ annee: AN });
+      const axe = interne.freins.par_axe.find((a) => a.axe === 'mobilite');
       const idx = entetes.indexOf('Frein mobilité — évolution');
       const par = Object.fromEntries(lignes.map((l) => [l[0], l]));
       // La synthèse compte Zzb en « non évalué » (elle lit la dernière
-      // évaluation SANS repli sur le diagnostic) ; l'export (d) écrit
+      // évaluation SANS repli sur le diagnostic) ; l'export (d) écrivait
       // « stable » pour la même personne, la même année.
       expect(axe.non_evalues).toBeGreaterThanOrEqual(1);
       expect(par.Zzb[idx]).toBe('non évalué');
