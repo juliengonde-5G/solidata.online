@@ -6,7 +6,7 @@
 >
 > **Complété le 13/09/2026 (PR C « Section CIP et documents du salarié », v. 2.54.0) :** l'espace CIP est réorganisé autour de ce qu'il y a à faire — l'écran d'ouverture devient **« Mes échéances »** (cas 1, réécrit), la fiche passe de huit à **quatre onglets** (Situation / Suivi / Dossier administratif / Diagnostic — cas 25), l'écran de l'encadrant technique s'ouvre désormais **sans compte, par un lien** (cas 26), et deux nouveaux documents sont produits **pour la personne accompagnée** — « Mon parcours en une page » et « Mon Récap » — avec des **rappels de rendez-vous** par SMS ou e-mail sur son accord (cas 27 et 28). Rien de ce qui existait n'a été supprimé ; ce qui a changé de place est signalé au fil du texte.
 >
-> **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », en cours de livraison) :** quatre nouveaux repères (cas 29 à 32) sur ce que le dialogue de gestion avec l'autorité de tutelle regarde de plus près — la synthèse annuelle, le débouché d'une immersion, les orientations DORA et les aides mobilisées, et la nouvelle façon de compter les sorties. **Trois de ces quatre cas décrivent un écran qui n'existe pas encore** au 14 septembre 2026 : le calcul et l'enregistrement en base sont faits, la saisie et l'affichage à l'écran restent à livrer. Chaque cas concerné le dit en toutes lettres.
+> **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », v. 2.55.0) :** quatre nouveaux repères (cas 29 à 32) sur ce que le dialogue de gestion avec l'autorité de tutelle regarde de plus près — la synthèse annuelle, le débouché d'une immersion, les orientations DORA et les aides mobilisées, et la nouvelle façon de compter les sorties. Les quatre écrans sont **en service** ; chaque cas dit où cliquer.
 >
 > Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
@@ -754,25 +754,23 @@ seuil, ses prochains rendez-vous, ses engagements et ceux de la structure, ses d
 **Objectif** : produire, une fois par an, le document que vous transmettez à l'autorité de tutelle
 avant la séance de dialogue de gestion — sans le reconstituer à la main dans un tableur.
 
-> **Pas encore livré à l'écran au 14/09/2026.** Le calcul est écrit et déjà utilisé par les indicateurs
-> de reporting RH ; **aucun bouton ne le produit encore**. Ce qui suit décrit ce que fera l'écran une
-> fois branché — utilisez d'ici là la **« Synthèse comité (CSV) »**, disponible sur « Pilotage &
-> indicateurs » (cas 15), qui répond à la même intention sur un périmètre plus étroit.
-
-**Ce que ce document contiendra** : neuf blocs dans un ordre fixe — effectifs et ETP (le **chiffre
+**Ce que ce document contient** : neuf blocs dans un ordre fixe — effectifs et ETP (le **chiffre
 validé par l'ASP en premier**, le calcul interne de contrôle en second et nommé comme tel), publics à
 l'entrée par critère d'éligibilité, freins (concernés à l'entrée, levés, stables, aggravés), heures
 d'accompagnement et aides mobilisées, immersions et leur débouché, **sorties** (voir cas 32), résultats
 à six mois, conformité (fiches transmises au référent, actualisations France Travail), et une dernière
 page qui écrit la règle de calcul de **chaque** taux en toutes lettres. **Strictement non nominatif** :
-tout agrégat portant sur moins de cinq personnes s'affiche `null` plutôt qu'un chiffre qui désignerait
-quelqu'un.
+tout agrégat portant sur moins de cinq personnes est **retiré** du document plutôt qu'affiché — comptes
+de personnes, mais aussi comptes d'actions, d'orientations et d'aides —, et le document dit combien
+d'agrégats ont été retirés par bloc, jamais lesquels. Ce plancher ne s'abaisse pas par un réglage.
 
-**Pas à pas, une fois l'écran livré** : Pilotage & indicateurs → onglet **« Dialogue de gestion »** →
+**Pas à pas** : menu **RH et Insertion → Pilotage & indicateurs** → onglet **« Dialogue de gestion »** →
 choisir l'année (et, pour un point d'étape allégé, le trimestre) → **« Aperçu »** pour vérifier avant
-d'envoyer → **« Générer et enregistrer »** pour produire un instantané daté (ce que vous transmettez le
-15 janvier reste ce qu'il était le 15 janvier, même si le dossier évolue ensuite) → **« CSV »** pour la
-version tableur. Un historique liste les générations passées et permet de rejouer un instantané ancien
+d'envoyer (rien n'est enregistré, mais la consultation est inscrite au journal) → **« Imprimer
+l'aperçu »** pour un PDF de travail → **« Générer et enregistrer (PDF) »** pour produire l'instantané
+daté que vous transmettez (ce que vous transmettez le 15 janvier reste ce qu'il était le 15 janvier,
+même si le dossier évolue ensuite) → **« CSV »** pour la version tableur. En bas de l'onglet,
+« Synthèses déjà transmises » liste les générations passées et rejoue n'importe quel instantané ancien
 en PDF.
 
 > **Points de vigilance**
@@ -788,11 +786,11 @@ en PDF.
 
 **Objectif** : dire ce qu'une immersion a produit, pas seulement qu'elle a eu lieu.
 
-> **Pas encore saisissable à l'écran au 14/09/2026.** Le champ existe et peut déjà être enregistré ;
-> **la fiche du salarié ne propose encore aucun sélecteur** pour le renseigner. Ce qui suit décrit ce
-> qui arrivera à la clôture d'une PMSMP.
+**Où** : fiche du salarié → onglet **Situation** → immersions (PMSMP) → **une immersion dont la date de fin
+est passée** propose le sélecteur ; une immersion en cours ne le propose pas (demander son débouché à
+une immersion qui commence n'aurait aucun sens).
 
-**Ce que vous choisirez** : à la date de fin d'une immersion passée, un sélecteur **« Débouché »** —
+**Ce que vous choisissez** : un sélecteur **« Débouché »** —
 embauche chez l'accueillant, embauche ailleurs, formation, poursuite du parcours, aucun débouché,
 inconnu — avec sa date. Choisir « embauche chez l'accueillant » alimente directement l'indicateur
 « immersions transformées en emploi » de la synthèse de dialogue de gestion (cas 29). **« Inconnu » est
@@ -810,10 +808,10 @@ doit pas se lire comme « aucun débouché ».
 **Objectif** : garder la trace de ce que vous mobilisez réellement pour lever un frein, au-delà du seul
 partenaire nommé — et pouvoir le chiffrer au dialogue de gestion.
 
-> **Pas encore saisissable à l'écran au 14/09/2026.** Les deux champs existent côté serveur (avec leurs
-> propres règles : un lien DORA doit être une adresse sécurisée, un montant d'aide ne peut pas être
-> négatif) ; **aucun formulaire ne les propose encore** sur la page Actions CIP. Ce qui suit décrit ce
-> qui s'ajoutera au formulaire d'une action.
+**Où** : sous chaque action (onglet **Suivi** de la fiche, ou page **Actions CIP**), le bloc
+**« + Orientation DORA / aide mobilisée »**, replié par défaut et marqué « (non renseignées) » tant qu'il
+est vide. Deux règles à la saisie : un lien DORA doit commencer par `https://`, un montant d'aide ne peut
+pas être négatif.
 
 **Orientation DORA** *(l'annuaire national des services d'insertion)* : un bloc repliable où noter le
 service consulté, le lien vers la fiche DORA, et le **résultat** — orienté, pris en charge, refusé,
@@ -829,8 +827,10 @@ même chose que « je ne sais pas combien »).
 > **Points de vigilance**
 > - Ces deux blocs sont **facultatifs** sur chaque action : ne forcez rien à y entrer si l'action ne
 >   relève ni de l'un ni de l'autre.
-> - C'est cet indicateur, une fois alimenté, qui permettra à la direction de chiffrer devant l'autorité
->   ce que l'accompagnement mobilise réellement — au-delà de la seule liste de partenaires.
+> - C'est cet indicateur qui permet à la direction de chiffrer devant l'autorité ce que
+>   l'accompagnement mobilise réellement — au-delà de la seule liste de partenaires (cas 29, blocs 3
+>   et 4). Pour l'encadrant technique, les orientations et aides d'une action de l'axe **santé** sont
+>   masquées comme le reste de cet axe.
 
 ---
 
@@ -854,9 +854,10 @@ dès que vous le pouvez (cas 13) — c'est ce geste, fait ou non fait, que la no
 imprimées **côte à côte** dans la synthèse de dialogue de gestion, pour que l'écart entre les deux ne
 se lise pas comme une erreur mais comme le changement de règle qu'il est.
 
-> **Où le voir aujourd'hui** : au 14/09/2026, ce nouveau calcul alimente déjà l'indicateur « sorties »
-> du reporting RH ; **l'écran « Pilotage & indicateurs » affiche encore l'ancien dénominateur**, en
-> attendant que l'onglet « Dialogue de gestion » (cas 29) soit branché.
+> **Où le voir** : sur **Pilotage & indicateurs**, le bloc « Sorties » présente la nouvelle méthode en
+> premier — fins de parcours, sorties classées, ligne **« non documentées »** en ambre dès qu'elle n'est
+> pas à zéro — et, pour 2026, l'ancienne méthode à côté ; le reporting RH et la synthèse de dialogue de
+> gestion (cas 29) appliquent la même règle, calculée une seule fois.
 
 > **Points de vigilance**
 > - **Une sortie « non documentée » se corrige** : si vous parvenez, même après coup, à joindre la
@@ -865,4 +866,4 @@ se lise pas comme une erreur mais comme le changement de règle qu'il est.
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », lot 8)** : quatre nouveaux cas (29 à 32 — la synthèse de dialogue de gestion, le débouché d'une immersion, les orientations DORA et aides mobilisées, la nouvelle ligne « sortie non documentée »), sept captures d'écran ajoutées (cas 1, 22, 24, 26, 27), aucun cas existant modifié. Trois des quatre nouveaux cas décrivent, à cette date, un calcul déjà en place côté serveur mais **encore sans écran de saisie ou d'affichage** — chacun le dit en toutes lettres ; ce guide sera repris dès que ces écrans seront livrés.*
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », lot 8)** : quatre nouveaux cas (29 à 32 — la synthèse de dialogue de gestion, le débouché d'une immersion, les orientations DORA et aides mobilisées, la nouvelle ligne « sortie non documentée »), sept captures d'écran ajoutées (cas 1, 22, 24, 26, 27), aucun cas existant modifié. **Repassé le même jour** après la livraison de l'écran (lot 6) et ses correctifs de revue : les cas 29 à 32 avaient d'abord été écrits « en cours de livraison », ils décrivent désormais les écrans en service, chemins de clic vérifiés dans le code.*

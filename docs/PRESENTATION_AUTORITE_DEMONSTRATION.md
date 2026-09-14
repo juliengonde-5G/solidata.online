@@ -182,24 +182,25 @@ résulte, et le refus d'un export sans données.
 | 4 | Ouvrir le module RGPD (`/rgpd`) → onglet **« Journal d'audit »** | La ligne la plus récente porte le code de l'export, l'heure exacte, le compte — jamais le contenu |
 | 5 | Revenir sur « Dossiers FSE+ », choisir **un projet ou une période sans aucun participant** (ou créer un filtre qui n'en retient aucun) et relancer l'export | **Refus** : message explicite, aucun fichier produit |
 
-**Partie 2 — l'export (e), synthèse de dialogue de gestion**
+**Partie 2 — l'export (e), synthèse de dialogue de gestion (livré, chantier D)**
 
 | # | Geste | Chemin |
 |---|---|---|
-| 1 | Ouvrir | **Pilotage & indicateurs** (`/insertion/audit`) |
-| 2 | Générer la synthèse agrégée | Bouton **« Synthèse comité (CSV) »**, ou l'onglet dédié **« Dialogue de gestion »** de cette même page une fois branché (voir note ci-dessous) |
-| 3 | Vérifier la ligne de journal | Comme pour l'export (a), onglet « Journal d'audit » du module RGPD |
-| 4 | Provoquer un export vide | Choisir une année sans aucun parcours terminé |
+| 1 | Ouvrir | **Pilotage & indicateurs** (`/insertion/audit`) → onglet **« Dialogue de gestion »** |
+| 2 | Choisir l'année (l'année en cours convient : le document est annuel, un trimestre donne la version allégée) | Sélecteurs en tête de l'onglet |
+| 3 | **« Aperçu »** | Les têtes de chapitre des neuf blocs s'affichent — ETP ASP en premier, sorties avec la ligne « non documentées », freins entrée → évolution, immersions et leur débouché, conformité, méthode. Rien n'est enregistré, **mais la consultation est déjà au journal** (elle est bloquante : sans journal, pas d'aperçu) |
+| 4 | **« Générer et enregistrer (PDF) »** (compte ADMIN ou RH) | Un instantané daté est enregistré, la fenêtre d'impression s'ouvre sur le PDF A4 (en-tête de traçabilité : date, compte, périmètre, version de l'outil) ; la synthèse apparaît dans « Synthèses déjà transmises » en bas de l'onglet |
+| 5 | **« CSV »** | Le même document à plat, une ligne par indicateur — cellule vide, jamais zéro, pour un agrégat retiré |
+| 6 | Vérifier la ligne de journal | Comme pour l'export (a), onglet « Journal d'audit » du module RGPD : trois lignes (aperçu, génération, CSV), chacune avec l'heure et le compte, jamais le contenu |
+| 7 | Provoquer un export vide | Choisir une année sans aucune fin de parcours et relancer « Aperçu » ou « Générer » : **refus motivé**, aucun fichier ni instantané |
 
-> **Point d'honnêteté sur l'export (e)** : la synthèse de dialogue de gestion en neuf blocs (ETP ASP en
-> premier, dénominateur des sorties corrigé avec la ligne « sortie non documentée », freins entrée →
-> évolution, débouchés d'immersion, orientations DORA) est le livrable du **lot 6** de cette même PR D,
-> conçu **en parallèle** de ce document. **Si la séance a lieu avant la fin de cette livraison**, la
-> version existante (« Synthèse comité », en service depuis les livraisons précédentes) tient la même
-> promesse sur un périmètre plus étroit — nous le disons en séance, sans le présenter comme le document
-> final, et nous montrons alors les neuf blocs sur l'environnement de recette. C'est exactement la
-> réserve déjà posée par `PRESENTATION_AUTORITE_INSERTION.md` pour le chantier A en son temps : dire
-> l'écart plutôt que le taire.
+> **Ce qu'il est utile de dire en séance** : ce document ne peut désigner personne **par construction** —
+> tout agrégat entre 1 et 4 est retiré en une seule passe sur le document entier (comptes de personnes
+> comme comptes d'actions, d'orientations et d'aides ; la liste des entreprises d'accueil disparaît sous
+> le seuil ; une seconde case tombe quand la première se retrouverait par soustraction), et le document
+> indique combien d'agrégats ont été retirés par bloc. Si la gestionnaire demande à voir une case
+> retirée, la réponse est : « elle n'existe pas dans le fichier, elle n'a jamais été composée ». Le
+> plancher de cinq ne s'abaisse pas par un réglage.
 
 **Ce que l'autorité doit voir** : le journal est écrit **avant** l'envoi du fichier (un journal en
 échec fait échouer l'export — jamais de fichier nominatif non tracé), chaque fichier porte son en-tête
@@ -260,6 +261,8 @@ confirmée ou, au contraire, mise en défaut.
 § 4.3 de `09-matrice-reporting-autorite.md`. Chaque chemin de clic a été vérifié dans le code au
 14 septembre 2026 (`frontend/src/pages/InsertionParcours.jsx`, `AuditInsertion.jsx`, `DossiersFSE.jsx`,
 `components/insertion/EntretienForm.jsx`, `DiagnosticForm.jsx`) ; le point signalé « pas encore d'écran
-de consultation » (condition 2) et le point d'honnêteté sur l'export (e) (condition 4) le resteront
-tant que le code correspondant n'aura pas changé — relire ce document après chaque livraison qui
-touche ces deux surfaces.*
+de consultation » (condition 2) le restera tant que le code correspondant n'aura pas changé — relire ce
+document après chaque livraison qui touche cette surface. La condition 4 a été **reprise le même jour**
+après la livraison de l'onglet « Dialogue de gestion » (lot 6) et ses correctifs de revue : la réserve
+« si la séance précède la livraison » n'a plus d'objet, le déroulé décrit l'écran en service
+(`components/insertion/DialogueGestionPanel.jsx`, `routes/insertion/reporting.js`).*

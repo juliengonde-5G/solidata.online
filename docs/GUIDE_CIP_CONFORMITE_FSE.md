@@ -11,18 +11,16 @@
 > bénéficiaires du RSA (§ 9) et la feuille de temps de l'intervenant qui les accompagne (§ 10) —, et
 > désormais **la façon dont ces obligations remontent chaque semaine à la conseillère** (§ 11), **les
 > deux documents produits pour la personne accompagnée** (§ 12), et **le document annuel transmis à
-> l'autorité de tutelle avant le dialogue de gestion** (§ 13, chantier D — en cours de livraison).
+> l'autorité de tutelle avant le dialogue de gestion** (§ 13, chantier D, livré le 14/09/2026, v. 2.55.0).
 >
 > - **Public** : CIP, RH, administrateur. Les écrans décrits sont réservés aux rôles **ADMIN et RH** — un
 >   encadrant technique n'en voit aucun ; la synthèse de dialogue de gestion (§ 13) fait exception dans
->   l'autre sens, un encadrant technique (MANAGER) pouvant la **lire** en agrégat une fois qu'elle sera
->   branchée. La feuille de temps (§ 10) fait exception d'écriture : un encadrant technique qui mène
+>   l'autre sens, un encadrant technique (MANAGER) pouvant la **lire** en agrégat — jamais la générer.
+>   La feuille de temps (§ 10) fait exception d'écriture : un encadrant technique qui mène
 >   lui-même des entretiens ou des actions voit **la sienne**, jamais celle d'un collègue.
 > - **Les copies d'écran de ce guide sont des maquettes**, validées le 12/09/2026 avant développement :
->   l'écran livré peut différer dans le détail. Les blocs et écrans de la PR C (§ 11 et § 12) n'ont pas
->   encore de maquette illustrée dans ce guide. **Le § 13 (chantier D) n'a, au 14/09/2026, aucun écran
->   du tout** — le calcul est en base, la saisie et l'affichage restent à livrer, comme le § 13 le dit
->   lui-même.
+>   l'écran livré peut différer dans le détail. Les blocs et écrans des PR C et D (§ 11 à § 13) n'ont
+>   pas encore de maquette illustrée dans ce guide.
 
 ---
 
@@ -253,9 +251,10 @@ Trois documents transmis par la référente institutionnelle en septembre 2026 c
 > **Points de vigilance**
 > - **Le rattachement d'un participant à un projet se saisit toujours à la main**, jamais déduit d'un statut
 >   social : être bénéficiaire du RSA ne fait entrer personne dans une opération européenne.
-> - **Aujourd'hui, aucun écran ne permet ce rattachement.** Le bouton « Rattacher à un projet » de la fiche
->   renvoie vers les réglages, où seuls les projets et les postes se gèrent. En attendant l'écran de
->   rattachement, demandez à votre administrateur (l'API existe et le geste est tracé).
+> - **Où le faire** : fiche du salarié → onglet **Dossier administratif** → bloc **« Projets cofinancés »**
+>   (ADMIN/RH) : choisir un projet **actif** et la **date d'entrée** dans le projet, puis « Rattacher ».
+>   Le geste est daté et tracé ; les réglages (`/admin/insertion`) ne servent qu'à gérer les projets et
+>   leurs postes, jamais à rattacher une personne.
 > - Un projet se **clôt**, il ne se supprime pas : les dossiers qui s'y rattachent doivent rester lisibles
 >   pendant toute la piste d'audit.
 
@@ -392,14 +391,11 @@ Trois gestes, dans cet ordre : **« Aperçu »** (n'enregistre rien) → **« G�
 dicté colonne par colonne — sans le reconstituer chaque année à la main dans un tableur, et sans jamais
 y faire figurer un nom.
 
-> **État au 14/09/2026 : calcul livré, écran non livré.** Le chantier D est en cours de livraison en
-> parallèle de ce guide. La structure de données et le **moteur de calcul du dénominateur des sorties**
-> (`services/sorties-engine.js`) sont écrits, testés et déjà consommés par les indicateurs de reporting
-> RH — mais **aucun écran de saisie ni d'affichage** n'existe encore : ni le formulaire d'orientation
-> DORA / aide mobilisée sur une action, ni le sélecteur de débouché d'une PMSMP, ni l'onglet
-> « Dialogue de gestion » lui-même. Ce paragraphe décrit ce que le document contiendra et pourquoi,
-> pour que la conseillère comprenne dès aujourd'hui ce que ses saisies courantes (actions, PMSMP,
-> bilans de sortie) alimenteront demain.
+> **Livré le 14/09/2026 (v. 2.55.0).** Le moteur de calcul du dénominateur des sorties
+> (`services/sorties-engine.js`), l'onglet **« Dialogue de gestion »** de la page Pilotage & indicateurs,
+> le bloc **« Orientation DORA / aide mobilisée »** de chaque action et le sélecteur de **débouché** d'une
+> immersion terminée sont en service. Ce paragraphe décrit ce que le document contient et pourquoi, pour
+> que la conseillère sache ce que ses saisies courantes (actions, PMSMP, bilans de sortie) alimentent.
 
 **Neuf blocs, dans un ordre fixe qui ne change pas d'une année sur l'autre** :
 
@@ -420,24 +416,48 @@ y faire figurer un nom.
    rupture de série soit comprise et non découverte.
 7. **Résultats** — situation à six mois, satisfaction de sortie.
 8. **Conformité** — complétude FSE+ par projet, points d'étape tenus avec les référents,
-   actualisations France Travail rappelées, semaines sous 15 h.
+   actualisations France Travail rappelées, ruptures de droits évitées, semaines sous 15 h — cet
+   indicateur **n'est pas rendu** quand aucune semaine n'a été relevée sur la période (la paie n'a rien
+   remonté) : le document le dit en toutes lettres, ce n'est pas « zéro semaine sous le plancher ».
 9. **Méthode** — la règle de calcul de **chaque** taux, en toutes lettres, avec la mention « objectif
    non paramétré » là où la cible n'est pas encore connue.
 
 **Ce qui garantit qu'il ne désigne personne** : tout agrégat portant sur **moins de cinq personnes**
-est rendu absent (`null`) plutôt qu'affiché — c'est la même règle que celle des enquêtes anonymes du
-module RSE, appliquée ici à un document qui, lui, sort de la structure.
+est rendu absent plutôt qu'affiché — c'est la même règle que celle des enquêtes anonymes du module RSE,
+appliquée ici à un document qui, lui, sort de la structure. La règle est appliquée **en une seule passe
+sur le document entier**, pas bloc par bloc : les **comptes d'actions, d'orientations DORA, d'aides et
+de gestes de conformité** y sont soumis comme les comptes de personnes ; la **liste des entreprises
+d'accueil** disparaît sous le seuil ; quand une seule case retirée pourrait se retrouver par soustraction
+à partir du total, une **seconde case** tombe avec elle (suppression complémentaire) ; et le document
+indique le **nombre** d'agrégats retirés par bloc, jamais leur emplacement. Le plancher de cinq est
+**structurel** : le réglage `insertion.k_anonymat_min` ne peut que le durcir, jamais l'abaisser — une
+décision qui appartient au délégué à la protection des données, pas à un réglage.
 
-**Pas à pas, une fois l'écran livré** : Pilotage & indicateurs → onglet « Dialogue de gestion » →
-choisir l'année (une version trimestrielle allégée existera aussi, pour les publics à l'entrée et la
-conformité) → « Aperçu » (ne rien enregistre) → « Générer et enregistrer » (fige un instantané daté et
-inscrit la génération au journal — un échec du journal empêchera la génération, comme pour tous les
-exports du module) → export CSV en parallèle du PDF.
+**Pas à pas** : menu **RH et Insertion → Pilotage & indicateurs** (`/insertion/audit`) → onglet
+**« Dialogue de gestion »** → choisir l'année (et, pour un point d'étape allégé sur les publics à
+l'entrée et la conformité, le trimestre) → **« Aperçu »** : les têtes de chapitre à l'écran, sans rien
+enregistrer — mais la consultation est **inscrite au journal, de façon bloquante** : si le journal est
+indisponible, l'aperçu ne s'affiche pas ; **« Imprimer l'aperçu »** produit le PDF sans l'enregistrer ;
+**« Générer et enregistrer (PDF) »** (ADMIN/RH) fige un instantané daté et inscrit la génération au
+journal dans la même transaction — un échec du journal empêche la génération, comme pour tous les
+exports du module ; **« CSV »** produit la version tableur (mêmes règles, même journal). Un périmètre
+sans aucune fin de parcours est **refusé** (message explicite, aucun fichier). L'historique des
+synthèses déjà transmises, en bas de l'onglet, rejoue n'importe quel instantané ancien en PDF.
 
-**Ce que la CIP alimente déjà, sans le savoir, pour ce document futur** : la catégorie et le partenaire
-de chaque action (bloc 3), la durée saisie à la clôture des entretiens et des actions (bloc 4), le
-classement d'une sortie dès qu'il est connu (bloc 6, voir § 5) — rien de nouveau à saisir, seulement une
-raison de plus de ne pas laisser une sortie sans catégorie.
+**Ce que la CIP alimente déjà, sans y penser, pour ce document** : la catégorie et le partenaire de
+chaque action (bloc 3), la durée saisie à la clôture des entretiens et des actions (bloc 4), le
+classement d'une sortie dès qu'il est connu (bloc 6, voir § 5). Trois saisies sont nouvelles et
+**facultatives** : le **débouché** d'une immersion terminée (bloc 5, fiche du salarié → onglet Situation →
+immersions), l'**orientation DORA** et l'**aide mobilisée** sur une action (blocs 3 et 4, bloc repliable
+sous chaque action de l'onglet Suivi) — voir [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 30 et 31.
+
+**Le tableau des freins enrichi (export (d))**, produit depuis la même page (bouton « Tableau des
+freins »), passe de 23 à **45 colonnes** : les 23 du cahier des charges, intactes et en tête, puis BRSA,
+catégorie France Travail, critères d'éligibilité (jamais l'article 10), Pass IAE, référent unique,
+projet cofinancé, prescripteur, semaines sous 15 h, et pour chaque axe de frein la **valeur d'entrée et
+son évolution**. En CSV, il porte le même **en-tête commenté** que l'export FSE+ (export, généré le, par,
+périmètre, nombre de lignes, version, mention « document de travail ») ; chaque génération est
+journalisée. Le frein judiciaire n'y figure que sur demande explicite (`sensibles=1`, ADMIN/RH).
 
 ---
 
@@ -477,7 +497,7 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 
 **7. Dois-je encore saisir sur les Emplois de l'inclusion et sur Ma Démarche FSE+ ?** Oui, comme avant. SOLIDATA **prépare, contrôle et trace** ; les plateformes de l'État font foi, et chaque export le rappelle en toutes lettres. Le bloc à copier du dossier administratif est là précisément pour raccourcir la saisie sur la plateforme, pas pour la remplacer.
 
-**8. Qu'est-ce qui n'est pas encore livré ?** Côté conformité FSE+ et cadre RSA (§ 1 à 12), rien : ce guide est à jour. La **réorganisation de la fiche en quatre onglets**, la remontée du questionnaire FSE+ dans le socle du diagnostic, et l'**écran encadrant accessible par simple lien** (sans compte SOLIDATA) pour les renouvellements — annoncés ici comme à venir — sont **livrés depuis le 13/09/2026 (PR C, v. 2.54.0)**, voir § 11 et § 12 ainsi que [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 25 et 26. La **feuille de temps mensuelle par intervenant**, l'**agrégat des heures d'accompagnement** et la **fiche pour le référent** externe (§ 9 et § 10) restent **livrés** depuis la PR B. **La synthèse de dialogue de gestion (§ 13, chantier D) ne l'est pas** : voir questions 12 et 13.
+**8. Qu'est-ce qui n'est pas encore livré ?** Côté conformité FSE+ et cadre RSA (§ 1 à 12), rien : ce guide est à jour. La **réorganisation de la fiche en quatre onglets**, la remontée du questionnaire FSE+ dans le socle du diagnostic, et l'**écran encadrant accessible par simple lien** (sans compte SOLIDATA) pour les renouvellements — annoncés ici comme à venir — sont **livrés depuis le 13/09/2026 (PR C, v. 2.54.0)**, voir § 11 et § 12 ainsi que [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 25 et 26. La **feuille de temps mensuelle par intervenant**, l'**agrégat des heures d'accompagnement** et la **fiche pour le référent** externe (§ 9 et § 10) restent **livrés** depuis la PR B. La **synthèse de dialogue de gestion** et le **tableau des freins enrichi** (§ 13, chantier D) le sont **depuis le 14/09/2026 (v. 2.55.0)** : voir questions 12 et 13.
 
 **9. La base légale de la fiche pour le référent, c'est réglé ?** Pas encore, et nous le disons sans détour. L'entrée au registre est posée sur la mission d'intérêt public du dispositif, mais **c'est notre délégué à la protection des données qui doit la confirmer** avant que le traitement soit définitivement établi, et l'analyse d'impact déjà engagée pour le module doit être complétée de ce point précis. En attendant, la fiche continue d'être produite quand le référent en a besoin — la structure ne peut pas faire autrement — mais ce point figure explicitement parmi ce qui reste à trancher (voir [`PRESENTATION_AUTORITE_INSERTION.md`](PRESENTATION_AUTORITE_INSERTION.md) § 12).
 
@@ -485,10 +505,10 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 
 **11. La personne n'a pas de téléphone ou d'e-mail à elle : puis-je quand même activer les rappels ?** Non, pas raisonnablement : le destinataire doit être un contact **qui lui appartient** — c'est une règle de conduite (vérifiée oralement), aucun contrôle technique ne peut la garantir. Sans contact propre, laissez le consentement à « jamais demandé » plutôt que d'utiliser le téléphone d'un tiers.
 
-**12. Le débouché d'une PMSMP, l'orientation DORA, l'aide mobilisée : où je les saisis ?** Nulle part encore au 14/09/2026 — voir § 13. Le serveur sait déjà enregistrer ces trois informations, mais aucun écran ne les propose. Ne cherchez pas un bouton caché : il n'existe pas encore.
+**12. Le débouché d'une PMSMP, l'orientation DORA, l'aide mobilisée : où je les saisis ?** Le **débouché** : fiche du salarié → onglet **Situation** → immersions → sur une immersion dont la date de fin est passée, le sélecteur « Débouché » et sa date (« inconnu » est une réponse honnête, pas un oubli). L'**orientation DORA** et l'**aide mobilisée** : sous chaque action de l'onglet **Suivi** (ou de la page Actions CIP), le bloc repliable **« + Orientation DORA / aide mobilisée »**. Les trois sont facultatifs — voir [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 30 et 31.
 
-**13. Je veux savoir où en est la synthèse de dialogue de gestion pour la préparer à l'avance.** Continuez de faire ce que vous faites déjà : classer les sorties dès que vous le pouvez, rattacher chaque action à sa catégorie et à un partenaire, saisir la durée à la clôture des entretiens. Le document futur se composera de ces mêmes saisies (§ 13 le détaille bloc par bloc) — il n'y a rien à anticiper de plus.
+**13. Je veux préparer la synthèse de dialogue de gestion à l'avance.** Ouvrez l'**« Aperçu »** (§ 13) à tout moment de l'année : il montre ce que le document dirait aujourd'hui, sans rien enregistrer — et notamment la ligne « sortie non documentée », qui est ce que vous pouvez encore réduire. Pour le reste, continuez de faire ce que vous faites déjà : classer les sorties dès que vous le pouvez, rattacher chaque action à sa catégorie et à un partenaire, saisir la durée à la clôture des entretiens, renseigner le débouché des immersions terminées. Le document se compose de ces mêmes saisies (§ 13 le détaille bloc par bloc).
 
 ---
 
-*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée), **puis à la livraison de la PR C « Section CIP et documents du salarié » (v. 2.54.0)** : nouveaux § 11 (écran « Mes échéances », obligations reportables 48 h) et § 12 (« Mon parcours en une page », « Mon Récap », rappels de rendez-vous), anciens § 11-12 renumérotés § 13-14, deux nouvelles questions de FAQ, mise à jour des renvois d'onglets (Dossier administratif, Suivi) et de la question 8. Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail — les blocs de la PR C n'ont pas encore de maquette illustrée ici. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », lot 8, en cours de livraison)** : nouveau § 13 (synthèse de dialogue de gestion), anciens § 13-14 renumérotés § 14-15, deux nouvelles questions de FAQ (12 et 13), la question 8 mise à jour. Le § 13 décrit un calcul déjà en base et un écran qui ne l'est pas encore — il le dit lui-même en toutes lettres, et sera repris dès que cet écran sera livré.*
+*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée), **puis à la livraison de la PR C « Section CIP et documents du salarié » (v. 2.54.0)** : nouveaux § 11 (écran « Mes échéances », obligations reportables 48 h) et § 12 (« Mon parcours en une page », « Mon Récap », rappels de rendez-vous), anciens § 11-12 renumérotés § 13-14, deux nouvelles questions de FAQ, mise à jour des renvois d'onglets (Dossier administratif, Suivi) et de la question 8. Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail — les blocs de la PR C n'ont pas encore de maquette illustrée ici. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », v. 2.55.0)** : nouveau § 13 (synthèse de dialogue de gestion, tableau des freins enrichi), anciens § 13-14 renumérotés § 14-15, deux nouvelles questions de FAQ (12 et 13), la question 8 mise à jour ; **repassé le même jour** après la livraison du lot 6 et ses correctifs de revue — le § 13 avait d'abord été écrit pendant que l'écran se construisait et le disait « non livré » ; il décrit désormais l'écran en service, vérifié dans le code (onglet « Dialogue de gestion », blocs DORA / aide, sélecteur de débouché, export (d) à 45 colonnes, aperçu journalisé, k-anonymat structurel). Le § 8 a été corrigé au passage : le rattachement d'un participant à un projet se fait depuis le Dossier administratif, l'écran existe.*

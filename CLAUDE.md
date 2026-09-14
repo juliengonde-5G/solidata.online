@@ -2,7 +2,7 @@
 
 > **Ce fichier est le contexte de référence pour tout agent IA (Claude, Copilot, etc.) travaillant sur le projet SOLIDATA.**
 > Il est lu automatiquement par Claude Code au démarrage de chaque session.
-> Dernière mise à jour : 13 septembre 2026
+> Dernière mise à jour : 14 septembre 2026
 
 ---
 

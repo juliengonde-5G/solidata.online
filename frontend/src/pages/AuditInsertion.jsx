@@ -315,7 +315,7 @@ function ExportFreinsModal({ year, onClose }) {
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-4 space-y-3 my-auto max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="font-semibold text-gray-800">Export « Tableau des freins » (23 colonnes)</h3>
+            <h3 className="font-semibold text-gray-800">Export « Tableau des freins » (45 colonnes — les 23 du cahier des charges en tête)</h3>
             <p className="text-[11px] text-gray-400">Vérifiez la complétude avant de générer — chaque génération est <strong>journalisée</strong> au registre RGPD.</p>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none" aria-label="Fermer">×</button>
