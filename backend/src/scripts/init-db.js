@@ -8790,6 +8790,8 @@ async function executerInitialisation() {
     // PR C (2.54.0) — échéances / jeton ETI (lot 5) et documents du salarié / rappels (lot 7)
     await require('./migrations/insertion-echeances').run(client);
     await require('./migrations/insertion-salarie').run(client);
+    // PR D (2.55.0) — reporting autorité (débouché PMSMP, DORA, aides, catégories, snapshots de synthèse)
+    await require('./migrations/insertion-reporting').run(client);
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

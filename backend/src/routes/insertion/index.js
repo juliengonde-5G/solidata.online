@@ -40,6 +40,8 @@ router.use('/temps', require('./temps'));
 // PR C (2.54.0) — échéances CIP (obligations reportables, compteur) et documents du salarié
 router.use('/echeances', require('./echeances'));
 router.use('/salarie', require('./salarie'));
+// PR D (2.55.0) — reporting autorité : synthèse de dialogue de gestion (agrégats non nominatifs)
+router.use('/reporting', require('./reporting'));
 
 // Mount routes
 const routes = require('./routes');

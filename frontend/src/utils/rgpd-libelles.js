@@ -146,6 +146,15 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_DOC_SALARIE_REMISE: 'Remise tracée d’un document au salarié',
   INSERTION_RAPPEL_CONSENTEMENT: 'Recueil ou retrait du consentement aux rappels de rendez-vous',
   INSERTION_RAPPEL_ENVOI: 'Envoi d’un rappel de rendez-vous au salarié (SMS / e-mail)',
+
+  // ── Reporting autorité (routes/insertion/reporting.js, PR D lot 6) ────────
+  // La synthèse est agrégée et non nominative ; c'est sa SORTIE de la structure
+  // qui est tracée, jamais son contenu.
+  INSERTION_DIALOGUE_GESTION_APERCU: 'Aperçu de la synthèse de dialogue de gestion (sans enregistrement)',
+  INSERTION_DIALOGUE_GESTION_GENERATION: 'Génération enregistrée de la synthèse de dialogue de gestion',
+  INSERTION_DIALOGUE_GESTION_CONSULTATION: 'Consultation d’une synthèse de dialogue de gestion déjà générée',
+  EXPORT_DIALOGUE_GESTION: 'Export CSV de la synthèse de dialogue de gestion',
+  EXPORT_INSERTION_FREINS_ENRICHI: 'Export du tableau des freins enrichi (cadre 2026)',
   // Message de vérification du contact, envoyé AU MOMENT du recueil pour que la
   // conseillère puisse demander « vous l’avez reçu ? » tant que la personne est
   // devant elle (correctif M-05 de la revue de sécurité PR C).
