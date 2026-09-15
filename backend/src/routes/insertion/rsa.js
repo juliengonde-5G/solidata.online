@@ -52,8 +52,8 @@ const { readInsertionSetting } = require('../../utils/insertion-settings');
 // Dates civiles : une seule conversion pour tout le module. `String(uneDate)`
 // sur une colonne `DATE` rend « Sun Mar 02 » — quatre défauts de cette PR en
 // sont venus (rapport 18, D-01 à D-03). Voir l'en-tête de `utils/date-iso.js`.
-const { isoDate, moisDe, aujourdhuiParis, decalerJours, ecartJours } = require('../../utils/date-iso');
-const { activiteHebdoCohorte } = require('../../services/activite-hebdo');
+const { isoDate, moisDe, aujourdhuiParis, decalerJours } = require('../../utils/date-iso');
+const { composerEcheancesPeriodiques } = require('../../services/echeances-cip');
 
 const router = express.Router();
 router.use(authorize('ADMIN', 'RH'));
@@ -65,49 +65,28 @@ const JOUR_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MOIS_RE = /^\d{4}-\d{2}$/;
 
 /**
- * Journal RGPD de la surface RSA. Ne reçoit JAMAIS de valeur transmise : la
- * trace dit qui a produit ou consulté quel document et sur quelle période —
- * jamais ce que le document raconte. Un journal d'audit qui recopierait le
- * contenu deviendrait une seconde copie de ce qu'il protège.
- */
-async function ecrireJournal(db, req, action, employeeId, details) {
-  await db.query(
-    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
-    [req.user && req.user.id != null ? req.user.id : null, action, 'insertion_rsa', employeeId,
-      JSON.stringify({ employee_id: employeeId, ...(details || {}) })]
-  );
-}
-
-/**
- * Journal TOLÉRANT — réservé aux consultations d'écran interne (le compteur
- * d'activité). Perdre la trace d'une lecture d'écran est regrettable ; empêcher
- * la CIP d'ouvrir un compteur parce que le journal est indisponible serait pire.
- */
-async function journaliser(req, action, employeeId, details) {
-  try {
-    await ecrireJournal(pool, req, action, employeeId, details);
-  } catch (e) {
-    console.error(`[INSERTION][RSA] Journalisation ${action} impossible :`, e.message);
-  }
-}
-
-/**
- * Journal BLOQUANT — pour tout geste qui FAIT SORTIR un document vers le
- * référent unique (correctifs M-02 et D-06).
+ * Journal RGPD de la surface RSA — une seule implémentation pour tout le
+ * module depuis la PR C (`utils/insertion-journal.js`). La distinction que ce
+ * couple tient est INTACTE :
  *
- * La fiche pour le référent et le relevé d'assiduité peuvent fonder une
- * suspension de droits : leur trace n'est pas un confort d'exploitation, c'est
- * la **preuve de la transmission**. Le lot 4 tenait déjà cette règle sur son
- * export (« le journal est écrit AVANT l'envoi, son échec fait échouer
- * l'acte », `temps.js`) ; les deux surfaces de la même PR se comportaient
- * différemment devant le même risque.
+ *   - `journaliser` est TOLÉRANT (consultations d'écran interne : perdre la
+ *     trace d'une lecture est regrettable, empêcher la CIP d'ouvrir son
+ *     compteur parce que le journal est indisponible serait pire) ;
+ *   - `journaliserDocument` est BLOQUANT — tout geste qui FAIT SORTIR un
+ *     document vers le référent unique. Aucun try/catch : l'erreur remonte au
+ *     `catch` de la route, qui rend 500. Le document ne part pas sans sa trace
+ *     (correctifs M-02 et D-06).
  *
- * Aucun try/catch ici : l'erreur remonte au `catch` de la route, qui rend 500
- * — le document ne part pas sans sa trace.
+ * La trace dit qui a produit ou consulté quel document, sur quelle période —
+ * jamais ce que le document raconte.
  */
-async function journaliserDocument(db, req, action, employeeId, details) {
-  await ecrireJournal(db, req, action, employeeId, details);
-}
+const { journalPour } = require('../../utils/insertion-journal');
+const { journaliser: journaliserBrut, journaliserDocument } =
+  journalPour('insertion_rsa', '[INSERTION][RSA]');
+
+/** Signature historique de ce fichier (le pool est implicite). */
+const journaliser = (req, action, employeeId, details) =>
+  journaliserBrut(pool, req, action, employeeId, details);
 
 /** Parcours courant du salarié (repli 1), comme `cadre.js`. */
 async function parcoursNum(employeeId) {
@@ -158,148 +137,14 @@ function lirePeriode(req) {
 // conflit de forme ici — un seul segment contre deux —, mais la règle vaut
 // d'être tenue : c'est celle qui évite qu'un jour une route littérale soit
 // capturée par un paramètre).
+// Le CALCUL vit désormais dans `services/echeances-cip.js` : l'écran « Mes
+// échéances » de la PR C sert ce même bloc dans SON appel (contrat 20 § 5.1),
+// et deux implémentations du même tableau de bord auraient divergé au premier
+// correctif. La FORME DE RÉPONSE de cette route est inchangée au caractère
+// près — ses tests de la PR B en sont la garde.
 router.get('/echeances-periodiques', async (req, res) => {
-  const soft = async (label, text, params = []) => {
-    try { return (await pool.query(text, params)).rows; }
-    catch (err) {
-      console.error(`[INSERTION][RSA] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`);
-      return [];
-    }
-  };
   try {
-    const moisMin = Math.max(1, Math.round(Number(await readInsertionSetting('insertion.point_etape_referent_mois')) || 3));
-    // Tout le bloc se date sur le JOUR CIVIL DE PARIS (m-07) : le conteneur
-    // tourne en UTC, et « le mois courant » lu sur son horloge bascule deux
-    // heures trop tôt le 1er du mois.
-    const jour = aujourdhui();
-    const mois = `${jour.slice(0, 7)}-01`;
-
-    const [actualisations, points, referentsNd] = await Promise.all([
-      // Actualisations du mois : toutes les personnes concernées, qu'une ligne
-      // existe ou non pour le mois courant (LEFT JOIN) — le bloc doit afficher
-      // ce qui RESTE à faire, pas seulement ce qui a été commencé.
-      soft('actualisations_ft', `
-        SELECT e.id AS employee_id, e.first_name, e.last_name,
-               a.rappel_le, a.honoree
-          FROM employees e
-          LEFT JOIN insertion_actualisations_ft a ON a.employee_id = e.id AND a.mois = $1::date
-         WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
-           AND (e.actualisation_ft_requise = true OR e.referent_unique_type = 'france_travail')
-         ORDER BY UPPER(e.last_name), UPPER(e.first_name)`, [mois]),
-      // Dernier contact avec le référent : le plus récent d'un « Point avec le
-      // référent » RÉALISÉ et d'une fiche effectivement REMISE. Les deux valent
-      // alimentation — ne compter que les entretiens ferait apparaître « jamais
-      // de point » sur un dossier où une fiche part chaque trimestre.
-      // CORRECTIF D-03 — plus de sentinelle '1900-01-01'. Elle était reconnue
-      // côté JS en comparant `String(uneDate).slice(0, 10)` à la chaîne
-      // '1900-01-01' : le pilote rendant « Mon Jan 01 », et les lettres passant
-      // après les chiffres en ASCII, la sentinelle était prise pour une vraie
-      // date. La branche « jamais de contact tracé » était donc MORTE et le
-      // tableau de bord affichait « dernier contact il y a null j ».
-      //
-      // `GREATEST` de PostgreSQL IGNORE les NULL (à la différence d'autres
-      // moteurs) : il ne rend NULL que si les deux le sont — exactement la
-      // sémantique voulue. Et la date est convertie **par PostgreSQL**
-      // (`to_char`), ce qui retire la conversion du chemin JS.
-      soft('points_referent', `
-        SELECT e.id AS employee_id, e.first_name, e.last_name,
-               to_char(GREATEST(MAX(m.completed_date), MAX(a.remis_referent_le)), 'YYYY-MM-DD') AS dernier_le
-          FROM employees e
-          LEFT JOIN insertion_milestones m
-                 ON m.employee_id = e.id AND m.milestone_type = 'point_etape_referent' AND m.status = 'realise'
-          LEFT JOIN insertion_alimentations_referent a
-                 ON a.employee_id = e.id AND a.remis_referent_le IS NOT NULL
-         WHERE e.insertion_status = 'en_parcours' AND e.is_active = true
-         GROUP BY e.id, e.first_name, e.last_name
-         ORDER BY UPPER(e.last_name), UPPER(e.first_name)`),
-      soft('referents_non_determines', `
-        SELECT id AS employee_id, first_name, last_name
-          FROM employees
-         WHERE insertion_status = 'en_parcours' AND is_active = true
-           AND COALESCE(referent_unique_type, 'non_determine') = 'non_determine'
-         ORDER BY UPPER(last_name), UPPER(first_name)`),
-    ]);
-
-    // « Dû depuis » : jours écoulés depuis le dernier contact. Un dossier sans
-    // aucun contact ne rend PAS un nombre de jours géant (qui trierait la liste
-    // de façon absurde) mais `dernier_le: null` — c'est une autre situation,
-    // elle se lit autrement.
-    const pointsDus = [];
-    for (const p of points) {
-      const dernier = isoDate(p.dernier_le);
-      const depuis = dernier ? ecartJours(dernier, jour) : null;
-      if (dernier && depuis < moisMin * 30) continue; // dans les clous
-      pointsDus.push({
-        employee_id: p.employee_id,
-        nom: `${(p.last_name || '').toUpperCase()} ${p.first_name || ''}`.trim(),
-        dernier_le: dernier,
-        du_depuis_jours: depuis,
-      });
-    }
-
-    // Semaines sous le plancher : agrégat de cohorte. Il est calculé personne
-    // par personne (le moteur n'a pas de forme agrégée) et BORNÉ à la cohorte
-    // en parcours — c'est-à-dire à quelques dizaines de dossiers, pas à
-    // l'historique complet.
-    const cohorte = await soft('cohorte', `
-      SELECT id, first_name, last_name FROM employees
-       WHERE insertion_status = 'en_parcours' AND is_active = true
-       ORDER BY UPPER(last_name), UPPER(first_name)`);
-    // CORRECTIF D-07 — un seul chargement pour toute la cohorte. La boucle
-    // appelait `activiteHebdo` dossier par dossier : 3 lectures de réglage +
-    // 5 requêtes CHACUN, soit 325 requêtes pour 40 dossiers (mesuré), à chaque
-    // ouverture du tableau de bord. `activiteHebdoCohorte` lit les réglages une
-    // fois et charge les cinq sources d'un coup (`= ANY($1::int[])`) : le coût
-    // devient CONSTANT, 8 requêtes quelle que soit la taille de la cohorte.
-    const annee = Number(jour.slice(0, 4));
-    const employesSousSeuil = [];
-    try {
-      const activites = await activiteHebdoCohorte({ employeeIds: cohorte.map((c) => c.id), annee });
-      for (const c of cohorte) {
-        const a = activites.get(Number(c.id));
-        if (a && a.alerte && a.alerte.active) {
-          employesSousSeuil.push({
-            employee_id: c.id,
-            nom: `${(c.last_name || '').toUpperCase()} ${c.first_name || ''}`.trim(),
-            nb_semaines: a.nb_semaines_sous_seuil,
-          });
-        }
-      }
-    } catch (err) {
-      // Dégradation NOMMÉE : le bloc affiche zéro salarié signalé, jamais une
-      // panne — mais le journal serveur dit pourquoi.
-      console.error(`[INSERTION][RSA] Activité de la cohorte illisible : ${err.message}`);
-    }
-
-    // Déclaration trimestrielle de ressources : l'échéance est une règle de
-    // calendrier, pas une donnée du dossier — elle se dit telle quelle.
-    // Le trimestre se lit sur le jour civil de PARIS : au 1er janvier à 00 h 30,
-    // l'horloge UTC du conteneur est encore au 31 décembre — donc au T4 de
-    // l'année précédente.
-    const anneeJour = Number(jour.slice(0, 4));
-    const trimestre = Math.floor((Number(jour.slice(5, 7)) - 1) / 3) + 1;
-    const finTrimestre = new Date(Date.UTC(anneeJour, trimestre * 3, 0));
-
-    res.json({
-      actualisations_ft_du_mois: actualisations.map((a) => ({
-        employee_id: a.employee_id,
-        nom: `${(a.last_name || '').toUpperCase()} ${a.first_name || ''}`.trim(),
-        // CORRECTIF D-02 bis — `String(uneDate).slice(0, 10)` rendait
-        // « Sun Mar 02 », que le front re-datait SILENCIEUSEMENT de l'an 2001
-        // (V8 parse cette forme sans erreur). Un « Invalid Date » aurait été
-        // moins dangereux qu'une date plausible et fausse de vingt-quatre ans.
-        rappel_le: isoDate(a.rappel_le),
-        honoree: a.honoree == null ? null : a.honoree === true,
-      })),
-      points_referent_dus: pointsDus,
-      semaines_sous_seuil: { nb_salaries: employesSousSeuil.length, employes: employesSousSeuil },
-      dtr: { trimestre: `T${trimestre} ${anneeJour}`, echeance: finTrimestre.toISOString().slice(0, 10) },
-      referents_non_determines: referentsNd.map((r) => ({
-        employee_id: r.employee_id,
-        nom: `${(r.last_name || '').toUpperCase()} ${r.first_name || ''}`.trim(),
-      })),
-      periodicite_point_referent_mois: moisMin,
-    });
+    res.json(await composerEcheancesPeriodiques({ db: pool }));
   } catch (err) {
     console.error('[INSERTION][RSA] Erreur échéances périodiques :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });

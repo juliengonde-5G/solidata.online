@@ -429,19 +429,59 @@ describe('CONTRAT GET /insertion/alertes/:id — obligations FSE+', () => {
   };
   const types = (body) => body.alertes.map((a) => a.type);
 
-  it('sortie FSE+ à saisir : critique passé le premier seuil, avec le nombre de jours', async () => {
-    const finContrat = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
-    brancherAlertes({ ...base, contract_end: finContrat });
+  // CORRECTIF D-06 — la sortie FSE+ n'est due QUE pour un participant d'un
+  // projet cofinancé, et le délai court depuis la sortie de l'OPÉRATION.
+  // L'alerte de fiche a désormais la MÊME règle que l'écran des échéances
+  // (`services/echeances-cip.js › evaluerSortieFse`) : avant, l'une se taisait
+  // quand l'autre affichait une ligne rouge (rupture anticipée), et elle
+  // réclamait une sortie à des salariés rattachés à aucun projet.
+  it('sortie FSE+ à saisir : au second seuil, avec le nombre de jours', async () => {
+    const finContrat = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    brancherAlertes({ ...base, contract_end: finContrat }, { projets: [{ code: 'ASI', date_sortie: null }] });
     const res = await get('/api/insertion/alertes/5', 'RH');
     expect(res.status).toBe(200);
     const a = res.body.alertes.find((x) => x.type === 'fse_sortie_a_saisir');
     expect(a).toBeDefined();
     expect(a.niveau).toBe('critique');
-    expect(a.jours).toBeGreaterThanOrEqual(15);
+    expect(a.jours).toBeGreaterThanOrEqual(25);
+  });
+
+  it('entre les deux seuils, l’alerte est « attention » et non « critique »', async () => {
+    const finContrat = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
+    brancherAlertes({ ...base, contract_end: finContrat }, { projets: [{ code: 'ASI', date_sortie: null }] });
+    const res = await get('/api/insertion/alertes/5', 'RH');
+    const a = res.body.alertes.find((x) => x.type === 'fse_sortie_a_saisir');
+    expect(a).toBeDefined();
+    expect(a.niveau).toBe('attention');
+  });
+
+  it('AUCUNE alerte de sortie pour qui n’est participant d’aucun projet cofinancé', async () => {
+    const finContrat = new Date(Date.now() - 92 * 86400000).toISOString().slice(0, 10);
+    brancherAlertes({ ...base, contract_end: finContrat }, { projets: [] });
+    const res = await get('/api/insertion/alertes/5', 'RH');
+    expect(types(res.body)).not.toContain('fse_sortie_a_saisir');
+  });
+
+  it('le délai court depuis la SORTIE DE L’OPÉRATION, pas depuis la fin de contrat', async () => {
+    // Rupture anticipée : sortie du projet il y a 26 jours, fin de contrat il y
+    // a 2 jours. L'ancienne règle se taisait (2 < 15).
+    const sortieOperation = new Date(Date.now() - 26 * 86400000).toISOString().slice(0, 10);
+    brancherAlertes(
+      { ...base, contract_end: new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10) },
+      { projets: [{ code: 'ASI', date_sortie: sortieOperation }] }
+    );
+    const res = await get('/api/insertion/alertes/5', 'RH');
+    const a = res.body.alertes.find((x) => x.type === 'fse_sortie_a_saisir');
+    expect(a).toBeDefined();
+    expect(a.jours).toBe(26);
+    expect(a.niveau).toBe('critique');
   });
 
   it('pas d’alerte de sortie tant que le premier seuil n’est pas atteint', async () => {
-    brancherAlertes({ ...base, contract_end: new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10) });
+    brancherAlertes(
+      { ...base, contract_end: new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10) },
+      { projets: [{ code: 'ASI', date_sortie: null }] }
+    );
     const res = await get('/api/insertion/alertes/5', 'RH');
     expect(types(res.body)).not.toContain('fse_sortie_a_saisir');
   });
@@ -449,7 +489,7 @@ describe('CONTRAT GET /insertion/alertes/:id — obligations FSE+', () => {
   it('aucune alerte de sortie quand la sortie EST enregistrée', async () => {
     brancherAlertes(
       { ...base, contract_end: new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10) },
-      { sorties: [{ id: 1, date_sortie: '2026-01-01', situation_6mois: 'emploi_durable' }] }
+      { projets: [{ code: 'ASI', date_sortie: null }], sorties: [{ id: 1, date_sortie: '2026-01-01', situation_6mois: 'emploi_durable' }] }
     );
     const res = await get('/api/insertion/alertes/5', 'RH');
     expect(types(res.body)).not.toContain('fse_sortie_a_saisir');

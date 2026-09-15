@@ -539,13 +539,37 @@ export default function Layout({ children }) {
       .then((res) => {
         setAlerts(res.data?.alertes || []);
         const k = res.data?.kpis || res.data || {};
-        setCounts({
+        setCounts((c) => ({
+          ...c,
           '/candidates': k.candidates_actifs ?? k.candidats ?? null,
           '/tours': k.tours_today ?? k.tournees_du_jour ?? null,
-        });
+        }));
       })
       .catch(() => { /* silencieux */ });
   }, []);
+
+  // Pastille « Espace CIP » = nombre d'OBLIGATIONS EN ROUGE non reportées
+  // (PR C lot 5). Elle ne compte pas les alertes de fiche ni les bilans en
+  // retard : seulement les lignes que l'autorité de tutelle contrôle et qui ne
+  // s'acquittent pas. Un badge qui compterait tout ne serait jamais à zéro, et
+  // un badge jamais à zéro ne se regarde plus.
+  //
+  // Best-effort et SILENCIEUX : le serveur rend déjà `{rouges: 0}` quand il ne
+  // peut pas calculer, et un échec réseau ne doit pas faire apparaître de
+  // bandeau dans la navigation. Réservé aux rôles du module — les autres
+  // recevraient un 403 à chaque montage de page.
+  const roleCip = ['ADMIN', 'RH', 'MANAGER'].includes(user?.base_role || user?.role);
+  useEffect(() => {
+    if (!roleCip) return undefined;
+    let vivant = true;
+    api.get('/insertion/echeances/compteur')
+      .then((res) => {
+        const n = Number(res.data?.rouges);
+        if (vivant && Number.isFinite(n) && n > 0) setCounts((c) => ({ ...c, '/insertion': n }));
+      })
+      .catch(() => { /* silencieux */ });
+    return () => { vivant = false; };
+  }, [roleCip]);
 
   const handleMobileNav = useCallback(() => {
     if (window.innerWidth < 1024) setMobileOpen(false);

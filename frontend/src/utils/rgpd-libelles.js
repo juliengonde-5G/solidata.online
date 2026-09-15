@@ -42,6 +42,8 @@ export const RGPD_ACTION_LABELS = {
   PURGE_ARRETS_GPS: 'Purge manuelle — arrêts GPS de collecte',
   PURGE_BORDEREAUX_DECHETERIE: 'Purge manuelle — bordereaux de collecte en déchèterie (signatures)',
   PURGE_MESSAGERIE: 'Purge manuelle — messagerie interne',
+  // PR C lot 7 — 10ᵉ purge : trace des rappels de rendez-vous envoyés aux salariés.
+  PURGE_RAPPELS_RDV: 'Purge manuelle — rappels de rendez-vous envoyés aux salariés',
   PURGE_REFRESH_TOKENS: 'Purge manuelle — jetons de connexion expirés',
 
   // ── Purges — job planifié (préfixe AUTO_ = déclenchement automatique) ────
@@ -53,6 +55,7 @@ export const RGPD_ACTION_LABELS = {
   AUTO_PURGE_ARRETS_GPS: 'Purge automatique — arrêts GPS de collecte',
   AUTO_PURGE_BORDEREAUX_DECHETERIE: 'Purge automatique — bordereaux de collecte en déchèterie (signatures)',
   AUTO_PURGE_MESSAGERIE: 'Purge automatique — messagerie interne',
+  AUTO_PURGE_RAPPELS_RDV: 'Purge automatique — rappels de rendez-vous envoyés aux salariés',
   AUTO_PURGE_REFRESH_TOKENS: 'Purge automatique — jetons de connexion expirés',
   AUTO_PURGE_BADGEUSE: 'Purge automatique — module Temps & Présence (badgeuse)',
 
@@ -127,6 +130,26 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_FEUILLE_TEMPS_VALIDATION: 'Validation d’une feuille de temps d’accompagnement',
   INSERTION_FEUILLE_TEMPS_REOUVERTURE: 'Réouverture d’une feuille de temps d’accompagnement (motif obligatoire)',
   EXPORT_FEUILLE_TEMPS: 'Export d’une feuille de temps d’accompagnement',
+
+  // ── Section CIP (routes/insertion/echeances.js, eti-public.js, PR C lot 5) ─
+  INSERTION_ECHEANCES_CONSULTATION: 'Consultation des échéances CIP (obligations et suivi)',
+  INSERTION_ECHEANCE_REPORT: 'Report d’une obligation (48 h)',
+  INSERTION_ETI_LIEN_GENERATION: 'Génération d’un lien public pour l’encadrant technique (renouvellement)',
+  INSERTION_ETI_FORMULAIRE_JETON: 'Avis de l’encadrant transmis par lien public (sans compte)',
+
+  // ── Documents du salarié et rappels (routes/insertion/salarie.js, PR C lot 7) ─
+  // Ces documents SORTENT vers la personne : la génération et la remise sont
+  // journalisées de façon bloquante ; le contenu, lui, n'est jamais au journal.
+  INSERTION_DOC_SALARIE_APERCU: 'Aperçu d’un document pour le salarié (sans enregistrement)',
+  INSERTION_DOC_SALARIE_GENERATION: 'Génération d’un document pour le salarié (Mon parcours / Mon Récap)',
+  INSERTION_DOC_SALARIE_CONSULTATION: 'Consultation d’un document déjà remis au salarié',
+  INSERTION_DOC_SALARIE_REMISE: 'Remise tracée d’un document au salarié',
+  INSERTION_RAPPEL_CONSENTEMENT: 'Recueil ou retrait du consentement aux rappels de rendez-vous',
+  INSERTION_RAPPEL_ENVOI: 'Envoi d’un rappel de rendez-vous au salarié (SMS / e-mail)',
+  // Message de vérification du contact, envoyé AU MOMENT du recueil pour que la
+  // conseillère puisse demander « vous l’avez reçu ? » tant que la personne est
+  // devant elle (correctif M-05 de la revue de sécurité PR C).
+  INSERTION_RAPPEL_VERIFICATION: 'Vérification du contact choisi pour les rappels de rendez-vous',
 
   // ── Effectifs ETP / états ASP (routes/effectifs.js) ───────────────────────
   ASP_IMPORT: 'Import d’un état ASP mensuel',

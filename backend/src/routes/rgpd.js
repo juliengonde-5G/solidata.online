@@ -271,6 +271,11 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
     // la même raison — cet écran sert à PROUVER la conformité ; s'il annonçait
     // une durée que le code n'applique pas, il ferait le contraire.
     const retentionPcmReponsesJours = await readSetting('rgpd.pcm_reponses_retention_jours', PCM_REPONSES_RETENTION_DEFAUT_JOURS);
+    // PR C lot 7 — trace des rappels de rendez-vous (consentement art. 6-1-a).
+    // Lu au même endroit que la purge, pour que l'écran ne puisse pas annoncer
+    // une durée que le code n'applique pas.
+    const purgeRappels = trouverPurge('rappels_rdv');
+    const retentionRappels = purgeRappels ? await retentionEffective(purgeRappels) : { valeur: 365, source: 'code' };
 
     let registreCount = null;
     try {
@@ -333,6 +338,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             source: retentionBordereauxSource,
             reference: 'backend/src/services/rgpd-purges.js (purgeBordereauxDecheterie), backend/src/services/anonymization.js',
           },
+          {
+            titre: 'Rappels de rendez-vous envoyés aux salariés (SMS / e-mail)',
+            description: "Un rappel n'est envoyé la veille d'un rendez-vous que si la personne l'a EXPRESSÉMENT accepté (consentement art. 6-1-a, horodaté, révocable à tout moment d'un seul geste). Le message ne nomme jamais le type de rendez-vous ni son motif : il arrive sur un écran que d'autres peuvent voir. Son contenu n'est pas conservé ; seule subsiste une trace de l'envoi portant le canal et un destinataire MASQUÉ (« 06 ** ** ** 12 »), supprimée après ce délai et dès l'anonymisation du dossier. Le contact choisi par la personne est effacé au retrait du consentement comme à l'anonymisation.",
+            valeur: `${retentionRappels.valeur} jours`,
+            source: retentionRappels.source === 'code' ? 'code' : 'insertion.rappels_retention_jours',
+            reference: 'backend/src/services/rgpd-purges.js (purgeRappelsRdv), backend/src/services/rappels-rdv.js, backend/src/services/anonymization.js',
+          },
         ],
       },
       {
@@ -342,8 +354,8 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
         regles: [
           {
             titre: 'Purges automatiques planifiées',
-            description: "9 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, réponses détaillées au questionnaire PCM, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, bordereaux de collecte en déchèterie (signatures manuscrites), messagerie interne, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
-            valeur: '9 purges, 3×/jour',
+            description: "10 purges de rétention tournent plusieurs fois par jour : tests PCM des personnes non recrutées, réponses détaillées au questionnaire PCM, anonymisation des candidatures expirées, anonymisation des dossiers d'insertion clos, positions GPS, arrêts de tournée dérivés du GPS, bordereaux de collecte en déchèterie (signatures manuscrites), messagerie interne, rappels de rendez-vous envoyés aux salariés, jetons de rafraîchissement expirés. Chaque passage est horodaté et son résultat conservé (journal des jobs), consultable dans l'onglet « Automatisations & purges ».",
+            valeur: '10 purges, 3×/jour',
             source: 'code',
             reference: 'backend/src/services/rgpd-purges.js (registre PURGES_RGPD), backend/src/services/scheduler.js (runAllJobs)',
           },

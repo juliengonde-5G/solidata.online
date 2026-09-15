@@ -37,6 +37,9 @@ router.use('/conformite', require('./conformite'));
 // PR B (2.53.0) — cadre RSA (structure d'accueil) et temps d'accompagnement
 router.use('/rsa', require('./rsa'));
 router.use('/temps', require('./temps'));
+// PR C (2.54.0) — échéances CIP (obligations reportables, compteur) et documents du salarié
+router.use('/echeances', require('./echeances'));
+router.use('/salarie', require('./salarie'));
 
 // Mount routes
 const routes = require('./routes');

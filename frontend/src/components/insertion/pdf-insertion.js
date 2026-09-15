@@ -18,7 +18,12 @@ import {
 } from './freins';
 import { formatEmployeeName } from '../../utils/names';
 
-export const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+// CORRECTIF m-01 — `esc()` n'échappait que `& < >`. Aujourd'hui sans effet (les
+// documents n'interpolent qu'en nœud texte), mais la PREMIÈRE interpolation en
+// ATTRIBUT ouvrirait une injection : on ferme la porte avant qu'elle serve.
+export const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
 export const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 
 const RGPD_FOOTER = (variante) =>
@@ -27,9 +32,19 @@ const RGPD_FOOTER = (variante) =>
   + (variante === 'salarie' ? ' Ce document vous appartient.' : '')
   + ' — édité le ' + new Date().toLocaleDateString('fr-FR') + '</div>';
 
+/**
+ * Ouvre la fenêtre d'impression. Rend `true` si elle a pu s'ouvrir, `false`
+ * sinon — CORRECTIF m-08 : la fonction ouvrait un `alert()` natif, et la règle
+ * « aucune boîte native » perdrait son sens si le dernier écran du parcours en
+ * ouvrait une. L'appelant affiche le message dans son propre bandeau ; ceux qui
+ * ignorent la valeur de retour se comportent comme avant, à la boîte près.
+ */
 export function openPrintWindow(title, bodyHtml, { large = false } = {}) {
   const w = window.open('', '_blank', 'width=820,height=1100');
-  if (!w) { alert('Popup bloquée — autorisez les popups pour exporter le PDF.'); return; }
+  if (!w) {
+    console.warn('[PDF] Fenêtre d’impression bloquée par le navigateur.');
+    return false;
+  }
   w.document.write('<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><title>' + esc(title) + '</title><style>'
     + '@page { size: A4; margin: 15mm 12mm; }'
     + '* { box-sizing: border-box; margin: 0; padding: 0; }'
@@ -54,6 +69,7 @@ export function openPrintWindow(title, bodyHtml, { large = false } = {}) {
     + '</style></head><body>' + bodyHtml + '</body></html>');
   w.document.close();
   setTimeout(() => w.print(), 400);
+  return true;
 }
 
 // Axes de freins pour un document : jamais le judiciaire en variante salarié ;

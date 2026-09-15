@@ -119,8 +119,9 @@ datés. Ce qu'il contient aujourd'hui :
 
 ![Fiche d'un salarié — onglet « Situation »](../rapports/cip-refonte-2026-09-12/maquettes/captures/Fiche_Situation.jpg)
 *Maquette de travail (noms fictifs). Évolution des neuf freins entre le diagnostic et le dernier bilan,
-frise du parcours, activité de la semaine, immersions, menu des documents imprimables. La
-réorganisation en quatre onglets est prévue au chantier C.*
+frise du parcours, activité de la semaine, immersions, menu des documents imprimables. La fiche compte
+désormais quatre onglets — Situation (illustré ici), Suivi, Dossier administratif, Diagnostic —,
+livrés au chantier C.*
 
 ![Onglet « Dossier administratif »](../rapports/cip-refonte-2026-09-12/maquettes/captures/Dossier_Complet.jpg)
 *Maquette de travail (noms fictifs). Critères d'éligibilité cochés, Pass IAE et ses événements,
@@ -336,8 +337,10 @@ des données — trois profils habilités, pour qu'une absence ne bloque pas une
 fonction « droit d'accès » du module RGPD (fiche du salarié et contrats) — **chaque production est
 inscrite au journal d'audit** ; (2) les **documents lisibles de son parcours** dans leur variante
 « exemplaire salarié », en français simple : fiche de parcours, diagnostic d'accueil, chacun de ses
-entretiens ; (3) une **note d'accompagnement** rappelant les finalités, les durées de conservation et
-les voies de recours.
+entretiens — et, depuis le chantier C, deux documents qu'elle peut aussi demander à tout moment de
+son parcours sans attendre une demande formelle : « Mon parcours en une page » et « Mon Récap »
+(§ 12, « Ce que reçoit la personne accompagnée ») ; (3) une **note d'accompagnement** rappelant les
+finalités, les durées de conservation et les voies de recours.
 
 **En combien de temps.** Le règlement donne **un mois**, prolongeable de deux mois pour une demande
 complexe. La production technique prend moins d'une heure ; le délai réel est celui de la relecture
@@ -397,7 +400,7 @@ un projet.
 |---|---|---|
 | **A — Conformité immédiate** | Réparation de l'export européen (il sortait vide en silence : corrigé, et un export à zéro ligne est désormais **refusé avec un motif**) · Journalisation de tous les exports nominatifs et en-tête de traçabilité partout · Suivi après la sortie porté à **+6 mois** · Saisie du Pass IAE · **Critères d'éligibilité cochables** · Statut de bénéficiaire du RSA, catégorie France Travail, orienteur / prescripteur / **référent unique** · Suspension et prolongation du Pass IAE · **Projets cofinancés et rattachement daté des participants** · **Questionnaires d'entrée et de sortie typés**, avec écran de saisie de la sortie · Alerte « sortie non renseignée » à J+15 et J+25 · **Dossier de conformité en neuf pièces** · Export européen en **29 colonnes, une par question, en français** | **En cours de réalisation** |
 | **B — Cadre RSA et temps d'accompagnement** | Deux entretiens dédiés (point avec le référent, conciliation) · **Fiche pour le référent** en liste blanche, tracée en deux temps · Relevé d'assiduité et motifs légitimes d'absence · Compteur d'activité hebdomadaire (15-20 h, jamais présenté au salarié comme un seuil) · Registre d'actualisation France Travail · **Volume d'heures d'accompagnement** et **feuille de temps mensuelle par intervenant et par projet**, validée puis contre-signée | **Livré** |
-| **C — Espace de la conseillère réorganisé** | Tableau de bord des échéances · Liste des parcours avec recherche et filtres · Fiche en quatre onglets · Diagnostic resserré · Écran de l'encadrant technique accessible par lien direct · **Documents pour le salarié** : « Mon parcours en une page » en français simple, récapitulatif partageable, rappels de rendez-vous | Prévu |
+| **C — Espace de la conseillère réorganisé** | Écran des échéances hebdomadaires, qui distingue les obligations réglementaires (reportables 48 h) de l'organisation courante du suivi · Liste des parcours avec recherche et filtres · Fiche en quatre onglets · Diagnostic resserré · Écran de l'encadrant technique accessible par lien direct, sans compte · **Documents pour le salarié** : « Mon parcours en une page » en français simple, récapitulatif partageable, rappels de rendez-vous | **Livré** |
 | **D — Reporting et documentation** | **Dénominateur des taux de sortie corrigé** (toutes les sorties de la période, avec une ligne « sortie non documentée ») · Chiffre ASP en premier dans la synthèse, base **1 820 h** seule dans les documents de conventionnement · Typologie par critère d'éligibilité · **Freins levés** par axe · Débouché des immersions · Documentation mise à jour | Prévu |
 
 **Déjà en production** : le dossier individuel complet ; le verrouillage des entretiens à la clôture
@@ -408,7 +411,35 @@ pilotage ; les effectifs conventionnés avec la doctrine « **le chiffre ASP fai
 d'échéance du Pass IAE et des 24 mois de contrat ; le **compteur d'activité hebdomadaire**, la
 **fiche pour le référent** et sa double trace de remise, le **relevé d'assiduité**, le registre
 d'**actualisation France Travail**, et la **feuille de temps mensuelle** signée par intervenant et
-par projet cofinancé (chantier B).
+par projet cofinancé (chantier B) ; et, depuis le chantier C, l'écran hebdomadaire des **échéances
+réglementaires** avec leur report tracé, la fiche en **quatre onglets**, l'écran de l'encadrant
+technique **accessible sans compte**, et les deux documents produits **pour la personne
+accompagnée** avec ses **rappels de rendez-vous** sur son seul accord (chantier C).
+
+### Comment la structure suit ses obligations, semaine après semaine (chantier C)
+
+Chaque conseillère ouvre son espace de travail sur un écran unique — « Mes échéances » — qui sépare
+ce qui **se contrôle** de ce qui **s'organise**. Ce qui relève d'un texte ou d'une convention (Pass
+IAE, cumul de contrats d'insertion, diagnostic dans les délais, sortie et questionnaire européens,
+référent unique désigné, situation à +6 mois) forme une liste d'**obligations** : elle ne se coche
+jamais « traitée », elle se **reporte 48 heures** au maximum, et à partir du deuxième report la
+raison du retard est enregistrée dans une liste fermée. Le nombre d'obligations non traitées est
+affiché en continu — c'est ce chiffre, et non une appréciation, qu'un contrôleur peut demander à
+tout moment. Ce qui relève du rythme normal de l'accompagnement (un bilan à reprendre, un rendez-
+vous à poser) reste organisable à son rythme, sans se confondre avec ce qui précède.
+
+### Ce que reçoit la personne accompagnée (chantier C)
+
+Deux documents, composés côté serveur à partir d'une liste **positive** de champs — jamais une
+donnée retirée après coup, une donnée qui n'y figure pas n'y a jamais été mise. **« Mon parcours en
+une page »** : ce qui a été convenu avec elle, ce que la structure s'engage à faire, ses heures de
+la semaine sans aucun objectif ni seuil affiché, son prochain rendez-vous sans jamais préciser lequel
+il est, son référent, les documents déjà remis. **« Mon Récap »** : un récapitulatif qu'elle peut
+montrer à qui elle veut — contrats, grandes étapes datées, objectifs — sans aucune donnée de santé,
+de justice ni de situation sociale, et sans aucun texte libre. Un troisième dispositif, distinct des
+deux documents, lui propose un **rappel de rendez-vous** par SMS ou e-mail la veille : il ne part
+que si elle en a exprimé l'accord (recueilli oralement puis tracé, révocable à tout moment), et son
+contenu ne dit jamais pourquoi elle a rendez-vous.
 
 ### Ce que le chantier B laisse ouvert, et que nous ne présentons pas comme réglé
 

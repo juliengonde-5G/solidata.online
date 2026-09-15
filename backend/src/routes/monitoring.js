@@ -153,6 +153,9 @@ const JOB_SCHEDULE = {
   // raison que les purges voisines : une purge qui cesse de tourner sans se
   // signaler, ce sont des signatures manuscrites conservées sans le savoir.
   purgeBordereauxDecheterie:      { label: 'Purge RGPD bordereaux déchèterie',  cadence: '3×/jour',            maxAgeHours: DAILY },
+  // PR C lot 7 — trace des rappels de rendez-vous (365 j). Elle repose sur un
+  // consentement révocable : sa conservation doit être bornée ET visible.
+  purgeRappelsRdv:                { label: 'Purge RGPD rappels de rendez-vous', cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeExpiredRefreshTokens:      { label: 'Purge refresh tokens expirés',      cadence: '3×/jour',            maxAgeHours: DAILY },
   refreshMaterializedViews:       { label: 'Refresh vues matérialisées',        cadence: '3×/jour',            maxAgeHours: DAILY },
   scanBoutiqueCSVFolders:         { label: 'Scan CSV caisse boutiques',         cadence: '3×/jour + 20h',      maxAgeHours: DAILY },
@@ -172,6 +175,12 @@ const JOB_SCHEDULE = {
   syncPennylaneDaily:             { label: 'Sync Pennylane (GL + transactions)', cadence: 'quotidien 2h',      maxAgeHours: DAILY },
   syncPennylaneInvoicesDaily:     { label: 'Sync factures clients Pennylane',    cadence: 'quotidien 4h',      maxAgeHours: DAILY },
   generateDailyPredictions:       { label: 'Prédictions remplissage J..J+7',     cadence: 'quotidien 5h',      maxAgeHours: DAILY },
+  // PR C lot 7 — rappels de rendez-vous J-1 aux salariés (sur consentement).
+  // Déclaré ici pour la même raison que les purges : un job qui cesse de tourner
+  // sans se signaler, ce sont des personnes qui ne sont plus prévenues de leur
+  // rendez-vous alors qu'elles l'ont demandé — et qui ne peuvent pas le savoir.
+  // Tolérance 26 h : une seule exécution par jour, à l'heure de Paris configurée.
+  envoyerRappelsRdvSalaries:      { label: 'Rappels de rendez-vous J-1 (salariés)', cadence: 'quotidien (18h Europe/Paris)', maxAgeHours: DAILY },
   // ── hebdo / mensuel / annuel ──
   // Sauvegarde auto BDD (Lot 11) : mardi & vendredi 4h heure de Paris (évaluée
   // en Europe/Paris via Intl, cf. services/db-backup.js) → plus grand intervalle

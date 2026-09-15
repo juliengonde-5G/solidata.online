@@ -766,7 +766,10 @@ describe('CONTRAT GET /insertion/cohorte/stats (phase D)', () => {
     const res = await get('/api/insertion/cohorte/stats', 'RH');
     expect(res.status).toBe(200);
     const auj = res.body.agenda_30j.find((j) => j.id === 1);
-    expect(auj.titre).toBe('Bilan n° 2');
+    // CORRECTIF M-01 — le `titre` rendu est le libellé du TYPE, jamais le texte
+    // saisi (« Bilan n° 2 », mais aussi « Bilan après l'hospitalisation ») :
+    // cet agrégat sert toute la cohorte à tous les rôles du module.
+    expect(auj.titre).toBe('Bilan intermédiaire');
     expect(auj.interview_date).toBe('2026-07-23T14:30:00Z');
     expect(auj.ia_preparation_ready).toBe(true);
     const retard = res.body.jalons_en_retard.find((j) => j.id === 2);

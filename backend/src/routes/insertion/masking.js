@@ -48,6 +48,40 @@ const MANAGER_HIDDEN_FIELDS = Array.from(new Set([
 const MANAGER_HIDDEN_PREFIX = 'frein_judiciaire';
 
 /**
+ * Champs retirés POUR TOUS LES RÔLES (correctif PR C — constats B-01 de la
+ * revue de sécurité et D-02 du debug).
+ *
+ * `eti_token` n'est pas une donnée du dossier : c'est un IDENTIFIANT DE
+ * CONNEXION qui ouvre, sans compte et pendant 60 jours, le formulaire qui
+ * fonde un renouvellement de CDDI. Il est arrivé dans les réponses par
+ * accident — trois routes font `SELECT im.*` / `SELECT *` / `RETURNING *`,
+ * dont une qui sert la cohorte entière — exactement comme le `SELECT e.*` de
+ * la 2.43.0 et le `resume_rse` de la 2.44.0. Aucun rôle n'en a besoin dans une
+ * liste : son seul point de sortie légitime est le lien DÉRIVÉ que produit
+ * `POST /renouvellements/:id/lien-eti`.
+ *
+ * Le retrait est donc posé AVANT le test de rôle : un masquage réservé au
+ * MANAGER laisserait le jeton traverser le réseau pour une CIP, s'inscrire dans
+ * l'historique de son navigateur et pouvoir être réexpédié par qui le voit.
+ * `eti_token_expires_at` reste : c'est une échéance, pas une clé.
+ */
+const ALWAYS_HIDDEN_FIELDS = ['eti_token'];
+
+/**
+ * Retire les secrets d'une ligne, quel que soit le rôle. Retourne la ligne
+ * (mutée). Appelée par `maskInsertionRow`/`maskInsertionRows`, et directement
+ * partout où une ligne d'entretien sort sans passer par le masquage (réponses
+ * de création, snapshot d'historisation).
+ */
+function stripSecrets(row) {
+  if (!row || typeof row !== 'object') return row;
+  for (const k of ALWAYS_HIDDEN_FIELDS) {
+    if (k in row) delete row[k];
+  }
+  return row;
+}
+
+/**
  * Masque UNE ligne (objet) selon le rôle de base. Retourne l'objet (muté).
  * Ne fait rien pour ADMIN/RH. Tolère null/undefined.
  * @param {object|null} row
@@ -55,6 +89,7 @@ const MANAGER_HIDDEN_PREFIX = 'frein_judiciaire';
  */
 function maskInsertionRow(row, baseRole) {
   if (!row || typeof row !== 'object') return row;
+  stripSecrets(row);                 // avant le test de rôle — cf. ALWAYS_HIDDEN_FIELDS
   if (baseRole !== 'MANAGER') return row;
   for (const key of Object.keys(row)) {
     if (MANAGER_HIDDEN_FIELDS.includes(key) || key.startsWith(MANAGER_HIDDEN_PREFIX)) {
@@ -66,9 +101,9 @@ function maskInsertionRow(row, baseRole) {
 
 /** Masque un tableau de lignes (mutation en place, retourne le tableau). */
 function maskInsertionRows(rows, baseRole) {
-  if (!Array.isArray(rows) || baseRole !== 'MANAGER') return rows;
+  if (!Array.isArray(rows)) return rows;
   for (const r of rows) maskInsertionRow(r, baseRole);
   return rows;
 }
 
-module.exports = { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS };
+module.exports = { maskInsertionRow, maskInsertionRows, stripSecrets, MANAGER_HIDDEN_FIELDS, ALWAYS_HIDDEN_FIELDS };

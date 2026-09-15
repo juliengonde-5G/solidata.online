@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "commentaire": "SOURCE UNIQUE des champs du SOCLE du diagnostic d'accueil (PR C lot 5, contrat 20 § 5.5). Le serveur en dérive la colonne `diagnostic_socle_complet` de GET /insertion (services/echeances-cip.js) et l'obligation `diagnostic_socle` des échéances ; le front en dérive la complétude affichée dans le stepper. Une COPIE à l'identique vit dans frontend/src/components/insertion/diagnostic-socle-champs.json — le front ne peut pas importer ce fichier, le contexte de build Docker du frontend est ./frontend et ne contient pas backend/. Un test unitaire (tests/unit/services/echeances-cip.test.js) compare les deux fichiers et échoue si l'un dérive de l'autre. Les APPROFONDISSEMENTS (parcours & famille, budget détaillé, portefeuille/AFOM, style d'apprentissage, projet de formation) n'entrent JAMAIS dans la complétude : le socle est ce qui doit être tenu à J+30, pas tout ce qu'un dossier peut contenir.",
+  "champs": [
+    { "colonne": "piece_identite_validite", "type": "date", "rubrique": "cadre" },
+    { "colonne": "allocataire_caf", "type": "booleen", "rubrique": "cadre" },
+    { "colonne": "ressources", "type": "liste", "rubrique": "cadre" },
+    { "colonne": "logement_statut", "type": "texte", "rubrique": "logement" },
+    { "colonne": "mutuelle_statut", "type": "texte", "rubrique": "sante" },
+    { "colonne": "rqth", "type": "booleen", "rubrique": "sante" },
+    { "colonne": "contre_indications", "type": "booleen", "rubrique": "sante" },
+    { "colonne": "suivi_sante", "type": "booleen", "rubrique": "sante" },
+    { "colonne": "permis_b_statut", "type": "texte", "rubrique": "mobilite" },
+    { "colonne": "moyen_transport", "type": "liste", "rubrique": "mobilite" },
+    { "colonne": "niveau_formation", "type": "texte", "rubrique": "pro" },
+    { "colonne": "metiers_souhaites", "type": "texte", "rubrique": "pro" },
+    { "colonne": "cecrl_niveau", "type": "texte", "rubrique": "pro" },
+    { "colonne": "attentes_parcours", "type": "texte", "rubrique": "expression" },
+    { "colonne": "difficultes_exprimees", "type": "texte", "rubrique": "expression" }
+  ]
+}

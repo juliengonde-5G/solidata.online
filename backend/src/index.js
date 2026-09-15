@@ -208,6 +208,11 @@ app.use('/api/geocodage', require('./routes/geocodage'));
 app.use('/api/stock-original', require('./routes/stock-original'));
 app.use('/api/referentiels', require('./routes/referentiels'));
 app.use('/api/insertion', require('./routes/insertion'));
+// PR C (2.54.0) — écran de l'encadrant technique à JETON PUBLIC (hex 32, 60 j) :
+// routeur SANS authenticate (pattern /api/enquetes/public/:token), rate-limité
+// à part parce qu'un jeton se devine par force brute et pas un compte.
+app.use('/api/eti', rateLimit({ windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Trop de tentatives, réessayez plus tard' } }), require('./routes/insertion/eti-public'));
 // RSEI-10 : module « Pilotage RSE » (28e module — labellisation RSEi).
 app.use('/api/rse', require('./routes/rse'));
 app.use('/api/energie', require('./routes/energie'));

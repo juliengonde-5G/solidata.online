@@ -105,6 +105,43 @@ const INSERTION_SETTING_DEFAULTS = {
   // signalée (lot 4). Ce n'est pas une date limite opposable à l'intervenant :
   // c'est le moment où le retard devient visible dans l'écran.
   'insertion.feuille_temps_cloture_jour': 10,
+  // ── PR C lot 5 — section CIP ──
+  // Validité du lien public remis à l'encadrant technique (amendement CIP :
+  // 60 j, le bloc « renouvellements » anticipe à 42 j — le lien doit survivre
+  // à l'entretien qu'il prépare, pas indéfiniment).
+  'insertion.eti_token_validite_jours': 60,
+  // Durée d'un report d'obligation (« À traiter cette semaine ») : 48 h, motif
+  // obligatoire au 2e report — jamais un acquittement 7 j, ce sont les lignes
+  // que l'autorité contrôle.
+  'insertion.report_echeance_heures': 48,
+  // Un parcours terminé reste dans la file active tant que la sortie FSE+ et le
+  // relevé à 6 mois peuvent être dus (6 mois + 1 de marge).
+  'insertion.file_active_terminees_mois': 7,
+  // Catégorie France Travail « G » (en attente d'orientation) depuis plus de N
+  // jours → ligne ORANGE (jamais rouge : seul le référent peut la changer).
+  'insertion.categorie_g_alerte_jours': 30,
+  // ── PR C lot 7 — le salarié ──
+  // Heure de Paris de l'envoi des rappels de rendez-vous J-1 (SMS / e-mail
+  // Brevo, sur consentement tracé). Le tick horaire du scheduler compare
+  // l'heure MURALE de Paris à cette valeur (DST géré), jamais getHours().
+  'insertion.rappel_rdv_heure_envoi': 18,
+  // Rétention de la trace des rappels envoyés (destinataire masqué) — purge
+  // `purgeRappelsRdv` du registre PURGES_RGPD. Le lot 7 le disait lui-même :
+  // rien n'exige de garder un an la preuve qu'un SMS de rappel est parti. La
+  // valeur est ramenée à 90 jours — de quoi traiter une réclamation — au titre
+  // de la minimisation (point 4 des arbitrages de la revue de sécurité) ; la
+  // direction peut la relever dans `settings` si elle le décide.
+  'insertion.rappels_retention_jours': 90,
+  // « Mon Récap » est fait pour CIRCULER (la personne peut le remettre à un
+  // employeur). Deux libellés y disaient plus que ce que la personne croit
+  // partager : « Entretien de conciliation (protection des droits) » — la
+  // procédure contradictoire qui précède une décision RSA défavorable — et
+  // « Point avec le référent ». Ils sont regroupés sous « Entretien
+  // d'accompagnement », et la raison sociale de l'entreprise d'accueil d'une
+  // PMSMP (un ESAT, un établissement de soins) n'est pas imprimée.
+  // Réglage RÉVERSIBLE : la direction peut rétablir le détail en posant
+  // `insertion.recap_neutralise` à `false` (arbitrage M-10, revue de sécurité).
+  'insertion.recap_neutralise': true,
   // PR A lot 0 — durées d'entretien proposées par type technique (minutes).
   // Défaut d'objet : la lecture accepte une surcharge en JSON dans `settings`
   // et retombe sur ce défaut si le JSON est illisible (jamais un objet vide,

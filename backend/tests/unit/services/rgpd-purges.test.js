@@ -324,15 +324,20 @@ describe('purges déplacées — comportement automatique inchangé', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('registre PURGES_RGPD — source unique', () => {
-  it('couvre les 9 purges de rétention, avec des clés uniques', () => {
+  it('couvre les 10 purges de rétention, avec des clés uniques', () => {
     const cles = purges.PURGES_RGPD.map((p) => p.cle);
     // 2.45.0 : `pcm_reponses` s'intercale juste après `pcm_non_recrute` — les
     // deux règles PCM se lisent d'affilée à l'écran comme au journal des jobs.
     // 2.50.0 : `bordereaux_decheterie` se range après `arrets_gps` — c'est une
     // pièce produite par une tournée, elle se lit avec les purges de collecte.
+    // PR C lot 7 : `rappels_rdv` se range juste avant `refresh_tokens` — c'est
+    // une trace d'accompagnement fondée sur un consentement révocable, et elle
+    // se lit à la suite des purges de données personnelles, pas des purges
+    // techniques.
     expect(cles).toEqual([
       'pcm_non_recrute', 'pcm_reponses', 'candidats_expires', 'insertion_dossiers',
-      'gps_positions', 'arrets_gps', 'bordereaux_decheterie', 'messagerie', 'refresh_tokens',
+      'gps_positions', 'arrets_gps', 'bordereaux_decheterie', 'messagerie',
+      'rappels_rdv', 'refresh_tokens',
     ]);
     expect(new Set(cles).size).toBe(cles.length);
   });

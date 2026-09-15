@@ -115,7 +115,8 @@ async function journaliserSynthese({ action, entiteAudit, userId = null, details
       // 'AUTO_PURGE_ARRETS_GPS', 'PURGE_ARRETS_GPS', 'PURGE_MESSAGERIE',
       // 'PURGE_REFRESH_TOKENS', 'PURGE_EXPIRED', 'PURGE_INSERTION',
       // 'AUTO_PURGE_PCM_REPONSES', 'PURGE_PCM_REPONSES',
-      // 'AUTO_PURGE_BORDEREAUX_DECHETERIE', 'PURGE_BORDEREAUX_DECHETERIE'.
+      // 'AUTO_PURGE_BORDEREAUX_DECHETERIE', 'PURGE_BORDEREAUX_DECHETERIE',
+      // 'AUTO_PURGE_RAPPELS_RDV', 'PURGE_RAPPELS_RDV'.
       [userId, action, entiteAudit, JSON.stringify(details)]
     );
     return true;
@@ -767,6 +768,85 @@ async function purgeExpiredRefreshTokens({ trigger = 'auto', userId = null } = {
 }
 
 // ══════════════════════════════════════════
+// 8. RAPPELS DE RENDEZ-VOUS ENVOYÉS AUX SALARIÉS (PR C lot 7)
+// ══════════════════════════════════════════
+
+/**
+ * Rétention par défaut de la trace des rappels (jours).
+ *
+ * Lue de la source UNIQUE des réglages d'insertion : deux défauts en dur, c'est
+ * une divergence garantie au premier arbitrage — celui-ci est précisément
+ * arrivé (365 → 90, minimisation ; rien n'exige de garder un an la preuve qu'un
+ * SMS de rappel est parti). Le repli 90 ne sert que si le dictionnaire est
+ * inaccessible.
+ */
+const RAPPELS_RDV_RETENTION_DEFAUT_JOURS = (() => {
+  try {
+    const { INSERTION_SETTING_DEFAULTS } = require('../utils/insertion-settings');
+    const v = INSERTION_SETTING_DEFAULTS && INSERTION_SETTING_DEFAULTS['insertion.rappels_retention_jours'];
+    return Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : 90;
+  } catch (_) { return 90; }
+})();
+
+/**
+ * Supprime la trace des rappels de rendez-vous envoyés passé le délai.
+ *
+ * DELETE et non anonymisation : ce qui reste après avoir retiré le canal et le
+ * destinataire masqué, c'est « un message est parti tel jour » — aucune valeur
+ * d'agrégat, aucun usage. Et le destinataire n'y est déjà qu'en forme masquée :
+ * la ligne ne sert qu'à prouver qu'un envoi a eu lieu, preuve dont la durée de
+ * vie est celle du service rendu, pas celle du dossier.
+ *
+ * Le délai court depuis l'envoi (`envoye_le`), c'est-à-dire depuis le seul fait
+ * que la ligne atteste.
+ */
+async function purgeRappelsRdv({ trigger = 'auto', userId = null } = {}) {
+  const manuel = trigger === 'manual';
+  const retentionJours = await readSetting('insertion.rappels_retention_jours', RAPPELS_RDV_RETENTION_DEFAUT_JOURS);
+  try {
+    const result = await pool.query(
+      "DELETE FROM insertion_rappels_rdv WHERE envoye_le < NOW() - ($1 || ' days')::interval",
+      [String(retentionJours)]
+    );
+    const supprimes = result.rowCount || 0;
+    if (supprimes > 0) {
+      console.log(`[RGPD-PURGES] Rappels de rendez-vous : ${supprimes} trace(s) supprimée(s) (> ${retentionJours} jours)`);
+    }
+    let journalise = false;
+    if (manuel || supprimes > 0) {
+      journalise = await journaliserSynthese({
+        action: manuel ? 'PURGE_RAPPELS_RDV' : 'AUTO_PURGE_RAPPELS_RDV',
+        entiteAudit: 'insertion_rappels_rdv',
+        userId: manuel ? userId : null,
+        details: {
+          trigger, rows_deleted: supprimes, retention_days: retentionJours,
+          supprimes: { insertion_rappels_rdv: supprimes },
+        },
+      });
+    }
+    return resume('rappels_rdv', { insertion_rappels_rdv: supprimes }, retentionJours, journalise,
+      { ok: true, rappels_supprimes: supprimes });
+  } catch (err) {
+    const absente = err && err.code === '42P01';
+    if (absente) {
+      console.warn('[RGPD-PURGES] Table insertion_rappels_rdv absente (base non migrée) — purge des rappels ignorée.');
+    } else {
+      console.error('[RGPD-PURGES] Erreur purgeRappelsRdv :', err.message);
+    }
+    const motif = absente ? 'table insertion_rappels_rdv absente' : err.message;
+    let journalise = false;
+    if (manuel) {
+      journalise = await journaliserSynthese({
+        action: 'PURGE_RAPPELS_RDV', entiteAudit: 'insertion_rappels_rdv', userId,
+        details: { trigger, rows_deleted: 0, retention_days: retentionJours, echec: motif },
+      });
+    }
+    return resume('rappels_rdv', { insertion_rappels_rdv: 0 }, retentionJours, journalise,
+      { ok: false, motif, rappels_supprimes: 0 });
+  }
+}
+
+// ══════════════════════════════════════════
 // REGISTRE — source unique consommée par le scheduler, la route de
 // déclenchement manuel et la liste affichée à l'écran RGPD.
 //
@@ -881,6 +961,19 @@ const PURGES_RGPD = [
     retentionUnite: 'jours',
   },
   {
+    cle: 'rappels_rdv',
+    libelle: 'Rappels de rendez-vous envoyés aux salariés',
+    description: "Supprime la trace des rappels de rendez-vous envoyés par SMS ou e-mail (canal et destinataire MASQUÉ — le contact n'y figure jamais en clair, et le contenu du message n'est pas conservé). Le délai court depuis l'envoi, seul fait que la ligne atteste. DELETE et non anonymisation : ce qui resterait après retrait du canal et du destinataire masqué n'aurait aucun usage.",
+    fn: purgeRappelsRdv,
+    actionAuto: 'AUTO_PURGE_RAPPELS_RDV',
+    actionManuelle: 'PURGE_RAPPELS_RDV',
+    jobName: 'purgeRappelsRdv',
+    entiteAudit: 'insertion_rappels_rdv',
+    retentionSetting: 'insertion.rappels_retention_jours',
+    retentionDefaut: RAPPELS_RDV_RETENTION_DEFAUT_JOURS,
+    retentionUnite: 'jours',
+  },
+  {
     cle: 'refresh_tokens',
     libelle: 'Jetons de rafraîchissement expirés',
     description: "Supprime les jetons de session expirés, qui s'accumulaient sinon en base entre deux redémarrages. Aucune donnée personnelle exploitable : ce sont des jetons techniquement morts.",
@@ -933,6 +1026,7 @@ module.exports = {
   purgeBordereauxDecheterie,
   purgeMessagerie,
   purgeExpiredRefreshTokens,
+  purgeRappelsRdv,
   // Exposés pour les tests et pour la politique affichée à l'écran.
   readSetting,
   PCM_RETENTION_DEFAUT_JOURS,
@@ -941,4 +1035,5 @@ module.exports = {
   BORDEREAUX_DECHETERIE_RETENTION_DEFAUT_JOURS,
   CANDIDATS_RETENTION_MOIS,
   INSERTION_RETENTION_DEFAUT_MOIS,
+  RAPPELS_RDV_RETENTION_DEFAUT_JOURS,
 };

@@ -70,6 +70,43 @@ function isoDate(v) {
 }
 
 /**
+ * L'heure MURALE d'un horodatage, en 'HH:MM' (`null` si illisible).
+ *
+ * ═══ POURQUOI « MURALE » ET NON « CONVERTIE » ═════════════════════════════
+ *
+ * `insertion_milestones.interview_date` est un `TIMESTAMP **WITHOUT** TIME
+ * ZONE`, et ce qu'il porte est décidé par le chemin d'écriture : le formulaire
+ * saisit un `<input type="datetime-local">`, qui produit une chaîne NAÏVE
+ * (« 2026-09-16T14:00 ») — l'heure que la conseillère lit sur sa montre — et la
+ * route l'écrit TELLE QUELLE. La valeur stockée EST donc déjà l'heure de Paris.
+ *
+ * La convertir « vers Paris » lui ajoute l'offset une seconde fois : le rappel
+ * de la PR C annonçait **16 h pour un rendez-vous saisi à 14 h** (défaut D-01),
+ * et « Mon parcours », le document que la personne garde, disait la même chose.
+ * Symétriquement, `toISOString()` rend l'heure UTC : sous `TZ=Europe/Paris` la
+ * file active affichait 12:00 pour le même rendez-vous.
+ *
+ * On lit donc les composantes LOCALES — celles du repère où le pilote a
+ * construit l'objet — exactement comme `isoDate` le fait pour le jour. La
+ * lecture par PostgreSQL (`to_char(col, 'HH24:MI')`) reste préférable quand la
+ * requête est à portée de main : elle ne dépend d'aucun fuseau de processus.
+ */
+function heureMurale(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    return `${deuxChiffres(v.getHours())}:${deuxChiffres(v.getMinutes())}`;
+  }
+  const s = String(v).trim();
+  // Chaîne déjà horodatée : on prend les composantes TELLES QUELLES, sans les
+  // faire transiter par un `Date`, qui leur prêterait un fuseau.
+  const m = s.match(/^\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/);
+  if (m) return `${m[1]}:${m[2]}`;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : heureMurale(d);
+}
+
+/**
  * Le mois civil d'une date, en 1-12 (`null` si illisible).
  * Écrit à part parce que c'est la lecture qui a produit D-01 : on ne découpe
  * plus une chaîne à la main pour obtenir un numéro de mois.
@@ -149,6 +186,6 @@ function ecartJours(a, b) {
 }
 
 module.exports = {
-  isoDate, moisDe, anneeDe, aujourdhuiParis, jourParis,
+  isoDate, heureMurale, moisDe, anneeDe, aujourdhuiParis, jourParis,
   decalerJours, ajouterMois, ecartJours, FUSEAU_PARIS,
 };
