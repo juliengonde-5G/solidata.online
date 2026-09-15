@@ -8,7 +8,7 @@ const { autoLogActivity } = require('../middleware/activity-logger');
 const stateMachine = require('../services/state-machine');
 const recurrence = require('../services/commandes-recurrence');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('commande_exutoire'));
 
 // ══════════════════════════════════════════

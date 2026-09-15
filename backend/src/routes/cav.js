@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../config/database');
+const { remplissageEffectif } = require('../utils/remplissage');
 const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
@@ -458,7 +459,7 @@ router.post('/scan-qr', [
 // GET /api/cav/qr-sheets/:format — Planche PDF des QR codes.
 // A7/A8 : étiquettes à découper sur feuille A4 vierge.
 // AVERY : planche pré-découpée Avery 105×74 RCT (8 par page, jointives).
-router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/qr-sheets/:format', authorize('ADMIN'), async (req, res) => {
   try {
     const format = (req.params.format || 'A7').toUpperCase();
     if (!['A7', 'A8', 'AVERY'].includes(format)) {
@@ -483,7 +484,7 @@ router.get('/qr-sheets/:format', authorize('ADMIN', 'MANAGER'), async (req, res)
 // POST /api/cav/:id/photo — Upload photo d'un CAV (back-office)
 // Pose aussi la date de prise de vue et l'origine : c'est cette date qui
 // détermine si le chauffeur devra re-photographier le point au prochain passage.
-router.post('/:id/photo', authorize('ADMIN', 'MANAGER'), uploadPhotoOr400(uploadCavPhoto.single('photo')), async (req, res) => {
+router.post('/:id/photo', authorize('ADMIN'), uploadPhotoOr400(uploadCavPhoto.single('photo')), async (req, res) => {
   const cleanupUpload = () => { if (req.file) unlinkQuiet(req.file.path); };
   try {
     if (!req.file) return res.status(400).json({ error: 'Aucune photo fournie (jpg, png, webp, max 10 Mo)' });
@@ -521,7 +522,7 @@ router.post('/:id/photo', authorize('ADMIN', 'MANAGER'), uploadPhotoOr400(upload
 });
 
 // DELETE /api/cav/:id/photo — Supprimer la photo d'un CAV
-router.delete('/:id/photo', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id/photo', authorize('ADMIN'), async (req, res) => {
   try {
     const old = await pool.query('SELECT photo_path FROM cav WHERE id = $1', [req.params.id]);
     if (old.rows.length === 0) return res.status(404).json({ error: 'CAV non trouvé' });
@@ -620,7 +621,7 @@ router.get('/:id/qr-code', async (req, res) => {
 });
 
 // POST /api/cav/batch-generate-qr — Générer les QR codes manquants
-router.post('/batch-generate-qr', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/batch-generate-qr', authorize('ADMIN'), async (req, res) => {
   try {
     const cavs = await pool.query('SELECT id, name FROM cav WHERE qr_code_data IS NULL OR qr_code_data = \'\'');
 
@@ -819,7 +820,7 @@ router.get('/:id/activity', async (req, res) => {
 // GET /api/cav/sensors — Liste de la flotte capteurs (+ statut online/offline calculé)
 // Perf (item 3.D-4) : lecture pure (statut agrégé + sous-requête open_alerts par
 // capteur) — cache court 30 s (data peu volatile, uplinks capteur espacés).
-router.get('/sensors', authorize('ADMIN', 'MANAGER'), cacheMiddleware(cavCacheKey('sensors'), 30), async (req, res) => {
+router.get('/sensors', authorize('ADMIN'), cacheMiddleware(cavCacheKey('sensors'), 30), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -849,7 +850,7 @@ router.get('/sensors', authorize('ADMIN', 'MANAGER'), cacheMiddleware(cavCacheKe
 
 // GET /api/cav/liveobjects-devices — Liste les devices déclarés côté Orange Live Objects,
 // annotés avec l'assignation SOLIDATA actuelle (si le devEUI est déjà lié à un CAV).
-router.get('/liveobjects-devices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/liveobjects-devices', authorize('ADMIN'), async (req, res) => {
   try {
     const { listLoraDevices } = require('../services/liveobjects-api');
     const devices = await listLoraDevices();
@@ -883,7 +884,7 @@ router.get('/liveobjects-devices', authorize('ADMIN', 'MANAGER'), async (req, re
 });
 
 // POST /api/cav/sensors/alerts/:alertId/ack — Acquitter une alerte (déclaré avant /:id)
-router.post('/sensors/alerts/:alertId/ack', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/sensors/alerts/:alertId/ack', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE cav_sensor_alerts
@@ -901,7 +902,7 @@ router.post('/sensors/alerts/:alertId/ack', authorize('ADMIN', 'MANAGER'), async
 });
 
 // POST /api/cav/:id/sensor/provision — Provisionner un capteur LoRaWAN complet
-router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
+router.post('/:id/sensor/provision', authorize('ADMIN'), [
   body('dev_eui').isString().isLength({ min: 8 }).withMessage('DevEUI requis'),
   body('sensor_height_cm').isInt({ min: 30, max: 500 }).withMessage('Hauteur 30-500 cm requise'),
   body('sensor_distance_full_cm').optional({ nullable: true }).isInt({ min: 0, max: 499 }).withMessage('Distance à plein 0-499 cm'),
@@ -962,7 +963,7 @@ router.post('/:id/sensor/provision', authorize('ADMIN', 'MANAGER'), [
 });
 
 // DELETE /api/cav/:id/sensor — Déprovisionner un capteur
-router.delete('/:id/sensor', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/:id/sensor', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE cav SET
@@ -1079,7 +1080,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/cav
-router.post('/', authorize('ADMIN', 'MANAGER'), [
+router.post('/', authorize('ADMIN'), [
   body('name').notEmpty().withMessage('Nom requis'),
   body('latitude').isFloat().withMessage('Latitude invalide'),
   body('longitude').isFloat().withMessage('Longitude invalide'),
@@ -1128,7 +1129,7 @@ router.post('/', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/cav/:id
-router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const { name, address, commune, latitude, longitude, nb_containers, status, unavailable_reason,
             communaute_communes, surface, ref_refashion, entite_detentrice, code_postal } = req.body;
@@ -1214,7 +1215,7 @@ router.get('/:id/history', async (req, res) => {
 // retrouver par le lieu et pas seulement par la journée où il a été produit.
 // Aucun BYTEA n'est renvoyé ici — le PDF se lit par sa route dédiée, qui, elle,
 // journalise la consultation.
-router.get('/:id/bordereaux', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/bordereaux', authorize('ADMIN'), async (req, res) => {
   try {
     const cavId = parseInt(req.params.id, 10);
     if (!Number.isInteger(cavId)) return res.status(400).json({ error: 'Identifiant de CAV invalide' });
@@ -1252,7 +1253,7 @@ router.get('/:id/bordereaux', authorize('ADMIN', 'MANAGER'), async (req, res) =>
 // GET /api/cav/:id/historique — Historique consolidé d'un CAV pour la fiche
 // AdminCAV : passages en tournée (collecté / sauté avec motif, niveau relevé),
 // tonnages attribués et incidents, plus une synthèse chiffrée de la période.
-router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/historique', authorize('ADMIN'), async (req, res) => {
   try {
     const cavId = parseInt(req.params.id, 10);
     if (!Number.isInteger(cavId)) return res.status(400).json({ error: 'Identifiant de CAV invalide' });
@@ -1268,7 +1269,7 @@ router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) =>
       pool.query(
         `SELECT t.id AS tour_id, t.date, t.mode, t.status AS tour_status,
                 v.registration, v.name AS vehicle_name,
-                tc.status, tc.fill_level, tc.skip_reason, tc.collected_at
+                tc.status, tc.fill_level, tc.fill_percent, tc.skip_reason, tc.collected_at
            FROM tour_cav tc
            JOIN tours t ON t.id = tc.tour_id
            LEFT JOIN vehicles v ON v.id = t.vehicle_id
@@ -1325,7 +1326,17 @@ router.get('/:id/historique', authorize('ADMIN', 'MANAGER'), async (req, res) =>
         nb_incidents: incidents.rows.length,
         incidents_ouverts: incidents.rows.filter((i) => !['resolved', 'closed'].includes(i.status)).length,
       },
-      passages: passages.rows,
+      // Chaque passage porte son remplissage DÉCODÉ (libellé, pourcentage,
+      // débordement) plutôt que les deux colonnes brutes, que l'écran devrait
+      // sinon réinterpréter — c'est précisément cette réinterprétation qui
+      // faisait afficher « 4/5 » à une borne déclarée EN DÉBORDEMENT, donc
+      // exactement comme une borne pleine (constat client du 10/09/2026). Les
+      // colonnes brutes restent dans la réponse : aucun appelant existant n'a
+      // à changer.
+      passages: passages.rows.map((p) => ({
+        ...p,
+        remplissage: remplissageEffectif(p.fill_level, p.fill_percent),
+      })),
       tonnages: tonnages.rows,
       incidents: incidents.rows,
       // Volontairement AU PREMIER NIVEAU et non dans `synthese` : la forme de
@@ -1363,7 +1374,7 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // PUT /api/cav/:id/sensor — Associer un capteur à un CAV
-router.put('/:id/sensor', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id/sensor', authorize('ADMIN'), async (req, res) => {
   try {
     const { sensor_reference, sensor_type, population_commune } = req.body;
     const result = await pool.query(
@@ -1426,7 +1437,7 @@ router.get('/:id/sensor-history', cacheMiddleware((req) => `cav:sensor-history:$
 // GET /api/cav/:id/sensor-readings-raw — Historique brut (toutes colonnes + payload JSON)
 // Perf (item 3.D-4) : lecture pure lourde (jusqu'à 500 lignes brutes + payload) —
 // cache court 60 s clé par CAV + limite (historique brut, peu volatile).
-router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), cacheMiddleware((req) => `cav:sensor-raw:${req.params.id}:${req.query.limit || 100}:${minuteBucket()}`, 60), async (req, res) => {
+router.get('/:id/sensor-readings-raw', authorize('ADMIN'), cacheMiddleware((req) => `cav:sensor-raw:${req.params.id}:${req.query.limit || 100}:${minuteBucket()}`, 60), async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
     const result = await pool.query(
@@ -1445,7 +1456,7 @@ router.get('/:id/sensor-readings-raw', authorize('ADMIN', 'MANAGER'), cacheMiddl
 });
 
 // GET /api/cav/:id/sensor-diagnostic — Diagnostic 4 couches : sonde / Live Objects / Solidata / BDD
-router.get('/:id/sensor-diagnostic', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/sensor-diagnostic', authorize('ADMIN'), async (req, res) => {
   try {
     const cavResult = await pool.query(
       `SELECT id, name, commune, lora_deveui, sensor_reference, sensor_type,
@@ -1780,7 +1791,7 @@ function formatDuration(minutes) {
 
 // PATCH /api/cav/:id/sensor-calibration — Mise à jour de la calibration du capteur
 // (sans toucher au DevEUI / AppKey, contrairement à /sensor/provision)
-router.patch('/:id/sensor-calibration', authorize('ADMIN', 'MANAGER'), [
+router.patch('/:id/sensor-calibration', authorize('ADMIN'), [
   body('sensor_height_cm').optional().isInt({ min: 30, max: 500 }).withMessage('Hauteur 30-500 cm'),
   body('sensor_distance_full_cm').optional({ nullable: true }).isInt({ min: 0, max: 499 }).withMessage('Distance à plein 0-499 cm'),
   body('sensor_reporting_interval_min').optional().isInt({ min: 5, max: 1440 }).withMessage('Intervalle 5-1440 min'),
@@ -1826,7 +1837,7 @@ router.patch('/:id/sensor-calibration', authorize('ADMIN', 'MANAGER'), [
 
 // POST /api/cav/sensors/reassign — Déplacer un capteur du CAV source vers un CAV cible
 // Conserve devEUI/appKey/référence, ne touche pas l'historique des lectures (cav_id reste sur source)
-router.post('/sensors/reassign', authorize('ADMIN', 'MANAGER'), [
+router.post('/sensors/reassign', authorize('ADMIN'), [
   body('source_cav_id').isInt().withMessage('source_cav_id requis'),
   body('target_cav_id').isInt().withMessage('target_cav_id requis'),
 ], validate, async (req, res) => {

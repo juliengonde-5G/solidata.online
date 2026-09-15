@@ -72,7 +72,7 @@ const request = require('supertest');
 let app;
 const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 const YEAR = new Date().getFullYear();
 
@@ -98,7 +98,7 @@ const del = (path, role) => request(app).delete(path).set('Authorization', `Bear
 describe('CONTRAT /rse/criteres', () => {
   it('GET : lecture ouverte ADMIN/MANAGER/RH, refusée COLLABORATEUR (403)', async () => {
     mockQuery.mockResolvedValue({ rows: [{ code: '1.1', intitule: 'Projet', niveau_auto_evalue: null }] });
-    for (const role of ['ADMIN', 'MANAGER', 'RH']) {
+    for (const role of ['ADMIN', 'RH']) {
       const res = await get('/api/rse/criteres', role);
       expect(res.status).toBe(200);
     }
@@ -163,7 +163,7 @@ describe('CONTRAT /rse/actions', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/rse/actions', 'MANAGER');
+    const res = await get('/api/rse/actions', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body[0].en_retard).toBe(true);
   });
@@ -286,7 +286,7 @@ describe('CONTRAT GET /rse/dossier-afnor', () => {
         return Promise.resolve({ rows: [{ chapitre: 1, code: '1.1', intitule: 'Projet', niveau_vise: 2, niveau_auto_evalue: 2, commentaire: 'ok', pilote_nom: 'A B' }] });
       }
       if (/unnest\(critere_codes\) AS code/.test(s) && /reference/.test(s)) {
-        return Promise.resolve({ rows: [{ code: '1.1', id: 1, reference: `P-${YEAR}-001`, intitule: 'Doc', type: 'procedure', source: 'QHSE', lien_interne: null, date_preuve: '2026-01-01', echeance_fraicheur: '2027-01-01' }] });
+        return Promise.resolve({ rows: [{ code: '1.1', id: 1, reference: `P-${YEAR}-001`, intitule: 'Doc', type: 'procedure', source: 'ADMIN', lien_interne: null, date_preuve: '2026-01-01', echeance_fraicheur: '2027-01-01' }] });
       }
       if (/DISTINCT ON \(i\.critere_code\)/.test(s)) {
         return Promise.resolve({ rows: [{ critere_code: '1.1', niveau_constate: 2, constat: 'RAS', ecart: null, date_evaluation: '2026-02-01', evaluation_type: 'auto_evaluation', evaluation_libelle: 'Auto 2026' }] });
@@ -412,7 +412,7 @@ describe('CONTRAT GET /rse/dossier-candidature', () => {
         ] });
       }
       if (/unnest\(critere_codes\) AS code/.test(s) && /reference/.test(s)) {
-        return Promise.resolve({ rows: [{ code: '1.1', id: 1, reference: `P-${YEAR}-001`, intitule: 'Doc', type: 'procedure', source: 'QHSE', lien_interne: null, date_preuve: '2026-01-01', echeance_fraicheur: '2027-01-01' }] });
+        return Promise.resolve({ rows: [{ code: '1.1', id: 1, reference: `P-${YEAR}-001`, intitule: 'Doc', type: 'procedure', source: 'ADMIN', lien_interne: null, date_preuve: '2026-01-01', echeance_fraicheur: '2027-01-01' }] });
       }
       if (/DISTINCT ON \(i\.critere_code\)/.test(s)) return Promise.resolve({ rows: [] });
       if (/FROM settings WHERE key = ANY/.test(s)) {
@@ -442,7 +442,7 @@ describe('CONTRAT GET /rse/dossier-candidature', () => {
   });
 
   it('lecture ouverte ADMIN/MANAGER/RH, refusée COLLABORATEUR (403)', async () => {
-    for (const role of ['ADMIN', 'MANAGER', 'RH']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/rse/dossier-candidature', role)).status).toBe(200);
     }
     expect((await get('/api/rse/dossier-candidature', 'COLLABORATEUR')).status).toBe(403);

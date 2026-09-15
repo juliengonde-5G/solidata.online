@@ -26,6 +26,7 @@
 
 const ExcelJS = require('exceljs');
 const { resyncMilestones, generateMilestones, computeCddiCumulativeMonths } = require('../routes/insertion/engine');
+const { categoriserAbsence } = require('../utils/absences');
 
 // ── Référentiels de mapping ────────────────────────────────────────────────
 
@@ -446,13 +447,16 @@ function parseWeekHoursSheet(sheet) {
   return out;
 }
 
-/** Catégorie ERP d'un libellé d'absence Malibou (aligné enum work_hours). */
-function categorizeLeaveType(label) {
-  const s = stripAccents(label || '').toLowerCase();
-  if (/conges? paye|rtt|repos compensateur/.test(s)) return 'holiday';
-  if (/maladie|enfant malade/.test(s)) return 'sick';
-  return 'absence';
-}
+/**
+ * Catégorie ERP d'un libellé d'absence (aligné enum work_hours).
+ *
+ * La règle a été EXTRAITE dans `utils/absences.js` : la synchronisation de
+ * l'API Malibou écrit dans la même table, sur la même clé naturelle, et une
+ * règle recopiée aurait fini par diverger — la même absence aurait alors
+ * changé de nature selon l'import qui a tourné en dernier. Le nom est
+ * conservé ici pour ses appelants.
+ */
+const categorizeLeaveType = categoriserAbsence;
 
 /** Feuille « Congés & Télétravail » → { matricule: [absences] }. */
 function parseLeavesSheet(sheet) {

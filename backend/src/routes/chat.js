@@ -197,7 +197,7 @@ const EXTENDED_TOOLS = [
   {
     name: 'resume_finance',
     // Rôles autorisés (rôle de base résolu) : direction / contrôle de gestion.
-    _roles: ['ADMIN', 'MANAGER', 'FINANCE'],
+    _roles: ['ADMIN'],
     tool: {
       name: 'resume_finance',
       description: "Synthèse financière de l'année en cours : chiffre d'affaires opérationnel par activité (exutoires, boutiques, vente au kilo) et P&L de synthèse (produits, charges, résultat). Réservé à la direction.",
@@ -213,7 +213,7 @@ const EXTENDED_TOOLS = [
   {
     name: 'kpis_insertion',
     // Agrégats non nominatifs de cohorte insertion.
-    _roles: ['ADMIN', 'RH', 'MANAGER'],
+    _roles: ['ADMIN', 'RH'],
     tool: {
       name: 'kpis_insertion',
       description: "Indicateurs AGRÉGÉS (non nominatifs) de la cohorte en insertion : nombre en parcours, jalons en retard et à venir, taux de sorties dynamiques de l'année. Ne retourne jamais de nom de salarié.",
@@ -229,7 +229,7 @@ const EXTENDED_TOOLS = [
   {
     name: 'ventes_synthese',
     // Performance retail (boutiques + VAK).
-    _roles: ['ADMIN', 'MANAGER', 'RESP_BTQ'],
+    _roles: ['ADMIN', 'RESP_BTQ'],
     tool: {
       name: 'ventes_synthese',
       description: "Synthèse des ventes : chiffre d'affaires HT des boutiques mois par mois (année en cours) et résumé de la dernière Vente au Kilo (CA HT, poids vendu). Réservé aux rôles commerce/direction.",
@@ -915,13 +915,13 @@ router.get('/suggestions', async (req, res) => {
   // génériques pour qu'elles survivent au plafonnement à 8 (bug corrigé : elles
   // étaient poussées en fin de liste puis coupées par slice(0, 8)).
   const pilotage = [];
-  if (['ADMIN', 'MANAGER', 'FINANCE'].includes(base)) {
+  if (['ADMIN'].includes(base)) {
     pilotage.push({ icon: '💶', text: 'Résume la finance de cette année', category: 'finance' });
   }
-  if (['ADMIN', 'RH', 'MANAGER'].includes(base)) {
+  if (['ADMIN', 'RH'].includes(base)) {
     pilotage.push({ icon: '🤝', text: 'Où en est la cohorte insertion ?', category: 'insertion' });
   }
-  if (['ADMIN', 'MANAGER', 'RESP_BTQ'].includes(base)) {
+  if (['ADMIN', 'RESP_BTQ'].includes(base)) {
     pilotage.push({ icon: '🛍️', text: 'Synthèse des ventes boutiques', category: 'ventes' });
   }
 
@@ -935,7 +935,7 @@ router.get('/suggestions', async (req, res) => {
 
   // Extras admin/manager (moins prioritaires que le pilotage).
   const adminExtras = [];
-  if (['ADMIN', 'MANAGER'].includes(base)) {
+  if (['ADMIN'].includes(base)) {
     adminExtras.push(
       { icon: '📈', text: 'Stats collecte cette semaine', category: 'collecte' },
       { icon: '🗺️', text: 'CAV indisponibles', category: 'cav' },
@@ -948,7 +948,7 @@ router.get('/suggestions', async (req, res) => {
 });
 
 // GET /api/chat/alerts/cav-uncollected — CAV non ramassés alors que prévus en tournée
-router.get('/alerts/cav-uncollected', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/alerts/cav-uncollected', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT tc.cav_id, c.name as cav_name, c.commune, t.id as tour_id, t.date,
@@ -970,7 +970,7 @@ router.get('/alerts/cav-uncollected', authorize('ADMIN', 'MANAGER'), async (req,
 });
 
 // GET /api/chat/alerts/cav-full — CAV avec taux remplissage > 80%
-router.get('/alerts/cav-full', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/alerts/cav-full', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, name, commune, address, avg_fill_rate,
@@ -1046,7 +1046,7 @@ router.get('/history/stats', authorize('ADMIN'), async (req, res) => {
 // l'état d'une tournée en cours : météo défavorable, remplissage anormal,
 // retards, incidents, rendement. Approche règles déterministes (pas
 // d'appel LLM à chaque requête — budget et latence maîtrisés).
-router.get('/insights/tour/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/insights/tour/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const tourId = parseInt(req.params.id, 10);
     const tour = await pool.query(

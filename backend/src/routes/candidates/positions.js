@@ -7,7 +7,7 @@ const { authorize } = require('../../middleware/auth');
 // POSITIONS (Postes)
 // ══════════════════════════════════════════
 
-router.get('/list', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/list', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const queries = [
       `SELECT p.*, (SELECT COUNT(*)::int FROM candidates c WHERE c.position_id = p.id AND c.status = 'hired') as filled

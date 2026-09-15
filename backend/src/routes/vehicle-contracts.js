@@ -85,7 +85,7 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/vehicle-contracts — Créer (avec ou sans document)
 router.post('/',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   upload.single('document'),
   [
     body('vehicle_id').isInt().withMessage('ID véhicule requis'),
@@ -135,7 +135,7 @@ router.post('/',
 
 // PUT /api/vehicle-contracts/:id — MAJ (sans remplacer le doc)
 router.put('/:id',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const fields = [
@@ -170,7 +170,7 @@ router.put('/:id',
 
 // POST /api/vehicle-contracts/:id/document — Ajouter / remplacer le PDF
 router.post('/:id/document',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   upload.single('document'),
   async (req, res) => {
     try {

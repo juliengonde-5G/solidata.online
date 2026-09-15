@@ -531,7 +531,7 @@ export default function Production() {
                   <p className="text-xs font-semibold text-amber-800">
                     📋 Consignes du directeur ({consignes.length})
                   </p>
-                  {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && (
+                  {(user?.role === 'ADMIN') && (
                     <button
                       onClick={() => setShowConsigneModal(true)}
                       className="text-xs text-amber-700 hover:text-amber-900 underline"
@@ -569,7 +569,7 @@ export default function Production() {
             <ObjectivesPanel
               objectives={objectives}
               onAdd={() => setShowObjectiveModal(true)}
-              canEdit={user?.role === 'ADMIN' || user?.role === 'MANAGER'}
+              canEdit={user?.role === 'ADMIN'}
             />
 
             {/* ══ SECTION CENTRALE : Affectations planning + Chariots ══ */}

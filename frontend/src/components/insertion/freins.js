@@ -52,6 +52,9 @@ export function visibleFreins(baseRole) {
 
 /** true si l'utilisateur (rôle de base) peut voir/éditer ce champ du diagnostic. */
 export function canSeeField(field, baseRole) {
+  // Garde conservée bien que le rôle MANAGER ait été retiré le 10/09/2026 :
+  // elle masque le frein judiciaire, et une garde morte coûte moins cher
+  // qu'une garde manquante si le rôle revenait (miroir de insertion/masking.js).
   if (baseRole !== 'MANAGER') return true;
   return !MANAGER_HIDDEN_FIELDS.includes(field) && !String(field).startsWith('frein_judiciaire');
 }

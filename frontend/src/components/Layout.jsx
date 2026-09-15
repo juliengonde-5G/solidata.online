@@ -5,6 +5,9 @@ import useNonLusBadge from './messagerie/useNonLusBadge';
 import useNotificationsNonLues from './messagerie/useNotificationsNonLues';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { NAV_TREE } from '../navigation/navTree';
+import api from '../services/api';
+
 import {
   LayoutDashboard, Newspaper, UserPlus, Brain, Users, Clock, Star, Heart,
   ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory, Route,
@@ -433,15 +436,27 @@ const NAV_TREE = [
 // doit le voir au menu, même si son rôle de base ne l'a pas. Sans ça, un rôle
 // pouvait accéder à une page par son URL sans jamais la trouver dans la barre
 // latérale — une incohérence relevée en ajoutant le rôle « Praticien PCM ».
-function filterByRole(tree, roles) {
+//
+// 2.56.0 — `estAccorde` ajoute la troisième voie : un écran dont la SECTION a
+// été accordée au rôle dans `/admin/permissions` apparaît, même si son rôle
+// n'est pas nommé dessus. C'est ce qui rend de nouveau constructible un profil
+// d'exploitation depuis le retrait de MANAGER, sans donner ADMIN. Les modules
+// ancêtres sont portés au fil de la descente (une entrée sous « Frip › VAK »
+// s'ouvre par un accord sur `frip` OU sur `vak`).
+function filterByRole(tree, roles, estAccorde = () => false, modulesAncetres = []) {
   return tree
     .map((node) => {
+      const mods = node.id ? [...modulesAncetres, node.id] : modulesAncetres;
       if (node.children) {
-        const kids = filterByRole(node.children, roles);
+        const kids = filterByRole(node.children, roles, estAccorde, mods);
         if (kids.length === 0) return null;
         return { ...node, children: kids };
       }
-      if (node.roles && !node.roles.some((r) => roles.includes(r))) return null;
+      if (
+        node.roles &&
+        !node.roles.some((r) => roles.includes(r)) &&
+        !mods.some((m) => estAccorde(m))
+      ) return null;
       return node;
     })
     .filter(Boolean);
@@ -476,7 +491,7 @@ const persistedState = {
 };
 
 export default function Layout({ children }) {
-  const { user, canAccessModule } = useAuth();
+  const { user, canAccessModule, isModuleGranted } = useAuth();
 
   const [collapsed, setCollapsed] = useState(persistedState.collapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -528,9 +543,17 @@ export default function Layout({ children }) {
   // refusé au rôle est masqué ; l'ADMIN voit tout).
   // base_role : un rôle personnalisé hérite des accès de son rôle intégré.
   const filteredTree = useMemo(() => {
-    const byRole = filterByRole(NAV_TREE, [user?.base_role, user?.role].filter(Boolean));
+    const byRole = filterByRole(
+      NAV_TREE,
+      [user?.base_role, user?.role].filter(Boolean),
+      isModuleGranted
+    );
+    // Le REFUS s'applique APRÈS l'accord, donc il prime : un module retiré reste
+    // masqué même si une ligne d'accord traînait. La matrice n'écrit jamais les
+    // deux, mais l'ordre rend la règle vraie par construction plutôt que par
+    // confiance dans la donnée.
     return filterByModuleAccess(byRole, canAccessModule);
-  }, [user?.base_role, user?.role, canAccessModule]);
+  }, [user?.base_role, user?.role, canAccessModule, isModuleGranted]);
 
   // Charger alertes + compteurs sidebar (best-effort)
   useEffect(() => {

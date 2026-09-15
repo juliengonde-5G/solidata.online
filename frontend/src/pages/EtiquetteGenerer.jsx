@@ -1,18 +1,29 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ShoppingBag, Shirt, Footprints, Recycle, Printer, ChevronLeft, Check, Tag, Delete } from 'lucide-react';
+import { Printer, ChevronLeft, Check, Tag, Delete } from 'lucide-react';
 import Layout from '../components/Layout';
 import EtiquetteA4 from '../components/EtiquetteA4';
 import api from '../services/api';
+import {
+  visuelCategorie, visuelSaison, visuelGamme, grouperGenres, VISUEL_NEUTRE,
+} from '../utils/etiquettes-visuels';
 import '../styles/etiquette-print.css';
 
-const CATEGORY_VISUALS = {
-  Textiles: { icon: Shirt, color: '#2563EB', bg: '#DBEAFE' },
-  Chaussures: { icon: Footprints, color: '#92400E', bg: '#FED7AA' },
-  Maroquinerie: { icon: ShoppingBag, color: '#8B5A2B', bg: '#FEF3C7' },
-  Chiffons: { icon: Recycle, color: '#475569', bg: '#E2E8F0' },
-};
-
-const STEPS = ['Catégorie', 'Genre', 'Saison', 'Gamme', 'Produit', 'Poids'];
+// Les étapes sont identifiées par un NOM, pas par un rang : une catégorie sans
+// déclinaison (upcycling) n'a que « Catégorie » puis « Poids », et un parcours
+// indexé sur 0..5 se serait mis à désigner la mauvaise étape dès qu'on en retire
+// quatre au milieu.
+const ETAPE_CATEGORIE = { id: 'categorie', label: 'Catégorie' };
+const ETAPE_POIDS = { id: 'poids', label: 'Poids' };
+const ETAPES_COMPLETES = [
+  ETAPE_CATEGORIE,
+  { id: 'genre', label: 'Genre' },
+  { id: 'saison', label: 'Saison' },
+  { id: 'gamme', label: 'Gamme' },
+  { id: 'produit', label: 'Produit' },
+  ETAPE_POIDS,
+];
+// Catégorie choisie, puis la balance. Rien entre les deux.
+const ETAPES_SANS_DECLINAISON = [ETAPE_CATEGORIE, ETAPE_POIDS];
 
 export default function EtiquetteGenerer() {
   const [step, setStep] = useState(0);
@@ -21,7 +32,7 @@ export default function EtiquetteGenerer() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [poste, setPoste] = useState(null);
-  const [dimensions, setDimensions] = useState({ categorie_eco_org: [], genre: [], saison: [], gamme: [] });
+  const [dimensions, setDimensions] = useState({ categorie_eco_org: [], genre: [], saison: [], gamme: [], categories_sans_declinaison: [] });
   const [produits, setProduits] = useState([]);
   const [loading, setLoading] = useState(true);
   // Traçabilité carton → lot (optionnel) : lot de tri en cours à rattacher aux
@@ -42,7 +53,7 @@ export default function EtiquetteGenerer() {
         ]);
         if (cancelled) return;
         setPoste(p.data[0] || null);
-        setDimensions(d.data || { categorie_eco_org: [], genre: [], saison: [], gamme: [] });
+        setDimensions(d.data || { categorie_eco_org: [], genre: [], saison: [], gamme: [], categories_sans_declinaison: [] });
         setProduits(o.data || []);
         setLots(l.data || []);
       } catch (e) {
@@ -54,12 +65,25 @@ export default function EtiquetteGenerer() {
     return () => { cancelled = true; };
   }, []);
 
-  const categories = useMemo(() => {
-    return (dimensions.categorie_eco_org || []).map((key) => ({
-      key, label: key,
-      ...(CATEGORY_VISUALS[key] || { icon: Tag, color: '#475569', bg: '#E2E8F0' }),
-    }));
-  }, [dimensions.categorie_eco_org]);
+  const categories = useMemo(() => (
+    (dimensions.categorie_eco_org || []).map((key) => ({ key, label: key, ...visuelCategorie(key) }))
+  ), [dimensions.categorie_eco_org]);
+
+  // Genres rangés par famille (Adulte / Enfants / Layettes), demande client.
+  const famillesGenre = useMemo(() => grouperGenres(dimensions.genre), [dimensions.genre]);
+
+  // La liste vient du SERVEUR (GET /etiquettes/dimensions) : l'écran ne connaît
+  // aucune catégorie particulière en dur, il applique ce que le référentiel dit.
+  const sansDeclinaison = useMemo(
+    () => (dimensions.categories_sans_declinaison || []).includes(sel.categorie),
+    [dimensions.categories_sans_declinaison, sel.categorie]
+  );
+  const etapes = sansDeclinaison ? ETAPES_SANS_DECLINAISON : ETAPES_COMPLETES;
+  // Clamp défensif : changer de catégorie peut raccourcir le parcours sous le
+  // rang courant (un `step` hors bornes n'afficherait plus aucune étape).
+  const rang = Math.min(step, etapes.length - 1);
+  const etape = etapes[rang].id;
+  const rangPoids = etapes.length - 1;
 
   const produitsFiltres = useMemo(() => (
     sel.categorie
@@ -81,11 +105,14 @@ export default function EtiquetteGenerer() {
     try {
       const { data } = await api.post('/etiquettes/generer', {
         poste_id: poste.id,
-        produit: sel.produit,
         categorie_eco_org: sel.categorie,
-        genre: sel.genre,
-        saison: sel.saison,
-        gamme: sel.gamme,
+        // Sans déclinaison : rien n'est envoyé plutôt qu'une chaîne vide. Le
+        // serveur tranche de toute façon lui-même d'après la catégorie — ceci
+        // évite seulement d'envoyer un champ qui ne veut rien dire.
+        produit: sansDeclinaison ? undefined : sel.produit,
+        genre: sansDeclinaison ? undefined : sel.genre,
+        saison: sansDeclinaison ? undefined : sel.saison,
+        gamme: sansDeclinaison ? undefined : sel.gamme,
         poids_kg: parseFloat(sel.poids.replace(',', '.')),
         batch_id: selectedLot || undefined,
       });
@@ -111,7 +138,9 @@ export default function EtiquetteGenerer() {
     });
   };
 
-  const canPrint = sel.categorie && sel.genre && sel.saison && sel.gamme && sel.produit && sel.poids && parseFloat(sel.poids.replace(',', '.')) > 0 && !submitting;
+  const poidsSaisi = sel.poids && parseFloat(sel.poids.replace(',', '.')) > 0;
+  const declinaisonsCompletes = sansDeclinaison || (sel.genre && sel.saison && sel.gamme && sel.produit);
+  const canPrint = Boolean(sel.categorie && declinaisonsCompletes && poidsSaisi && !submitting);
 
   return (
     <Layout>
@@ -145,25 +174,25 @@ export default function EtiquetteGenerer() {
         )}
 
         <nav className="bg-white border-b px-6 py-3 flex gap-2 overflow-x-auto">
-          {STEPS.map((label, i) => (
+          {etapes.map((e, i) => (
             <button
-              key={label}
-              onClick={() => i < step && setStep(i)}
+              key={e.id}
+              onClick={() => i < rang && setStep(i)}
               className={`px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition ${
-                i === step
+                i === rang
                   ? 'bg-emerald-600 text-white shadow'
-                  : i < step
+                  : i < rang
                   ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                   : 'bg-slate-100 text-slate-400'
               }`}
             >
-              {i + 1}. {label}
+              {i + 1}. {e.label}
             </button>
           ))}
         </nav>
 
         <div className="flex-1 p-8">
-          {step === 0 && (
+          {etape === 'categorie' && (
             <div>
               <h2 className="text-xl font-bold text-slate-700 mb-6">Choisir la catégorie</h2>
               {loading && (
@@ -183,7 +212,15 @@ export default function EtiquetteGenerer() {
                     return (
                       <button
                         key={c.key}
-                        onClick={() => { setSel({ ...sel, categorie: c.key, produit: '' }); setStep(1); }}
+                        onClick={() => {
+                          const direct = (dimensions.categories_sans_declinaison || []).includes(c.key);
+                          // Changer de catégorie remet les déclinaisons à zéro :
+                          // garder celles de la catégorie précédente enverrait
+                          // une saison choisie pour des Textiles sur un carton
+                          // de Chaussures.
+                          setSel({ ...sel, categorie: c.key, genre: '', saison: '', gamme: '', produit: '' });
+                          setStep(1); // 1 = Genre, ou Poids quand c'est la 2e et dernière étape
+                        }}
                         className={`relative aspect-square rounded-2xl shadow-md flex flex-col items-center justify-center gap-4 transition transform hover:scale-105 ${
                           active ? 'ring-4 ring-emerald-500' : ''
                         }`}
@@ -199,19 +236,21 @@ export default function EtiquetteGenerer() {
             </div>
           )}
 
-          {step === 1 && (
-            <PickGrid title="Genre" items={dimensions.genre} value={sel.genre}
+          {etape === 'genre' && (
+            <PickGroupes title="Genre" groupes={famillesGenre} value={sel.genre}
               onPick={(v) => { setSel({ ...sel, genre: v }); setStep(2); }} />
           )}
-          {step === 2 && (
+          {etape === 'saison' && (
             <PickGrid title="Saison" items={dimensions.saison} value={sel.saison}
-              onPick={(v) => { setSel({ ...sel, saison: v }); setStep(3); }} cols={3} />
+              visuel={visuelSaison} cols={3}
+              onPick={(v) => { setSel({ ...sel, saison: v }); setStep(3); }} />
           )}
-          {step === 3 && (
+          {etape === 'gamme' && (
             <PickGrid title="Gamme" items={dimensions.gamme} value={sel.gamme}
-              onPick={(v) => { setSel({ ...sel, gamme: v }); setStep(4); }} cols={3} />
+              visuel={visuelGamme} cols={2}
+              onPick={(v) => { setSel({ ...sel, gamme: v }); setStep(4); }} />
           )}
-          {step === 4 && (
+          {etape === 'produit' && (
             <div>
               <h2 className="text-xl font-bold text-slate-700 mb-6">Produit</h2>
               {produitsFiltres.length === 0 && (
@@ -222,7 +261,7 @@ export default function EtiquetteGenerer() {
               <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                 {produitsFiltres.map((it) => (
                   <button key={it}
-                    onClick={() => { setSel({ ...sel, produit: it }); setStep(5); }}
+                    onClick={() => { setSel({ ...sel, produit: it }); setStep(rangPoids); }}
                     className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
                       sel.produit === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
                     }`}
@@ -232,9 +271,12 @@ export default function EtiquetteGenerer() {
             </div>
           )}
 
-          {step === 5 && (
+          {etape === 'poids' && (
             <div>
-              <h2 className="text-xl font-bold text-slate-700 mb-6">Poids du carton (kg)</h2>
+              <h2 className="text-xl font-bold text-slate-700 mb-6">
+                Poids du carton (kg)
+                {sansDeclinaison && <span className="ml-3 text-base font-semibold text-teal-700">— {sel.categorie}</span>}
+              </h2>
               <div className="bg-white rounded-3xl shadow-lg p-8 max-w-md mx-auto">
                 <div className="text-7xl font-extrabold text-center text-slate-800 mb-6 min-h-[7rem] flex items-center justify-center">
                   {sel.poids || '0'}
@@ -263,12 +305,13 @@ export default function EtiquetteGenerer() {
         </div>
 
         <footer className="bg-white border-t px-6 py-4 flex items-center justify-between">
-          <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}
+          <button onClick={() => setStep(Math.max(0, rang - 1))} disabled={rang === 0}
             className="px-5 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 disabled:opacity-40 flex items-center gap-2 font-semibold">
             <ChevronLeft className="w-5 h-5" /> Retour
           </button>
           <div className="text-sm text-slate-600 flex flex-wrap gap-x-4">
             {sel.categorie && <span>📦 {sel.categorie}</span>}
+            {sel.categorie && sansDeclinaison && <span className="text-slate-400">sans genre / saison / gamme / produit</span>}
             {sel.genre && <span>👤 {sel.genre}</span>}
             {sel.saison && <span>🌤️ {sel.saison}</span>}
             {sel.gamme && <span>🏷️ {sel.gamme}</span>}
@@ -296,22 +339,97 @@ export default function EtiquetteGenerer() {
   );
 }
 
-function PickGrid({ title, items, value, onPick, cols }) {
-  const colsClass = cols === 3 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
+/**
+ * Tuile d'un choix : image d'abord, nom ensuite, définition métier en dessous
+ * quand la valeur en porte une (les gammes : « Extra » ne dit rien, « Premium »
+ * si). Sans table de visuel (`visuel` non fourni), on retombe sur le bouton
+ * texte historique — aucune icône n'est inventée pour une valeur inconnue.
+ */
+function TuileChoix({ valeur, visuel, actif, onPick }) {
+  const v = visuel ? visuel(valeur) : null;
+  const Icon = v?.icon;
+  const neutre = !v || v === VISUEL_NEUTRE;
+  if (!Icon) {
+    return (
+      <button onClick={() => onPick(valeur)}
+        className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
+          actif ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
+        }`}
+      >{valeur}</button>
+    );
+  }
+  return (
+    <button
+      onClick={() => onPick(valeur)}
+      className={`relative rounded-2xl shadow-md flex flex-col items-center justify-center gap-3 py-8 px-4 transition transform hover:scale-105 ${
+        actif ? 'ring-4 ring-emerald-500' : ''
+      }`}
+      style={{ background: v.bg, color: v.color }}
+    >
+      <Icon className="w-16 h-16" strokeWidth={1.5} />
+      <span className="text-xl font-bold text-center leading-tight">{valeur}</span>
+      {v.definition && (
+        <span className="text-sm font-semibold opacity-80 text-center">{v.definition}</span>
+      )}
+      {neutre && (
+        <span className="text-[11px] font-medium opacity-60 text-center">Image à définir</span>
+      )}
+    </button>
+  );
+}
+
+function PickGrid({ title, items, value, onPick, cols, visuel }) {
+  const colsClass = cols === 2
+    ? 'grid-cols-2 md:grid-cols-4'
+    : cols === 3 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
   return (
     <div>
       <h2 className="text-xl font-bold text-slate-700 mb-6">{title}</h2>
       <div className={`grid gap-4 ${colsClass}`}>
         {(items || []).map((it) => (
-          <button key={it} onClick={() => onPick(it)}
-            className={`px-6 py-8 rounded-2xl text-xl font-bold shadow-md transition transform hover:scale-105 ${
-              value === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
-            }`}
-          >{it}</button>
+          <TuileChoix key={it} valeur={it} visuel={visuel} actif={value === it} onPick={onPick} />
         ))}
         {(!items || items.length === 0) && (
           <div className="col-span-full text-slate-400 italic">Aucune valeur — ajoute-en depuis Admin → Catalogue.</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Choix rangé par FAMILLES, une ligne chacune (genres : Adulte / Enfants /
+ * Layettes). Une famille vide n'est pas affichée — un intitulé sans tuile en
+ * dessous se lit comme une donnée manquante.
+ */
+function PickGroupes({ title, groupes, value, onPick }) {
+  return (
+    <div>
+      <h2 className="text-xl font-bold text-slate-700 mb-6">{title}</h2>
+      {(groupes || []).length === 0 && (
+        <div className="text-slate-400 italic">Aucune valeur — ajoute-en depuis Admin → Catalogue.</div>
+      )}
+      <div className="space-y-7">
+        {(groupes || []).map((g) => {
+          const Icon = g.icon;
+          return (
+            <div key={g.id}>
+              <div className="flex items-center gap-2 mb-3 text-slate-600">
+                {Icon && <Icon className="w-6 h-6" strokeWidth={1.8} />}
+                <span className="text-sm font-bold uppercase tracking-wide">{g.label}</span>
+              </div>
+              <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {g.valeurs.map((it) => (
+                  <button key={it} onClick={() => onPick(it)}
+                    className={`px-5 py-7 rounded-2xl text-lg font-bold shadow-md transition transform hover:scale-105 ${
+                      value === it ? 'bg-emerald-600 text-white ring-4 ring-emerald-300' : 'bg-white text-slate-800 hover:bg-emerald-50'
+                    }`}
+                  >{it}</button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

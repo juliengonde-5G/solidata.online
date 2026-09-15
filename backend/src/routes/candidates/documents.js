@@ -18,7 +18,7 @@ const RECRUITMENT_DOCS = {
 };
 
 // GET /api/candidates/documents/list — Liste des documents disponibles
-router.get('/list', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+router.get('/list', authorize('ADMIN', 'RH'), (req, res) => {
   const docs = Object.entries(RECRUITMENT_DOCS).map(([key, doc]) => ({
     key,
     label: doc.label,
@@ -28,7 +28,7 @@ router.get('/list', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
 });
 
 // GET /api/candidates/documents/download/:docKey — Télécharger un document
-router.get('/download/:docKey', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+router.get('/download/:docKey', authorize('ADMIN', 'RH'), (req, res) => {
   const doc = RECRUITMENT_DOCS[req.params.docKey];
   if (!doc) return res.status(404).json({ error: 'Document non trouvé' });
   const filePath = path.join(__dirname, '..', '..', '..', 'uploads', 'documents', doc.filename);
@@ -37,7 +37,7 @@ router.get('/download/:docKey', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) 
 });
 
 // GET /api/candidates/documents/livret-content — Contenu du livret en texte structuré
-router.get('/livret-content', authorize('ADMIN', 'RH', 'MANAGER'), (req, res) => {
+router.get('/livret-content', authorize('ADMIN', 'RH'), (req, res) => {
   res.json({
     title: "Livret d'accueil collaborateur",
     sections: [

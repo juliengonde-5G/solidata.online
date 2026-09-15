@@ -253,8 +253,8 @@ router.post('/public/:token', [
 router.use(authenticate);
 router.use(autoLogActivity('enquetes'));
 
-const READ = authorize('ADMIN', 'MANAGER', 'RH', 'QHSE');
-const WRITE = authorize('ADMIN', 'RH', 'MANAGER', 'QHSE');
+const READ = authorize('ADMIN', 'RH');
+const WRITE = authorize('ADMIN', 'RH');
 
 // ───────────────────────────────────────────────────────────────────────────
 // MODÈLES

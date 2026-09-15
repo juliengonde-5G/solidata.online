@@ -37,7 +37,7 @@ async function getDemoTour(vehicleId) {
 }
 
 // GET /api/tours/demo/access-info — lien + état, pour l'écran du formateur
-router.get('/demo/access-info', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/demo/access-info', authorize('ADMIN'), async (req, res) => {
   try {
     const vehicle = await getDemoVehicle();
     if (!vehicle) {
@@ -66,7 +66,7 @@ router.get('/demo/access-info', authorize('ADMIN', 'MANAGER'), async (req, res) 
 });
 
 // POST /api/tours/demo/reset — remet la démo dans son état initial
-router.post('/demo/reset', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/demo/reset', authorize('ADMIN'), async (req, res) => {
   try {
     const vehicle = await getDemoVehicle();
     if (!vehicle) {

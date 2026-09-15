@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
 });
 
 // PUT /api/alert-thresholds/:indicateur — UPSERT
-router.put('/:indicateur', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:indicateur', authorize('ADMIN'), async (req, res) => {
   try {
     const { domaine, libelle, seuil_min, seuil_max, unite, severite, actif, notes } = req.body;
     if (severite && !SEVERITES.includes(severite)) {

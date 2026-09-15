@@ -19,8 +19,7 @@
  * sauvegarde de la base). Comme partout dans le projet, aucun seed en base :
  * la valeur par défaut vit dans le code et la table ne sert qu'à la surcharger.
  *
- * MANAGER n'est délibérément PAS soumis (encadrants de terrain, surfaces déjà
- * masquées) ; les chauffeurs (jetons `driver-start`, rôle COLLABORATEUR en dur)
+ * Les chauffeurs (jetons `driver-start`, rôle COLLABORATEUR en dur)
  * et les jobs du scheduler ne passent jamais par ici. Le rôle PCM (Praticien)
  * a été RETIRÉ du périmètre par arbitrage client (2.43.0) : il fait passer des
  * tests, sans accès au dossier de recrutement ni au parcours d'insertion. Le
@@ -48,7 +47,7 @@
  * non enrôlée garderait le flux temps réel (messagerie) ouvert.
  *
  * Pour les rôles NON soumis, tout ceci est un no-op intégral : aucune
- * régression attendue sur MANAGER / AUTORITE / QHSE / FINANCE / RESP_BTQ…
+ * régression attendue sur AUTORITE / RESP_BTQ / COLLABORATEUR…
  */
 const pool = require('../config/database');
 const { resolveBaseRole } = require('./auth');

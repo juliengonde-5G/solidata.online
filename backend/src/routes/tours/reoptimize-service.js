@@ -430,7 +430,7 @@ async function proposeReoptimization({
   if (!proposal.applique_automatiquement) {
     const detail = `Gain ${proposal.gain_percent}% (${proposal.old_distance_km} → ${proposal.new_distance_km} km`
       + `${co2Evite !== null ? `, ${co2Evite} kg CO2 évités` : ''}) — motif ${triggerReason}`;
-    sendPushToRoles(['ADMIN', 'MANAGER'], {
+    sendPushToRoles(['ADMIN'], {
       title: `Ré-optim. proposée — Tournée #${tourId}`,
       body: detail,
       tag: `reopt-${tourId}`,

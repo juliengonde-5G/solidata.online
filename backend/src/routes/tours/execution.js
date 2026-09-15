@@ -439,7 +439,7 @@ module.exports = function createExecutionRouter(upload) {
         const detail = tour.total_weight_kg
           ? `Poids total : ${Math.round(tour.total_weight_kg)} kg`
           : 'Voir le détail de la tournée';
-        sendPushToRoles(['ADMIN', 'MANAGER'], {
+        sendPushToRoles(['ADMIN'], {
           title: `Tournée #${req.params.id} ${label}`,
           body: detail,
           tag: `tour-${req.params.id}-${status}`,

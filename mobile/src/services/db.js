@@ -333,6 +333,14 @@ export async function addPendingCollect(data) {
     anomaly: data.anomaly || null,
     notes: data.notes || null,
     qrScanned: !!data.qrScanned,
+    // QR déclaré indisponible + position du chauffeur à cet instant. La file
+    // ne garde que ce qu'elle NOMME (même piège que fillPercent/arriveeAt
+    // ci-dessus) : sans ces lignes, une collecte rejouée après une coupure
+    // repartirait sans sa déclaration, et le compte rendu de tournée dirait
+    // « QR scanné » d'un point où le chauffeur n'a pas pu approcher.
+    qrUnavailable: !!data.qrUnavailable,
+    qrUnavailableReason: data.qrUnavailableReason || null,
+    declarationPosition: data.declarationPosition || null,
     remballe: !!data.remballe,
     createdAt: new Date().toISOString(),
   });

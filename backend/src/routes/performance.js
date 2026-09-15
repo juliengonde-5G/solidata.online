@@ -8,8 +8,8 @@ router.use(authenticate);
 // agrégés sans PII. Le reste du routeur reste ADMIN/MANAGER.
 router.use((req, res, next) => {
   const roles = req.path === '/industrial-kpis'
-    ? ['ADMIN', 'MANAGER', 'RH']
-    : ['ADMIN', 'MANAGER'];
+    ? ['ADMIN', 'RH']
+    : ['ADMIN'];
   return authorize(...roles)(req, res, next);
 });
 

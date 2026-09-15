@@ -25,7 +25,7 @@ const TABS = [
 export default function Enquetes() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
-  const canWrite = ['ADMIN', 'RH', 'MANAGER', 'QHSE'].includes(base);
+  const canWrite = ['ADMIN', 'RH'].includes(base);
 
   const [tab, setTab] = useState('modeles');
 

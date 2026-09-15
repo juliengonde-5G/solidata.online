@@ -377,7 +377,7 @@ function vehicleConflictMessage(conflict) {
 }
 
 // GET /api/tours — Liste des tournées
-router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/', authorize('ADMIN'), async (req, res) => {
   try {
     const { date, status, vehicle_id } = req.query;
     let query = `
@@ -421,7 +421,7 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // Renvoie les facteurs EFFECTIFS (appris > manuel > défaut) + la source de
 // chacun (item 49). Les tableaux `seasonalFactors`/`dayOfWeekFactors` reflètent
 // donc ce que le moteur applique réellement ; `*Sources` documente l'origine.
-router.get('/predictive-config', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/predictive-config', authorize('ADMIN'), async (req, res) => {
   try {
     await ensureConfigLoaded();
     const resolved = await fillFactors.getResolvedFactors();
@@ -459,7 +459,7 @@ router.get('/predictive-config', authorize('ADMIN', 'MANAGER'), async (req, res)
 // `settings` via fill-factors, mais cet endpoint n'expose QUE ces clés-là : le
 // routeur /api/settings, lui, reste ADMIN (il porte les clés chiffrées SumUp,
 // Pennylane et badgeuse).
-router.put('/predictive-config', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/predictive-config', authorize('ADMIN'), async (req, res) => {
   try {
     const { seasonalFactors, dayOfWeekFactors, holidays, schoolVacations, scoring } = req.body;
 
@@ -526,7 +526,7 @@ router.put('/predictive-config', authorize('ADMIN', 'MANAGER'), async (req, res)
 // L'écran d'estimation les affiche AVANT la soumission — le 409 de création
 // devient l'exception, pas la découverte.
 // ══════════════════════════════════════════
-router.post('/estimate', authorize('ADMIN', 'MANAGER'), [
+router.post('/estimate', authorize('ADMIN'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
 ], validate, async (req, res) => {
   try {
@@ -658,7 +658,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/tours/intelligent — Générer une tournée intelligente
-router.post('/intelligent', authorize('ADMIN', 'MANAGER'), [
+router.post('/intelligent', authorize('ADMIN'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
   body('date').notEmpty().withMessage('Date requise'),
 ], validate, async (req, res) => {
@@ -708,7 +708,7 @@ router.post('/intelligent', authorize('ADMIN', 'MANAGER'), [
 });
 
 // POST /api/tours/standard — Créer une tournée standard (route prédéfinie)
-router.post('/standard', authorize('ADMIN', 'MANAGER'), [
+router.post('/standard', authorize('ADMIN'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
   body('date').notEmpty().withMessage('Date requise'),
   body('standard_route_id').isInt().withMessage('ID route standard requis'),
@@ -770,7 +770,7 @@ router.post('/standard', authorize('ADMIN', 'MANAGER'), [
 });
 
 // POST /api/tours/manual — Créer une tournée manuelle
-router.post('/manual', authorize('ADMIN', 'MANAGER'), [
+router.post('/manual', authorize('ADMIN'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
   body('date').notEmpty().withMessage('Date requise'),
   body('cav_ids').isArray({ min: 1 }).withMessage('Liste de CAV requise'),
@@ -848,7 +848,7 @@ router.post('/manual', authorize('ADMIN', 'MANAGER'), [
 // L'ordre n'est pas arbitraire : une tournée qui déborde de la journée n'a pas
 // à discuter de ses horaires, et un rendez-vous pris avec une personne prime
 // sur une plage d'ouverture théorique.
-router.post('/association', authorize('ADMIN', 'MANAGER'), [
+router.post('/association', authorize('ADMIN'), [
   body('vehicle_id').isInt().withMessage('ID véhicule requis'),
   body('date').notEmpty().withMessage('Date requise'),
   body('association_point_ids').custom((value, { req }) => {
@@ -1002,7 +1002,7 @@ router.post('/association', authorize('ADMIN', 'MANAGER'), [
 // ══════════════════════════════════════════
 
 // GET /api/tours/association-routes — Routes standard association
-router.get('/association-routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/association-routes/list', authorize('ADMIN'), async (req, res) => {
   try {
     const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
     const result = await pool.query(`
@@ -1021,7 +1021,7 @@ router.get('/association-routes/list', authorize('ADMIN', 'MANAGER'), async (req
 });
 
 // GET /api/tours/association-routes/:id/points — Points d'une route association
-router.get('/association-routes/:id/points', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/association-routes/:id/points', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT sra.position, ap.*
@@ -1037,7 +1037,7 @@ router.get('/association-routes/:id/points', authorize('ADMIN', 'MANAGER'), asyn
 });
 
 // GET /api/tours/association-routes/:id — Détail d'un modèle association
-router.get('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/association-routes/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
@@ -1057,7 +1057,7 @@ router.get('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req,
 });
 
 // POST /api/tours/association-routes — Créer un modèle association
-router.post('/association-routes', authorize('ADMIN', 'MANAGER'), [
+router.post('/association-routes', authorize('ADMIN'), [
   body('name').notEmpty().withMessage('Nom requis'),
   body('association_point_ids').isArray({ min: 1 }).withMessage('Liste de points association requise'),
 ], validate, async (req, res) => {
@@ -1085,7 +1085,7 @@ router.post('/association-routes', authorize('ADMIN', 'MANAGER'), [
 });
 
 // PUT /api/tours/association-routes/:id — Modifier un modèle association
-router.put('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/association-routes/:id', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -1132,7 +1132,7 @@ router.put('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req,
 });
 
 // DELETE /api/tours/association-routes/:id — Supprimer un modèle association
-router.delete('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/association-routes/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
@@ -1148,7 +1148,7 @@ router.delete('/association-routes/:id', authorize('ADMIN', 'MANAGER'), async (r
 });
 
 // GET /api/tours/predict/:cavId — Prédiction de remplissage pour un CAV
-router.get('/predict/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/predict/:cavId', authorize('ADMIN'), async (req, res) => {
   try {
     const prediction = await predictFillRate(req.params.cavId, req.query.date);
     res.json(prediction);
@@ -1165,7 +1165,7 @@ router.get('/predict/:cavId', authorize('ADMIN', 'MANAGER'), async (req, res) =>
 // GET /api/tours/routes/list — Modèles de tournée CAV
 // Par défaut : modèles ACTIFS uniquement (comportement historique).
 // `?include_inactive=1` ajoute les modèles désactivés.
-router.get('/routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/routes/list', authorize('ADMIN'), async (req, res) => {
   try {
     const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
     const result = await pool.query(`
@@ -1186,7 +1186,7 @@ router.get('/routes/list', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // GET /api/tours/routes/:id — Détail d'un modèle CAV (composition ordonnée)
-router.get('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/routes/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });
@@ -1205,7 +1205,7 @@ router.get('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // POST /api/tours/routes — Créer un modèle CAV
-router.post('/routes', authorize('ADMIN', 'MANAGER'), [
+router.post('/routes', authorize('ADMIN'), [
   body('name').notEmpty().withMessage('Nom requis'),
 ], validate, async (req, res) => {
   const client = await pool.connect();
@@ -1235,7 +1235,7 @@ router.post('/routes', authorize('ADMIN', 'MANAGER'), [
 
 // PUT /api/tours/routes/:id — Modifier un modèle CAV
 // `cav_ids` = REMPLACEMENT COMPLET et ordonné de la composition (transaction).
-router.put('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/routes/:id', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -1283,7 +1283,7 @@ router.put('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // DELETE /api/tours/routes/:id — Supprimer un modèle CAV
 // Refus 409 si le modèle est référencé par une tournée (l'historique doit rester
 // lisible) : le désactiver (`is_active: false`) est alors la bonne manœuvre.
-router.delete('/routes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/routes/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Identifiant invalide' });

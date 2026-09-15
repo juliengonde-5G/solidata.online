@@ -50,7 +50,7 @@ const tokenPour = (role, id = 1) => jwt.sign(
   { id, userId: id, username: `u${id}`, role }, JWT_SECRET, { expiresIn: '1h' }
 );
 const adminToken = tokenPour('ADMIN', 1);
-const managerToken = tokenPour('MANAGER', 2);
+const gestionnaireToken = tokenPour('ADMIN', 2);
 const collabToken = tokenPour('COLLABORATEUR', 3);
 
 let app;
@@ -140,7 +140,7 @@ describe('habilitations', () => {
     mockDb();
     expect((await get(TOUR_ID, adminToken)).status).toBe(200);
     mockDb();
-    expect((await get(TOUR_ID, managerToken)).status).toBe(200);
+    expect((await get(TOUR_ID, gestionnaireToken)).status).toBe(200);
   });
 
   test('404 sur une tournée inexistante', async () => {

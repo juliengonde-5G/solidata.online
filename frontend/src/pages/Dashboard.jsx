@@ -35,7 +35,7 @@ const MODULE_CARDS = [
     path: '/employees',
     icon: Users,
     color: 'emerald',
-    roles: ['ADMIN', 'RH', 'MANAGER'],
+    roles: ['ADMIN', 'RH'],
     kpiKey: 'employes_actifs',
     kpiLabel: 'collaborateurs',
   },
@@ -46,7 +46,7 @@ const MODULE_CARDS = [
     path: '/dashboard-collecte',
     icon: Truck,
     color: 'teal',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     kpiKey: 'tours_aujourdhui',
     kpiLabel: 'tournees',
   },
@@ -57,7 +57,7 @@ const MODULE_CARDS = [
     path: '/production',
     icon: Factory,
     color: 'amber',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     kpiKey: 'kg_trie_aujourdhui',
     kpiLabel: 'kg tries',
   },
@@ -68,7 +68,7 @@ const MODULE_CARDS = [
     path: '/exutoires-commandes',
     icon: Ship,
     color: 'purple',
-    roles: ['ADMIN', 'MANAGER'],
+    roles: ['ADMIN'],
     kpiKey: 'commandes_en_cours',
     kpiLabel: 'commandes',
   },
@@ -79,7 +79,7 @@ const MODULE_CARDS = [
     path: '/performance',
     icon: BarChart3,
     color: 'rose',
-    roles: ['ADMIN', 'MANAGER', 'RH'],
+    roles: ['ADMIN', 'RH'],
     kpiKey: null,
     kpiLabel: '',
   },
@@ -394,7 +394,7 @@ function formatTonnage(val) {
 
 function getQuickActions(role) {
   const actions = [];
-  if (['ADMIN', 'MANAGER'].includes(role)) {
+  if (['ADMIN'].includes(role)) {
     actions.push({ label: 'Nouvelle tournee', path: '/tours', icon: Truck });
     actions.push({ label: 'Saisir production', path: '/production', icon: Factory });
   }
@@ -402,7 +402,7 @@ function getQuickActions(role) {
     actions.push({ label: 'Candidats', path: '/candidates', icon: UserPlus });
     actions.push({ label: 'Parcours insertion', path: '/insertion', icon: Heart });
   }
-  if (['ADMIN', 'MANAGER'].includes(role)) {
+  if (['ADMIN'].includes(role)) {
     actions.push({ label: 'Stock', path: '/stock', icon: Package });
     actions.push({ label: 'Commandes', path: '/exutoires-commandes', icon: Ship });
   }

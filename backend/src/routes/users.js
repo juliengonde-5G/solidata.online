@@ -14,11 +14,13 @@ const { logActivity, autoLogActivity } = require('../middleware/activity-logger'
 router.use(authenticate, requireMfa, authorize('ADMIN'));
 router.use(autoLogActivity('user'));
 
-// Rôles intégrés. DPO / FINANCE / QHSE ajoutés en vague 2 (parties prenantes) :
-// DPO (RGPD sans pleins droits ADMIN), FINANCE (consultation direction/CA),
-// QHSE (incidents + véhicules + exports d'audit). Ce sont des rôles INTÉGRÉS
-// (pas des rôles personnalisés) car ils ouvrent des accès qu'un rôle dupliqué,
-// borné aux droits de son rôle de base, ne pourrait pas accorder.
+// Rôles intégrés. MANAGER / QHSE / FINANCE ont été RETIRÉS le 10/09/2026
+// (demande client) : `isValidRole` les refuse désormais, on ne peut donc plus
+// les assigner. Un compte qui les porte encore n'est PAS réaffecté d'office —
+// ni promu ADMIN (ce serait une escalade décidée par un script), ni rétrogradé
+// COLLABORATEUR (ce serait couper l'accès d'un encadrant sans que personne ne
+// le sache). Il est SIGNALÉ : au démarrage (init-db) et sur cet écran, avec la
+// mention « rôle supprimé — à réaffecter ». C'est un ADMIN qui tranche.
 // Liste et validation déplacées dans utils/roles.js : une clé d'API de service
 // porte elle aussi un rôle (2.45.0) et doit être validée contre la MÊME liste.
 const { isValidRole } = require('../utils/roles');

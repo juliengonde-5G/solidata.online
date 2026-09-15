@@ -56,7 +56,7 @@ const { enregistrerArretsGps } = require('../../src/routes/tours/completion-effe
 const { sendPushToRoles } = require('../../src/services/push-notifications');
 
 const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
-const managerToken = jwt.sign({ id: 2, username: 'manager', role: 'MANAGER' }, JWT_SECRET, { expiresIn: '1h' });
+const gestionnaireToken = jwt.sign({ id: 2, username: 'manager', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
 const collabToken = jwt.sign({ id: 3, username: 'collab', role: 'COLLABORATEUR' }, JWT_SECRET, { expiresIn: '1h' });
 
 let app;
@@ -191,7 +191,7 @@ describe('GET /api/tours/:id/arrets-gps', () => {
       [/FROM gps_positions/, []],
       ...CONTEXTE,
     ]);
-    expect((await request(app).get('/api/tours/7/arrets-gps').set('Authorization', `Bearer ${managerToken}`)).status).toBe(200);
+    expect((await request(app).get('/api/tours/7/arrets-gps').set('Authorization', `Bearer ${gestionnaireToken}`)).status).toBe(200);
     expect((await request(app).get('/api/tours/7/arrets-gps').set('Authorization', `Bearer ${collabToken}`)).status).toBe(403);
     expect((await request(app).get('/api/tours/7/arrets-gps')).status).toBe(401);
   });
@@ -400,12 +400,12 @@ describe('POST /api/tours/:id/checklist-public — remontée des anomalies', () 
     expect(r.status).toBe(200);
 
     expect(sendPushToRoles).toHaveBeenCalledTimes(1);
-    expect(sendPushToRoles.mock.calls[0][0]).toEqual(['ADMIN', 'MANAGER']);
+    expect(sendPushToRoles.mock.calls[0][0]).toEqual(['ADMIN']);
     expect(sendPushToRoles.mock.calls[0][1].body).toContain('AB-123-CD');
 
     expect(mockMessagerieRoles).toHaveBeenCalledTimes(1);
     const [roles, msg] = mockMessagerieRoles.mock.calls[0];
-    expect(roles).toEqual(['ADMIN', 'MANAGER']);
+    expect(roles).toEqual(['ADMIN']);
     expect(msg.source).toBe('checklist');
     // Le message doit NOMMER le point refusé : un compteur nu obligerait le
     // gestionnaire à rouvrir le questionnaire pour savoir quoi faire.

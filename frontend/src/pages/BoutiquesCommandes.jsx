@@ -115,8 +115,8 @@ export default function BoutiquesCommandes() {
     }
   }
 
-  const canAdjust = user?.role === 'ADMIN' || user?.role === 'MANAGER';
-  const canSend = ['ADMIN', 'MANAGER', 'RESP_BTQ'].includes(user?.role);
+  const canAdjust = user?.role === 'ADMIN';
+  const canSend = ['ADMIN', 'RESP_BTQ'].includes(user?.role);
 
   const columnCommandes = (col) => commandes.filter(c => col.statuts.includes(c.statut));
 

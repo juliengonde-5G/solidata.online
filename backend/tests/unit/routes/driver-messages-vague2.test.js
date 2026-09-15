@@ -23,7 +23,7 @@ const request = require('supertest');
 
 let app;
 const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
-const managerToken = jwt.sign({ id: 2, username: 'mgr', role: 'MANAGER' }, JWT_SECRET, { expiresIn: '1h' });
+const gestionnaireToken = jwt.sign({ id: 2, username: 'mgr', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
 const autoriteToken = jwt.sign({ id: 3, username: 'auto', role: 'AUTORITE' }, JWT_SECRET, { expiresIn: '1h' });
 const collabToken = jwt.sign({ id: 4, username: 'driver_5', role: 'COLLABORATEUR' }, JWT_SECRET, { expiresIn: '1h' });
 
@@ -60,20 +60,20 @@ describe('POST /api/tours/messages (envoi consigne)', () => {
 
   it('400 si message vide (que des espaces)', async () => {
     const res = await request(app).post('/api/tours/messages')
-      .set('Authorization', `Bearer ${managerToken}`).send({ vehicle_id: 5, message: '   ' });
+      .set('Authorization', `Bearer ${gestionnaireToken}`).send({ vehicle_id: 5, message: '   ' });
     expect(res.status).toBe(400);
   });
 
   it('400 si vehicle_id manquant', async () => {
     const res = await request(app).post('/api/tours/messages')
-      .set('Authorization', `Bearer ${managerToken}`).send({ message: 'consigne' });
+      .set('Authorization', `Bearer ${gestionnaireToken}`).send({ message: 'consigne' });
     expect(res.status).toBe(400);
   });
 
   it('404 si véhicule inexistant', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] }); // SELECT vehicle → aucun
     const res = await request(app).post('/api/tours/messages')
-      .set('Authorization', `Bearer ${managerToken}`).send({ vehicle_id: 999, message: 'x' });
+      .set('Authorization', `Bearer ${gestionnaireToken}`).send({ vehicle_id: 999, message: 'x' });
     expect(res.status).toBe(404);
   });
 
@@ -82,7 +82,7 @@ describe('POST /api/tours/messages (envoi consigne)', () => {
       .mockResolvedValueOnce({ rows: [{ id: 5 }] }) // SELECT vehicle existe
       .mockResolvedValueOnce({ rows: [{ id: 10, tour_id: 3, vehicle_id: 5, message: 'Danger', read_at: null }] });
     const res = await request(app).post('/api/tours/messages')
-      .set('Authorization', `Bearer ${managerToken}`).send({ vehicle_id: 5, tour_id: 3, message: '  Danger  ' });
+      .set('Authorization', `Bearer ${gestionnaireToken}`).send({ vehicle_id: 5, tour_id: 3, message: '  Danger  ' });
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(10);
     const call = insertCall();
@@ -112,7 +112,7 @@ describe('GET /api/tours/messages (suivi manager lu/non lu)', () => {
   it('200 (MANAGER) — renvoie la liste', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 10, message: 'x', read_at: null }] });
     const res = await request(app).get('/api/tours/messages?vehicle_id=5')
-      .set('Authorization', `Bearer ${managerToken}`);
+      .set('Authorization', `Bearer ${gestionnaireToken}`);
     expect(res.status).toBe(200);
     expect(res.body.messages).toHaveLength(1);
   });

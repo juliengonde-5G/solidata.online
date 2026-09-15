@@ -45,7 +45,7 @@ function weatherIcon(code) {
 export default function BoutiquesDashboard() {
   const { user } = useAuth();
   const roleEff = user?.base_role || user?.role;
-  const isFullAccess = roleEff === 'ADMIN' || roleEff === 'MANAGER';
+  const isFullAccess = roleEff === 'ADMIN';
   const isAdmin = roleEff === 'ADMIN';
 
   const [boutiques, setBoutiques] = useState([]);

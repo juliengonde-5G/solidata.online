@@ -7,8 +7,9 @@ const { validate } = require('../middleware/validate');
 // Générateur partagé avec la voie « étiquette » (item 32) — même code-barres
 // généré (base24 + compteur poste), mêmes champs, created_by + source systématiques.
 const { generateProduitFini } = require('./etiquettes');
+const { sansDeclinaison } = require('../utils/etiquettes-categories');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 
 // GET /api/produits-finis
 router.get('/', async (req, res) => {
@@ -66,19 +67,27 @@ router.get('/summary', async (req, res) => {
 // code-barres GÉNÉRÉ (plus de saisie libre), created_by + source='manuel'.
 router.post('/', [
   body('poste_id').notEmpty().withMessage('Poste requis'),
-  body('produit').notEmpty().withMessage('Produit requis'),
   body('poids_kg').isFloat({ gt: 0 }).withMessage('Poids requis (> 0)'),
 ], validate, async (req, res) => {
   const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg, batch_id } = req.body;
-  if (!poste_id || !produit || !categorie_eco_org || !genre || !gamme || !poids_kg || Number(poids_kg) <= 0) {
-    return res.status(400).json({ error: 'poste_id, produit, categorie_eco_org, genre, gamme et poids_kg (>0) requis' });
+  if (!poste_id || !categorie_eco_org || !poids_kg || Number(poids_kg) <= 0) {
+    return res.status(400).json({ error: 'poste_id, categorie_eco_org et poids_kg (>0) requis' });
+  }
+  // Même règle que la voie étiquette, et pour la même raison : une catégorie
+  // sans déclinaison (upcycling) n'a ni produit ni genre ni gamme à exiger —
+  // les réclamer ici puis les laisser tomber au générateur ferait diverger les
+  // deux chemins qui écrivent le MÊME carton.
+  const sansDecl = sansDeclinaison(categorie_eco_org);
+  if (!sansDecl && (!produit || !genre || !gamme)) {
+    return res.status(400).json({ error: 'produit, genre et gamme requis pour cette catégorie' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { row, poste_label } = await generateProduitFini(client, {
-      poste_id, produit, categorie_eco_org, genre, saison: saison || 'Sans Saison', gamme,
+      poste_id, produit, categorie_eco_org, genre,
+      saison: sansDecl ? null : (saison || 'Sans Saison'), gamme,
       poids_kg, batch_id, created_by: req.user.id, source: 'manuel',
     });
     await client.query('COMMIT');

@@ -42,7 +42,7 @@ async function executerInitialisation() {
         username VARCHAR(100) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         email VARCHAR(255),
-        role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'FINANCE', 'QHSE')),
+        role VARCHAR(50) NOT NULL CHECK (role IN ('ADMIN', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO')),
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         phone VARCHAR(20),
@@ -124,19 +124,52 @@ async function executerInitialisation() {
       );
     `);
 
-    // Habilitations par module (V2.4) : DENY-overlay par rôle sur les sections
-    // de 1er niveau de la sidebar. Absence de ligne = autorisé (défaut).
+    // Habilitations par module (V2.4) : matrice par rôle sur les sections de la
+    // sidebar. Historiquement un DENY-overlay pur — absence de ligne = autorisé,
+    // l'ADMIN ne pouvait que RETIRER.
+    //
+    // 2.56.0 — LA MATRICE PEUT AUSSI ACCORDER (demande client). Le retrait des
+    // profils MANAGER/QHSE/FINANCE (2.52.0) a resserré 44 entrées de la barre
+    // latérale sur le seul ADMIN : plus aucun profil assignable, ni aucun rôle
+    // personnalisé (bornés aux droits de leur rôle de base), ne pouvait recevoir
+    // la Collecte, le Tri, l'Analyse ou la Frip. Donner ces écrans supposait de
+    // donner ADMIN — donc aussi Utilisateurs, Base de données, Configuration et
+    // le registre RGPD. La matrice devient donc capable d'AJOUTER un module à un
+    // rôle, et pas seulement de lui en retirer un.
+    //
+    // POURQUOI UNE COLONNE À PART, ET SURTOUT PAS `allowed = true` : l'écran
+    // d'administration enregistre une ligne pour CHAQUE rôle × CHAQUE module à
+    // chaque sauvegarde (AdminPermissions.jsx). Les lignes `allowed = true`
+    // déjà en base ne veulent donc pas dire « accordé », elles veulent dire
+    // « non refusé ». Les relire comme des accords donnerait, au premier
+    // déploiement, TOUS les modules à TOUS les rôles ayant déjà été enregistrés
+    // — une escalade générale posée par une migration. D'où `grant_access`,
+    // colonne distincte à défaut `false` : après migration, la matrice se
+    // comporte EXACTEMENT comme avant, et rien n'est accordé tant qu'un
+    // administrateur ne l'a pas décidé explicitement.
+    //
+    // Les trois états d'une case se lisent donc :
+    //   allowed = false                     → REFUSÉ    (retire le module)
+    //   allowed = true,  grant_access=false → PAR DÉFAUT (le rôle décide seul)
+    //   allowed = true,  grant_access=true  → ACCORDÉ   (ajoute le module)
     await client.query(`
       CREATE TABLE IF NOT EXISTS role_module_access (
         role VARCHAR(50) NOT NULL,
         module_key VARCHAR(50) NOT NULL,
         allowed BOOLEAN NOT NULL DEFAULT true,
+        grant_access BOOLEAN NOT NULL DEFAULT false,
         updated_at TIMESTAMP DEFAULT NOW(),
         PRIMARY KEY (role, module_key)
       );
     `);
     // Élargit role si la table préexistait en VARCHAR(30) (clés de rôles custom).
     await client.query(`DO $$ BEGIN ALTER TABLE role_module_access ALTER COLUMN role TYPE VARCHAR(50); EXCEPTION WHEN others THEN NULL; END $$;`);
+    // Base déjà déployée : la colonne d'accord manque. Ajoutée à `false` — la
+    // migration ne peut donc RIEN ouvrir (cf. commentaire ci-dessus).
+    await client.query(`
+      ALTER TABLE role_module_access
+      ADD COLUMN IF NOT EXISTS grant_access BOOLEAN NOT NULL DEFAULT false;
+    `);
 
     // Rôles personnalisés (V2.4.1) : un rôle custom hérite des accès d'un rôle
     // de base intégré (base_role) et se restreint via role_module_access.
@@ -1961,6 +1994,23 @@ async function executerInitialisation() {
       );
     }
 
+    // 2.53.0 — catégorie d'étiquette « Upcycling » (demande client du 10/09/2026).
+    // Elle se passe de genre / saison / gamme / produit : l'opérateur la choisit
+    // et pèse (cf. backend/src/utils/etiquettes-categories.js, qui porte la
+    // règle et la sert à l'écran).
+    //
+    // ON CONFLICT DO NOTHING, et JAMAIS DO UPDATE is_active = true : à la
+    // différence du bloc « gammes » ci-dessus — qui NORMALISE un référentiel
+    // figé —, il s'agit ici d'AJOUTER une valeur. Un exploitant qui la
+    // désactive depuis Admin → Catalogue doit la voir rester désactivée ;
+    // la remettre à chaque démarrage serait la doctrine inverse de celle du
+    // projet (un élément retiré volontairement ne revient jamais).
+    await client.query(
+      `INSERT INTO ref_dimensions (type, valeur, ordre) VALUES ('categorie_eco_org', $1, $2)
+       ON CONFLICT (type, valeur) DO NOTHING`,
+      ['Upcycling', 50]
+    );
+
     // V2.2 — la table `associations` du référentiel fait doublon avec
     // `association_points` (module collecte). Suppression de la table inutilisée.
     await client.query(`DROP TABLE IF EXISTS associations CASCADE`);
@@ -3008,6 +3058,22 @@ async function executerInitialisation() {
     await client.query(`
       ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS fill_percent DOUBLE PRECISION;
       ALTER TABLE collection_learning_feedback ADD COLUMN IF NOT EXISTS observed_fill_percent DOUBLE PRECISION;
+    `);
+
+    // 2.54.0 — POSITION AU MOMENT D'UNE DÉCLARATION « QR INDISPONIBLE ».
+    // Le contrôle de présence (50 m) refusait la déclaration à un chauffeur
+    // trop éloigné — or il l'est souvent PARCE QUE l'accès est impossible
+    // (portail fermé, benne bloquée). Le refus est levé côté mobile ; il est
+    // remplacé par une trace : où était le chauffeur quand il a déclaré. Le
+    // compte rendu de tournée en tire la distance au point.
+    // Colonnes NULLABLES : le GPS peut être refusé ou trop lent, et « position
+    // non relevée » est une réponse honnête — jamais un 0, qui se lirait comme
+    // une coordonnée (golfe de Guinée, cf. 2.42.0).
+    await client.query(`
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_lat DOUBLE PRECISION;
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_lng DOUBLE PRECISION;
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_accuracy_m DOUBLE PRECISION;
+      ALTER TABLE tour_cav ADD COLUMN IF NOT EXISTS declaration_at TIMESTAMP;
     `);
     console.log('[INIT-DB] Migration pilotage tournées en cours (arrêts techniques, dégâts, prévention) ✓');
 
@@ -5272,6 +5338,7 @@ async function executerInitialisation() {
         longitude DOUBLE PRECISION,
         geom GEOMETRY(Point, 4326),
         contact_phone VARCHAR(50),
+        contact_email VARCHAR(255),
         contact_info TEXT,
         avg_fill_rate DOUBLE PRECISION DEFAULT 0,
         status VARCHAR(30) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'temporairement_indisponible')),
@@ -5370,11 +5437,18 @@ async function executerInitialisation() {
     // `duree_collecte_min` : durée d'arrêt par défaut du point ; NULL = non
     //   renseignée, le réglage global s'applique alors (RG-C3, cascade
     //   passage → fiche → global, aucune valeur inventée).
+    // `contact_email` (10/09/2026, demande client) : la fiche portait le
+    // téléphone du référent, pas son adresse électronique. C'est pourtant par
+    // là que passent la confirmation d'un rendez-vous de collecte et l'envoi
+    // d'un justificatif — le numéro sert sur place, l'adresse sert avant.
+    // Nullable : une association sans adresse connue reste une fiche valide,
+    // et on n'invente rien.
     await client.query(`
       ALTER TABLE association_points
         ADD COLUMN IF NOT EXISTS horaires_accessibilite JSONB,
         ADD COLUMN IF NOT EXISTS horaires_notes TEXT,
-        ADD COLUMN IF NOT EXISTS duree_collecte_min INTEGER;
+        ADD COLUMN IF NOT EXISTS duree_collecte_min INTEGER,
+        ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255);
     `);
 
     // RG-C2 — durée d'arrêt ajustée POUR CETTE TOURNÉE (premier niveau de la
@@ -5663,6 +5737,38 @@ async function executerInitialisation() {
       console.log('[INIT-DB] Migration users.role : validation applicative (aucune CHECK figée) ✓');
     } catch (e) {
       console.warn('[INIT-DB] Migration users_role_check:', e.message);
+    }
+
+    // ── Rôles retirés le 10/09/2026 : MANAGER / QHSE / FINANCE ───────────────
+    // SIGNALEMENT, jamais réaffectation d'office. Promouvoir ces comptes ADMIN
+    // serait une escalade décidée par un script ; les rétrograder COLLABORATEUR
+    // couperait l'accès d'un encadrant sans que personne ne l'apprenne. On les
+    // NOMME donc au démarrage — c'est un ADMIN qui tranche, depuis /users.
+    //
+    // Les rôles PERSONNALISÉS dupliqués de l'un des trois sont dans le même cas :
+    // leur rôle de base n'existe plus, ils n'ouvrent donc plus rien.
+    try {
+      const orphelins = await client.query(
+        `SELECT role, COUNT(*)::int AS n FROM users
+         WHERE role IN ('MANAGER', 'QHSE', 'FINANCE') AND is_active = true
+         GROUP BY role ORDER BY role`
+      );
+      for (const r of orphelins.rows) {
+        console.warn(`[INIT-DB] ⚠ ${r.n} compte(s) actif(s) portent le rôle « ${r.role} », RETIRÉ de l'application. ` +
+          `Ces comptes se connectent mais n'ont plus aucun accès : leur réaffecter un rôle depuis Administration → Utilisateurs.`);
+      }
+      const crOrphelins = await client.query(
+        `SELECT role_key, label, base_role FROM custom_roles WHERE base_role IN ('MANAGER', 'QHSE', 'FINANCE')`
+      ).catch(() => ({ rows: [] }));
+      for (const r of crOrphelins.rows) {
+        console.warn(`[INIT-DB] ⚠ Le rôle personnalisé « ${r.label} » est dupliqué de « ${r.base_role} », rôle retiré : ` +
+          `il n'ouvre plus aucun accès. Le recréer depuis un rôle existant (Administration → Habilitations).`);
+      }
+      if (orphelins.rows.length === 0 && crOrphelins.rows.length === 0) {
+        console.log('[INIT-DB] Rôles retirés (MANAGER/QHSE/FINANCE) : aucun compte ni rôle personnalisé concerné ✓');
+      }
+    } catch (e) {
+      console.warn('[INIT-DB] Contrôle des rôles retirés :', e.message);
     }
 
     // Table 1 : boutiques (référentiel)
@@ -8452,7 +8558,7 @@ async function executerInitialisation() {
       // être tenus par un prestataire. C'est un arbitrage d'ORGANISATION : la
       // Direction le change ici, sans toucher au code. Un équipage reste borné
       // en tout état de cause (règle d'identité, pas de rôle).
-      ['messagerie.roles_perimetre_restreint', '["AUTORITE","FINANCE","DPO"]', 'messagerie'],
+      ['messagerie.roles_perimetre_restreint', '["AUTORITE","DPO"]', 'messagerie'],
       ['collecte.arret_seuil_min', '5', 'collecte'],         // durée minimale d'un arrêt GPS retenu
       ['collecte.arret_rayon_m', '40', 'collecte'],          // rayon de stationnarité du cluster GPS
       ['collecte.arret_rattachement_m', '80', 'collecte'],   // rayon de rattachement CAV/association

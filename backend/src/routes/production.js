@@ -7,7 +7,7 @@ const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { monthBounds } = require('../utils/month-range');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('production'));
 
 // ══════════════════════════════════════════
@@ -364,7 +364,7 @@ router.get('/objectives', async (req, res) => {
 });
 
 // POST /api/production/objectives — Créer/maj un objectif (upsert sur period_type+period_start+type)
-router.post('/objectives', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/objectives', authorize('ADMIN'), async (req, res) => {
   try {
     const { period_type, period_start, period_end, type, value_kg, value_pct, alert_threshold_pct, commentaire } = req.body;
     if (!period_type || !period_start || !period_end || !type) {
@@ -394,7 +394,7 @@ router.post('/objectives', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // DELETE /api/production/objectives/:id
-router.delete('/objectives/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/objectives/:id', authorize('ADMIN'), async (req, res) => {
   try {
     await pool.query('DELETE FROM production_objectives WHERE id = $1', [req.params.id]);
     res.json({ success: true });
@@ -429,7 +429,7 @@ router.get('/consignes', async (req, res) => {
 });
 
 // POST /api/production/consignes
-router.post('/consignes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/consignes', authorize('ADMIN'), async (req, res) => {
   try {
     const { date_start, date_end, message, priority } = req.body;
     if (!date_start || !date_end || !message) {
@@ -448,7 +448,7 @@ router.post('/consignes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 });
 
 // DELETE /api/production/consignes/:id
-router.delete('/consignes/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/consignes/:id', authorize('ADMIN'), async (req, res) => {
   try {
     await pool.query('DELETE FROM production_consignes WHERE id = $1', [req.params.id]);
     res.json({ success: true });
@@ -527,7 +527,7 @@ router.get('/managers-tri', async (req, res) => {
       pool.query(`
         SELECT id, first_name, last_name, role, username
         FROM users
-        WHERE role IN ('ADMIN', 'MANAGER') AND is_active = true
+        WHERE role = 'ADMIN' AND is_active = true
         ORDER BY last_name, first_name
       `),
     ]);

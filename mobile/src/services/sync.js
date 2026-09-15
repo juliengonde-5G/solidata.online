@@ -329,6 +329,19 @@ export async function sendCollect(collect) {
         // Absent sur une borne de rue — le serveur l'ignore.
         nb_sacs: collect.nbSacs ?? null,
         qr_scanned: !!collect.qrScanned,
+        // QR déclaré indisponible : le motif et la POSITION du chauffeur au
+        // moment de la déclaration. Le serveur les conserve et le compte rendu
+        // de tournée affiche la distance au point — depuis que la déclaration
+        // n'est plus refusée quand l'accès est impossible, c'est cette trace
+        // qui rend compte de la situation à la place du refus.
+        qr_unavailable: !!collect.qrUnavailable,
+        qr_unavailable_reason: collect.qrUnavailableReason || null,
+        // `?? null` : une position non relevée (GPS refusé, trop lent) reste
+        // une absence — jamais un 0 qui se lirait comme une coordonnée.
+        declaration_lat: collect.declarationPosition?.lat ?? null,
+        declaration_lng: collect.declarationPosition?.lng ?? null,
+        declaration_accuracy_m: collect.declarationPosition?.accuracy ?? null,
+        declaration_at: collect.declarationPosition?.at ?? null,
         remballe: !!collect.remballe,
         notes: collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''),
         client_id: collect.clientId || null,
@@ -393,6 +406,15 @@ export async function sendCollectWithPhoto(collect, photoFile) {
   // illisible qu'il écarterait en la journalisant pour rien.
   if (collect.nbSacs != null) fd.append('nb_sacs', String(collect.nbSacs));
   fd.append('qr_scanned', String(!!collect.qrScanned));
+  fd.append('qr_unavailable', String(!!collect.qrUnavailable));
+  // Posés SEULEMENT s'ils existent : en multipart tout devient chaîne, et un
+  // `null` sérialisé arriverait au serveur comme la chaîne « null » — donc
+  // comme une valeur, alors que c'est une absence.
+  if (collect.qrUnavailableReason) fd.append('qr_unavailable_reason', collect.qrUnavailableReason);
+  if (collect.declarationPosition?.lat != null) fd.append('declaration_lat', String(collect.declarationPosition.lat));
+  if (collect.declarationPosition?.lng != null) fd.append('declaration_lng', String(collect.declarationPosition.lng));
+  if (collect.declarationPosition?.accuracy != null) fd.append('declaration_accuracy_m', String(collect.declarationPosition.accuracy));
+  if (collect.declarationPosition?.at) fd.append('declaration_at', collect.declarationPosition.at);
   fd.append('remballe', String(!!collect.remballe));
   fd.append('notes', collect.anomaly ? `${collect.anomaly}${collect.notes ? ': ' + collect.notes : ''}` : (collect.notes || ''));
   if (collect.clientId) fd.append('client_id', collect.clientId);

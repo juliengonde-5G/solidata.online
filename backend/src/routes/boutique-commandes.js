@@ -239,7 +239,7 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/boutique-commandes — créer (RESP_BTQ, MANAGER, ADMIN)
 router.post('/',
-  authorize('ADMIN', 'MANAGER', 'RESP_BTQ'),
+  authorize('ADMIN', 'RESP_BTQ'),
   [
     body('boutique_id').isInt(),
     body('date_commande').isISO8601(),
@@ -286,7 +286,7 @@ router.post('/',
 
 // PUT /api/boutique-commandes/:id — mise à jour (seulement en brouillon)
 router.put('/:id',
-  authorize('ADMIN', 'MANAGER', 'RESP_BTQ'),
+  authorize('ADMIN', 'RESP_BTQ'),
   async (req, res) => {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     const client = await pool.connect();
@@ -337,7 +337,7 @@ router.put('/:id',
 );
 
 // PATCH /api/boutique-commandes/:id/envoyer (RESP_BTQ, MANAGER, ADMIN)
-router.patch('/:id/envoyer', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
+router.patch('/:id/envoyer', authorize('ADMIN', 'RESP_BTQ'), async (req, res) => {
   try {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'envoyee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
@@ -346,7 +346,7 @@ router.patch('/:id/envoyer', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (r
 });
 
 // PATCH /api/boutique-commandes/:id/ajuster (MANAGER, ADMIN) — ajuste les poids
-router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/ajuster', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -378,21 +378,21 @@ router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => 
   }
 });
 
-router.patch('/:id/preparer', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/preparer', authorize('ADMIN'), async (req, res) => {
   try {
     await checkAndTransition(req.params.id, 'en_preparation', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.patch('/:id/expedier', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/expedier', authorize('ADMIN'), async (req, res) => {
   try {
     await checkAndTransition(req.params.id, 'expediee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.patch('/:id/annuler', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
+router.patch('/:id/annuler', authorize('ADMIN', 'RESP_BTQ'), async (req, res) => {
   try {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'annulee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });

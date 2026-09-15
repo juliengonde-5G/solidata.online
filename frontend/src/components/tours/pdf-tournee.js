@@ -394,18 +394,54 @@ function ligneKpi(label, valeur, note = null, alerte = false) {
  * passe de 42 à 60 points tenables) et le seuil s'établit à 52, laissant la
  * marge de sécurité que 55 n'avait plus.
  *
- * PLAFOND STRUCTUREL, dit honnêtement : au-delà de ~190 points, deux colonnes
- * débordent aussi — vérifié en retirant TOUTE l'annexe, qui ne change rien :
- * c'est le tableau seul qui ne tient plus. Seule une liste tronquée y
- * remédierait, et elle ne le sera jamais. Sans conséquence pratique : six
- * heures de travail bornent une tournée réelle autour de 45 points, la plus
- * grosse observée en comptant 74.
+ * COMPTÉ EN LIGNES, ET NON EN POINTS, le 10/09/2026 : la mention « QR
+ * indisponible » ajoute une ligne SOUS le nom du point, comme le motif de
+ * non-collecte le faisait déjà. Un seuil exprimé en POINTS ignore ces lignes :
+ * mesuré, une colonne unique débordait dès 42 points quand tous en portaient
+ * une, alors que le seuil la laissait passer jusqu'à 52 — la bande 42→52
+ * sortait donc en TROIS pages, exactement le défaut corrigé le 28/08/2026 pour
+ * une autre cause. Le seuil compte désormais ce qui coûte réellement de la
+ * hauteur.
+ *
+ * POURQUOI UNE MENTION VAUT UNE DEMI-LIGNE DE POINT : elle est composée en
+ * 6,5 px sans pastille d'état ni colonnes chiffrées. Le rapport est MESURÉ, pas
+ * supposé — trois charges (aucune mention, une sur trois, toutes) placent la
+ * rupture à 58/50/41 points, soit 125, 125 et 129 demi-lignes : le coût d'une
+ * mention est bien la moitié de celui d'un point, à la mesure près.
+ *
+ * Le budget de 112 demi-lignes laisse la marge que 125 n'a pas, et conserve le
+ * comportement historique sur un rapport SANS mention : la bascule y tombe
+ * toujours à 53 points, comme avec l'ancien seuil de 52.
+ *
+ * PLAFOND STRUCTUREL, dit honnêtement : deux colonnes débordent aussi, à
+ * ~440 demi-lignes — soit 206 points sans mention, 178 avec une sur trois,
+ * 140 si tous en portent une (mesuré). Vérifié en retirant TOUTE l'annexe, qui
+ * ne change rien : c'est le tableau seul qui ne tient plus. Seule une liste
+ * tronquée y remédierait, et elle ne le sera jamais. Sans conséquence
+ * pratique : six heures de travail bornent une tournée réelle autour de
+ * 45 points, la plus grosse observée en comptant 74.
  */
-const SEUIL_DEUX_COLONNES = 52;
+const BUDGET_COLONNE_UNIQUE = 112;
+const COUT_POINT = 2;
+const COUT_MENTION = 1;
+
+/**
+ * Ce que « pèse » la liste des points, en demi-lignes. Les mentions comptées
+ * sont celles qui s'impriment SOUS le nom : motif de non-collecte et QR
+ * indisponible. Toute mention ajoutée demain devra s'ajouter ici — sans quoi
+ * le seuil recommencerait à mentir.
+ */
+function poidsListe(points) {
+  return (points || []).reduce((total, p) => total + COUT_POINT
+    + (p.motif_non_collecte ? COUT_MENTION : 0)
+    + (p.qr_indisponible ? COUT_MENTION : 0), 0);
+}
+
+const deuxColonnes = (points) => poidsListe(points) > BUDGET_COLONNE_UNIQUE;
 
 function tableauPoints(points) {
   if (!points || points.length === 0) return '<p class="gris">Aucun point au programme.</p>';
-  if (points.length > SEUIL_DEUX_COLONNES) {
+  if (deuxColonnes(points)) {
     // Les rangs sont calculés sur la liste ENTIÈRE avant la coupe : la seconde
     // colonne continue la numérotation, elle ne recommence pas à 1.
     const milieu = Math.ceil(points.length / 2);
@@ -460,6 +496,25 @@ function marquesPoint(p) {
   return m;
 }
 
+/**
+ * Mention imprimée sous un point dont le QR a été déclaré indisponible.
+ *
+ * La DISTANCE est l'information utile : « déclaré à 180 m » dit à la fois que
+ * le chauffeur n'a pas pu approcher et de combien — c'est ce qui remplace le
+ * refus que l'application opposait autrefois. Position non relevée (GPS refusé
+ * ou trop lent, point sans coordonnées) : on l'écrit, plutôt que de laisser
+ * croire à une déclaration faite au pied de la borne.
+ * En mode dense (deux colonnes), seule la mention courte tient.
+ */
+function mentionQrIndisponible(p, dense) {
+  const d = p.declaration_distance_m;
+  const distance = Number.isFinite(Number(d))
+    ? `à ${Math.round(Number(d))} m` : 'position non relevée';
+  if (dense) return `QR indisponible (${distance})`;
+  const motif = p.qr_indisponible_libelle ? ` — ${p.qr_indisponible_libelle}` : '';
+  return `QR indisponible, déclaré ${distance}${motif}`;
+}
+
 function unTableau(points, dense) {
   const lignes = points.map((p, i) => {
     const prevu = frHeure(p.heure_prevue);
@@ -482,7 +537,8 @@ function unTableau(points, dense) {
       <td class="rang">${p.rang ?? i + 1}</td>
       <td>${esc(court(sansCommune(p.nom, p.commune) || p.nom || '—', budget))}${
         suffixe ? ` <span class="gris">${esc(suffixe)}</span>` : ''}${p.commune && !dense ? ` <span class="gris" style="font-size:6.5px">· ${esc(p.commune)}</span>` : ''}
-          ${p.motif_non_collecte ? `<br><span class="moyen" style="font-size:6.5px">${esc(p.motif_non_collecte)}</span>` : ''}</td>
+          ${p.motif_non_collecte ? `<br><span class="moyen" style="font-size:6.5px">${esc(p.motif_non_collecte)}</span>` : ''}
+          ${p.qr_indisponible ? `<br><span class="moyen" style="font-size:6.5px">${esc(mentionQrIndisponible(p, dense))}</span>` : ''}</td>
       <td class="num">${prevu ? esc(prevu) : '<span class="gris">—</span>'}</td>
       <td class="num">${reel ? esc(reel) : '<span class="gris">—</span>'}</td>
       <td class="num ${ecartClasse(p.ecart_min)}">${e ? esc(e) : '<span class="gris">—</span>'}</td>
@@ -572,6 +628,14 @@ export function depuisApi(rep) {
       remballe: p.remballe === true,
       nb_sacs: p.nb_sacs ?? null,
       motif_non_collecte: p.skip_reason_label ?? null,
+      // QR déclaré indisponible (2.54.0) : le chauffeur n'a pas pu approcher —
+      // l'application ne le lui refuse plus, elle en rend compte ici. La
+      // distance vient du serveur (position relevée au moment du geste) ;
+      // `null` = position non relevée, et le compte rendu le dit plutôt que
+      // d'imprimer « 0 m ».
+      qr_indisponible: p.qr_unavailable === true,
+      qr_indisponible_libelle: p.qr_unavailable_label ?? null,
+      declaration_distance_m: p.declaration_distance_m ?? null,
       motif_libelle: p.motif_label ?? null,
       // Temps réellement passé sur place, mesuré sur la trace GPS. `null` quand
       // aucun arrêt n'a été rattaché à ce point : le camion s'y est peut-être
@@ -739,7 +803,7 @@ export function construireRapportHtml(r) {
   // occupe déjà les deux colonnes) : la seconde page a rendu la hauteur qui
   // manquait. Le principe ne change pas — on borne, et on DIT combien
   // manquent, plutôt que de couper en silence.
-  const MAX_BLOCS = points.length > SEUIL_DEUX_COLONNES ? 4 : 6;
+  const MAX_BLOCS = deuxColonnes(points) ? 4 : 6;
   const reste = (n, sing, plur) => (n <= 0 ? ''
     : `<p class="note">+ ${n} ${n > 1 ? plur : sing} — voir la fiche de la tournée.</p>`);
 
@@ -860,7 +924,7 @@ export function construireRapportHtml(r) {
   const corps = `
     <div class="identite">${identite}</div>
     <div class="kpis">${kpis}</div>
-    <div class="cols${points.length > SEUIL_DEUX_COLONNES ? ' cols-dense' : ''}">
+    <div class="cols${deuxColonnes(points) ? ' cols-dense' : ''}">
       <div class="col-g">
         <h2>Détail de la collecte${legendeMarques(points)}</h2>
         ${tableauPoints(points)}

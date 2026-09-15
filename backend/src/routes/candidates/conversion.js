@@ -364,7 +364,7 @@ router.post('/:id/unlink-employee', authorize('ADMIN', 'RH'), async (req, res) =
 // ══════════════════════════════════════════
 
 // GET /api/candidates/:id/interview-form — Récupérer l'entretien structuré
-router.get('/:id/interview-form', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/interview-form', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM recruitment_interviews WHERE candidate_id = $1 ORDER BY created_at DESC LIMIT 1',
@@ -447,7 +447,7 @@ router.post('/:id/interview-form', authorize('ADMIN', 'RH'), async (req, res) =>
 // ══════════════════════════════════════════
 
 // GET /api/candidates/:id/mise-en-situation — Récupérer les évaluations
-router.get('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/:id/mise-en-situation', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT m.*, u.first_name as evaluator_name, u.last_name as evaluator_lastname
@@ -464,7 +464,7 @@ router.get('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async 
 });
 
 // POST /api/candidates/:id/mise-en-situation — Sauvegarder une évaluation
-router.post('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.post('/:id/mise-en-situation', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { id } = req.params;
     const f = req.body;
@@ -522,7 +522,7 @@ router.post('/:id/mise-en-situation', authorize('ADMIN', 'RH', 'MANAGER'), async
 // ══════════════════════════════════════════
 
 // GET /api/candidates/recruitment-plan?from=2026-01&to=2026-12
-router.get('/recruitment-plan', authorize('ADMIN', 'RH', 'MANAGER'), async (req, res) => {
+router.get('/recruitment-plan', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const { from, to } = req.query;
     let query = `
