@@ -129,6 +129,23 @@ FINXBM
   fi
 fi
 
+# VERROUS DE PROFIL RESIDUELS. Un chromium tue en SIGKILL — ce que fait l'unite
+# au bout de TimeoutStopSec — laisse ses fichiers « Singleton* ». Au demarrage
+# suivant, chromium affiche « Profile error occurred : something went wrong when
+# opening your profile », une fenetre modale POSEE SUR L'INTERFACE d'un poste
+# qui n'a ni souris ni clavier : personne ne peut la fermer, et elle masque une
+# partie de l'ecran jusqu'au prochain redemarrage (constate le 10/09/2026,
+# capture a l'appui). On ne les retire QUE si aucun chromium de cet utilisateur
+# ne tourne : les retirer sous un chromium vivant ouvrirait deux instances sur
+# le meme profil, ce que ce verrou existe precisement pour empecher.
+PROFIL_CHROMIUM="${HOME:-/home/badgeuse}/.config/chromium"
+if [ -d "$PROFIL_CHROMIUM" ] && ! pgrep -u "$(id -u)" chromium >/dev/null 2>&1; then
+  for verrou in "$PROFIL_CHROMIUM"/Singleton*; do
+    [ -e "$verrou" ] || continue
+    rm -f "$verrou" && dire "verrou de profil residuel retire : $(basename "$verrou")"
+  done
+fi
+
 dire "demarrage : ${NAV} (options : ${CHROMIUM_FLAGS:-aucune}) -> ${URL}"
 
 # shellcheck disable=SC2086 — CHROMIUM_FLAGS est une liste d'options, le

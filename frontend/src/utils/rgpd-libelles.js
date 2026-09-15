@@ -79,9 +79,33 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_NOTE_SUIVI_MODIFICATION: 'Modification d\'une note de suivi (CIP)',
   INSERTION_NOTE_SUIVI_SUPPRESSION: 'Suppression d\'une note de suivi (CIP)',
 
-  // ── Export insertion (routes/exports.js) ──────────────────────────────────
+  // ── Export insertion (routes/exports.js, routes/exports-fse.js) ───────────
   EXPORT_INSERTION_FREINS: 'Export des freins périphériques (23 colonnes)',
   EXPORT_INSERTION_FREINS_SENSIBLE: 'Export des freins périphériques — données sensibles (judiciaire)',
+  // PR A — les deux exports nominatifs qui n'étaient PAS journalisés alors que
+  // la note aux certificateurs l'affirmait (écart 03 § 9.1). Un export est la
+  // seule opération qui fait sortir la donnée de l'outil : sans trace, aucune
+  // réponse possible à « qui a eu cette liste et quand ».
+  EXPORT_INSERTION_COMPLET: 'Export complet du module Insertion (Excel/CSV)',
+  EXPORT_FSE_PLUS: 'Export FSE+ participants',
+
+  // ── Dossier administratif d'insertion (routes/insertion/cadre.js, pieces.js) ──
+  // Éligibilité IAE, Pass IAE, référent unique, statuts sociaux (BRSA,
+  // catégorie France Travail). La CONSULTATION est journalisée au même titre
+  // que l'écriture : ces champs disent la situation sociale d'une personne, et
+  // savoir qui les a regardés fait partie de ce qu'on doit pouvoir prouver.
+  INSERTION_CADRE_CONSULTATION: 'Consultation du dossier administratif d’insertion',
+  INSERTION_CADRE_MODIFICATION: 'Modification du dossier administratif d’insertion',
+  // Pièces dont la structure est SEULE dépositaire (entretien signé, convention
+  // PMSMP, accusé de remise) — servies authentifiées, jamais sous /uploads.
+  INSERTION_PIECE_DEPOT: 'Dépôt d’une pièce signée (insertion)',
+  INSERTION_PIECE_CONSULTATION: 'Consultation d’une pièce signée (insertion)',
+  INSERTION_PIECE_SUPPRESSION: 'Suppression d’une pièce signée (insertion)',
+
+  // ── Cofinancement FSE+ (routes/insertion/fse.js, projets.js) ──────────────
+  INSERTION_FSE_SORTIE_SAISIE: 'Saisie de la sortie FSE+ d’un participant',
+  INSERTION_FSE_SIX_MOIS_SAISIE: 'Relevé de situation à 6 mois (FSE+)',
+  INSERTION_PROJET_PARTICIPANT: 'Rattachement / retrait d’un participant à un projet cofinancé',
 
   // ── Effectifs ETP / états ASP (routes/effectifs.js) ───────────────────────
   ASP_IMPORT: 'Import d’un état ASP mensuel',

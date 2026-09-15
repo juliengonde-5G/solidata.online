@@ -228,18 +228,47 @@ router.put('/:id', authorize('ADMIN', 'RH'), async (req, res) => {
       'birth_city', 'birth_country', 'birth_department',
       'disability_status', 'residence_permit_type', 'residence_permit_number', 'residence_permit_renewal',
       'medical_visit_frequency', 'seniority_date', 'manager_malibou_id', 'manager_name', 'manager_id',
-      'work_time_type', 'gross_salary', 'siret', 'establishment'];
+      'work_time_type', 'gross_salary', 'siret', 'establishment',
+      // PR A lot 0 — conformité IAE. Ces colonnes existaient en base depuis la
+      // PR 2 du chantier insertion, mais AUCUNE surface ne les écrivait : le
+      // Pass IAE n'était saisissable nulle part pour un salarié non issu d'une
+      // candidature, ce qui rendait inopérantes les alertes d'échéance (7 mois
+      // / 2 mois) et le bilan de prolongation. Le dossier administratif complet
+      // (éligibilité typée, référent unique, statuts) est l'objet du lot 1 ;
+      // ici on rend simplement écrivables les champs déjà présents.
+      'pass_iae_number', 'pass_iae_start', 'pass_iae_end',
+      'eligibilite_criteres', 'eligibilite_justificatifs_ref', 'france_travail_id',
+      'cddi_derogation_motif', 'cddi_derogation_date'];
 
     // Nettoyer les types : strings vides → null pour les champs numériques/date/boolean
     const intFields = ['team_id', 'user_id', 'candidate_id', 'manager_id', 'prescripteur_id'];
     const dateFields = ['contract_start', 'contract_end', 'insertion_start_date', 'insertion_end_date',
-      'visite_medicale_date', 'birth_date', 'seniority_date', 'date_prescription'];
+      'visite_medicale_date', 'birth_date', 'seniority_date', 'date_prescription',
+      // Pass IAE et dérogation CDDI : mêmes règles que les autres dates (chaîne
+      // vide envoyée par un formulaire vidé → NULL, jamais une date invalide).
+      'pass_iae_start', 'pass_iae_end', 'cddi_derogation_date'];
     for (const f of intFields) {
       if (fields[f] !== undefined && !fields[f] && fields[f] !== 0) fields[f] = null;
       else if (fields[f]) fields[f] = Number(fields[f]);
     }
     for (const f of dateFields) {
       if (fields[f] !== undefined && !fields[f]) fields[f] = null;
+    }
+
+    // Motif de dérogation CDDI : liste FERMÉE (les 4 motifs légaux de
+    // prolongation au-delà de 24 mois). La base porte le même CHECK ; le
+    // contrôler ici permet de rendre un 400 explicite en français plutôt qu'un
+    // 500 issu d'une violation de contrainte, que l'écran ne saurait pas
+    // traduire. Une chaîne vide vaut « pas de dérogation » → NULL.
+    const DEROGATION_MOTIFS = ['formation_en_cours', 'senior_50', 'rqth', 'cdi_inclusion'];
+    if (fields.cddi_derogation_motif !== undefined) {
+      if (!fields.cddi_derogation_motif) fields.cddi_derogation_motif = null;
+      else if (!DEROGATION_MOTIFS.includes(fields.cddi_derogation_motif)) {
+        return res.status(400).json({
+          error: 'Motif de dérogation CDDI invalide',
+          hint: `Valeurs acceptées : ${DEROGATION_MOTIFS.join(', ')}.`,
+        });
+      }
     }
 
     const setClauses = [];

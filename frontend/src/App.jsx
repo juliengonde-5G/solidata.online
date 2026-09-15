@@ -55,6 +55,7 @@ const ActionsCIP = lazy(() => import('./pages/ActionsCIP'));
 const AuditInsertion = lazy(() => import('./pages/AuditInsertion'));
 const RenouvellementETI = lazy(() => import('./pages/RenouvellementETI'));
 const AdminInsertion = lazy(() => import('./pages/AdminInsertion'));
+const DossiersFSE = lazy(() => import('./pages/DossiersFSE'));
 const PilotageRSE = lazy(() => import('./pages/PilotageRSE'));
 const EnergieGES = lazy(() => import('./pages/EnergieGES'));
 const AchatsResponsables = lazy(() => import('./pages/AchatsResponsables'));
@@ -223,6 +224,11 @@ function App() {
               <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH']}><InsertionParcours /></ProtectedRoute>} />
               <Route path="/insertion/actions" element={<ProtectedRoute roles={['ADMIN', 'RH']}><ActionsCIP /></ProtectedRoute>} />
               <Route path="/insertion/audit" element={<ProtectedRoute roles={['ADMIN', 'RH']}><AuditInsertion /></ProtectedRoute>} />
+              <Route path="/insertion" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><InsertionParcours /></ProtectedRoute>} />
+              <Route path="/insertion/actions" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><ActionsCIP /></ProtectedRoute>} />
+              <Route path="/insertion/audit" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER']}><AuditInsertion /></ProtectedRoute>} />
+              {/* Dossiers FSE+ (PR A « Conformité immédiate », 2026-09) : pièces à compléter par participant */}
+              <Route path="/insertion/conformite" element={<ProtectedRoute roles={['ADMIN', 'RH']}><DossiersFSE /></ProtectedRoute>} />
               {/* Écran ETI (REC-UX-06) : un écran, un salarié, accessible par lien direct */}
               <Route path="/insertion/renouvellement/:milestoneId" element={<ProtectedRoute roles={['ADMIN', 'RH']}><RenouvellementETI /></ProtectedRoute>} />
               <Route path="/admin/insertion" element={<ProtectedRoute roles={['ADMIN']}><AdminInsertion /></ProtectedRoute>} />

@@ -3,6 +3,7 @@ const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { neutraliserFormule, nomGenerateur } = require('../utils/export-csv');
 const { requireMfa } = require('../middleware/mfa');
 const { query } = require('express-validator');
 const { validate } = require('../middleware/validate');
@@ -335,165 +336,66 @@ router.get('/stock', async (req, res) => {
 });
 
 // ══════════════════════════════════════════
-// V4 — Export FSE+ (Fonds Social Européen Plus)
+// Export FSE+ — DÉPLACÉ (PR A, lot 2)
 //
-// Conformité IAE — la SIAE doit déclarer trimestriellement les bénéficiaires
-// CDDI au cofinanceur FSE+. Données obligatoires : prénom, nom, SIRET
-// employeur, dates contrat, heures cumulées, type de sortie, prescripteur,
-// genre, situation sociale.
+// L'ancienne route `GET /fse-plus` vivait ici. Elle sortait TOUJOURS des
+// heures à 0 (elle sommait `EXTRACT(EPOCH FROM (end_time - start_time))` sur
+// `work_hours`, table qui ne porte pas ces colonnes — l'erreur SQL était
+// avalée par un `.catch(() => ({ rows: [] }))`, donc l'export sortait vide
+// sans que rien ne le dise), livrait les questionnaires FSE+ en JSON brut dans
+// deux colonnes, et n'était pas journalisée alors qu'elle est intégralement
+// nominative.
 //
-// Format CSV semi-colon (compatible export DGEFP / pôle FSE+).
-// Le visuel UE est intégré dans les éditions PDF (cf utils/fse-plus.js).
+// Elle est remplacée par `routes/exports-fse.js`, monté sur /api/exports AVANT
+// ce routeur (une colonne par item, en français, 409 si aucune ligne, journal
+// `EXPORT_FSE_PLUS` avant envoi). Elle n'est PAS réécrite ici : deux routes du
+// même chemin dans deux fichiers, c'est la porte ouverte à ce que la version
+// réparée soit masquée par l'ancienne au premier changement d'ordre de montage.
 // ══════════════════════════════════════════
 
-// GET /api/exports/fse-plus?annee=2026&trimestre=1
-// CSV avec en-tête signalant la source FSE+ + footer "Cofinancé par l'Union européenne"
-router.get('/fse-plus', authorize('ADMIN', 'RH'), async (req, res) => {
-  try {
-    const annee = parseInt(req.query.annee) || new Date().getFullYear();
-    const trimestre = parseInt(req.query.trimestre) || Math.ceil((new Date().getMonth() + 1) / 3);
+// ══════════════════════════════════════════
+// Export COMPLET du module Insertion (EXG-43 — PR A lot 0)
+//
+// Parcours salariés, diagnostics CIP, jalons et plans d'action, en Excel
+// multi-feuilles ou en CSV (un jeu de données par fichier — le CSV est
+// mono-table). Données personnelles sensibles (freins santé, judiciaire) →
+// ADMIN/RH, le routeur autorisant plus large.
+//
+// Trois règles posées par la PR A, communes à tous les exports nominatifs :
+//  1. JOURNAL AVANT ENVOI — chaque génération écrit `EXPORT_INSERTION_COMPLET`
+//     dans `rgpd_audit_log` ; un échec de journalisation fait échouer l'export
+//     (jamais de fichier nominatif non tracé). La promesse figurait dans la
+//     note aux certificateurs depuis un an sans être tenue ici.
+//  2. EN-TÊTE DE TRAÇABILITÉ — date et heure de génération, générateur,
+//     périmètre, nombre de lignes. Un classeur qui circule doit dire d'où il
+//     vient : sans cela, un chiffre lu six mois plus tard n'est rattachable ni
+//     à une date ni à une personne.
+//  3. JAMAIS DE FICHIER VIDE — 0 ligne → 409 `EXPORT_VIDE` motivé. Un fichier
+//     vide se lit « il n'y a personne », alors qu'il signale presque toujours
+//     un filtre trop étroit ou une base non peuplée.
+//
+// Le `soft()` d'origine (chaque requête enveloppée d'un catch qui rendait une
+// liste vide) est retiré : il transformait une erreur SQL en feuille vide, donc
+// en « aucun diagnostic » indiscernable de « diagnostics non saisis ». Une
+// requête en échec rend désormais un 500 qui NOMME le jeu de données fautif.
+// ══════════════════════════════════════════
 
-    const periodeStart = `${annee}-${String((trimestre - 1) * 3 + 1).padStart(2, '0')}-01`;
-    const periodeEnd = trimestre === 4
-      ? `${annee + 1}-01-01`
-      : `${annee}-${String(trimestre * 3 + 1).padStart(2, '0')}-01`;
+// Journal RGPD de l'export complet (EXG-43) — même format d'entrée que
+// routes/rgpd.js et que logExportFreins ci-dessous. `details` porte le
+// périmètre du tirage, JAMAIS une donnée nominative.
+async function logExportInsertionComplet(req, { format, dataset, lignes }) {
+  await pool.query(
+    'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+    [req.user.id, 'EXPORT_INSERTION_COMPLET', 'insertion', null,
+      JSON.stringify({ format, dataset, lignes, requested_by: req.user.id })]
+  );
+}
 
-    const { rows } = await pool.query(`
-      SELECT
-        e.id,
-        e.civility,
-        e.gender,
-        e.first_name,
-        e.last_name,
-        e.contract_type,
-        e.contract_start,
-        e.contract_end,
-        e.insertion_status,
-        e.insertion_start_date,
-        e.insertion_end_date,
-        po.nom AS prescripteur_orga,
-        po.type AS prescripteur_type,
-        e.date_prescription,
-        (
-          SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time)) / 3600), 0)::numeric(10,2)
-          FROM work_hours wh
-          WHERE wh.employee_id = e.id
-            AND wh.date >= $1::date
-            AND wh.date < $2::date
-        ) AS heures_trimestre,
-        diag.fse_entree,
-        sortie.milestone_type AS sortie_type_jalon,
-        sortie.sortie_classification,
-        sortie.sortie_type,
-        sortie.sortie_employeur_siret,
-        sortie.sortie_duree_contrat_mois,
-        sortie.completed_date AS sortie_date,
-        sortie.fse_sortie
-      FROM employees e
-      LEFT JOIN prescripteur_orgas po ON po.id = e.prescripteur_id
-      LEFT JOIN LATERAL (
-        SELECT d.fse_entree FROM insertion_diagnostics d
-        WHERE d.employee_id = e.id
-        ORDER BY d.parcours_num DESC LIMIT 1
-      ) diag ON true
-      LEFT JOIN LATERAL (
-        SELECT milestone_type, sortie_classification, sortie_type,
-               sortie_employeur_siret, sortie_duree_contrat_mois, completed_date, fse_sortie
-        FROM insertion_milestones m
-        WHERE m.employee_id = e.id
-          AND m.milestone_type = 'bilan_sortie'
-          AND m.completed_date >= $1::date
-          AND m.completed_date < $2::date
-        ORDER BY m.completed_date DESC LIMIT 1
-      ) sortie ON true
-      WHERE e.contract_type = 'CDDI'
-        AND (
-          (e.contract_start IS NOT NULL AND e.contract_start < $2::date AND
-            (e.contract_end IS NULL OR e.contract_end >= $1::date))
-          OR (e.insertion_start_date IS NOT NULL AND e.insertion_start_date < $2::date)
-        )
-      ORDER BY e.last_name, e.first_name
-    `, [periodeStart, periodeEnd]).catch(() => ({ rows: [] }));
+/** Nom lisible du générateur pour l'en-tête de traçabilité (jamais son e-mail). */
+// `nomGenerateur` vit dans utils/export-csv.js : les DEUX exports transmis
+// hors de la structure doivent composer leur en-tête de la même façon.
 
-    // CSV semi-colon — encodage UTF-8 BOM pour Excel
-    // Classification = NOUVELLE nomenclature (emploi_durable / emploi_transition /
-    // sortie_positive / autre — D8/EXG-06) ; « Sortie dynamique » explicite.
-    // Données FSE+ (EXG-12) : fse_entree (diagnostic) / fse_sortie (bilan de
-    // sortie) sérialisées en JSON.
-    const DYN = ['emploi_durable', 'emploi_transition', 'sortie_positive'];
-    const headers = [
-      'ID', 'Civilité', 'Genre', 'Prénom', 'Nom', 'Type contrat', 'Début contrat', 'Fin contrat',
-      'Statut insertion', 'Début parcours', 'Fin parcours',
-      'Prescripteur (organisme)', 'Prescripteur (type)', 'Date prescription',
-      'Heures travaillées (trimestre)',
-      'Sortie type', 'Classification', 'Sortie dynamique', 'Catégorie', 'SIRET employeur sortie', 'Durée contrat sortie (mois)', 'Date sortie',
-      'FSE+ entrée', 'FSE+ sortie',
-    ];
-    const lines = rows.map(r => [
-      r.id,
-      r.civility || '',
-      r.gender || '',
-      r.first_name || '',
-      r.last_name || '',
-      r.contract_type || '',
-      r.contract_start ? new Date(r.contract_start).toISOString().slice(0, 10) : '',
-      r.contract_end ? new Date(r.contract_end).toISOString().slice(0, 10) : '',
-      r.insertion_status || '',
-      r.insertion_start_date ? new Date(r.insertion_start_date).toISOString().slice(0, 10) : '',
-      r.insertion_end_date ? new Date(r.insertion_end_date).toISOString().slice(0, 10) : '',
-      r.prescripteur_orga || '',
-      r.prescripteur_type || '',
-      r.date_prescription ? new Date(r.date_prescription).toISOString().slice(0, 10) : '',
-      r.heures_trimestre || 0,
-      r.sortie_type_jalon || '',
-      r.sortie_classification || '',
-      r.sortie_classification ? (DYN.includes(r.sortie_classification) ? 'oui' : 'non') : '',
-      r.sortie_type || '',
-      r.sortie_employeur_siret || '',
-      r.sortie_duree_contrat_mois != null ? r.sortie_duree_contrat_mois : '',
-      r.sortie_date ? new Date(r.sortie_date).toISOString().slice(0, 10) : '',
-      r.fse_entree ? JSON.stringify(r.fse_entree) : '',
-      r.fse_sortie ? JSON.stringify(r.fse_sortie) : '',
-    ].map(v => {
-      const s = String(v ?? '').replace(/"/g, '""');
-      return /[;\n"]/.test(s) ? `"${s}"` : s;
-    }).join(';'));
-
-    const meta = [
-      `# Export FSE+ — SOLIDARITE TEXTILES`,
-      `# Période : ${annee} T${trimestre} (${periodeStart} → ${periodeEnd})`,
-      `# Bénéficiaires CDDI : ${rows.length}`,
-      `# Cofinancé par l'Union européenne — FSE+`,
-      `# Généré le ${new Date().toISOString()}`,
-      '',
-    ].join('\n');
-
-    const csv = '﻿' + meta + headers.join(';') + '\n' + lines.join('\n') + '\n';
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="fse-plus_${annee}_T${trimestre}_solidarite-textiles.csv"`
-    );
-    res.send(csv);
-  } catch (err) {
-    console.error('[EXPORTS] Erreur FSE+ :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// GET /api/exports/insertion — Extraction COMPLÈTE des données d'insertion
-// (parcours salariés, diagnostics CIP, jalons, plans d'action) au format
-// Excel multi-feuilles. Données personnelles sensibles (freins santé/social)
-// → restreint à ADMIN/RH (le router autorise ADMIN/MANAGER/RH, on resserre).
 router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
-  // Requête résiliente : une requête qui échoue (colonne absente sur une base
-  // ancienne) n'annule pas tout l'export — la feuille concernée est juste vide.
-  const soft = async (label, text, params = []) => {
-    try { return (await pool.query(text, params)).rows; }
-    catch (err) { console.error(`[EXPORTS] insertion « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
-  };
-
   // Normalise une valeur de cellule (dates ISO, tableaux/JSON en texte).
   const fmtCell = (v) => {
     if (v === null || v === undefined) return '';
@@ -501,6 +403,21 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     if (Array.isArray(v)) return v.join(', ');
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
+  };
+
+  // Neutralisation de formule : règle partagée avec l'export FSE+ (M-04), voir
+  // utils/export-csv.js — un tableur évalue toute cellule commençant par
+  // « = », « + », « - », « @ », TAB ou CR, guillemets compris.
+
+  // Exécute une requête en NOMMANT le jeu de données en cas d'échec : le 500
+  // rendu à l'écran doit dire lequel a échoué, faute de quoi on retombe sur le
+  // défaut que ce lot corrige (une erreur SQL indiscernable d'une absence).
+  const lire = async (label, text, params = []) => {
+    try { return (await pool.query(text, params)).rows; }
+    catch (err) {
+      err.datasetLabel = label;
+      throw err;
+    }
   };
 
   // Ajoute une feuille à colonnes DYNAMIQUES (toutes les colonnes présentes),
@@ -516,7 +433,11 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     sheet.columns = ordered.map((k) => ({ header: k, key: k, width: Math.min(Math.max(k.length + 2, 12), 42) }));
     for (const r of rows) {
       const o = {};
-      for (const k of ordered) o[k] = fmtCell(r[k]);
+      // ExcelJS écrit une chaîne commençant par « = » comme une FORMULE quand
+      // la cellule est typée automatiquement : le classeur est exposé au même
+      // défaut que le CSV, et il est justement le format par défaut de cet
+      // export. Même neutralisation.
+      for (const k of ordered) o[k] = neutraliserFormule(r[k], fmtCell(r[k]));
       sheet.addRow(o);
     }
     sheet.getRow(1).font = { bold: true };
@@ -525,26 +446,35 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
   };
 
   // Sérialise un jeu de lignes en CSV point-virgule + BOM (ouverture directe
-  // dans Excel FR), colonnes matricule/nom/prénom en tête, valeurs échappées.
-  const toCsv = (rows, leadKeys = []) => {
-    if (!rows.length) return '﻿(aucune donnée)\n';
+  // dans Excel FR), colonnes matricule/nom/prénom en tête, valeurs échappées,
+  // précédé des lignes « # » de traçabilité (règle 2 de l'en-tête).
+  const toCsv = (rows, leadKeys = [], meta = []) => {
+    // Garde-fou local rétabli (constat m-09) : sans elle, `Object.keys(rows[0])`
+    // lève un TypeError sur un jeu vide. Les deux appelants sont gardés par un
+    // 409 en amont — la fonction, elle, ne doit pas dépendre de ses appelants.
+    if (!Array.isArray(rows) || rows.length === 0) {
+      const e = new Error('Aucune donnée à exporter');
+      e.code = 'EXPORT_VIDE';
+      throw e;
+    }
+    const entete = meta.map((l) => `# ${l}`).join('\n') + (meta.length ? '\n\n' : '');
     const allKeys = Object.keys(rows[0]);
     const cols = [
       ...leadKeys.filter((k) => allKeys.includes(k)),
       ...allKeys.filter((k) => !leadKeys.includes(k)),
     ];
     const esc = (v) => {
-      const s = String(fmtCell(v));
+      const s = neutraliserFormule(v, String(fmtCell(v)));
       return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
     const lines = rows.map((r) => cols.map((k) => esc(r[k])).join(';'));
-    return '﻿' + cols.join(';') + '\n' + lines.join('\n') + '\n';
+    return '﻿' + entete + cols.join(';') + '\n' + lines.join('\n') + '\n';
   };
 
   try {
     // 1) Salariés en insertion (vue synthèse curée) — les 9 freins du registre
     // unique (feuille Salariés : colonnes frein_mobilite … frein_judiciaire).
-    let salaries = await soft('salaries', `
+    const salaries = await lire('Salariés', `
       SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom,
              e.position AS poste, t.name AS equipe,
              e.insertion_status AS statut,
@@ -565,22 +495,12 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
          OR EXISTS (SELECT 1 FROM insertion_milestones m WHERE m.employee_id = e.id)
       ORDER BY e.last_name, e.first_name
     `);
-    if (!salaries.length) {
-      // Repli minimal (colonnes garanties) si la requête curée a échoué.
-      salaries = await soft('salaries-min', `
-        SELECT e.id AS employee_id, e.last_name AS nom, e.first_name AS prenom,
-               e.insertion_status AS statut, e.insertion_start_date AS debut_parcours
-        FROM employees e
-        WHERE e.insertion_status IS DISTINCT FROM 'none'
-        ORDER BY e.last_name, e.first_name
-      `);
-    }
 
     // 2) Diagnostics CIP — toutes les colonnes. Les champs sensibles chiffrés
     // (santé / judiciaire, utils/field-crypto) sont DÉCHIFFRÉS : cet export est
     // réservé ADMIN/RH (diffusion restreinte, mention RGPD en feuille 1).
     const { SENSITIVE_DIAG_FIELDS, decryptField } = require('../utils/field-crypto');
-    const diagnostics = await soft('diagnostics', `
+    const diagnostics = await lire('Diagnostics CIP', `
       SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, d.*
       FROM insertion_diagnostics d
       JOIN employees e ON e.id = d.employee_id
@@ -593,7 +513,7 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     }
 
     // 3) Jalons — toutes les colonnes.
-    const jalons = await soft('jalons', `
+    const jalons = await lire('Jalons', `
       SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, m.*
       FROM insertion_milestones m
       JOIN employees e ON e.id = m.employee_id
@@ -601,57 +521,120 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     `);
 
     // 4) Plans d'action CIP — toutes les colonnes.
-    const actions = await soft('actions', `
+    const actions = await lire("Plans d'action", `
       SELECT e.malibou_id AS matricule, e.last_name AS nom, e.first_name AS prenom, a.*
       FROM cip_action_plans a
       JOIN employees e ON e.id = a.employee_id
       ORDER BY e.last_name, e.first_name
     `);
 
-    const stamp = new Date().toISOString().slice(0, 10);
+    const genere = new Date();
+    const stamp = genere.toISOString().slice(0, 10);
+    const horodatage = genere.toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
     const lead = ['matricule', 'nom', 'prenom'];
+    const format = (req.query.format || 'xlsx').toLowerCase() === 'csv' ? 'csv' : 'xlsx';
+    const PERIMETRE = "Salariés en parcours d'insertion, ou porteurs d'un diagnostic ou d'un entretien (tous parcours, toutes années).";
+
+    // ─── Règle 3 : jamais de fichier vide ───
+    // Le périmètre de l'export est la population d'insertion : sans elle, il
+    // n'y a rien à exporter, quel que soit le format demandé.
+    if (!salaries.length) {
+      return res.status(409).json({
+        error: "Aucun salarié en parcours d'insertion à exporter.",
+        code: 'EXPORT_VIDE',
+        hint: "Vérifiez qu'au moins un collaborateur porte un statut d'insertion, un diagnostic ou un entretien avant de générer l'export.",
+      });
+    }
 
     // ─── Format CSV (une entité par fichier ; CSV est mono-table) ───
-    if ((req.query.format || 'xlsx').toLowerCase() === 'csv') {
+    if (format === 'csv') {
       const datasets = { salaries, diagnostics, jalons, actions, plans: actions };
-      const key = (req.query.dataset || 'salaries').toLowerCase();
-      const rows = datasets[key] || salaries;
+      const libelles = {
+        salaries: 'Salariés', diagnostics: 'Diagnostics CIP', jalons: 'Jalons',
+        actions: "Plans d'action", plans: "Plans d'action",
+      };
+      const demande = (req.query.dataset || 'salaries').toLowerCase();
+      const dataset = datasets[demande] ? demande : 'salaries';
+      const rows = datasets[dataset];
+
+      // Un jeu de données demandé mais vide est refusé pour la même raison que
+      // ci-dessus : un CSV à en-tête seul se lit « aucun entretien saisi ».
+      if (!rows.length) {
+        return res.status(409).json({
+          error: `Aucune ligne à exporter pour « ${libelles[dataset]} ».`,
+          code: 'EXPORT_VIDE',
+          hint: "Choisissez un autre jeu de données ou vérifiez la saisie du module Insertion.",
+        });
+      }
+
+      // Règle 1 : journal AVANT envoi — un échec ici fait échouer l'export.
+      await logExportInsertionComplet(req, { format: 'csv', dataset, lignes: rows.length });
+
+      const meta = [
+        "Export SOLIDATA — module Insertion (extraction complète)",
+        `Jeu de données : ${libelles[dataset]}`,
+        `Généré le : ${horodatage} (heure de Paris)`,
+        `Générateur : ${nomGenerateur(req.user)}`,
+        `Périmètre : ${PERIMETRE}`,
+        `Lignes : ${rows.length}`,
+        "Confidentialité : données personnelles sensibles (freins santé / judiciaire). Diffusion restreinte — RGPD, conservation limitée. Chaque génération est journalisée.",
+      ];
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename=insertion_${datasets[key] ? key : 'salaries'}_${stamp}.csv`);
-      return res.send(toCsv(rows, lead));
+      res.setHeader('Content-Disposition', `attachment; filename=insertion_${dataset}_${stamp}.csv`);
+      return res.send(toCsv(rows, lead, meta));
     }
 
     // ─── Format Excel (défaut) : classeur multi-feuilles ───
+    // Règle 1 : journal AVANT toute composition de fichier.
+    const totalLignes = salaries.length + diagnostics.length + jalons.length + actions.length;
+    await logExportInsertionComplet(req, { format: 'xlsx', dataset: 'tout', lignes: totalLignes });
+
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'SOLIDATA';
 
-    // Feuille d'informations / RGPD.
+    // Règle 2 : feuille de traçabilité (première feuille du classeur).
     const info = workbook.addWorksheet('Informations');
-    info.columns = [{ header: 'Champ', key: 'k', width: 26 }, { header: 'Valeur', key: 'v', width: 70 }];
+    info.columns = [{ header: 'Champ', key: 'k', width: 26 }, { header: 'Valeur', key: 'v', width: 80 }];
     info.addRows([
       { k: 'Export', v: "Données d'insertion — extraction complète" },
-      { k: 'Généré le', v: new Date().toISOString() },
+      { k: 'Généré le', v: `${horodatage} (heure de Paris)` },
+      { k: 'Générateur', v: nomGenerateur(req.user) },
+      { k: 'Périmètre', v: PERIMETRE },
+      { k: 'Lignes (total)', v: totalLignes },
       { k: 'Salariés (insertion)', v: salaries.length },
       { k: 'Diagnostics CIP', v: diagnostics.length },
       { k: 'Jalons', v: jalons.length },
       { k: "Plans d'action", v: actions.length },
-      { k: 'Confidentialité', v: 'Données personnelles sensibles (freins santé/social). Diffusion restreinte — RGPD, durée de conservation limitée.' },
+      { k: 'Confidentialité', v: 'Données personnelles sensibles (freins santé / judiciaire). Diffusion restreinte — RGPD, durée de conservation limitée.' },
+      { k: 'Traçabilité', v: "Chaque génération de cet export est inscrite au journal d'audit RGPD (qui, quand, combien de lignes — jamais le contenu)." },
     ]);
     info.getRow(1).font = { bold: true };
     info.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
 
-    addDataSheet(workbook, 'Salariés', salaries, ['matricule', 'nom', 'prenom']);
-    addDataSheet(workbook, 'Diagnostics CIP', diagnostics, ['matricule', 'nom', 'prenom']);
-    addDataSheet(workbook, 'Jalons', jalons, ['matricule', 'nom', 'prenom']);
-    addDataSheet(workbook, "Plans d'action", actions, ['matricule', 'nom', 'prenom']);
+    addDataSheet(workbook, 'Salariés', salaries, lead);
+    addDataSheet(workbook, 'Diagnostics CIP', diagnostics, lead);
+    addDataSheet(workbook, 'Jalons', jalons, lead);
+    addDataSheet(workbook, "Plans d'action", actions, lead);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename=insertion_complet_${stamp}.xlsx`);
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
-    console.error('[EXPORTS] Erreur export insertion :', err);
-    res.status(500).json({ error: 'Erreur serveur', detail: err.message });
+    // Le jeu de données fautif est NOMMÉ : sans lui, l'écran affiche « erreur
+    // serveur » là où l'administrateur a besoin de savoir quelle requête a
+    // échoué (typiquement une colonne absente sur une base non migrée).
+    const ou = err.datasetLabel ? ` (jeu de données « ${err.datasetLabel} »)` : '';
+    console.error(`[EXPORTS] Erreur export insertion${ou} :`, err);
+    if (res.headersSent) return res.end();
+    if (err.code === 'EXPORT_VIDE') {
+      return res.status(409).json({ error: 'Aucune donnée à exporter sur ce périmètre.', code: 'EXPORT_VIDE' });
+    }
+    // `detail: err.message` retiré (constat m-03) : c'était le message SQL brut
+    // rendu au client. Le jeu de données fautif et le SQLSTATE suffisent à
+    // rendre l'erreur diagnosticable ; la trace complète reste au journal
+    // serveur, juste au-dessus.
+    res.status(500).json({ error: `Erreur lors de la génération de l'export${ou}`, code: err.code });
   }
 });
 

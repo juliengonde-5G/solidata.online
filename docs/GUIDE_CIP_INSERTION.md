@@ -1,7 +1,9 @@
 # Guide CIP — Le module Insertion au quotidien
 
 > **Module livré (parcours d'insertion étendu) — dernière mise à jour 23/07/2026 (lot 8 inclus).**
-> Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Seul le **volet RSE de l'insertion (RSEi)** fait l'objet d'une mission séparée et n'est pas traité ici. Les copies d'écran seront ajoutées après la première recette avec la CIP.
+> **Complété le 13/09/2026 (PR A « Conformité immédiate ») :** le dossier administratif de chaque salarié et les obligations du cofinancement FSE+ font l'objet d'un guide à part — [Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) — auquel renvoie le nouveau cas 20.
+>
+> Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
 - **Public** : conseillère/conseiller en insertion professionnelle (CIP) de Solidarité Textiles ; certains passages concernent les encadrants techniques (ETI) et la direction.
 - **Principe du module** : chaque salarié en insertion a un **dossier unique de parcours** — une frise chronologique, des entretiens historisés, des objectifs, un journal d'actions. Tout ce que vous saisissez sert trois fois : votre suivi quotidien, le document remis au salarié, la preuve pour les contrôles (DDETS, CD76). **Vous ne saisissez jamais deux fois la même chose.**
@@ -30,6 +32,7 @@
 17. [FAQ — 10 questions fréquentes](#17-faq--10-questions-fréquentes)
 18. [Lexique](#18-lexique)
 19. [Le volet RSE de l'insertion (mission séparée)](#19-le-volet-rse-de-linsertion-mission-séparée)
+20. [Dossier administratif et FSE+](#20--dossier-administratif-et-fse)
 
 ---
 
@@ -41,9 +44,10 @@
 
 1. Ouvrez **Espace CIP**. En tête de page, le bloc **« Aujourd'hui / Cette semaine »** liste vos entretiens planifiés, avec l'heure et un badge **« préparation prête »** quand la note de préparation a déjà été générée (voir cas 8). Un clic ouvre directement la fiche du salarié sur le bon entretien.
 2. En dessous, le bloc **Alertes** regroupe ce qui demande une action, **une ligne par salarié** (les badges se cumulent sur la ligne). Trois couleurs seulement :
-   - **rouge** = réglementaire ou contractuel (Pass IAE arrivant à échéance, cumul CDDI ≥ 22 mois, diagnostic non réalisé à 30 jours) ;
+   - **rouge** = réglementaire ou contractuel (Pass IAE arrivant à échéance, cumul CDDI ≥ 22 mois, diagnostic non réalisé à 30 jours ; depuis septembre 2026 : **sortie FSE+ non renseignée** 15 jours après une fin de contrat — puis un second rappel à 25 jours —, **référent unique non déterminé** pour un bénéficiaire du RSA, **questionnaire FSE+ d'entrée incomplet** pour un participant à une opération cofinancée) ;
    - **ambre** = organisation du suivi (bilan en retard, prochain rendez-vous non planifié, action critique en retard, renouvellement à préparer) ;
-   - **gris** = à venir (pour anticiper, rien d'urgent).
+   - **gris** = à venir (pour anticiper, rien d'urgent) ;
+   - **ambre** également pour la **situation à +6 mois non relevée** après une sortie (indicateur de résultat du cofinancement).
 3. Sur chaque alerte : **« Vu — me le rappeler dans 7 jours »** pour la mettre de côté sans la perdre. Le report est **enregistré en base et partagé** avec vos collègues CIP (acquitter, c'est acquitter pour toute l'équipe ; l'auteur et la date sont journalisés).
 4. Votre **file active** (« Espace CIP — mes salariés ») liste les salariés dont vous êtes référente ; les filtres (en parcours, fin de contrat proche, sans prochain RDV) servent à organiser la semaine.
 
@@ -52,6 +56,7 @@
 > **Points de vigilance**
 > - Le rouge signifie « agir cette semaine ». Si vous voyez du rouge partout, dites-le : les seuils sont réglables par l'administrateur (écran Réglages insertion), ils doivent rester crédibles.
 > - « Me le rappeler dans 7 jours » reporte l'affichage, pas l'échéance réelle : un Pass expire à sa date, quoi qu'il arrive.
+> - **L'alerte « sortie FSE+ non renseignée » ne se reporte pas à la légère** : passé un mois, la situation ne se recueille plus auprès de la personne, et la plateforme européenne bloque le dépôt du bilan financier. Voir le [guide Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) (cas 20).
 
 ---
 
@@ -82,6 +87,8 @@
 
 1. Depuis la fiche : **« Commencer le diagnostic d'accueil »**. Le questionnaire suit la trame que vous connaissez, **une rubrique à la fois** (repère « Rubrique 3/12 » et sommaire cliquable sur le côté) : identité et famille, logement, accès aux droits, santé, budget, mobilité, situation professionnelle, projet professionnel, expression du salarié, et les volets **linguistique** (auto-évaluation simplifiée CECRL + votre observation), **FSE+ (entrée)** et **situation judiciaire** (réduite au niveau de frein et à l'impact sur l'organisation du travail — voir vigilance).
 2. Chaque rubrique se conclut par votre **commentaire CIP** et, quand la rubrique nourrit un frein, par la **valorisation du frein** : une rangée de six boutons **[Non évalué | 1 | 2 | 3 | 4 | 5]**. Le bouton suggéré par les réponses est mis en évidence (la suggestion est **calculée par le serveur** à partir de vos réponses structurées) — **vous confirmez ou corrigez d'un clic, c'est toujours vous qui décidez**.
+
+> **Sens de l'échelle — à lire une fois pour toutes.** **1 = pas de difficulté sur cet axe. 5 = difficulté bloquante.** Le chiffre **monte avec la difficulté**, et la couleur du bouton le confirme (1-2 vert, 3 jaune, 4-5 orange puis rouge). C'est le même sens partout : radar, tendances (↗ signifie que le frein **s'aggrave**), export 23 colonnes, indicateurs de pilotage. *Deux guides diffusés portaient l'échelle inversée ; ils sont corrigés — si vous avez appris l'inverse, c'est bien cette version qui fait foi.*
 3. La rubrique **« expression du salarié »** (attentes, difficultés, objectifs, aide souhaitée — les mots du salarié) alimente directement les **objectifs du parcours**, marqués « origine : salarié ». C'est la trace de la co-construction.
 4. Vous pouvez **vous arrêter à tout moment** : le diagnostic reste « en cours » et, à la réouverture, reprend là où vous étiez. Faire le diagnostic en **deux séances** (par exemple garder Santé et Budget pour un second rendez-vous, quand la confiance est là) est prévu — l'essentiel est de terminer dans la fenêtre des 30 jours.
 5. À la fin : le radar des freins (la **toile d'araignée**, 9 axes) s'affiche, avec les « non évalué » réellement absents du tracé. Clôturez, puis générez le **PDF** (exemplaire salarié / exemplaire dossier — voir cas 16).
@@ -286,7 +293,7 @@
 
 ## 13. La sortie
 
-**Objectif** : clore le parcours proprement — bilan, classement officiel de la sortie, documents remis, satisfaction — et préparer le suivi à 3 mois.
+**Objectif** : clore le parcours proprement — bilan, classement officiel de la sortie, documents remis, satisfaction — et préparer le suivi à 6 mois.
 
 **Pas à pas**
 
@@ -298,16 +305,20 @@
    - **Autre sortie** (avec le sous-motif : chômage, inactivité, rupture…).
    Ajoutez la destination détaillée (type de contrat, employeur ou formation).
 3. Cochez la **liste des documents remis** : solde de tout compte, certificat de travail, attestation France Travail. La clôture est impossible sans.
-4. Proposez le **questionnaire de satisfaction** (trame interne : accueil, accompagnement, compétences, conditions de travail, bilan personnel, situation à la sortie, satisfaction globale, suggestions). La saisie est assistée ; les réponses ne sont restituées qu'en **agrégats anonymes** (`GET /satisfaction-stats`).
-5. **Informez le salarié du contact post-sortie** : il sera recontacté dans 3 à 6 mois pour connaître sa situation ; il peut s'y opposer, et l'opposition est consignée (l'entretien passera alors en « non réalisable — opposition »). Cette information figure aussi sur le PDF du bilan de sortie.
-6. Clôturez : le parcours passe en « terminé », et l'entretien **« Suivi post-sortie »** est planifié automatiquement à +3 mois. Le moment venu, vous y saisirez la **situation constatée** (en emploi, en formation, autre, injoignable) — deux minutes, souvent au téléphone.
+4. Renseignez le bloc **« Sortie FSE+ »** de l'étape « Sortie & documents » : situation à la sortie et type de contrat. Laissé vide, il se déduit de la catégorie de sortie choisie plus haut — jamais d'une valeur inventée. À la clôture, la sortie entre dans le dossier de l'opération cofinancée (détail : [guide conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) § 5).
+5. Proposez le **questionnaire de satisfaction** (trame interne : accueil, accompagnement, compétences, conditions de travail, bilan personnel, situation à la sortie, satisfaction globale, suggestions). La saisie est assistée ; les réponses ne sont restituées qu'en **agrégats anonymes** (`GET /satisfaction-stats`).
+6. **Informez le salarié du contact post-sortie** : il sera recontacté **six mois** après sa sortie pour connaître sa situation ; il peut s'y opposer, et l'opposition est consignée (l'entretien passera alors en « non réalisable — opposition »). Cette information figure aussi sur le PDF du bilan de sortie.
+7. Clôturez : le parcours passe en « terminé », et l'entretien **« Suivi post-sortie (+6 mois) »** est planifié automatiquement. Le moment venu, vous y saisirez la **situation constatée** (en emploi, en formation, autre, injoignable) — deux minutes, souvent au téléphone.
 
-**Ce qui est automatique** : la proposition du bilan de sortie, la planification du suivi post-sortie (fenêtre 3–6 mois, avec rappel), la reprise des sorties dans les statistiques annuelles (taux de sorties dynamiques), la clôture du parcours.
+**Si la personne est partie sans entretien de sortie** (abandon, embauche du jour au lendemain, licenciement), ne restez pas sans rien : l'écran **« Dossiers FSE+ »** permet de saisir la sortie en trois réponses — date, situation, type de contrat — sans bilan. La ligne pourra être précisée plus tard ; une sortie jamais saisie, elle, se perd.
+
+**Ce qui est automatique** : la proposition du bilan de sortie, la planification du suivi post-sortie (+6 mois, avec rappel), les alertes **J+15 et J+25** quand aucune sortie n'est enregistrée après une fin de contrat, la reprise des sorties dans les statistiques annuelles (taux de sorties dynamiques), la clôture du parcours.
 
 > **Points de vigilance**
 > - La **catégorie de sortie** alimente directement les taux présentés à la DDETS : en cas de doute entre deux catégories, tranchez avec les définitions affichées à l'écran (et notez l'élément déterminant en commentaire).
 > - Un salarié parti brutalement (abandon, licenciement) a droit au même soin de classement : « autre sortie » + sous-motif. Ne laissez pas de sortie sans catégorie.
 > - En cas de **réembauche** plus tard, un **nouveau parcours** s'ouvre avec son propre diagnostic et son propre bilan de sortie (voir FAQ n° 6).
+> - **La sortie doit être saisie dans le mois qui suit le départ** : au-delà, la plateforme Ma Démarche FSE+ bloque le dépôt du bilan financier. C'est la seule donnée du dossier dont le retard soit irrattrapable — le délai de saisie est d'ailleurs la première colonne que l'autorité regarde.
 
 ---
 
@@ -395,7 +406,7 @@ Trois éléments se cumulent : la case « validé en présence du salarié » co
 Elle reçoit un dossier pseudonymisé (jamais le nom, jamais les identifiants), produit une note étiquetée « Proposition IA », que vous éditez librement. Elle ne fixe aucun niveau de frein, ne classe aucune sortie, ne prend aucune décision. Tout reste à votre main.
 
 **5. Je ne peux pas évaluer un frein (sujet pas encore abordé) : je mets 1 ?**
-Non, jamais. Choisissez « Non évalué » : l'axe n'est pas tracé sur la toile d'araignée et n'entre pas dans les moyennes. Un 1 « par défaut » fausse tout.
+Non, jamais. Sur l'échelle, **1 signifie « pas de difficulté »** — le mettre par défaut, c'est affirmer que tout va bien sur un sujet que vous n'avez pas abordé. Choisissez « Non évalué » : l'axe n'est alors pas tracé sur la toile d'araignée et n'entre pas dans les moyennes. C'est la seule réponse honnête, et elle est prévue pour cela.
 
 **6. Un ancien salarié est réembauché : comment faire ?**
 Sa réentrée en parcours ouvre un **nouveau parcours** (numéroté) sur le même dossier : nouveau diagnostic d'accueil (dans les 30 jours), nouveaux bilans, nouveau bilan de sortie et nouvelle enquête de satisfaction le moment venu. L'historique du premier parcours reste lisible sur la frise.
@@ -422,6 +433,8 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **AFOM / SWOT** | Analyse Atouts-Faiblesses-Opportunités-Menaces : atouts et faiblesses internes au salarié, opportunités et menaces extérieures. Volet de co-construction du diagnostic (cas 4). |
 | **ASP** | Agence de Services et de Paiement — verse l'aide au poste sur la base des états mensuels de présence (saisie officielle, hors ERP). |
 | **Bilan de suivi** | Entretien intermédiaire à fréquence libre (souvent bimestrielle), numéroté (« Bilan n° 3 »), qui commence toujours par l'évaluation du précédent. |
+| **BRSA** | Bénéficiaire du Revenu de Solidarité Active. Statut social enregistré dans le **dossier administratif** (oui / non / non renseigné, avec sa date de constat) et visible des seuls rôles ADMIN et RH. Il n'a rien d'automatique : « non renseigné » ne vaut jamais « non ». |
+| **Catégorie France Travail** | Catégorie statistique du demandeur d'emploi (A à G) ; depuis 2025, tout BRSA est inscrit à France Travail et en porte une. Les catégories **F** (accompagnement social, freins majeurs) et **G** (en attente d'orientation) intéressent particulièrement l'autorité. Saisie au dossier administratif, ADMIN/RH. |
 | **CDDI** | Contrat à Durée Déterminée d'Insertion — 4 mois minimum, renouvelable dans la limite de 24 mois (dérogations possibles : formation en cours, 50 ans et plus, RQTH, CDI inclusion). |
 | **CIP** | Conseiller·ère en Insertion Professionnelle — vous. |
 | **Criticité** | Niveau d'urgence d'une action CIP (haute / moyenne / basse) ; une action critique en retard déclenche une alerte. |
@@ -429,27 +442,53 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **Échéances du parcours** | Les rendez-vous obligatoires posés automatiquement (diagnostic, renouvellements, bilan de sortie) — appelés « jalons » dans les documents techniques. |
 | **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement sur son écran dédié et **note les grilles de compétences métier** (onglet Compétences) ; n'accède jamais aux volets santé, judiciaire ou budget. |
 | **File active** | L'ensemble des salariés en parcours dont vous êtes référente. |
-| **Frein** | Difficulté périphérique à l'emploi, évaluée de 1 (très bloquant) à 5 (résolu) ou « non évalué ». Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
+| **Frein** | Difficulté périphérique à l'emploi, évaluée de **1 (pas de difficulté)** à **5 (bloquant)**, ou « non évalué ». Le chiffre monte avec la difficulté : c'est le sens de l'échelle affichée à l'écran (1 vert → 5 rouge). Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
 | **Jalon** | Terme technique pour une échéance du parcours (voir ci-dessus). |
+| **MDFSE+** | *Ma Démarche FSE+* — la plateforme sur laquelle se déposent les dossiers du cofinancement européen. Elle fait foi ; SOLIDATA prépare les pièces et contrôle les délais, il ne la remplace pas. |
+| **Orienteur** | Organisme qui a envoyé la personne vers la structure (Département-CMS, France Travail, mission locale, Cap emploi, CCAS…). À ne pas confondre avec le **prescripteur habilité** (qui valide l'éligibilité IAE) ni avec le **référent unique** (qui tient le parcours dans la durée). |
 | **Pass IAE** | Agrément individuel délivré via la plateforme des emplois de l'inclusion, valable 24 mois, prolongeable par un prescripteur habilité sur présentation d'un bilan du parcours. |
 | **Période d'essai (entretien de)** | Point formalisé à environ un mois : décision « confirmée / à revoir / rompue ». Auto-créé à la liaison recrutement (cas 6). |
+| **Pièce signée** | Document dont la structure est **seule dépositaire** et qui se dépose au dossier administratif : exemplaire signé d'un entretien, convention PMSMP, accusé de remise, autre pièce. **Jamais un justificatif d'éligibilité** (il reste sur les Emplois de l'inclusion, l'outil n'en garde que la référence), jamais une pièce de santé. |
 | **PMSMP** | Période de Mise en Situation en Milieu Professionnel — immersion en entreprise (1 mois max par convention, 60 jours max sur 12 mois chez un même organisme d'accueil). |
 | **Portefeuille de compétences** | Recueil, construit avec le salarié au diagnostic, de ses centres d'intérêt, compétences par domaine, savoir-faire et savoir-être (cas 4). À ne pas confondre avec les grilles de compétences notées par l'encadrant (cas 7). |
 | **Prescripteur** | Organisme qui a orienté le salarié vers l'ACI (France Travail, mission locale, CD76…) ; en auto-prescription, c'est la structure elle-même qui a validé l'éligibilité. |
+| **Projet cofinancé (ASI, OCS)** | Opération financée avec un concours européen. **ASI** = Accompagnement Social Intensif, opération **à participants** (chaque salarié y est rattaché à la main, jamais déduit d'un statut) ; **OCS** = coûts simplifiés, opération qui porte des **postes** (quotité d'affectation, taux forfaitaire) et non des personnes accompagnées. |
+| **Référent unique** | Le professionnel qui tient le parcours d'insertion de la personne dans la durée (conseiller du CMS, de France Travail, ou de la structure). Solidarité Textiles est **structure d'accueil** : le référent est le plus souvent extérieur, et c'est lui qui rédige le contrat d'engagements réciproques. Un référent « non déterminé » pour un BRSA se signale au Département. |
 | **RQTH** | Reconnaissance de la Qualité de Travailleur Handicapé (avec date d'échéance). |
 | **Sortie dynamique** | Somme des trois catégories officielles de sorties : emploi durable + emploi de transition + sortie positive. C'est le taux phare du dialogue de gestion. |
 | **STC** | Solde de tout compte — l'un des trois documents obligatoires remis à la sortie (avec le certificat de travail et l'attestation France Travail). |
+| **Structure d'accueil** | Position de Solidarité Textiles dans le dispositif BRSA, arbitrée le 12/09/2026 : nous **accueillons et accompagnons**, nous **alimentons** le référent unique externe en points d'étape — nous ne rédigeons pas le contrat d'engagements réciproques. C'est ce qui rend le nom et le contact du référent aussi importants que le reste du dossier. |
 | **Style d'apprentissage (Kolb)** | Profil pédagogique (Adaptateur / Divergeur / Assimilateur / Convergeur) issu d'un questionnaire de 24 items, pour adapter la façon de former. Complète le PCM, ne le remplace pas (cas 4). |
 | **Toile d'araignée** | Le radar des freins : une forme par évaluation ; leur superposition montre l'évolution du parcours d'un coup d'œil. |
 
 ---
 
-## 19. Le volet RSE de l'insertion (mission séparée)
+## 19. Le volet RSE de la structure — un autre module, livré
 
-Le module couvre désormais **l'ensemble du parcours d'accompagnement**, de l'entrée au suivi post-sortie, **espace encadrant technique compris** : les grilles de compétences métier (cas 7), le portefeuille de compétences et le style d'apprentissage au diagnostic (cas 4), l'entretien de période d'essai (cas 6) et la check-list d'embauche (cas 5) sont tous **livrés**. Il n'y a plus de « phase 2 » de l'accompagnement en attente.
+Le module Insertion couvre **l'ensemble du parcours d'accompagnement**, de l'entrée au suivi post-sortie, **espace encadrant technique compris** : les grilles de compétences métier (cas 7), le portefeuille de compétences et le style d'apprentissage au diagnostic (cas 4), l'entretien de période d'essai (cas 6) et la check-list d'embauche (cas 5) sont tous **livrés**.
 
-Reste, hors de ce guide, un seul chantier : le **volet RSE de l'insertion (RSEi)** — pilotage de la responsabilité sociale de la structure (module Pilotage RSE) — qui fait l'objet d'une **mission dédiée séparée**. Il ne fait pas partie du module Insertion décrit ici et sera documenté à part le moment venu.
+Le **pilotage de la démarche de labellisation RSEi** n'est pas « une mission séparée » à venir : c'est un **module de l'application, livré** — « Pilotage RSE » (27 critères du référentiel, plan d'action, registre de preuves, campagnes d'auto-évaluation, matrice des parties prenantes, bilan RSE annuel et dossier de préparation AFNOR). Il n'est pas décrit ici parce qu'il n'est pas votre outil de travail quotidien : **c'est la structure qui est labellisée, jamais le logiciel**, et le module ne manipule que des **agrégats non nominatifs** — aucune donnée individuelle de parcours n'y entre. Ce que votre accompagnement produit (traçabilité, boucle d'écoute, indicateurs sociaux) y sert de **preuve**, sans qu'aucun dossier ne quitte le module Insertion.
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). Les copies d'écran seront ajoutées lors de la première recette avec la CIP.*
+## 20 · Dossier administratif et FSE+
+
+**Objectif** : tenir, pour chaque salarié, le dossier que l'autorité de tutelle et le cofinanceur européen demandent — et savoir, avant un contrôle, ce qui manque.
+
+Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier administratif »** (3ᵉ onglet, après « Diagnostic ») et le menu une entrée **« Dossiers FSE+ — pièces à compléter »**. Ce qu'on y fait :
+
+- **Éligibilité IAE** : cocher les critères constatés, la date de vérification, la source, et la **référence** des justificatifs — qui restent sur *Les Emplois de l'inclusion* et ne se déposent jamais ici. Un **bloc à copier** prépare la saisie sur la plateforme.
+- **Pass IAE** : numéro et dates, **suspensions et prolongations** ; le statut (actif / suspendu / prolongé / expiré) est **calculé**, jamais saisi.
+- **Orientation** : l'orienteur, le prescripteur habilité, et le **référent unique** avec son contact — nous sommes **structure d'accueil**, ce référent est le plus souvent extérieur, et son absence se signale en rouge.
+- **Statuts** (ADMIN/RH seulement) : **BRSA**, **catégorie France Travail**, identifiant France Travail.
+- **Pièces signées** : exemplaire signé d'un entretien, convention PMSMP, accusé de remise — jamais un justificatif d'éligibilité, jamais une pièce de santé.
+- **Questionnaire FSE+** : cinq questions **pré-remplies par déduction** du diagnostic (à confirmer ou corriger), la **sortie dans le mois** et le **relevé à +6 mois**.
+- **Dossier de conformité** : les 9 pièces attendues, avec leur état, en colonne de droite de la fiche — et en vue d'ensemble sur l'écran « Dossiers FSE+ », d'où partent l'export des participants et le bilan d'exécution.
+
+> **Tout le pas-à-pas est dans un guide dédié : [Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md).** Il explique aussi ce qui protège les personnes (chiffrement, masquage par rôle, journalisation, ce que reçoit l'IA), de quoi répondre à un salarié qui demande ce qu'on note sur lui.
+
+**Ce qui n'est pas encore livré**, et qui est annoncé dans ce guide : la feuille de temps mensuelle par intervenant (PR B), la réorganisation de la fiche en quatre onglets (PR C), l'écran encadrant accessible par simple lien, et la fiche destinée au référent externe.
+
+---
+
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique.*

@@ -23,6 +23,8 @@ import SatisfactionForm from '../components/insertion/SatisfactionForm';
 import CompetencesETI from '../components/insertion/CompetencesETI';
 import ChecklistEmbauche from '../components/insertion/ChecklistEmbauche';
 import NoteProfilInitial from '../components/insertion/NoteProfilInitial';
+import DossierAdministratif from '../components/insertion/DossierAdministratif';
+import { PASS_STATUT_LABELS, PASS_STATUT_CLASSES } from '../components/insertion/PassIaePanel';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
 import { formatEmployeeName, compareByName } from '../utils/names';
@@ -761,6 +763,15 @@ function CohortePanel({ onSelect }) {
   );
 }
 
+// Libellés du référent unique externe (loi pour le plein emploi). Solidarité
+// Textiles est « structure d'accueil » : le référent est un tiers, et
+// « non déterminé » est un SIGNALEMENT — d'où un libellé explicite et non un
+// champ vide (décision de direction du 12/09, amendement CIP § 10).
+const REFERENT_UNIQUE_LABELS = {
+  structure: 'structure', france_travail: 'France Travail', cms: 'CMS',
+  autre: 'autre', non_determine: 'non déterminé',
+};
+
 // ═══════════════════════════════════════
 // MAIN PAGE — Espace CIP
 // ═══════════════════════════════════════
@@ -783,6 +794,11 @@ export default function InsertionParcours() {
   const [contracts, setContracts] = useState([]);
   const [competences, setCompetences] = useState([]);
   const [passBilanLoading, setPassBilanLoading] = useState(false);
+  // Dossier administratif (PR A lot 1) : l'en-tête de fiche en tire le statut
+  // du Pass, les badges BRSA / projet / référent unique. Chargé AVEC la fiche
+  // (une requête de plus, mais l'en-tête ne doit pas s'afficher à moitié).
+  const [cadre, setCadre] = useState(null);
+  const [cadreError, setCadreError] = useState(null);
 
   const [loadError, setLoadError] = useState(null);
   const [panelError, setPanelError] = useState(null);
@@ -794,8 +810,6 @@ export default function InsertionParcours() {
   const [iaAnalyse, setIaAnalyse] = useState(null);
   const [iaError, setIaError] = useState(null);
   const [iaLoadingProfil, setIaLoadingProfil] = useState(false);
-  const [iaDiag, setIaDiag] = useState(null);
-  const [iaDiagLoading, setIaDiagLoading] = useState(false);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -844,6 +858,7 @@ export default function InsertionParcours() {
     setPanelError(null);
     setDiagDirty(false); setBilanDirty(false);
     setIaAnalyse(null); setIaError(null);
+    setCadre(null); setCadreError(null);
     setLoading(true);
     pushRecent(emp.id);
     try {
@@ -862,6 +877,11 @@ export default function InsertionParcours() {
         setActiveEntretien(null);
       }
       api.get(`/employees/${emp.id}/cddi-duration`).then((r) => setCddi(r.data)).catch(() => setCddi(null));
+      // Dossier administratif : l'échec est DIT (bandeau), jamais avalé — un
+      // en-tête muet ferait croire qu'il n'y a ni Pass, ni BRSA, ni référent.
+      api.get(`/insertion/cadre/${emp.id}`)
+        .then((r) => { setCadre(r.data); setCadreError(null); })
+        .catch((err) => setCadreError(err.response?.data?.error || err.message || 'Dossier administratif indisponible'));
       // Contrats pour la frise (couloir Contrats) — best-effort, repli sur les
       // dates de la fiche si l'appel échoue.
       api.get(`/employees/${emp.id}/contracts`)
@@ -967,6 +987,7 @@ export default function InsertionParcours() {
   const tabs = [
     { id: 'synthese', label: 'Synthèse' },
     { id: 'diagnostic', label: 'Diagnostic' },
+    { id: 'dossier', label: 'Dossier administratif' },
     { id: 'entretiens', label: 'Entretiens & bilans' },
     { id: 'competences', label: 'Compétences' },
     { id: 'objectifs', label: 'Objectifs & actions' },
@@ -1050,13 +1071,50 @@ export default function InsertionParcours() {
                       </div>
                       <div className="flex gap-2 mt-1.5 flex-wrap items-center">
                         {emp.parcours_num > 1 && <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">Parcours n° {emp.parcours_num}</span>}
-                        {emp.pass_iae_number ? (
+                        {/* Pass IAE — le badge lit le STATUT CALCULÉ par le
+                            serveur (utils/pass-iae.js) : une date de fin lointaine
+                            ne dit rien d'un Pass suspendu. Repli sur les dates de
+                            la fiche tant que le dossier n'est pas chargé. */}
+                        {cadre?.pass_iae ? (
+                          cadre.pass_iae.numero ? (
+                            <span className={`text-xs px-2 py-0.5 rounded ${PASS_STATUT_CLASSES[cadre.pass_iae.statut] || PASS_STATUT_CLASSES.inconnu}`}
+                              title={`Pass IAE n° ${cadre.pass_iae.numero}`}>
+                              Pass IAE {(PASS_STATUT_LABELS[cadre.pass_iae.statut] || cadre.pass_iae.statut).toLowerCase()}
+                              {cadre.pass_iae.fin ? ` · fin ${frDate(cadre.pass_iae.fin)}` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700"
+                              title="Sans numéro de Pass, aucune alerte d'échéance ne peut être calculée">
+                              Pass IAE non renseigné
+                            </span>
+                          )
+                        ) : emp.pass_iae_number ? (
                           <span className={`text-xs px-2 py-0.5 rounded ${emp.pass_iae_end && new Date(emp.pass_iae_end) < new Date() ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}
                             title={`Pass IAE n° ${emp.pass_iae_number}`}>
                             Pass IAE {emp.pass_iae_end ? `→ ${frDate(emp.pass_iae_end)}` : '✓'}
                           </span>
                         ) : (
                           <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500" title="Numéro de Pass IAE non renseigné (fiche collaborateur)">Pass IAE non renseigné</span>
+                        )}
+                        {/* Statuts sociaux : le serveur ne renvoie la clé
+                            `statuts` qu'aux rôles ADMIN/RH — pas de garde de
+                            rôle à recopier ici, l'absence de clé suffit. */}
+                        {cadre?.statuts?.brsa === true && (
+                          <span className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700" title="Bénéficiaire du RSA">BRSA</span>
+                        )}
+                        {(cadre?.projets || []).map((pr) => (
+                          <span key={pr.id} className="text-xs px-2 py-0.5 rounded bg-teal-100 text-teal-800" title={pr.nom}>
+                            Projet {pr.code}
+                          </span>
+                        ))}
+                        {cadre?.orientation?.referent_unique && (
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            cadre.orientation.referent_unique.type === 'non_determine'
+                              ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                          }`} title="Référent unique (loi pour le plein emploi)">
+                            Référent unique : {REFERENT_UNIQUE_LABELS[cadre.orientation.referent_unique.type] || cadre.orientation.referent_unique.type}
+                            {cadre.orientation.referent_unique.nom ? ` — ${cadre.orientation.referent_unique.nom}` : ''}
+                          </span>
                         )}
                         {cddi?.is_cddi && (
                           <span className={`text-xs px-2 py-0.5 rounded ${cddi.months_total >= 23 ? 'bg-red-100 text-red-700' : cddi.months_total >= 20 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}
@@ -1126,6 +1184,12 @@ export default function InsertionParcours() {
                       </div>
                     </div>
                   </div>
+                  {cadreError && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 text-sm">
+                      Dossier administratif non chargé : {cadreError} — les badges Pass IAE, BRSA et référent unique
+                      de cet en-tête peuvent être incomplets.
+                    </div>
+                  )}
                   <AlertesBloc employeeId={selectedEmployee.id} />
                 </div>
 
@@ -1267,6 +1331,22 @@ export default function InsertionParcours() {
                 )}
 
                 {/* Tab: Entretiens & bilans */}
+                {activeTab === 'dossier' && (
+                  <DossierAdministratif
+                    employeeId={selectedEmployee.id}
+                    employee={emp}
+                    baseRole={user?.base_role || user?.role}
+                    onChanged={(d) => { setCadre(d); setCadreError(null); }}
+                    onNaviguer={(lien) => {
+                      // « Compléter » du dossier de conformité : le lien porte
+                      // l'onglet visé (« diagnostic#fse », « suivi », « dossier#… »).
+                      const cible = String(lien || '').split('#')[0];
+                      if (cible === 'diagnostic') setActiveTab('diagnostic');
+                      else if (cible === 'suivi' || cible === 'entretiens') setActiveTab('entretiens');
+                    }}
+                  />
+                )}
+
                 {activeTab === 'entretiens' && (
                   <div className="space-y-4">
                     {activeEntretien ? (
@@ -1447,47 +1527,14 @@ export default function InsertionParcours() {
                               className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
                               {iaLoadingProfil ? 'Analyse…' : 'Analyser le profil'}
                             </button>
-                            <button onClick={async () => {
-                              setIaDiagLoading(true); setIaDiag(null); setIaError(null);
-                              try {
-                                const res = await api.get('/insertion/ia/diagnostic');
-                                setIaDiag(res.data);
-                              } catch (err) { setIaDiag(err.response?.data || { ok: false, message: err.message }); }
-                              setIaDiagLoading(false);
-                            }} disabled={iaDiagLoading}
-                              title="Teste la connexion à Claude sans dépendre d'un salarié (clé, modèle, réseau)"
-                              className="px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 text-xs font-medium hover:bg-slate-300 disabled:opacity-50">
-                              {iaDiagLoading ? 'Test…' : 'Tester la connexion IA'}
-                            </button>
                           </div>
                         </div>
-                        <p className="text-xs text-gray-400 mb-3">La préparation IA d'un entretien précis se lance depuis l'entretien lui-même (« Préparer avec l'IA »).</p>
-
-                        {iaDiag && (
-                          <div className={`mb-3 text-xs rounded-lg p-3 border ${iaDiag.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                            <p className="font-semibold mb-1">
-                              {iaDiag.ok ? '✓ Connexion IA opérationnelle' : '✗ Échec de la connexion IA'}
-                            </p>
-                            <ul className="space-y-0.5 font-mono text-[11px]">
-                              <li>configured : {String(iaDiag.configured)}{iaDiag.key_length ? ` (clé longueur ${iaDiag.key_length})` : ''}</li>
-                              <li>model : {iaDiag.model || '—'}</li>
-                              {iaDiag.status != null && <li>status HTTP : {iaDiag.status}</li>}
-                              {iaDiag.type && <li>type : {iaDiag.type}</li>}
-                              {iaDiag.latency_ms != null && <li>latence : {iaDiag.latency_ms} ms</li>}
-                              {iaDiag.message && <li className="whitespace-pre-wrap break-words">message : {iaDiag.message}</li>}
-                              {iaDiag.reply && <li>réponse : « {iaDiag.reply} »</li>}
-                            </ul>
-                            {!iaDiag.ok && iaDiag.configured === false && (
-                              <p className="mt-2 not-italic">→ La variable <code>ANTHROPIC_API_KEY</code> n'est pas transmise au conteneur backend. Vérifiez le <code>.env</code> serveur puis <code>docker compose ... restart backend</code>.</p>
-                            )}
-                            {!iaDiag.ok && iaDiag.status === 404 && (
-                              <p className="mt-2">→ Le modèle <code>{iaDiag.model}</code> n'est pas disponible pour cette clé. Définissez <code>CLAUDE_MODEL</code> sur un modèle autorisé puis redémarrez le backend.</p>
-                            )}
-                            {!iaDiag.ok && iaDiag.status === 401 && (
-                              <p className="mt-2">→ Clé <code>ANTHROPIC_API_KEY</code> invalide ou révoquée.</p>
-                            )}
-                          </div>
-                        )}
+                        <p className="text-xs text-gray-400 mb-3">
+                          La préparation IA d'un entretien précis se lance depuis l'entretien lui-même
+                          (« Préparer avec l'IA »). La sonde de connexion (clé, modèle, réseau) a rejoint
+                          les <Link to="/admin/insertion" className="underline">Réglages insertion</Link> :
+                          c'est un contrôle d'exploitation, il n'a rien à faire dans le dossier d'une personne.
+                        </p>
 
                         {iaError && (
                           <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 flex items-start gap-2">

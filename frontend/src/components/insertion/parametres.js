@@ -14,6 +14,16 @@ export const PARAMETRES_DEFAUTS = {
   delai_diagnostic_jours: 30,
   alerte_pass_iae_mois: 7,
   ia_preparation_auto: false,
+  // PR A (2026-09) — volet FSE+ et durée des entretiens (mêmes défauts que le
+  // backend, utils/insertion-settings.js) : la fenêtre de clôture propose la
+  // durée par type, les alertes de sortie FSE+ sonnent à J+15 puis J+25.
+  post_sortie_mois: 6,
+  alerte_sortie_fse_j1: 15,
+  alerte_sortie_fse_j2: 25,
+  duree_entretien_defaut: {
+    diagnostic_accueil: 90, bilan_intermediaire: 45, periode_essai: 30,
+    renouvellement: 30, bilan_sortie: 60, suivi_post_sortie: 15,
+  },
 };
 
 let cache = null;
