@@ -1,7 +1,9 @@
 /**
  * Projets cofinancés (FSE+) — PR A lot 2, item 2.1 du plan 07.
  * Monté par ./index.js sur `/projets`, AVANT routes.js ; hérite de
- * `authenticate + requireMfa + authorize('ADMIN','RH','MANAGER')`.
+ * `authenticate + requireMfa + authorize('ADMIN','RH')`. (La PR A visait
+ * ADMIN/RH/MANAGER ; MANAGER a été retiré de l'application en 2.52.0 — la
+ * porte du module s'est donc resserrée sur ADMIN/RH.)
  *
  * POURQUOI LE RATTACHEMENT EST SAISI ET DATÉ. L'autorité (09 § 1.4 F1, S3)
  * exige de savoir QUI appartient à quelle opération et DEPUIS QUAND. Déduire la

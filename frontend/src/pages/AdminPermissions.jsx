@@ -244,10 +244,21 @@ export default function AdminPermissions() {
               le module à lui.
             </p>
             <p className="text-sky-800">
-              L'<strong>Administrateur voit toujours tout</strong>. L'<strong>Administration</strong> ne peut pas être accordée
-              <Lock className="w-3 h-3 inline mx-1 mb-0.5" /> : elle commande les comptes, la base de données et cette page —
-              elle se donne en attribuant le profil Administrateur, en connaissance de cause.
+              L'<strong>Administrateur voit toujours tout</strong>. Trois modules ne peuvent pas être accordés
+              <Lock className="w-3 h-3 inline mx-1 mb-0.5" /> — ils restent en revanche <strong>refusables</strong> :
             </p>
+            <ul className="text-sky-800 ml-4 space-y-1 list-disc">
+              <li>
+                <strong>Administration</strong> — elle commande les comptes, la base de données et cette page ;
+                elle se donne en attribuant le profil Administrateur, en connaissance de cause.
+              </li>
+              <li>
+                <strong>RH et Insertion</strong> et <strong>Tests PCM</strong> — ces écrans portent de la santé,
+                du judiciaire, des salaires et la RQTH, et leurs masquages sont aujourd'hui écrits « masquer pour
+                tel rôle » plutôt que « masquer sauf ADMIN/RH ». Un accord y livrerait le dossier entier. Ils
+                redeviendront accordables une fois ces masquages inversés ; d'ici là, le profil RH est la voie.
+              </li>
+            </ul>
           </div>
         </div>
 

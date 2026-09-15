@@ -102,6 +102,28 @@ describe('Carte routeur → module', () => {
       }
     });
 
+    test('les surfaces RH / insertion / PCM ne sont pas accordables', () => {
+      // Elles portent de la santé (art. 9), du judiciaire (art. 10), des
+      // salaires et la RQTH, et leurs masquages sont écrits « masquer POUR
+      // MANAGER » — donc à défaut TOUT MONTRER. Un accord les rendrait
+      // atteignables et livrerait le dossier entier. Tant que ces gardes ne
+      // sont pas inversées en « masquer SAUF ADMIN/RH », l'accord reste fermé.
+      expect(MODULES_NON_ACCORDABLES.has('rh')).toBe(true);
+      expect(MODULES_NON_ACCORDABLES.has('pcm')).toBe(true);
+      for (const chemin of ['/api/insertion/cadre/5', '/api/employees', '/api/pcm/profiles', '/api/effectifs']) {
+        expect(modulesAccordables(chemin)).toEqual([]);
+      }
+    });
+
+    test('les surfaces d’exploitation, elles, restent accordables', () => {
+      // C'est le besoin qui a motivé le lot : reconstruire un profil
+      // d'exploitation sans donner ADMIN.
+      expect(modulesAccordables('/api/cav')).toEqual(['operations']);
+      expect(modulesAccordables('/api/production')).toEqual(['tri']);
+      expect(modulesAccordables('/api/finance')).toEqual(['analyse']);
+      expect(modulesAccordables('/api/vak')).toEqual(['vak', 'frip']);
+    });
+
     test('un routeur à plusieurs modules garde ceux qui restent accordables', () => {
       // Refashion relève d'Audit, d'Analyse et d'Administration : accorder
       // « Analyse » doit l'ouvrir, sans que « Administration » devienne

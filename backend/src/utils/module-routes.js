@@ -149,18 +149,40 @@ const MODULE_PAR_ROUTEUR = {
 /**
  * MODULES QU'UN ACCORD NE PEUT PAS OUVRIR.
  *
- * « Administration » commande les comptes utilisateurs (donc la création d'un
- * ADMIN), la base de données (sauvegarde, restauration), la configuration et le
- * registre RGPD — et la matrice elle-même. L'accorder par une case à cocher ne
- * donnerait pas « un module de plus » : ça fabriquerait un administrateur, en
- * silence, depuis un écran qui annonce gérer des habilitations de module. Le
- * profil Administrateur reste donc la seule voie vers ces écrans, et il se donne
- * en connaissance de cause dans Utilisateurs.
+ * 1. « Administration » commande les comptes utilisateurs (donc la création d'un
+ *    ADMIN), la base de données (sauvegarde, restauration), la configuration et
+ *    le registre RGPD — et la matrice elle-même. L'accorder par une case à
+ *    cocher ne donnerait pas « un module de plus » : ça fabriquerait un
+ *    administrateur, en silence, depuis un écran qui annonce gérer des modules.
  *
- * Le REFUS de ces modules, lui, continue de fonctionner : la matrice n'a jamais
- * perdu sa capacité à retirer.
+ * 2. « RH et Insertion » et « Tests PCM » sont écartés pour une raison
+ *    DIFFÉRENTE, et il faut la dire précisément parce qu'elle est temporaire.
+ *
+ *    Ces surfaces portent des données de l'article 9 (santé) et de l'article 10
+ *    (judiciaire), plus les salaires, la RQTH et les titres de séjour. Elles
+ *    sont protégées — mais par des gardes écrites en 2.52.0 sur le modèle
+ *    « masquer POUR le rôle MANAGER », et non « masquer SAUF pour ADMIN/RH » :
+ *    21 branches du type `if (baseRole !== 'MANAGER') return row;` dans
+ *    `routes/employees.js` et `routes/insertion/`. Leur défaut est donc de TOUT
+ *    MONTRER, et elles ne retenaient rien parce qu'aucun rôle ne pouvait plus
+ *    atteindre ces routes — `authorize('ADMIN','RH')` fermait la porte en amont.
+ *
+ *    L'accord de module (2.56.0) rouvre précisément cette porte. Un rôle
+ *    personnalisé à qui l'on accorderait « RH et Insertion » franchirait
+ *    `authorize`, puis recevrait le dossier ENTIER : frein judiciaire, détails
+ *    de santé, statuts sociaux, RQTH. Pas par un défaut de l'accord — par le
+ *    sens de ces gardes, que l'accord rend soudain atteignables.
+ *
+ *    On ne corrige pas 21 branches dans le même geste que l'ouverture qui les
+ *    expose : on ferme d'abord. Rendre ces deux modules accordables suppose de
+ *    les inverser en « masquer SAUF ADMIN/RH » (fail-safe), et de le prouver
+ *    surface par surface. Tant que ce n'est pas fait, le profil ADMIN ou RH
+ *    reste la seule voie vers ces écrans.
+ *
+ * Le REFUS de ces modules, lui, continue de fonctionner dans les trois cas : la
+ * matrice n'a jamais perdu sa capacité à retirer.
  */
-const MODULES_NON_ACCORDABLES = new Set(['admin']);
+const MODULES_NON_ACCORDABLES = new Set(['admin', 'rh', 'pcm']);
 
 /** Normalise une entrée de la carte en tableau (ou null si hors matrice). */
 function normaliser(valeur) {
