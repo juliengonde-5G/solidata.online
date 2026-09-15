@@ -16,6 +16,33 @@ const {
   LEARNING_STYLES, computeLearningStyle, competenceAverage,
 } = require('./engine');
 const { FREINS, freinColumns, RADAR_AXES } = require('./freins-registry');
+// PR B lot 3 — deux types d'entretien s'ajoutent au cadre RSA : le « Point avec
+// le référent » (la structure est structure d'accueil, elle ALIMENTE un référent
+// externe — ce dialogue avait lieu sans laisser aucune trace) et l'« Entretien
+// de conciliation (protection des droits) » (la réforme du RSA ouvre un droit
+// de contestation avant sanction).
+//
+// Pourquoi une liste locale et non un ajout à `MILESTONE_TYPES` d'engine.js :
+// ce fichier est le SEUL du lot 3 dans le périmètre des routes, `engine.js`
+// appartient à un autre périmètre (contrat 15 § 1). La liste ci-dessous est
+// dérivée de celle d'engine.js — elle ne la recopie pas —, et la base porte la
+// même liste dans le CHECK de `milestone_type` (migration insertion-rsa.js), ce
+// qui empêche les deux de diverger sans qu'un enregistrement échoue bruyamment.
+const MILESTONE_TYPES_RSA = ['point_etape_referent', 'conciliation'];
+const MILESTONE_TYPES_ALL = [...MILESTONE_TYPES, ...MILESTONE_TYPES_RSA];
+const MILESTONE_TYPE_LABELS_ALL = {
+  ...MILESTONE_TYPE_LABELS,
+  point_etape_referent: 'Point avec le référent',
+  conciliation: 'Entretien de conciliation (protection des droits)',
+};
+// Motifs LÉGITIMES d'une conciliation — liste fermée de codes, miroir de la
+// migration. Jamais de texte libre : un motif rédigé porterait par nature de la
+// santé (art. 9) sans qu'aucune colonne ne l'annonce, dans un champ que rien
+// n'aurait chiffré.
+const CONCILIATION_MOTIFS = ['sante', 'garde_enfant', 'transport',
+  'demarche_administrative', 'formation_emploi', 'deuil_famille', 'autre'];
+const CONCILIATION_ISSUES = ['maintien', 'reprise', 'orientation', 'sans_suite'];
+const REFERENT_MODALITES = ['tripartite', 'bilaterale'];
 const { SENSITIVE_DIAG_FIELDS, encryptField, decryptField } = require('../../utils/field-crypto');
 const { maskInsertionRow, maskInsertionRows, MANAGER_HIDDEN_FIELDS } = require('./masking');
 const { readInsertionSetting } = require('../../utils/insertion-settings');
@@ -558,7 +585,7 @@ async function applyPeriodeEssaiEffect(db, ms) {
 // diagnostic_accueil / bilan_sortie : uniques par parcours (upsert de l'échéance).
 router.post('/milestones', [
   body('employee_id').isInt().withMessage('ID employé requis'),
-  body('milestone_type').isIn(MILESTONE_TYPES).withMessage(`Type d'entretien invalide (attendu : ${MILESTONE_TYPES.join(', ')})`),
+  body('milestone_type').isIn(MILESTONE_TYPES_ALL).withMessage(`Type d'entretien invalide (attendu : ${MILESTONE_TYPES_ALL.join(', ')})`),
   body('due_date').optional({ nullable: true }).isISO8601().withMessage('due_date invalide (AAAA-MM-JJ)'),
   body('contract_id').optional({ nullable: true }).isInt().withMessage('contract_id invalide'),
   body('titre').optional({ nullable: true }).isLength({ max: 120 }).withMessage('titre trop long (120 max)'),
@@ -619,7 +646,7 @@ router.post('/milestones', [
         const moisAnnee = new Date(due).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
         titre = `Renouvellement ${moisAnnee}`;
       } else {
-        titre = MILESTONE_TYPE_LABELS[milestone_type];
+        titre = MILESTONE_TYPE_LABELS_ALL[milestone_type];
       }
     }
 
@@ -677,7 +704,9 @@ function mergeValidations(existing, incoming) {
   return [...kept, ...inc];
 }
 
-const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations', 'periode_essai_form'];
+const MILESTONE_JSONB_FIELDS = ['previous_review', 'validations', 'renouvellement_form', 'sortie_documents', 'remise_salarie', 'fse_sortie', 'ai_recommendations', 'periode_essai_form',
+  // PR B lot 3 — motifs légitimes d'une conciliation (tableau de codes).
+  'conciliation_motifs'];
 const MILESTONE_EDITABLE_FIELDS = [
   'status', 'titre', 'due_date', 'interview_date', 'interviewer_id', 'completed_date',
   ...FREINS.map((f) => f.column),
@@ -690,6 +719,10 @@ const MILESTONE_EDITABLE_FIELDS = [
   'renouvellement_avis', 'renouvellement_duree_mois',
   'post_sortie_situation', 'post_sortie_commentaire',
   'periode_essai_decision', // Lot 8 (PR3) — décision de période d'essai
+  // PR B lot 3 — modalité du point avec le référent (tripartite = la personne
+  // est présente ; bilatérale = deux professionnels parlent d'elle sans elle —
+  // c'est cette distinction que l'autorité regarde) et issue de la conciliation.
+  'referent_modalite', 'conciliation_issue',
   // PR A lot 2 — durée réelle de l'entretien (alimente l'agrégat d'heures
   // d'accompagnement promis aux certificateurs, RES-04 / indicateur B5) et
   // assiduité. Le motif d'absence est FACULTATIF par décision (08 § 10) : une
@@ -702,6 +735,26 @@ const MILESTONE_EDITABLE_FIELDS = [
 /** Assiduité — listes fermées reproduisant les CHECK de la migration lot 2. */
 const PRESENCES = ['present', 'absent', 'excuse'];
 const ABSENCE_MOTIFS = ['sante', 'administratif', 'garde', 'transport', 'autre'];
+
+/**
+ * Validateurs du cadre RSA (PR B lot 3) : modalité du point avec le référent,
+ * motifs légitimes et issue d'une conciliation.
+ *
+ * `conciliation_motifs` est un TABLEAU de codes d'une liste fermée — pas un
+ * texte. Le contrôle porte sur chaque élément : une liste dont un seul élément
+ * serait libre suffirait à faire entrer un verbatim médical dans une colonne
+ * que rien ne chiffre et qu'aucun masquage ne couvre.
+ */
+const conciliationValidators = [
+  body('referent_modalite').optional({ nullable: true }).isIn(REFERENT_MODALITES)
+    .withMessage(`referent_modalite invalide (${REFERENT_MODALITES.join(', ')})`),
+  body('conciliation_issue').optional({ nullable: true }).isIn(CONCILIATION_ISSUES)
+    .withMessage(`conciliation_issue invalide (${CONCILIATION_ISSUES.join(', ')})`),
+  body('conciliation_motifs').optional({ nullable: true }).isArray()
+    .withMessage('conciliation_motifs : une liste de motifs est attendue'),
+  body('conciliation_motifs.*').optional().isIn(CONCILIATION_MOTIFS)
+    .withMessage(`Motif de conciliation invalide (${CONCILIATION_MOTIFS.join(', ')})`),
+];
 
 /**
  * Validateurs de la durée et de l'assiduité, partagés par le PUT et la clôture.
@@ -725,6 +778,7 @@ router.put('/milestones/:id', [
   body('renouvellement_avis').optional({ nullable: true }).isIn(['favorable', 'favorable_reserves', 'defavorable']).withMessage('renouvellement_avis invalide'),
   body('post_sortie_situation').optional({ nullable: true }).isIn(['emploi_durable', 'emploi_transition', 'formation', 'recherche_emploi', 'autre', 'injoignable']).withMessage('post_sortie_situation invalide'),
   body('periode_essai_decision').optional({ nullable: true }).isIn(['confirme', 'rompu', 'a_revoir']).withMessage('periode_essai_decision invalide (confirme, rompu, a_revoir)'),
+  ...conciliationValidators,
   ...assiduiteValidators,
   ...FREINS.map((f) => body(f.column).optional({ nullable: true }).isInt({ min: 1, max: 5 }).withMessage(`${f.column} : niveau attendu entre 1 et 5`)),
 ], validate, async (req, res) => {
@@ -806,7 +860,7 @@ router.put('/milestones/:id', [
 router.post('/milestones/:id/close', [
   param('id').isInt().withMessage('ID invalide'),
   body('completed_date').optional({ nullable: true }).isISO8601().withMessage('completed_date invalide'),
-  body('next.milestone_type').optional().isIn(MILESTONE_TYPES).withMessage('next.milestone_type invalide'),
+  body('next.milestone_type').optional().isIn(MILESTONE_TYPES_ALL).withMessage('next.milestone_type invalide'),
   body('next.due_date').optional().isISO8601().withMessage('next.due_date invalide'),
   ...assiduiteValidators,
 ], validate, async (req, res) => {
@@ -1305,17 +1359,33 @@ router.put('/action-plans/:id', [
   body('status').optional({ nullable: true }).isIn(['a_faire', 'en_cours', 'realise', 'abandonne']).withMessage('Statut invalide'),
   body('priority').optional({ nullable: true }).isIn(['haute', 'moyenne', 'basse']).withMessage('Criticité invalide'),
   body('duree_minutes').optional({ nullable: true }).isInt({ min: 0 }).withMessage('duree_minutes invalide'),
+  // PR B lot 3 — la date à laquelle l'action a EU LIEU, distincte de la date de
+  // saisie : le compteur d'activité hebdomadaire et la feuille de temps rangent
+  // l'action dans la semaine où elle s'est déroulée, pas dans celle où on l'a
+  // notée. `updated_at` ne pouvait pas servir (elle bouge à chaque retouche).
+  body('date_realisation').optional({ nullable: true }).isISO8601().withMessage('date_realisation invalide (AAAA-MM-JJ)'),
 ], validate, async (req, res) => {
   try {
     const d = req.body;
     const editable = ['action_label', 'status', 'priority', 'echeance', 'notes',
-      'category', 'frein_type', 'milestone_id', 'objectif_id', 'partenaire_id', 'resultat', 'duree_minutes'];
+      'category', 'frein_type', 'milestone_id', 'objectif_id', 'partenaire_id', 'resultat', 'duree_minutes',
+      'date_realisation'];
     const sets = [];
     const vals = [];
     for (const field of editable) {
       if (!(field in d)) continue;
       vals.push(d[field] === '' ? null : d[field]);
       sets.push(`${field} = $${vals.length}`);
+    }
+    // Passage au statut « réalisé » sans date explicite : on pose la date du
+    // jour, et SEULEMENT si la colonne est encore vide (COALESCE) — repasser
+    // une action déjà réalisée par « réalisé » ne doit pas déplacer sa date de
+    // réalisation vers aujourd'hui, ce qui la ferait changer de semaine dans le
+    // compteur d'activité. Écrit en SQL et non en JS : la valeur ne dépend pas
+    // d'une lecture préalable, donc deux écritures simultanées ne peuvent pas
+    // se marcher dessus.
+    if (d.status === 'realise' && !('date_realisation' in d)) {
+      sets.push('date_realisation = COALESCE(date_realisation, CURRENT_DATE)');
     }
     if (sets.length === 0) return res.status(400).json({ error: 'Aucun champ à modifier' });
     vals.push(req.params.id);
@@ -3224,6 +3294,17 @@ router.get('/parametres', async (req, res) => {
       readInsertionSetting('insertion.alerte_sortie_fse_j2'),
       readInsertionSetting('insertion.duree_entretien_defaut'),
     ]);
+    // PR B (2.53.0) — réglages du cadre RSA et du temps d'accompagnement. Lus
+    // séparément pour ne pas gonfler la déstructuration ci-dessus, et servis
+    // au même endroit que les autres : l'écran doit lire LA valeur du serveur,
+    // jamais une constante recopiée côté navigateur.
+    const [cerMin, cerMax, semainesConsec, pointReferentMois, feuilleClotureJour] = await Promise.all([
+      readInsertionSetting('insertion.cer_heures_min'),
+      readInsertionSetting('insertion.cer_heures_max'),
+      readInsertionSetting('insertion.semaines_sous_seuil_consecutives'),
+      readInsertionSetting('insertion.point_etape_referent_mois'),
+      readInsertionSetting('insertion.feuille_temps_cloture_jour'),
+    ]);
     res.json({
       echeance_action_defaut_jours: echeanceActionJours,
       rythme_bilans_mois: rythmeBilansMois,
@@ -3237,6 +3318,11 @@ router.get('/parametres', async (req, res) => {
       alerte_sortie_fse_j1: alerteSortieFseJ1,
       alerte_sortie_fse_j2: alerteSortieFseJ2,
       duree_entretien_defaut: dureeEntretienDefaut,
+      cer_heures_min: cerMin,
+      cer_heures_max: cerMax,
+      semaines_sous_seuil_consecutives: semainesConsec,
+      point_etape_referent_mois: pointReferentMois,
+      feuille_temps_cloture_jour: feuilleClotureJour,
     });
   } catch (err) {
     console.error('[INSERTION] Erreur parametres :', err.message);
@@ -3495,10 +3581,50 @@ async function gatherAuditKpis(year) {
     methode: "Taux calculés sur les sorties constatées de l'année civile (dénominateur = bilans de sortie réalisés portant une classification — changement de méthode 2026). Cible null = objectif non paramétré.",
   };
 
+  // PR B (4.2) — heures d'accompagnement de l'année. `soft` : null si le
+  // service échoue ou si la base n'est pas migrée — jamais 0.
+  //
+  // ═══ CORRECTIF B-02 (bloquant) — PROJECTION À LA SOURCE ══════════════════
+  //
+  // `heuresAccompagnement` compose aussi `par_salarie` — la liste NOMINATIVE de
+  // toutes les personnes accompagnées de l'année (« NOM Prénom ») avec le
+  // volume d'heures consacré à chacune — et `par_intervenant`, la même chose
+  // pour le personnel. Le lot 4 le SAIT et réserve cette ventilation :
+  // `GET /temps/synthese` porte `authorize('ADMIN','RH')` et son test de
+  // contrat s'intitule « MANAGER refusé sur la synthèse (agrégats nominatifs
+  // par salarié) ».
+  //
+  // Or ces indicateurs partent vers DEUX surfaces plus larges :
+  //   · `GET /api/insertion/audit`            → ADMIN / RH / **MANAGER** ;
+  //   · `GET /api/exports/insertion-synthese` → spread intégral sous la
+  //     bannière « Document agrégé non nominatif — comité de pilotage ».
+  // Un document qui s'annonce non nominatif et transporte une liste de
+  // personnes est une non-conformité en soi, indépendamment de qui le lit.
+  //
+  // La projection est posée ICI, à la source, et non à chaque frontière : une
+  // projection par route se réintroduit à la troisième route. Ne survivent que
+  // les agrégats que l'autorité demande (indicateur n° 14 : volume total,
+  // ventilation par opération, moyenne par personne) ; la ventilation
+  // nominative reste sur `/temps/synthese`, gardée ADMIN/RH.
+  let heuresAccompagnement = null;
+  try {
+    const brut = await require('../../services/temps-accompagnement').heuresAccompagnement({ annee: year });
+    heuresAccompagnement = brut && {
+      annee: brut.annee,
+      global_minutes: brut.global_minutes,
+      par_projet: brut.par_projet,
+      nb_salaries_concernes: brut.nb_salaries_concernes,
+      moyenne_minutes_par_salarie: brut.moyenne_minutes_par_salarie,
+    };
+  } catch (err) {
+    console.error(`[INSERTION][AUDIT] « heures_accompagnement » ignorée : ${err.message}`);
+  }
+
   return {
     annee: year,
     nb_en_parcours: nbEnParcours,
     freins_nb_evalues: nbEvalues,
+    heures_accompagnement: heuresAccompagnement,
     milestones: { par_type: milestonesParType, global: milestonesGlobal },
     freins_moyennes: freinsMoyennes,
     frein_dominant: freinDominant,

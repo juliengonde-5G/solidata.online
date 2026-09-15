@@ -7,6 +7,8 @@ import { frDate, isAdminRh } from './freins';
 import PassIaePanel from './PassIaePanel';
 import PiecesPanel from './PiecesPanel';
 import DossierConformite from './DossierConformite';
+import ActiviteHebdo from './ActiviteHebdo';
+import FicheReferentPanel from './FicheReferentPanel';
 import { exportBilanProlongationPassIae } from './pdf-insertion';
 
 /**
@@ -629,6 +631,15 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
             </div>
           )}
         </Section>
+
+        {/* ══ Cadre RSA (PR B lot 3) — structure d'accueil ══
+            Deux surfaces ADMIN/RH : le compteur d'activité hebdomadaire (la
+            réponse à « combien d'heures fait cette personne ? » que pose le
+            référent) et la fiche qu'on lui transmet. Elles sont placées APRÈS
+            l'orientation, dont elles dépendent : sans référent déterminé, la
+            fiche n'a pas de destinataire, et le panneau le dit. */}
+        {adminRh && <ActiviteHebdo employeeId={employeeId} />}
+        {adminRh && <FicheReferentPanel employeeId={employeeId} cadre={cadre} adminRh={adminRh} />}
 
         {/* ══ Pièces (ADMIN/RH — le serveur ne renvoie pas la clé aux autres) ══ */}
         {cadre.pieces && (

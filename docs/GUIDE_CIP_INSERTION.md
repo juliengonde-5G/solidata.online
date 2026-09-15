@@ -2,6 +2,7 @@
 
 > **Module livré (parcours d'insertion étendu) — dernière mise à jour 23/07/2026 (lot 8 inclus).**
 > **Complété le 13/09/2026 (PR A « Conformité immédiate ») :** le dossier administratif de chaque salarié et les obligations du cofinancement FSE+ font l'objet d'un guide à part — [Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md) — auquel renvoie le nouveau cas 20.
+> **Complété le même jour (PR B « Cadre RSA et temps d'accompagnement ») :** quatre nouveaux cas d'usage (21 à 24) — le point avec le référent et l'entretien de conciliation, la fiche pour le référent et sa remise, le relevé d'assiduité et l'actualisation France Travail, le compteur d'activité hebdomadaire, et la feuille de temps de l'intervenant. Solidarité Textiles y est **structure d'accueil**, pas référent unique (décision de direction du 12/09/2026) : le pas-à-pas complet vit dans le guide dédié (§ 9 et § 10 de [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md)), ce guide-ci n'en donne que les repères, dans le fil de l'accompagnement quotidien.
 >
 > Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
@@ -33,6 +34,10 @@
 18. [Lexique](#18-lexique)
 19. [Le volet RSE de l'insertion (mission séparée)](#19-le-volet-rse-de-linsertion-mission-séparée)
 20. [Dossier administratif et FSE+](#20--dossier-administratif-et-fse)
+21. [Le point avec le référent, et l'entretien de conciliation](#21-le-point-avec-le-référent-et-lentretien-de-conciliation)
+22. [J'alimente le référent : la fiche, l'assiduité, l'actualisation France Travail](#22-jalimente-le-référent--la-fiche-lassiduité-lactualisation-france-travail)
+23. [Je lis le compteur d'activité (15-20 h)](#23-je-lis-le-compteur-dactivité-15-20-h)
+24. [Ma feuille de temps](#24-ma-feuille-de-temps)
 
 ---
 
@@ -430,6 +435,7 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | Terme | Définition |
 |---|---|
 | **ACI** | Atelier et Chantier d'Insertion — le cadre conventionnel de Solidarité Textiles. |
+| **Actualisation France Travail (mensuelle)** | Démarche mensuelle obligatoire pour tout demandeur d'emploi ; un oubli coupe les droits. Pour les salariés dont le référent est France Travail, un rappel et son constat se tracent au **dossier administratif**, en trois états : faite / non faite / **non constatée** (état par défaut — un mois non vérifié n'est jamais présumé « non fait »). |
 | **AFOM / SWOT** | Analyse Atouts-Faiblesses-Opportunités-Menaces : atouts et faiblesses internes au salarié, opportunités et menaces extérieures. Volet de co-construction du diagnostic (cas 4). |
 | **ASP** | Agence de Services et de Paiement — verse l'aide au poste sur la base des états mensuels de présence (saisie officielle, hors ERP). |
 | **Bilan de suivi** | Entretien intermédiaire à fréquence libre (souvent bimestrielle), numéroté (« Bilan n° 3 »), qui commence toujours par l'évaluation du précédent. |
@@ -437,12 +443,17 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **Catégorie France Travail** | Catégorie statistique du demandeur d'emploi (A à G) ; depuis 2025, tout BRSA est inscrit à France Travail et en porte une. Les catégories **F** (accompagnement social, freins majeurs) et **G** (en attente d'orientation) intéressent particulièrement l'autorité. Saisie au dossier administratif, ADMIN/RH. |
 | **CDDI** | Contrat à Durée Déterminée d'Insertion — 4 mois minimum, renouvelable dans la limite de 24 mois (dérogations possibles : formation en cours, 50 ans et plus, RQTH, CDI inclusion). |
 | **CIP** | Conseiller·ère en Insertion Professionnelle — vous. |
+| **Compteur d'activité hebdomadaire (15-20 h)** | Fourchette d'activité attendue d'un bénéficiaire du RSA — temps de travail CDDI **et** heures d'accompagnement confondus (le travail compte). Suivi semaine par semaine dans le Dossier administratif ; le mot « seuil » n'apparaît jamais sur cet écran (cas 23). |
+| **Conciliation (entretien de)** | Type d'entretien du cadre RSA, ouvert par la réforme : recueille les motifs légitimes d'un manquement avant toute sanction (cas 21). |
 | **Criticité** | Niveau d'urgence d'une action CIP (haute / moyenne / basse) ; une action critique en retard déclenche une alerte. |
 | **Diagnostic d'accueil** | Premier entretien approfondi du parcours (trame 12 rubriques), à réaliser dans les 30 jours suivant l'entrée. |
 | **Échéances du parcours** | Les rendez-vous obligatoires posés automatiquement (diagnostic, renouvellements, bilan de sortie) — appelés « jalons » dans les documents techniques. |
 | **ETI** | Encadrant·e Technique d'Insertion — remplit le volet renouvellement sur son écran dédié et **note les grilles de compétences métier** (onglet Compétences) ; n'accède jamais aux volets santé, judiciaire ou budget. |
+| **Feuille de temps** | Pièce mensuelle signée par un intervenant (entretiens et actions accompagnés, temps d'ateliers collectifs), contre-signée par la RH, exportée sans jamais le nom du bénéficiaire — exigée par les projets cofinancés en coûts simplifiés (cas 24). |
+| **Fiche pour le référent** | Document limitatif (9 rubriques, jamais de santé ni de judiciaire) transmis au référent unique externe, tracé et remis en double — au référent et à la personne concernée (cas 22). |
 | **File active** | L'ensemble des salariés en parcours dont vous êtes référente. |
 | **Frein** | Difficulté périphérique à l'emploi, évaluée de **1 (pas de difficulté)** à **5 (bloquant)**, ou « non évalué ». Le chiffre monte avec la difficulté : c'est le sens de l'échelle affichée à l'écran (1 vert → 5 rouge). Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
+| **Intervenant (temps d'accompagnement)** | Une personne qui a réellement mené un entretien, saisi un temps, ou occupe un poste affecté à un projet cofinancé dans l'année — pas un rôle en soi (cas 24). |
 | **Jalon** | Terme technique pour une échéance du parcours (voir ci-dessus). |
 | **MDFSE+** | *Ma Démarche FSE+* — la plateforme sur laquelle se déposent les dossiers du cofinancement européen. Elle fait foi ; SOLIDATA prépare les pièces et contrôle les délais, il ne la remplace pas. |
 | **Orienteur** | Organisme qui a envoyé la personne vers la structure (Département-CMS, France Travail, mission locale, Cap emploi, CCAS…). À ne pas confondre avec le **prescripteur habilité** (qui valide l'éligibilité IAE) ni avec le **référent unique** (qui tient le parcours dans la durée). |
@@ -450,15 +461,18 @@ D'abord traiter le rouge (réglementaire), puis utiliser « Vu — me le rappele
 | **Période d'essai (entretien de)** | Point formalisé à environ un mois : décision « confirmée / à revoir / rompue ». Auto-créé à la liaison recrutement (cas 6). |
 | **Pièce signée** | Document dont la structure est **seule dépositaire** et qui se dépose au dossier administratif : exemplaire signé d'un entretien, convention PMSMP, accusé de remise, autre pièce. **Jamais un justificatif d'éligibilité** (il reste sur les Emplois de l'inclusion, l'outil n'en garde que la référence), jamais une pièce de santé. |
 | **PMSMP** | Période de Mise en Situation en Milieu Professionnel — immersion en entreprise (1 mois max par convention, 60 jours max sur 12 mois chez un même organisme d'accueil). |
+| **Point avec le référent** | Type d'entretien du cadre RSA : le dialogue avec le référent unique, tripartite (la personne présente) ou bilatérale — hors du compte des bilans d'accompagnement (cas 21). |
 | **Portefeuille de compétences** | Recueil, construit avec le salarié au diagnostic, de ses centres d'intérêt, compétences par domaine, savoir-faire et savoir-être (cas 4). À ne pas confondre avec les grilles de compétences notées par l'encadrant (cas 7). |
 | **Prescripteur** | Organisme qui a orienté le salarié vers l'ACI (France Travail, mission locale, CD76…) ; en auto-prescription, c'est la structure elle-même qui a validé l'éligibilité. |
 | **Projet cofinancé (ASI, OCS)** | Opération financée avec un concours européen. **ASI** = Accompagnement Social Intensif, opération **à participants** (chaque salarié y est rattaché à la main, jamais déduit d'un statut) ; **OCS** = coûts simplifiés, opération qui porte des **postes** (quotité d'affectation, taux forfaitaire) et non des personnes accompagnées. |
 | **Référent unique** | Le professionnel qui tient le parcours d'insertion de la personne dans la durée (conseiller du CMS, de France Travail, ou de la structure). Solidarité Textiles est **structure d'accueil** : le référent est le plus souvent extérieur, et c'est lui qui rédige le contrat d'engagements réciproques. Un référent « non déterminé » pour un BRSA se signale au Département. |
+| **Relevé d'assiduité** | Rendez-vous proposés et honorés, absences par **motif catégorisé** — jamais « injustifiée » quand le motif n'a pas été renseigné (cas 22). |
 | **RQTH** | Reconnaissance de la Qualité de Travailleur Handicapé (avec date d'échéance). |
 | **Sortie dynamique** | Somme des trois catégories officielles de sorties : emploi durable + emploi de transition + sortie positive. C'est le taux phare du dialogue de gestion. |
 | **STC** | Solde de tout compte — l'un des trois documents obligatoires remis à la sortie (avec le certificat de travail et l'attestation France Travail). |
 | **Structure d'accueil** | Position de Solidarité Textiles dans le dispositif BRSA, arbitrée le 12/09/2026 : nous **accueillons et accompagnons**, nous **alimentons** le référent unique externe en points d'étape — nous ne rédigeons pas le contrat d'engagements réciproques. C'est ce qui rend le nom et le contact du référent aussi importants que le reste du dossier. |
 | **Style d'apprentissage (Kolb)** | Profil pédagogique (Adaptateur / Divergeur / Assimilateur / Convergeur) issu d'un questionnaire de 24 items, pour adapter la façon de former. Complète le PCM, ne le remplace pas (cas 4). |
+| **Temps d'accompagnement** | Durée des entretiens et des actions passées auprès d'un salarié ou en collectif ; agrégée par salarié, intervenant et projet cofinancé, à partir des mêmes lignes que les feuilles de temps signées (cas 24). |
 | **Toile d'araignée** | Le radar des freins : une forme par évaluation ; leur superposition montre l'évolution du parcours d'un coup d'œil. |
 
 ---
@@ -487,8 +501,100 @@ Depuis le 13/09/2026, la fiche d'un salarié comporte un onglet **« Dossier adm
 
 > **Tout le pas-à-pas est dans un guide dédié : [Dossier administratif et conformité FSE+](GUIDE_CIP_CONFORMITE_FSE.md).** Il explique aussi ce qui protège les personnes (chiffrement, masquage par rôle, journalisation, ce que reçoit l'IA), de quoi répondre à un salarié qui demande ce qu'on note sur lui.
 
-**Ce qui n'est pas encore livré**, et qui est annoncé dans ce guide : la feuille de temps mensuelle par intervenant (PR B), la réorganisation de la fiche en quatre onglets (PR C), l'écran encadrant accessible par simple lien, et la fiche destinée au référent externe.
+**Ce qui n'est pas encore livré**, et qui est annoncé dans ce guide : la réorganisation de la fiche en quatre onglets (PR C), et l'écran encadrant accessible par simple lien. Le cadre RSA — point avec le référent, fiche pour le référent, relevé d'assiduité, actualisation France Travail, compteur d'activité, feuille de temps — est **livré** depuis la PR B (cas 21 à 24 ci-dessous).
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique.*
+## 21. Le point avec le référent, et l'entretien de conciliation
+
+**Objectif** : garder trace des échanges avec le référent unique externe, et documenter un droit de contestation dont vous n'aviez, jusqu'ici, aucun endroit où l'écrire.
+
+**Rappel** : Solidarité Textiles est **structure d'accueil** (décision de direction du 12/09/2026). Nous n'écrivons pas le contrat d'engagements réciproques — c'est le CMS ou France Travail qui le tient. Ce que nous devons, c'est **alimenter** ce référent, et le prouver.
+
+**Pas à pas**
+
+1. Onglet **Entretiens & bilans**, bouton **« Nouvel entretien »** : le sélecteur de type compte désormais **huit valeurs**, les six habituelles plus deux.
+2. **« Point avec le référent »** — le dialogue avec le professionnel qui tient le CER. Choisissez la **modalité** : *tripartite* (la personne accompagnée était présente à l'échange) ou *bilatérale* (entre professionnels, sans elle) — c'est cette distinction que l'autorité regarde en premier. Trois champs courts : ce qui a été dit au référent, ce que le référent a transmis, les suites à donner. **Cet entretien est hors du compte des bilans d'accompagnement.**
+3. **« Entretien de conciliation (protection des droits) »** — la réforme du RSA ouvre un droit de contestation avant sanction. Le formulaire **commence par les motifs légitimes**, à choix multiples : un problème de santé, une garde d'enfant, un problème de transport, une démarche administrative, une formation ou une démarche d'emploi, un deuil ou un événement familial, autre motif. Puis « Ce que la personne a exprimé, dans ses mots » (texte libre), et l'**issue** : maintien du parcours en l'état, reprise avec aménagement, réorientation, sans suite.
+
+> **Points de vigilance**
+> - **L'ordre des blocs est la règle.** Commencer par les motifs légitimes transforme la question en
+>   « qu'est-ce qui vous en a empêché ? », jamais en « pourquoi n'avez-vous pas obéi ? ».
+> - **Les motifs sont volontairement généraux.** « Un problème de santé » ne dit rien d'un état de santé —
+>   et le texte libre qui suit ne doit rien en dire non plus.
+> - Ni l'un ni l'autre entretien ne comporte de freins, de questionnaire ou d'objectifs : ce sont des
+>   formulaires **courts**, faits pour ce qu'ils tracent et rien de plus.
+
+---
+
+## 22. J'alimente le référent : la fiche, l'assiduité, l'actualisation France Travail
+
+**Objectif** : produire, en quelques clics, ce que le référent externe attend de vous — et rien de plus que ce qu'il doit recevoir.
+
+**Pas à pas**
+
+1. Dans le **Dossier administratif** (cas 20), section **« Fiche pour le référent »**, ou raccourci **« Fiche pour le référent »** / **« Relevé d'assiduité »** dans le menu **« Fiche PDF ▾ »** en en-tête de la fiche (sur les douze derniers mois).
+2. Choisissez la **période** et le **motif** (entrée en parcours, renouvellement, sortie, à la demande du référent). **« Voir ce qui serait transmis »** ouvre un aperçu qui **n'enregistre rien** — vous vérifiez avant de décider.
+3. **« Générer la fiche »** : enregistre une **copie exacte** de ce qui part, et l'imprime aussitôt. Ce qui a été transmis en mars reste ce qu'il était en mars, même si le dossier évolue ensuite.
+4. Dans l'historique, **« Tracer la remise »** : deux dates indépendantes — la remise au référent (avec le moyen employé) et **l'exemplaire remis à la personne concernée**. Une date future est refusée.
+5. **« Relevé d'assiduité »** : rendez-vous proposés et honorés, absences **par motif catégorisé**. Une absence sans motif renseigné s'imprime « motif non renseigné » — **jamais** « injustifiée ».
+6. Si le référent est **France Travail**, le bloc **« Actualisation France Travail »** apparaît en dessous : douze mois, chacun « faite » (vert), « non faite » (ambre) ou **« non constatée »** (gris — l'état par défaut, tant que personne n'a rien vérifié).
+
+**Ce que la fiche contient, et rien d'autre** : identité et destinataire, situation d'emploi, activité hebdomadaire (avec le nombre de semaines sous 15 h — jamais le mot « seuil »), assiduité, les freins **hors santé et judiciaire** (les deux axes sensibles n'y figurent sous aucune forme, pas même une mention de leur absence), actions et orientations, objectifs en cours, prochaines échéances, et les droits de la personne.
+
+> **Points de vigilance**
+> - **Sans référent déterminé, aucune fiche ne peut être produite.** Le bouton reste inactif ; renseignez
+>   d'abord le référent dans « Orientation et référent unique » (cas 20).
+> - **« Non constatée » n'est jamais présumé « non faite ».** Un mois d'actualisation que personne n'a
+>   vérifié ne doit jamais se lire comme un manquement de la personne.
+> - Le bloc **« Rendez-vous réguliers et rappels »** de votre tableau de bord (cas 1) vous signale les
+>   actualisations du mois, les points référent qui arrivent à échéance (tous les trois mois par défaut),
+>   et les **référents non déterminés, en rouge**.
+
+---
+
+## 23. Je lis le compteur d'activité (15-20 h)
+
+**Objectif** : répondre au référent qui demande « combien d'heures cette personne fait-elle ? » sans recompter à la main.
+
+**Pas à pas**
+
+1. Dans la fiche du salarié, un **badge discret** en en-tête (« Activité : 18 h/sem. ») ; le détail complet vit dans le Dossier administratif, section **« Activité hebdomadaire »**.
+2. Le compteur additionne, semaine par semaine, le **temps de travail** (importé de la paie) et les **minutes d'accompagnement** (entretiens et actions dont la durée a été saisie), plus les jours de PMSMP. **Le temps de travail en CDDI compte** — un salarié à 26 heures contractuelles est au-dessus du plancher par le seul fait de travailler (décision de direction du 12/09/2026).
+3. Une frise de semaines colorées (vert au-dessus de 15 h, ambre en dessous, bleu en arrêt déclaré, gris « pas encore relevé ») et, en dessous, la liste des semaines basses avec leur **raison catégorisée** : arrêt déclaré, quotité contractuelle inférieure au plancher, congés, ou « non expliqué — à voir avec la personne ».
+
+> **Points de vigilance**
+> - **Vous ne verrez jamais le mot « seuil », ni « obligation », ni « insuffisant » sur cet écran.** Une
+>   semaine basse s'affiche « en dessous de 15 h » : c'est un constat, pas un jugement — c'est le référent
+>   qui juge, pas vous.
+> - **Une semaine sans heures importées ne s'affiche jamais à zéro.** Elle s'affiche « — », en gris, et
+>   n'entre dans aucune moyenne : c'est un mois de paie pas encore arrivé, pas une semaine d'inactivité.
+> - Le signalement ne se déclenche **jamais pendant un arrêt de travail déclaré**, et deux semaines
+>   consécutives sont nécessaires — une semaine basse isolée arrive (un pont, une reprise) sans qu'il
+>   faille s'en inquiéter.
+
+---
+
+## 24. Ma feuille de temps
+
+**Objectif** : la pièce mensuelle que le cofinancement en coûts simplifiés (l'opération OCS) exige de chaque intervenant — signée, cohérente avec les congés, sans jamais divulguer l'identité des personnes accompagnées.
+
+**Pas à pas**
+
+1. Menu **RH et Insertion → Temps d'accompagnement**. Si vous êtes encadrant technique ou manager, vous n'avez pas de sélecteur d'intervenant : **votre feuille est la vôtre**, point.
+2. Le tableau se compose **automatiquement** depuis vos entretiens et actions **dont la durée a été saisie** à la clôture — sans durée, pas de ligne, plutôt qu'une dépense inventée. Chaque ligne montre sa date, le projet (ASI, OCS ou « Hors projet »), l'activité, et un **identifiant interne** à la place du nom du salarié.
+3. **« + Ajouter un temps »** pour ce qui ne se rattache à aucun salarié — un atelier collectif, une réunion de projet : date, activité, projet, durée par une **rangée de boutons** (15/30/45/60/90/120 min) ou une valeur libre.
+4. En pied de page : le total, la ventilation par projet avec la **quotité** et le **taux forfaitaire**, et une **ligne de cohérence avec les congés** (« conforme » ou « à expliquer », avec le détail). Une incohérence ne bloque rien, elle s'imprime.
+5. **« Valider (intervenant) »** fige la feuille. **« Valider (RH) »** contre-signe — une même personne ne peut pas remplir les deux rôles. **« Rouvrir »** (ADMIN, motif obligatoire) si une correction s'impose après coup : les deux signatures tombent.
+6. **« Exporter CSV »** ou **« Imprimer »** pour le document destiné au cofinanceur.
+
+> **Points de vigilance**
+> - **Un mois sans aucune ligne ne peut pas être validé** : signer « zéro heure » affirmerait ce que
+>   personne n'a constaté.
+> - Les durées sont **déclaratives**, et le document le dit en toutes lettres.
+> - Passé le 10 du mois suivant, une feuille non validée est **signalée** — ce n'est pas une date limite
+>   qui vous serait opposée, seulement le moment où le retard devient visible pour la RH.
+
+---
+
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10.*

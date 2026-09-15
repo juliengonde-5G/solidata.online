@@ -1,9 +1,10 @@
 const express = require('express');
+const { isoDate } = require('../utils/date-iso');
 const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { neutraliserFormule, nomGenerateur } = require('../utils/export-csv');
+const { neutraliserFormule, nomGenerateur, escCsv } = require('../utils/export-csv');
 const { requireMfa } = require('../middleware/mfa');
 const { query } = require('express-validator');
 const { validate } = require('../middleware/validate');
@@ -399,7 +400,9 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
   // Normalise une valeur de cellule (dates ISO, tableaux/JSON en texte).
   const fmtCell = (v) => {
     if (v === null || v === undefined) return '';
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    // Famille D-05 : `toISOString()` sur une colonne DATE rend la veille sous
+    // tout fuseau positif. Le helper partagé lit les composantes locales.
+    if (v instanceof Date) return isoDate(v);
     if (Array.isArray(v)) return v.join(', ');
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
@@ -908,10 +911,13 @@ router.get('/insertion-synthese', [
       rows.push(['Satisfaction de sortie', 'Moyenne globale (1-4)', k.satisfaction?.moyenne_globale ?? '']);
       rows.push(['Actions CIP', 'En cours', k.actions?.total_en_cours ?? 0]);
 
-      const esc = (v) => {
-        const s = String(v ?? '');
-        return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-      };
+      // CORRECTIF m-10 — cet `esc` LOCAL n'échappait que les guillemets et les
+      // sauts de ligne : une cellule commençant par « = », « + », « - », « @ »,
+      // TAB ou CR était évaluée comme une FORMULE à l'ouverture du fichier. Ce
+      // document part à la DDETS. Le fichier importe déjà la règle partagée
+      // (`utils/export-csv.js`) pour ses autres exports — c'est le constat M-04
+      // de la PR A qui survivait ici, sur un export destiné à l'autorité.
+      const esc = (v) => escCsv(v);
       const csv = '﻿' + `${SYNTHESE_MENTION}\n`
         + 'Section;Indicateur;Valeur\n'
         + rows.map((r) => r.map(esc).join(';')).join('\n') + '\n';

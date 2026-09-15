@@ -8785,6 +8785,8 @@ async function executerInitialisation() {
     // ── Refonte CIP (PR A, 2026-09) : migrations déléguées à des modules par lot ──
     await require('./migrations/insertion-cadre').run(client);
     await require('./migrations/insertion-fse').run(client);
+    await require('./migrations/insertion-rsa').run(client);
+    await require('./migrations/insertion-temps').run(client);
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

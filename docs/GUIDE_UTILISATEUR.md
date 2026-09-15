@@ -2,7 +2,7 @@
 
 > **Pour** : Tous les utilisateurs de Solidarité Textile
 > **Version** : 1.2.1 | **Date** : 24 mars 2026
-> **Révision du 13/09/2026** — section 4.4 « Parcours Insertion » entièrement réécrite (elle décrivait encore 7 freins et trois jalons M1/M6/M12, et donnait **l'échelle des freins à l'envers**), numérotation du chapitre 4 corrigée (deux sections portaient le n° 4.4). Le reste du guide n'a pas été revu à cette date.
+> **Révision du 13/09/2026** — section 4.4 « Parcours Insertion » entièrement réécrite (elle décrivait encore 7 freins et trois jalons M1/M6/M12, et donnait **l'échelle des freins à l'envers**), numérotation du chapitre 4 corrigée (deux sections portaient le n° 4.4), puis **complétée le même jour** des écrans du cadre RSA et du temps d'accompagnement (nouveau menu « Temps d'accompagnement »). Le reste du guide n'a pas été revu à cette date.
 >
 > **Voir aussi les guides de formation par profil** :
 > - [Formation Chauffeurs](FORMATION_CHAUFFEURS.md) — Guide visuel simplifié
@@ -324,6 +324,12 @@ Espace de travail de la **CIP** (Conseillère en Insertion Professionnelle) pour
 **Exports** : extraction complète (Excel 5 feuilles ou CSV par jeu de données), **tableau des freins 23 colonnes** (avec sa complétude affichée avant génération, et le frein judiciaire exclu par défaut), synthèse de comité agrégée non nominative, export **FSE+** trimestriel des participants.
 
 > **Traçabilité.** Chaque génération d'un export nominatif est inscrite au **journal d'audit RGPD** (qui, quand, quel périmètre, combien de lignes — jamais le contenu), et chaque fichier porte un **en-tête de traçabilité** : date et heure, générateur, périmètre, nombre de lignes. Un export qui ne ramène **aucune ligne** est refusé avec un message explicite, plutôt que de produire un fichier vide qui se lirait « il n'y a personne ».
+
+**Cadre RSA (bénéficiaires du RSA)** : Solidarité Textiles est **structure d'accueil**, pas référent unique — elle n'écrit pas le contrat d'engagements réciproques, elle **alimente** le référent externe (CMS, France Travail). Dans le Dossier administratif, un badge d'en-tête et un tableau détaillé donnent l'**activité hebdomadaire** de la personne (temps de travail et accompagnement confondus, jamais présentés comme un « seuil ») ; un panneau « Fiche pour le référent » génère et trace la remise d'un document limitatif (9 rubriques, sans aucune donnée de santé ni judiciaire), imprime le **relevé d'assiduité**, et suit l'**actualisation mensuelle France Travail** pour les personnes concernées. Deux types d'entretien s'y ajoutent : « Point avec le référent » et « Entretien de conciliation (protection des droits) ». Le tableau de bord CIP affiche un bloc **« Rendez-vous réguliers et rappels »** qui signale les référents non déterminés et les semaines basses.
+
+**Temps d'accompagnement** — nouveau menu **Temps d'accompagnement** (RH et Insertion) : la feuille de temps mensuelle d'un intervenant (entretiens et actions réalisés, temps saisi pour les ateliers collectifs), validée par l'intervenant puis contre-signée par la RH, exportable en CSV pour le cofinanceur (sans jamais le nom du bénéficiaire) ; un onglet Synthèse (ADMIN/RH) agrège les heures d'accompagnement par projet, intervenant et personne accompagnée.
+
+*Le pas-à-pas complet de ces deux volets est dans les guides dédiés : [`GUIDE_CIP_CONFORMITE_FSE.md`](GUIDE_CIP_CONFORMITE_FSE.md) et [`GUIDE_CIP_INSERTION.md`](GUIDE_CIP_INSERTION.md).*
 
 ### 4.5 Planning Hebdomadaire
 

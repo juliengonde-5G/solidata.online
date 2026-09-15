@@ -11,6 +11,9 @@ import ObjectifsPanel from './ObjectifsPanel';
 import { SatisfactionModal } from './SatisfactionForm';
 import { exportEntretienPDF } from './pdf-insertion';
 import { getInsertionParametres, PARAMETRES_DEFAUTS, plusMois } from './parametres';
+import {
+  REFERENT_MODALITES, CONCILIATION_MOTIFS, CONCILIATION_ISSUES, TYPE_LABELS_RSA,
+} from './entretiens-rsa';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatEmployeeName } from '../../utils/names';
 
@@ -59,6 +62,10 @@ const DUREES_PROPOSEES = [15, 30, 45, 60, 90];
 const DUREE_DEFAUT = {
   diagnostic_accueil: 90, bilan_intermediaire: 45, periode_essai: 30,
   renouvellement: 30, bilan_sortie: 60, suivi_post_sortie: 15,
+  // PR B lot 3 — un point avec le référent se tient rarement en moins d'une
+  // heure (trois agendas à faire coïncider) ; une conciliation est plus courte
+  // mais jamais expédiée.
+  point_etape_referent: 60, conciliation: 45,
 };
 
 const PRESENCES = [['present', 'Présent'], ['absent', 'Absent'], ['excuse', 'Excusé']];
@@ -134,7 +141,10 @@ export default function EntretienForm({
   const timerRef = useRef(null);
 
   const type = milestone.milestone_type;
-  const titre = entretienLabel(milestone);
+  // Libellé étendu : `entretienLabel` ne connaît que les six types
+  // historiques ; sans ce repli, un « Point avec le référent » s'afficherait
+  // « point_etape_referent » en tête d'écran.
+  const titre = milestone.titre || TYPE_LABELS_RSA[milestone.milestone_type] || entretienLabel(milestone);
 
   // Entretien précédent : chaînage explicite sinon dernier réalisé avant celui-ci.
   const prevMilestone = useMemo(() => {
@@ -251,6 +261,26 @@ export default function EntretienForm({
     if (type === 'periode_essai') {
       return [{ id: 'periode_essai', label: "Période d'essai" }, { id: 'cloture', label: 'Clôture' }];
     }
+    // PR B lot 3 — deux formulaires COURTS et focalisés, comme la période
+    // d'essai. Ni freins, ni questionnaire, ni objectifs : ces entretiens ne
+    // sont pas des bilans d'accompagnement.
+    //
+    // « Point avec le référent » : la structure alimente un professionnel
+    // extérieur. Ce qui compte, c'est ce qui a été dit et la MODALITÉ — la
+    // personne était-elle là ?
+    //
+    // « Conciliation » : le formulaire COMMENCE par les motifs légitimes
+    // (08 § 10). L'ordre des écrans n'est pas un détail — poser d'abord les
+    // faits reprochés, puis les explications, transforme un entretien de
+    // protection des droits en convocation.
+    if (type === 'point_etape_referent') {
+      return [{ id: 'point_referent', label: 'Point avec le référent' },
+        { id: 'actions', label: 'Actions' }, { id: 'cloture', label: 'Clôture' }];
+    }
+    if (type === 'conciliation') {
+      return [{ id: 'conciliation', label: 'Motifs et issue' },
+        { id: 'actions', label: 'Actions' }, { id: 'cloture', label: 'Clôture' }];
+    }
     const s = [{ id: 'situation', label: 'Situation' }];
     if (prevMilestone) s.push({ id: 'precedent', label: 'Depuis le dernier bilan' });
     s.push({ id: 'freins', label: 'Freins (toile)' });
@@ -271,6 +301,25 @@ export default function EntretienForm({
   const missingFreins = freins.filter((f) => form[f.column] == null);
   const nextPlanned = allMilestones.find((m) => m.id !== milestone.id && m.status === 'planifie');
   const checklist = useMemo(() => {
+    // PR B lot 3 — ce qu'on demande avant de clôturer, et RIEN de plus : la
+    // modalité d'un point avec le référent (sans elle, on ne saura jamais si
+    // la personne était présente), les motifs et l'issue d'une conciliation.
+    if (type === 'point_etape_referent') {
+      return [{
+        id: 'modalite',
+        label: form.referent_modalite
+          ? `Modalité : ${form.referent_modalite === 'tripartite' ? 'la personne était présente' : 'entre professionnels'}`
+          : 'Modalité du point à préciser',
+        ok: !!form.referent_modalite, step: 'point_referent',
+      }];
+    }
+    if (type === 'conciliation') {
+      const motifs = Array.isArray(form.conciliation_motifs) ? form.conciliation_motifs : [];
+      return [
+        { id: 'motifs', label: motifs.length ? `${motifs.length} motif(s) recueilli(s)` : 'Motifs exprimés par la personne à recueillir', ok: motifs.length > 0, step: 'conciliation' },
+        { id: 'issue', label: form.conciliation_issue ? 'Issue de l\'entretien notée' : 'Issue de l\'entretien à noter', ok: !!form.conciliation_issue, step: 'conciliation' },
+      ];
+    }
     // Période d'essai (Lot 8) : seule la décision est requise pour clôturer.
     if (type === 'periode_essai') {
       return [{
@@ -375,7 +424,7 @@ export default function EntretienForm({
         if (absenceMotif) body.absence_motif = absenceMotif;
         if (absencePiece.trim()) body.absence_piece_ref = absencePiece.trim();
       }
-      if (!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(type) && nextForm.milestone_type && nextForm.due_date) {
+      if (!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai', 'point_etape_referent', 'conciliation'].includes(type) && nextForm.milestone_type && nextForm.due_date) {
         body.next = { milestone_type: nextForm.milestone_type, due_date: nextForm.due_date };
         if (nextForm.interview_date) body.next.interview_date = nextForm.interview_date;
       }
@@ -756,6 +805,129 @@ export default function EntretienForm({
               onChanged={() => api.get(`/insertion/action-plans/${employeeId}`).then((r) => setActions(Array.isArray(r.data) ? r.data : [])).catch(() => {})} />
           )}
 
+          {/* ══ PR B lot 3 — Point avec le référent ══════════════════════════
+              La structure est structure d'accueil : ce point est le moment où
+              elle ALIMENTE le référent unique externe. La modalité est la
+              donnée que l'autorité regarde — « bilatérale » veut dire que deux
+              professionnels ont parlé de la personne sans elle, et c'est une
+              information, pas un jugement. */}
+          {cur.id === 'point_referent' && (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-2">
+                Point d&apos;étape avec le référent unique désigné par l&apos;orienteur (CMS, France Travail…).
+                Solidarité Textiles est structure d&apos;accueil : elle alimente le contrat d&apos;engagements
+                réciproques, elle ne le rédige pas. Cet entretien n&apos;entre pas dans le compte des bilans
+                d&apos;accompagnement.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1.5">Modalité du point</label>
+                <div className="flex flex-wrap gap-2">
+                  {REFERENT_MODALITES.map((m) => (
+                    <button key={m.value} type="button" disabled={readOnly}
+                      onClick={() => setField('referent_modalite', form.referent_modalite === m.value ? null : m.value)}
+                      className={`px-4 py-2.5 rounded-lg border text-sm font-medium transition ${
+                        form.referent_modalite === m.value ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'
+                      } disabled:opacity-60`}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  « Tripartite » signifie que la personne accompagnée était présente à l&apos;échange.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Ce qui a été dit au référent</label>
+                  <textarea value={form.bilan_professionnel || ''} onChange={(e) => setField('bilan_professionnel', e.target.value)}
+                    disabled={readOnly} rows={4} className="input-modern py-1 w-full" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Ce que le référent a transmis</label>
+                  <textarea value={form.observations || ''} onChange={(e) => setField('observations', e.target.value)}
+                    disabled={readOnly} rows={4} className="input-modern py-1 w-full" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Suites à donner</label>
+                <textarea value={form.actions_a_mener || ''} onChange={(e) => setField('actions_a_mener', e.target.value)}
+                  disabled={readOnly} rows={2} className="input-modern py-1 w-full" />
+              </div>
+            </div>
+          )}
+
+          {/* ══ PR B lot 3 — Entretien de conciliation ═══════════════════════
+              L'ordre des blocs EST la règle de fond (08 § 10) : les motifs
+              légitimes viennent EN PREMIER. La question posée à la personne est
+              « qu'est-ce qui vous en a empêché ? », jamais « pourquoi n'avez-vous
+              pas obéi ? » — et la liste est fermée, parce qu'un motif rédigé
+              porterait de la santé dans une colonne que rien ne chiffre. */}
+          {cur.id === 'conciliation' && (
+            <div className="space-y-4">
+              <p className="text-xs text-teal-800 bg-teal-50 border border-teal-200 rounded-lg p-2">
+                Entretien de conciliation — protection des droits. La réforme du RSA ouvre un droit de contestation
+                avant toute sanction : cet entretien sert à recueillir ce que la personne a à dire, et à le transmettre
+                au référent. Commencez par ce qu&apos;elle exprime.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1.5">
+                  Ce qui a empêché la personne (plusieurs choix possibles)
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {CONCILIATION_MOTIFS.map((m) => {
+                    const choisis = Array.isArray(form.conciliation_motifs) ? form.conciliation_motifs : [];
+                    const actif = choisis.includes(m.value);
+                    return (
+                      <button key={m.value} type="button" disabled={readOnly}
+                        onClick={() => setField('conciliation_motifs',
+                          actif ? choisis.filter((x) => x !== m.value) : [...choisis, m.value])}
+                        className={`px-3 py-2 rounded-lg border text-sm transition ${
+                          actif ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'
+                        } disabled:opacity-60`}>
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Ces motifs sont volontairement généraux : « un problème de santé » ne dit rien d&apos;un état de
+                  santé, et ne doit rien en dire.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Ce que la personne a exprimé, dans ses mots</label>
+                <textarea value={form.bilan_social || ''} onChange={(e) => setField('bilan_social', e.target.value)}
+                  disabled={readOnly} rows={4} className="input-modern py-1 w-full" />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1.5">Issue de l&apos;entretien</label>
+                <div className="flex flex-wrap gap-2">
+                  {CONCILIATION_ISSUES.map((i) => (
+                    <button key={i.value} type="button" disabled={readOnly}
+                      onClick={() => setField('conciliation_issue', form.conciliation_issue === i.value ? null : i.value)}
+                      className={`px-3 py-2 rounded-lg border text-sm transition ${
+                        form.conciliation_issue === i.value ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-teal-400'
+                      } disabled:opacity-60`}>
+                      {i.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Suites convenues avec la personne</label>
+                <textarea value={form.actions_a_mener || ''} onChange={(e) => setField('actions_a_mener', e.target.value)}
+                  disabled={readOnly} rows={2} className="input-modern py-1 w-full" />
+              </div>
+            </div>
+          )}
+
           {cur.id === 'periode_essai' && (
             <div className="space-y-4">
               <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-2">
@@ -989,7 +1161,7 @@ export default function EntretienForm({
                     {!c.ok && <button type="button" onClick={() => goToStepId(c.step)} className="text-xs text-teal-700 underline">compléter</button>}
                   </div>
                 ))}
-                {type !== 'periode_essai' && missingFreins.length > 0 && (
+                {!['periode_essai', 'point_etape_referent', 'conciliation'].includes(type) && missingFreins.length > 0 && (
                   <label className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 cursor-pointer">
                     <input type="checkbox" checked={assumeFreins} onChange={(e) => setAssumeFreins(e.target.checked)} disabled={readOnly} className="rounded border-gray-300" />
                     J'assume la non-évaluation de : {missingFreins.map((f) => f.label).join(', ')} (non abordés ce jour).
@@ -1137,7 +1309,7 @@ export default function EntretienForm({
                 </div>
               )}
             </div>
-            {!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai'].includes(type) && (
+            {!nextPlanned && !['bilan_sortie', 'suivi_post_sortie', 'periode_essai', 'point_etape_referent', 'conciliation'].includes(type) && (
               <div className="border rounded-lg p-3 space-y-2 bg-teal-50/40">
                 <p className="text-xs font-semibold text-teal-800">Prochain entretien (obligatoire pour clôturer)</p>
                 <div className="grid grid-cols-2 gap-2">

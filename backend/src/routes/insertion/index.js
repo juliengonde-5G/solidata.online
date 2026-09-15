@@ -34,6 +34,9 @@ router.use('/pieces', require('./pieces'));
 router.use('/projets', require('./projets'));
 router.use('/fse', require('./fse'));
 router.use('/conformite', require('./conformite'));
+// PR B (2.53.0) — cadre RSA (structure d'accueil) et temps d'accompagnement
+router.use('/rsa', require('./rsa'));
+router.use('/temps', require('./temps'));
 
 // Mount routes
 const routes = require('./routes');

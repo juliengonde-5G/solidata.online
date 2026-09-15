@@ -104,6 +104,18 @@ datés. Ce qu'il contient aujourd'hui :
   sortie positive, autres sorties), documents remis, satisfaction.
 - **Le suivi après la sortie**, la trace de remise des documents, et le **journal de suivi** de la
   conseillère (ce qui se passe entre deux entretiens).
+- **Le cadre RSA — nous sommes structure d'accueil, pas référent unique** (décision de direction du
+  12 septembre 2026, § 12) : un **compteur d'activité hebdomadaire** (temps de travail et
+  accompagnement confondus — le travail en CDDI compte dans le volume attendu de 15 à 20 heures),
+  un **relevé d'assiduité** par motif catégorisé (jamais la nature médicale), et une **fiche pour le
+  référent** composée en liste blanche côté serveur — santé et volet judiciaire structurellement
+  absents — puis **tracée en deux temps** : remise au référent, exemplaire remis à la personne
+  concernée. Un registre d'**actualisation mensuelle France Travail** complète le dispositif pour les
+  salariés qui y sont soumis.
+- **Le temps d'accompagnement** : une **feuille de temps mensuelle** par intervenant, composée des
+  entretiens et actions dont la durée a été saisie, validée par l'intervenant puis contre-signée par
+  la RH, exportable sans jamais le nom de la personne accompagnée — et l'**agrégat d'heures
+  d'accompagnement** qui en découle, par salarié, par intervenant et par projet cofinancé.
 
 ![Fiche d'un salarié — onglet « Situation »](../rapports/cip-refonte-2026-09-12/maquettes/captures/Fiche_Situation.jpg)
 *Maquette de travail (noms fictifs). Évolution des neuf freins entre le diagnostic et le dernier bilan,
@@ -133,7 +145,7 @@ les autres reçoivent un refus du serveur.
 |---|---|---|
 | **Administrateur** | L'ensemble du logiciel, la gestion des comptes, le paramétrage, les exports. Double authentification obligatoire. | Rien ne lui est fermé — mais rien ne lui permet non plus d'effacer une trace : ses consultations sensibles et ses exports sont journalisés comme ceux des autres. |
 | **RH / conseillère en insertion (CIP)** | Le dossier d'insertion complet : diagnostic, neuf freins y compris santé et judiciaire, notes de suivi, note de profil, pièces signées, statuts sociaux, exports nominatifs. Double authentification obligatoire. | Les modules sans rapport avec sa mission (collecte, production, finance) selon le paramétrage des habilitations. |
-| **Encadrant technique (profil « manager »)** | Le parcours, les entretiens, les objectifs et actions, les compétences métier, les renouvellements. | **Le frein santé et ses commentaires ; le frein judiciaire sous toute forme ; le commentaire budget ; les notes de suivi de la conseillère ; la note de profil ; les statuts sociaux et les pièces justificatives** (ces deux derniers points avec la livraison du chantier A). |
+| **Encadrant technique (profil « manager »)** | Le parcours, les entretiens, les objectifs et actions, les compétences métier, les renouvellements ; s'il mène lui-même des entretiens ou des actions, **sa propre feuille de temps** — jamais celle d'un collègue. | **Le frein santé et ses commentaires ; le frein judiciaire sous toute forme ; le commentaire budget ; les notes de suivi de la conseillère ; la note de profil ; les statuts sociaux et les pièces justificatives** (ces deux derniers points avec la livraison du chantier A) ; **le compteur d'activité, la fiche pour le référent, le relevé d'assiduité et l'actualisation France Travail** (réservés administrateur et RH, chantier B). |
 | **Autorité / auditeur externe** | Des **agrégats non nominatifs** uniquement : indicateurs d'insertion pour la Métropole, indicateurs de collecte, déclarations à l'éco-organisme en lecture. | **Le module Insertion en totalité** : aucun dossier individuel, aucun nom, aucun frein. Le serveur refuse l'accès. |
 | **Délégué à la protection des données (DPO)** | Le registre des traitements, le journal d'audit, l'état et le déclenchement des purges, l'anonymisation, la production du droit d'accès. | Le contenu des dossiers d'insertion : il contrôle le dispositif, il ne lit pas les parcours. |
 | **Finance** | La comptabilité, la trésorerie, les rapprochements bancaires — **en lecture seule** (toute écriture est refusée par le serveur). | Toute donnée de personnel : ni salarié, ni parcours, ni contrat. |
@@ -303,6 +315,8 @@ passage réel** — « jamais exécuté » étant écrit tel quel le cas échéa
 | **Réponses détaillées au test de personnalité** | **30 jours** après la passation, **pour tout le monde** | Suppression des 20 réponses. Seule la synthèse est conservée. Fondement : la minimisation, pas l'issue du recrutement. |
 | **Pièces signées déposées dans le dossier** | Suivent le dossier | Supprimées à l'anonymisation (chantier A). |
 | **Bordereaux signés de déchèterie** | **3 ans** | Suppression du document et des signatures manuscrites. |
+| **Fiches transmises au référent unique, actualisations France Travail** | Suivent le dossier (24 mois après la fin de parcours) | Suppression intégrale à l'anonymisation du salarié. |
+| **Feuilles de temps mensuelles (accompagnement)** | **Conservées au-delà**, volontairement | Comme les données FSE+, elles servent de pièce de justification au cofinancement européen : le rattachement à la personne accompagnée est retiré à l'anonymisation, le document lui-même est conservé. |
 | **Messagerie interne** | **365 jours** | Suppression des messages. |
 | **Positions GPS des véhicules** | **90 jours** | Suppression définitive. |
 
@@ -382,7 +396,7 @@ un projet.
 | Chantier | Contenu | État |
 |---|---|---|
 | **A — Conformité immédiate** | Réparation de l'export européen (il sortait vide en silence : corrigé, et un export à zéro ligne est désormais **refusé avec un motif**) · Journalisation de tous les exports nominatifs et en-tête de traçabilité partout · Suivi après la sortie porté à **+6 mois** · Saisie du Pass IAE · **Critères d'éligibilité cochables** · Statut de bénéficiaire du RSA, catégorie France Travail, orienteur / prescripteur / **référent unique** · Suspension et prolongation du Pass IAE · **Projets cofinancés et rattachement daté des participants** · **Questionnaires d'entrée et de sortie typés**, avec écran de saisie de la sortie · Alerte « sortie non renseignée » à J+15 et J+25 · **Dossier de conformité en neuf pièces** · Export européen en **29 colonnes, une par question, en français** | **En cours de réalisation** |
-| **B — Cadre RSA et temps d'accompagnement** | Référent unique et points d'étape · **Fiche d'alimentation du référent** · Relevé d'assiduité et motifs légitimes d'absence · Compteur d'activité hebdomadaire (15-20 h) · **Durée des entretiens et volume d'heures d'accompagnement** · **Feuille de temps mensuelle par intervenant et par projet**, validée | Prévu, après A |
+| **B — Cadre RSA et temps d'accompagnement** | Deux entretiens dédiés (point avec le référent, conciliation) · **Fiche pour le référent** en liste blanche, tracée en deux temps · Relevé d'assiduité et motifs légitimes d'absence · Compteur d'activité hebdomadaire (15-20 h, jamais présenté au salarié comme un seuil) · Registre d'actualisation France Travail · **Volume d'heures d'accompagnement** et **feuille de temps mensuelle par intervenant et par projet**, validée puis contre-signée | **Livré** |
 | **C — Espace de la conseillère réorganisé** | Tableau de bord des échéances · Liste des parcours avec recherche et filtres · Fiche en quatre onglets · Diagnostic resserré · Écran de l'encadrant technique accessible par lien direct · **Documents pour le salarié** : « Mon parcours en une page » en français simple, récapitulatif partageable, rappels de rendez-vous | Prévu |
 | **D — Reporting et documentation** | **Dénominateur des taux de sortie corrigé** (toutes les sorties de la période, avec une ligne « sortie non documentée ») · Chiffre ASP en premier dans la synthèse, base **1 820 h** seule dans les documents de conventionnement · Typologie par critère d'éligibilité · **Freins levés** par axe · Débouché des immersions · Documentation mise à jour | Prévu |
 
@@ -391,7 +405,21 @@ et leur historique ; la journalisation des consultations sensibles ; le chiffrem
 santé et de justice ; le masquage par profil ; les purges automatiques ; l'export tableur complet ; le
 tableau des freins en 23 colonnes avec sa feuille « Informations » ; la synthèse agrégée pour comité de
 pilotage ; les effectifs conventionnés avec la doctrine « **le chiffre ASP fait foi** » ; les alertes
-d'échéance du Pass IAE et des 24 mois de contrat.
+d'échéance du Pass IAE et des 24 mois de contrat ; le **compteur d'activité hebdomadaire**, la
+**fiche pour le référent** et sa double trace de remise, le **relevé d'assiduité**, le registre
+d'**actualisation France Travail**, et la **feuille de temps mensuelle** signée par intervenant et
+par projet cofinancé (chantier B).
+
+### Ce que le chantier B laisse ouvert, et que nous ne présentons pas comme réglé
+
+Deux points ne dépendent pas de nous et restent, à dessein, en dehors de cette section « déjà en
+production ». **La base légale de la transmission de la fiche au référent unique externe** est
+posée sur la mission d'intérêt public du dispositif — c'est notre lecture, **elle doit être
+confirmée par notre délégué à la protection des données** avant que ce traitement n'entre
+définitivement au registre, et l'analyse d'impact déjà engagée pour le module doit être complétée de
+ce traitement précis. **Le questionnaire officiel de *Ma Démarche FSE+*** n'a toujours pas été
+transmis par l'autorité de gestion : nos écrans restent construits pour l'accueillir sans refonte,
+mais nous ne prétendons pas qu'ils le reproduisent déjà.
 
 ### Trois décisions de la direction (12 septembre 2026)
 
@@ -418,6 +446,7 @@ Reprise point par point de vos cinq conditions.
 | **3** | **Montrez la matrice « qui voit quoi », puis prouvez-la.** | Le tableau du § 3, puis une connexion **en direct avec un compte d'encadrant technique** : vous constaterez que les volets santé, judiciaire et budget sont **absents de l'écran**, et absents de la réponse du serveur. |
 | **4** | **Générez devant moi l'export participants et la synthèse de dialogue de gestion, montrez la ligne de journal, puis provoquez un export vide.** | Les deux exports produits en séance, puis la ligne inscrite à l'instant dans le journal d'audit (date, compte, nombre de lignes). Puis un export sur un périmètre sans participant : **refus motivé, aucun fichier produit**. *Ces exports sont livrés par le chantier A : si la séance précède la livraison, nous les montrerons sur notre environnement de recette et nous le dirons.* |
 | **5** | **Apportez les pièces hors logiciel.** | L'analyse d'impact relative à la protection des données validée par notre délégué, la trace de la consultation des représentants du personnel, et la note d'information remise aux salariés dans sa version diffusée avec sa trace de remise. **Nous savons que ce sont les seules lignes du dossier sur lesquelles vous n'avez aucune marge d'appréciation.** Nous ne les présenterons pas comme faites tant qu'elles ne le seront pas. |
+| **6** | **Montrez-moi le compteur d'activité et la fiche que vous transmettez au référent.** | Une fiche produite devant vous en aperçu (« Voir ce qui serait transmis », sans écriture), puis générée : vous constaterez qu'aucune mention de santé ni de judiciaire n'y figure, **même en creux**, et nous vous montrerons la trace de remise — au référent, et à la personne concernée. Puis le compteur d'activité d'un salarié à temps partiel, pour vérifier que ses semaines de travail comptent bel et bien dans son volume d'activité. |
 
 ---
 
@@ -452,8 +481,11 @@ Reprise point par point de vos cinq conditions.
 
 ---
 
-*Document rédigé le 13 septembre 2026 par Solidarité Textiles à l'attention de son autorité de tutelle.
-Aucune donnée nominative n'y figure ; les copies d'écran sont des maquettes renseignées avec des noms
-fictifs. Ce qui est présenté comme « en cours de réalisation » relève du plan d'action arrêté par la
-direction le 12 septembre 2026 et n'est pas présenté comme livré. Nous nous engageons à dater chaque
-affirmation de nos prochaines notes : « livré le… » ou « prévu pour… ».*
+*Document rédigé le 13 septembre 2026 par Solidarité Textiles à l'attention de son autorité de tutelle,
+**complété le même jour** de la livraison du chantier B (cadre RSA et temps d'accompagnement — § 2,
+§ 3, § 9, § 12). Aucune donnée nominative n'y figure ; les copies d'écran sont des maquettes renseignées
+avec des noms fictifs. Ce qui est présenté comme « en cours de réalisation » relève du plan d'action
+arrêté par la direction le 12 septembre 2026 et n'est pas présenté comme livré. Ce que le chantier B
+laisse ouvert (§ 12) — la base légale de la transmission au référent, le questionnaire officiel
+MDFSE+ — est dit comme tel, pas comme réglé. Nous nous engageons à dater chaque affirmation de nos
+prochaines notes : « livré le… » ou « prévu pour… ».*

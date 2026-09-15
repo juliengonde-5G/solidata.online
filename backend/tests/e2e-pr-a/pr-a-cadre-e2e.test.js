@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 'use strict';
 
-const { RUN, creerComptes, purger, creerSalarie, jourDecale } = require('./_helpers');
+const { RUN, creerComptes, purger, creerSalarie, jourDecale, iso } = require('./_helpers');
 
 jest.mock('../../src/middleware/activity-logger', () => ({
   autoLogActivity: () => (req, res, next) => next(),
@@ -229,7 +229,7 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       const v = await pool.query(
         'SELECT actualisation_ft_derniere_date, actualisation_ft_rappels_non_honores FROM employees WHERE id = $1', [salarie]);
       expect(v.rows[0].actualisation_ft_rappels_non_honores).toBe(0);
-      expect(v.rows[0].actualisation_ft_derniere_date.toISOString().slice(0, 10)).toBe(jourDecale(-2));
+      expect(iso(v.rows[0].actualisation_ft_derniere_date)).toBe(jourDecale(-2));
     });
   });
 

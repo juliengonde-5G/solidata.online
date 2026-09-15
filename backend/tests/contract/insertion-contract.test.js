@@ -884,7 +884,21 @@ describe('CONTRAT GET /insertion/parametres (REC-UX-18)', () => {
       duree_entretien_defaut: {
         diagnostic_accueil: 90, bilan_intermediaire: 45, periode_essai: 30,
         renouvellement: 30, bilan_sortie: 60, suivi_post_sortie: 15,
+        // PR B lot 3 — durées proposées pour les deux types du cadre RSA.
+        point_etape_referent: 60, conciliation: 45,
       },
+      // PR B « Cadre RSA et temps d'accompagnement » (2026-09, lot 3) — cinq
+      // réglages ajoutés au contrat de cet endpoint. Ils sont servis ICI et non
+      // recopiés côté navigateur pour la même raison que les précédents : le
+      // badge d'activité de l'en-tête de fiche, le bloc « Rendez-vous réguliers
+      // et rappels » et l'écran des feuilles de temps doivent afficher LA
+      // valeur du serveur — une constante dupliquée dans le front dirait « sous
+      // 15 h » pendant que le serveur en compterait 20.
+      cer_heures_min: 15,
+      cer_heures_max: 20,
+      semaines_sous_seuil_consecutives: 2,
+      point_etape_referent_mois: 3,
+      feuille_temps_cloture_jour: 10,
     });
   });
 

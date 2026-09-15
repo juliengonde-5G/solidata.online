@@ -7,7 +7,7 @@ import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import {
   FREIN_LABEL_BY_COLUMN, FREIN_LEVEL_COLORS,
-  ENTRETIEN_TYPE_LABELS, ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS,
+  ENTRETIEN_STATUS_LABELS, ENTRETIEN_STATUS_COLORS,
   SORTIE_CLASS_LABELS, entretienLabel, frDate, isAdminRh,
 } from '../components/insertion/freins';
 import RadarFreins from '../components/insertion/RadarFreins';
@@ -27,6 +27,9 @@ import DossierAdministratif from '../components/insertion/DossierAdministratif';
 import { PASS_STATUT_LABELS, PASS_STATUT_CLASSES } from '../components/insertion/PassIaePanel';
 import QuickActionButton, { pushRecent } from '../components/insertion/QuickActionButton';
 import { exportFicheParcoursPDF, exportBilanProlongationPassIae } from '../components/insertion/pdf-insertion';
+import { exportFicheReferentPDF, exportReleveAssiduitePDF } from '../components/insertion/pdf-referent';
+import ActiviteHebdo from '../components/insertion/ActiviteHebdo';
+import { TYPE_LABELS_RSA } from '../components/insertion/entretiens-rsa';
 import { formatEmployeeName, compareByName } from '../utils/names';
 
 // Les endpoints IA (Claude) génèrent 1500-2500 tokens et peuvent dépasser le
@@ -261,7 +264,7 @@ function AgendaBloc({ stats, onSelect }) {
               <span className="flex items-center gap-1 flex-wrap justify-end">
                 {r.items.slice(0, 3).map((it) => (
                   <span key={it.id} className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-red-200 text-red-700">
-                    {ENTRETIEN_TYPE_LABELS[it.milestone_type] || it.milestone_type} · {Math.abs(it.days_until)} j
+                    {TYPE_LABELS_RSA[it.milestone_type] || it.milestone_type} · {Math.abs(it.days_until)} j
                   </span>
                 ))}
                 {r.items.length > 3 && <span className="text-[10px] text-red-600">+{r.items.length - 3}</span>}
@@ -278,7 +281,7 @@ function AgendaBloc({ stats, onSelect }) {
           {today.length ? today.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
               className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-teal-50 text-sm">
-              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || TYPE_LABELS_RSA[j.milestone_type] || j.milestone_type}</span></span>
               <span className="flex items-center gap-1.5 flex-shrink-0">
                 <IaPretBadge ready={j.ia_preparation_ready} />
                 <span className="text-xs text-teal-700 font-medium">{heureRdv(j.interview_date) || "aujourd'hui"}</span>
@@ -291,7 +294,7 @@ function AgendaBloc({ stats, onSelect }) {
           {week.length ? week.map((j) => (
             <button key={j.id} onClick={() => onSelect(j.employee_id)}
               className="w-full text-left flex items-center justify-between gap-2 p-2 rounded hover:bg-slate-50 text-sm">
-              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+              <span className="truncate">{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{j.titre || TYPE_LABELS_RSA[j.milestone_type] || j.milestone_type}</span></span>
               <span className="flex items-center gap-1.5 flex-shrink-0">
                 <IaPretBadge ready={j.ia_preparation_ready} />
                 <span className="text-xs text-slate-500 font-medium">
@@ -433,6 +436,148 @@ function RenouvellementsBloc({ onSelect }) {
   );
 }
 
+
+/**
+ * « Rendez-vous réguliers et rappels » — PR B, lot 3.
+ *
+ * Quatre choses que la CIP doit voir le lundi matin, et qu'aucun écran ne
+ * disait jusqu'ici :
+ *   - les ACTUALISATIONS France Travail du mois (un oubli, c'est une rupture de
+ *     droits — la structure d'accueil est souvent la dernière à pouvoir le
+ *     rattraper) ;
+ *   - les POINTS AVEC LE RÉFÉRENT dus. Un dossier sans aucun contact affiche
+ *     « jamais » et non un nombre de jours géant, qui trierait la liste de
+ *     façon absurde ;
+ *   - les salariés dont l'activité relevée est basse depuis deux semaines
+ *     consécutives, hors arrêt. Le libellé dit « en dessous de 15 h par
+ *     semaine », jamais « sous le seuil » : c'est un constat, pas un jugement,
+ *     et c'est le référent qui juge ;
+ *   - les RÉFÉRENTS NON DÉTERMINÉS, en rouge : sans référent, aucune fiche ne
+ *     peut partir, et l'absence doit être signalée au Département.
+ *
+ * Le bloc ne s'affiche pas du tout aux rôles qui n'y ont pas droit (403) : ne
+ * rien montrer vaut mieux qu'annoncer une panne là où il n'y a qu'une
+ * habilitation.
+ */
+function EcheancesRsaBloc({ onSelect }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.get('/insertion/rsa/echeances-periodiques')
+      .then((r) => { if (alive) { setData(r.data); setError(null); } })
+      .catch((err) => {
+        if (!alive) return;
+        if (err.response?.status === 403) { setData(null); setError(null); }
+        else setError(err.response?.data?.error || err.message);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  if (error) {
+    return (
+      <div className="bg-white rounded-lg border p-4">
+        <h3 className="font-semibold text-gray-800 mb-2">Rendez-vous réguliers et rappels</h3>
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  const aFaire = (data.actualisations_ft_du_mois || []).filter((a) => a.honoree !== true);
+  const points = data.points_referent_dus || [];
+  const sousSeuil = data.semaines_sous_seuil || { nb_salaries: 0, employes: [] };
+  const sansReferent = data.referents_non_determines || [];
+  const rien = aFaire.length === 0 && points.length === 0 && sousSeuil.nb_salaries === 0 && sansReferent.length === 0;
+
+  const Personne = ({ p, suffixe, ton }) => (
+    <button type="button" onClick={() => onSelect?.(p.employee_id)}
+      className={`text-left w-full px-2 py-1 rounded hover:bg-gray-50 text-sm ${ton || 'text-gray-700'}`}>
+      <span className="font-medium">{p.nom}</span>
+      {suffixe && <span className="text-gray-500"> — {suffixe}</span>}
+    </button>
+  );
+
+  return (
+    <div className="bg-white rounded-lg border p-4">
+      <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+        <h3 className="font-semibold text-gray-800">Rendez-vous réguliers et rappels</h3>
+        <span className="text-xs text-gray-400">
+          Déclaration trimestrielle de ressources — {data.dtr?.trimestre}, échéance {frDate(data.dtr?.echeance)}
+        </span>
+      </div>
+
+      {rien && <p className="text-sm text-gray-400">Rien à rappeler cette semaine.</p>}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {aFaire.length > 0 && (
+          <div>
+            <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Actualisation France Travail du mois ({aFaire.length})
+            </h4>
+            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+              {aFaire.map((a) => (
+                <Personne key={a.employee_id} p={a}
+                  ton={a.honoree === false ? 'text-amber-800' : undefined}
+                  suffixe={a.honoree === false ? 'non faite'
+                    : a.rappel_le ? `rappelée le ${frDate(a.rappel_le)}` : 'aucun rappel'} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {points.length > 0 && (
+          <div>
+            <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Point avec le référent à prévoir ({points.length})
+            </h4>
+            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+              {points.map((p) => (
+                <Personne key={p.employee_id} p={p}
+                  suffixe={p.dernier_le ? `dernier contact il y a ${p.du_depuis_jours} j` : 'jamais de contact tracé'} />
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Attendu tous les {data.periodicite_point_referent_mois} mois — un point tenu ou une fiche remise.
+            </p>
+          </div>
+        )}
+
+        {sousSeuil.nb_salaries > 0 && (
+          <div>
+            <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              Activité en dessous de 15 h par semaine ({sousSeuil.nb_salaries} salarié{sousSeuil.nb_salaries > 1 ? 's' : ''})
+            </h4>
+            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+              {sousSeuil.employes.map((e) => (
+                <Personne key={e.employee_id} p={e} ton="text-amber-800"
+                  suffixe={`${e.nb_semaines} semaine${e.nb_semaines > 1 ? 's' : ''} relevée${e.nb_semaines > 1 ? 's' : ''} basse${e.nb_semaines > 1 ? 's' : ''}`} />
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Hors périodes d&apos;arrêt déclaré ; les semaines dont les heures ne sont pas encore relevées ne comptent pas.
+            </p>
+          </div>
+        )}
+
+        {sansReferent.length > 0 && (
+          <div>
+            <h4 className="text-xs font-medium text-red-700 uppercase tracking-wide mb-1">
+              Référent unique non déterminé ({sansReferent.length})
+            </h4>
+            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+              {sansReferent.map((r) => (
+                <Personne key={r.employee_id} p={r} ton="text-red-700" suffixe="aucune fiche ne peut être transmise" />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CohortePanel({ onSelect }) {
   const { user } = useAuth();
   const canExport = isAdminRh(user);
@@ -559,6 +704,9 @@ function CohortePanel({ onSelect }) {
       {/* Renouvellements à préparer (EXG-04 — « il y en a toujours ») */}
       <RenouvellementsBloc onSelect={onSelect} />
 
+      {/* Cadre RSA (PR B lot 3) — actualisations, points référent, activité basse */}
+      <EcheancesRsaBloc onSelect={onSelect} />
+
       <div className="bg-white rounded-lg border p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-3">
@@ -675,7 +823,7 @@ function CohortePanel({ onSelect }) {
               {stats.jalons_en_retard.map((j) => (
                 <button key={j.id} onClick={() => onSelect(j.employee_id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-red-50 text-sm">
-                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{TYPE_LABELS_RSA[j.milestone_type] || j.milestone_type}</span></span>
                   <span className="text-xs text-red-600 font-medium">{Math.abs(j.days_until)} j</span>
                 </button>
               ))}
@@ -693,7 +841,7 @@ function CohortePanel({ onSelect }) {
               {stats.jalons_a_venir_7j.map((j) => (
                 <button key={j.id} onClick={() => onSelect(j.employee_id)}
                   className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-amber-50 text-sm">
-                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{ENTRETIEN_TYPE_LABELS[j.milestone_type] || j.milestone_type}</span></span>
+                  <span>{formatEmployeeName(j.last_name, j.first_name)} — <span className="text-gray-500">{TYPE_LABELS_RSA[j.milestone_type] || j.milestone_type}</span></span>
                   <span className="text-xs text-amber-600 font-medium">J-{j.days_until}</span>
                 </button>
               ))}
@@ -969,6 +1117,56 @@ export default function InsertionParcours() {
     setPassBilanLoading(false);
   };
 
+  // ── PR B lot 3 — documents destinés au référent unique ────────────────────
+  //
+  // Raccourci de l'en-tête : les douze derniers mois, sans enregistrement. La
+  // fiche ENREGISTRÉE (avec son motif, sa période choisie et la trace de sa
+  // remise) se produit depuis l'onglet « Dossier administratif » — c'est là que
+  // le geste devient une preuve de ce qui est sorti vers le tiers.
+  const [referentLoading, setReferentLoading] = useState(null);
+  const ilYAUnAn = () => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().slice(0, 10);
+  };
+
+  // ══ M-03 — le raccourci d'en-tête ENREGISTRE avant d'imprimer ═══════════
+  // Il GETtait l'aperçu puis imprimait : le document sortait vers le référent
+  // sans qu'aucun snapshot n'en garde la preuve, alors qu'il portait le bloc de
+  // signature et le pied de remise qui lui donnent sa valeur probante. Une
+  // fiche imprimée EST une fiche transmise — le POST en garde la trace, avec
+  // son destinataire recopié et son inscription au registre RGPD (dans la même
+  // transaction que le snapshot). Le moment `demande` est celui du geste :
+  // c'est une fiche produite à la demande, hors des trois moments jalonnés.
+  const exporterFicheReferent = async (employeeId) => {
+    setReferentLoading('fiche'); setPanelError(null);
+    try {
+      const r = await api.post(`/insertion/rsa/${employeeId}/fiche-referent`, {
+        moment: 'demande', du: ilYAUnAn(), au: new Date().toISOString().slice(0, 10),
+      });
+      exportFicheReferentPDF(r.data.contenu, { moment: 'demande' });
+    } catch (err) {
+      const d = err.response?.data;
+      // Le 409 « référent non déterminé » n'est pas une panne : c'est une
+      // donnée manquante, et le message dit où la saisir.
+      setPanelError(d?.code === 'REFERENT_NON_DETERMINE'
+        ? `${d.error} ${d.hint || ''}`.trim()
+        : (d?.error || err.message) + ' (fiche pour le référent)');
+    }
+    setReferentLoading(null);
+  };
+
+  const exporterAssiduite = async (employeeId) => {
+    setReferentLoading('assiduite'); setPanelError(null);
+    try {
+      const r = await api.get(`/insertion/rsa/${employeeId}/assiduite?du=${ilYAUnAn()}&au=${new Date().toISOString().slice(0, 10)}`);
+      exportReleveAssiduitePDF(r.data);
+    } catch (err) {
+      setPanelError((err.response?.data?.error || err.message) + " (relevé d'assiduité)");
+    }
+    setReferentLoading(null);
+  };
+
   // Clic sur un élément de la frise → ouvre le bon onglet / le bon détail.
   const handleFriseSelect = ({ type, data }) => {
     if (!confirmLeave()) return;
@@ -1122,6 +1320,12 @@ export default function InsertionParcours() {
                             CDDI : {cddi.months_total}/{cddi.cap_months} mois{cddi.nb_contracts > 1 ? ` (${cddi.nb_contracts} contrats)` : ''}
                           </span>
                         )}
+                        {/* PR B lot 3 — activité hebdomadaire. Le badge ne dit
+                            jamais « seuil » : il annonce une moyenne, et un
+                            point orange quand deux semaines relevées de suite
+                            sont basses hors arrêt. Rendu aux seuls ADMIN/RH,
+                            comme l'API qui l'alimente. */}
+                        {adminRh && <ActiviteHebdo employeeId={selectedEmployee.id} variante="badge" />}
                         {analysis.has_pcm && <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">PCM recrutement</span>}
                         {(emp.prescripteur_nom || emp.prescripteur) && (
                           <span className="text-xs px-2 py-0.5 rounded bg-sky-100 text-sky-700">
@@ -1181,6 +1385,26 @@ export default function InsertionParcours() {
                             {passBilanLoading ? 'Génération…' : 'Bilan de prolongation (PDF)'}
                           </button>
                         )}
+                        {/* ══ PR B lot 3 — documents destinés au référent unique ══
+                            Deux impressions directes sur les douze derniers mois.
+                            La composition complète (choix de la période, du motif,
+                            trace de remise) vit dans l'onglet « Dossier
+                            administratif » : ces boutons sont le raccourci du
+                            geste le plus fréquent, pas un second écran de saisie. */}
+                        {adminRh && (
+                          <button onClick={() => exporterFicheReferent(selectedEmployee.id)} disabled={referentLoading}
+                            title="Point de situation transmis au référent unique externe (CMS, France Travail) — sans aucune donnée de santé ni judiciaire. La fiche est enregistrée au registre des transmissions avant d'être imprimée."
+                            className="px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 text-xs font-medium hover:bg-blue-50 whitespace-nowrap disabled:opacity-50">
+                            {referentLoading === 'fiche' ? 'Génération…' : 'Fiche pour le référent (enregistrée)'}
+                          </button>
+                        )}
+                        {adminRh && (
+                          <button onClick={() => exporterAssiduite(selectedEmployee.id)} disabled={referentLoading}
+                            title="Rendez-vous proposés, honorés et absences par motif catégorisé sur les douze derniers mois"
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 text-xs font-medium hover:bg-slate-50 whitespace-nowrap disabled:opacity-50">
+                            {referentLoading === 'assiduite' ? 'Génération…' : "Relevé d'assiduité"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1201,7 +1425,7 @@ export default function InsertionParcours() {
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Type</label>
                         <select value={newEntretien.milestone_type} onChange={(e) => setNewEntretien({ ...newEntretien, milestone_type: e.target.value })} className="input-modern py-1.5 w-full">
-                          {Object.entries(ENTRETIEN_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                          {Object.entries(TYPE_LABELS_RSA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                         </select>
                         <p className="text-[11px] text-gray-400 mt-1">Les bilans de suivi sont libres (n° auto). Diagnostic d'accueil et bilan de sortie sont uniques par parcours.</p>
                       </div>

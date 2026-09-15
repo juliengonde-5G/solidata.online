@@ -1,14 +1,19 @@
 # Guide CIP — Dossier administratif et conformité FSE+
 
-> **Livré le 13/09/2026 (PR A « Conformité immédiate »).** Ce guide complète le
+> **Livré le 13/09/2026 (PR A « Conformité immédiate »), complété le même jour (PR B « Cadre RSA et
+> temps d'accompagnement »).** Ce guide complète le
 > [Guide CIP — Le module Insertion au quotidien](GUIDE_CIP_INSERTION.md), qui reste le mode d'emploi de
 > l'accompagnement lui-même (diagnostic, bilans, objectifs, actions, sortie). Ici, on ne parle que de ce
 > que **l'autorité de tutelle et le cofinanceur européen exigent** : le dossier administratif de chaque
-> salarié, le questionnaire FSE+ d'entrée et de sortie, le relevé à six mois, et l'écran qui dit ce qui
-> manque avant qu'un contrôleur ne le découvre.
+> salarié, le questionnaire FSE+ d'entrée et de sortie, le relevé à six mois, l'écran qui dit ce qui
+> manque avant qu'un contrôleur ne le découvre — et, depuis la PR B, ce que la structure doit au
+> référent unique externe des bénéficiaires du RSA (§ 9) et la feuille de temps de l'intervenant qui
+> les accompagne (§ 10).
 >
 > - **Public** : CIP, RH, administrateur. Les écrans décrits sont réservés aux rôles **ADMIN et RH** — un
->   encadrant technique n'en voit aucun.
+>   encadrant technique n'en voit aucun. La feuille de temps (§ 10) fait exception : un encadrant
+>   technique qui mène lui-même des entretiens ou des actions voit **la sienne**, jamais celle d'un
+>   collègue.
 > - **Les copies d'écran de ce guide sont des maquettes**, validées le 12/09/2026 avant développement :
 >   l'écran livré peut différer dans le détail.
 
@@ -24,8 +29,10 @@
 6. [Le relevé à six mois](#6-le-relevé-à-six-mois)
 7. [L'écran « Dossiers FSE+ — pièces à compléter »](#7-lécran--dossiers-fse--pièces-à-compléter-)
 8. [Les projets cofinancés (Réglages insertion)](#8-les-projets-cofinancés-réglages-insertion)
-9. [Ce qui protège les personnes](#9-ce-qui-protège-les-personnes)
-10. [FAQ — 8 questions](#10-faq--8-questions)
+9. [Le cadre RSA en structure d'accueil](#9-le-cadre-rsa-en-structure-daccueil)
+10. [La feuille de temps](#10-la-feuille-de-temps)
+11. [Ce qui protège les personnes](#11-ce-qui-protège-les-personnes)
+12. [FAQ — 9 questions](#12-faq--9-questions)
 
 ---
 
@@ -244,7 +251,95 @@ Trois documents transmis par la référente institutionnelle en septembre 2026 c
 
 ---
 
-## 9. Ce qui protège les personnes
+## 9. Le cadre RSA en structure d'accueil
+
+**Objectif** : tenir ce que la réforme du RSA demande à une structure d'accueil qui n'est pas référent unique — savoir combien la personne travaille, l'assiduité aux rendez-vous, et alimenter le référent qui, lui, tient le contrat d'engagements réciproques.
+
+**Solidarité Textiles n'écrit pas ce contrat** (arbitrage du 12/09/2026, voir § 2 point 4). Nous ne saisissons ni ses termes, ni ses avenants, ni les décisions de suspension : c'est le rôle du centre médico-social ou de France Travail, désigné comme **référent unique** dans la rubrique « Orientation et référent unique » (§ 2). Ce que nous devons, à la place, c'est **alimenter** ce référent — et le prouver.
+
+### 9.1 Le compteur d'activité hebdomadaire
+
+**Pas à pas**
+
+1. Dans le Dossier administratif, section **« Activité hebdomadaire »**, juste après « Orientation et référent unique ». Un **badge discret** en en-tête de la fiche (« Activité : 18 h/sem. ») en donne un aperçu partout ailleurs.
+2. Le compteur additionne, semaine ISO par semaine ISO, les **heures de travail** (importées de la paie) et les **minutes d'accompagnement** (entretiens et actions dont la durée a été saisie), plus les jours de PMSMP. **Le temps de travail en CDDI compte** dans le volume attendu de 15 à 20 heures — c'est la décision de la direction du 12/09/2026 : un salarié à 26 heures contractuelles est au-dessus du plancher par le seul fait de travailler.
+3. Une frise de 52-53 cases, une par semaine, colorée : vert (au-dessus de 15 h), ambre (en dessous), bleu (arrêt de travail déclaré), gris (« pas encore relevé »).
+4. Sous la frise, la liste des semaines basses avec leur **raison catégorisée** : arrêt déclaré, quotité contractuelle inférieure au plancher, congés, ou « non expliqué — à voir avec la personne ».
+
+**Ce qui est automatique** : le calcul, la catégorisation des raisons, le signalement quand deux semaines consécutives sont basses.
+
+> **Points de vigilance**
+> - **Vous ne lirez jamais le mot « seuil » sur cet écran.** Une semaine basse s'affiche « en dessous de
+>   15 h » — un constat, pas un jugement. C'est le référent, pas nous, qui juge du respect du contrat.
+> - **Une semaine sans heures importées n'est jamais affichée à zéro.** Elle s'affiche « — », en gris, et
+>   ne compte dans aucune moyenne : c'est un mois de paie qui n'est pas encore arrivé, pas une semaine
+>   d'inactivité.
+> - **Le signalement ne se déclenche jamais pendant un arrêt de travail déclaré**, et une semaine sans
+>   relevé interrompt la série au lieu de la prolonger.
+
+### 9.2 Deux entretiens dédiés
+
+Dans **Entretiens & bilans**, bouton **« Nouvel entretien »**, le sélecteur de type propose désormais huit valeurs — les six habituelles, plus :
+
+- **« Point avec le référent »** — le dialogue avec le professionnel qui tient le contrat d'engagements réciproques. Choisissez sa **modalité** : *tripartite* (la personne était présente) ou *bilatérale* (entre professionnels, sans elle) — c'est cette distinction que l'autorité regarde. Cet entretien est **hors du compte des bilans d'accompagnement**.
+- **« Entretien de conciliation (protection des droits) »** — la réforme du RSA ouvre un droit de contestation avant sanction. Le formulaire **commence par les motifs légitimes** (un problème de santé, une garde d'enfant, un problème de transport, une démarche administrative, une formation ou une démarche d'emploi, un deuil ou un événement familial, autre motif) : la question posée est « qu'est-ce qui vous en a empêché ? », jamais « pourquoi n'avez-vous pas obéi ? ». Puis l'issue : maintien du parcours, reprise avec aménagement, réorientation, sans suite.
+
+> **Point de vigilance** — Les motifs de conciliation sont **volontairement généraux** : « un problème de santé » ne dit rien d'un état de santé, et ne doit rien en dire. N'y ajoutez jamais de détail médical dans le texte libre qui les accompagne.
+
+### 9.3 La fiche pour le référent
+
+**Objectif** : produire, en un clic, le document que le référent unique attend — et rien de plus.
+
+**Pas à pas**
+
+1. Dans le Dossier administratif, section **« Fiche pour le référent »**, ou depuis le menu **« Fiche PDF ▾ »** en en-tête de la fiche du salarié (raccourci sur les douze derniers mois).
+2. Choisissez la **période** et le **motif de la transmission** (entrée en parcours, renouvellement de contrat, sortie de parcours, à la demande du référent).
+3. **« Voir ce qui serait transmis »** : un aperçu, qui **n'enregistre rien**. Vous y lisez les neuf rubriques et rien d'autre.
+4. **« Générer la fiche »** : enregistre une **copie exacte** de ce qui part — ce qui a été transmis le 12 mars reste ce qu'il était le 12 mars, même si le dossier change ensuite. La fiche s'imprime aussitôt.
+5. Dans l'historique, pour chaque fiche déjà produite : **« Tracer la remise »** — deux dates indépendantes, l'une pour le référent (avec le moyen : courriel, courrier, main propre, dépôt sur une plateforme), l'autre pour **l'exemplaire remis à la personne concernée**. Une date future est refusée.
+6. Bouton **« Relevé d'assiduité »** à côté : rendez-vous proposés et honorés, absences **par motif catégorisé** — jamais « injustifiée » quand le motif n'a pas été renseigné.
+
+**Ce que la fiche contient, et rien d'autre** — neuf rubriques : identité et destinataire, situation d'emploi, activité hebdomadaire (avec le nombre de semaines sous 15 h, jamais le mot « seuil »), assiduité, freins **hors santé et judiciaire** (mobilité, administratif, finances, logement, linguistique, famille, numérique — les deux axes sensibles n'ont **aucune trace** dans le document, pas même une mention de leur absence), actions et orientations, objectifs en cours, prochaines échéances, et les droits de la personne.
+
+> **Sans référent déterminé, la fiche ne peut pas être produite.** Le bouton reste inactif et l'écran renvoie vers la rubrique « Orientation et référent unique » : un document sans destinataire n'existe pas.
+
+### 9.4 L'actualisation France Travail
+
+Quand le référent est **France Travail**, un bloc **« Actualisation France Travail »** apparaît sous la fiche : douze mois, chacun dans l'un de **trois états** — faite (vert), non faite (ambre), ou **« non constatée »** (gris, l'état par défaut). Un mois non vérifié n'est jamais présumé « non fait » : c'est ce qui protège la personne d'un manquement que personne n'a réellement constaté.
+
+### 9.5 Le tableau de bord CIP
+
+Le bloc **« Rendez-vous réguliers et rappels »** (menu Espace CIP) affiche désormais quatre listes : les actualisations France Travail du mois à faire, les points avec le référent qui arrivent à échéance (tous les trois mois, un point tenu **ou** une fiche remise), les salariés dont l'activité est basse depuis deux semaines consécutives, et les **référents non déterminés, en rouge** — un dossier sans référent est un signalement à faire au Département.
+
+---
+
+## 10. La feuille de temps
+
+**Objectif** : produire, pour chaque intervenant et chaque mois, la pièce que le cofinancement en coûts simplifiés (l'opération OCS) exige — signée, cohérente avec les congés, sans jamais divulguer l'identité des personnes accompagnées.
+
+**Pas à pas**
+
+1. Menu **RH et Insertion → Temps d'accompagnement** (`/insertion/temps`). ADMIN et RH choisissent l'intervenant et le mois ; un **encadrant technique ou un manager n'a pas de sélecteur : sa feuille est la sienne**, le serveur refuse le reste avant même de lire quoi que ce soit.
+2. Le tableau des lignes se compose **automatiquement** depuis les entretiens et les actions **dont la durée a été saisie à la clôture** — sans durée, aucune ligne n'apparaît, plutôt que d'inventer une dépense. Chaque ligne porte sa date, le projet (ASI, OCS ou « Hors projet »), l'activité et un identifiant interne à la place du nom — **jamais un nom de salarié**.
+3. **« + Ajouter un temps »** pour un temps qui ne se rattache à aucun salarié — un atelier collectif, une réunion de projet : date, activité, projet, durée par une **rangée de boutons** (15 / 30 / 45 / 60 / 90 / 120 min) ou une valeur libre.
+4. En pied de tableau : le total, la ventilation par projet avec la **quotité d'affectation** et le **taux forfaitaire**, et une **ligne de cohérence avec les congés** — « conforme » en vert, ou « à expliquer » en ambre avec le détail des jours en anomalie. Une incohérence **ne bloque rien** : elle s'imprime, et l'intervenant peut l'expliquer.
+5. **« Valider (intervenant) »** : la feuille se **fige** — elle ne peut plus être modifiée, et devient le document que la RH va relire. **« Valider (RH) »** : contre-signature, réservée à une personne **différente** de l'intervenant — une même personne ne peut pas signer les deux volets.
+6. **« Rouvrir »** (ADMIN uniquement, motif obligatoire) si une correction s'impose après coup : les deux signatures tombent, il faudra revalider.
+7. **« Exporter CSV »** et **« Imprimer »** : le document destiné au cofinanceur — six colonnes en français, jamais un nom de bénéficiaire, le pied de traçabilité complet.
+
+**Ce qui est automatique** : la composition des lignes, le calcul de la cohérence, le figement au moment de la validation, et l'agrégat annuel des **heures d'accompagnement** (onglet « Synthèse », ADMIN/RH) qui se compose des **mêmes lignes** que les feuilles signées — le chiffre annoncé au dialogue de gestion et les feuilles produites ne peuvent jamais se contredire.
+
+> **Points de vigilance**
+> - **Un mois sans aucune ligne ne peut pas être validé** : signer un mois à zéro heure affirmerait ce que
+>   personne n'a constaté.
+> - **Les durées sont déclaratives.** Le PDF le dit en toutes lettres : « durées déclarées par
+>   l'intervenant à la clôture des entretiens ».
+> - Une feuille non validée après le 10 du mois suivant est **signalée** à l'écran — ce n'est pas une
+>   date limite qui vous serait opposée, seulement le moment où le retard devient visible.
+
+---
+
+## 11. Ce qui protège les personnes
 
 De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi, et qui le voit ? ».
 
@@ -258,12 +353,13 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 | **Absence sans motif** | Elle ne s'imprime **jamais** « injustifiée » sur un document qui sort de la structure. |
 | **Exports vers l'extérieur** | Aucun frein, aucune donnée de santé, rien du judiciaire, aucune note. La RQTH n'apparaît que comme code d'éligibilité. |
 | **Conservation** | Le dossier d'accompagnement est anonymisé deux ans après le dernier contact. **Deux exceptions assumées** : les données de sortie FSE+ et le rattachement au projet sont **conservés** — la piste d'audit européenne court au moins cinq ans, et c'est écrit au registre des traitements. À l'anonymisation, les pièces déposées, les événements du Pass et les critères d'éligibilité sont **supprimés** ; le nom de l'orienteur, celui du référent et ses coordonnées (des données de tiers) sont effacés. |
+| **Fiche pour le référent et actualisation France Travail** | Les fiches déjà transmises et le registre d'actualisation sont **supprimés intégralement** à l'anonymisation du salarié. Sur la feuille de temps, seul le rattachement à la personne accompagnée (`employee_id`) est retiré : le document reste, en tant que pièce de financement, conservé au-delà — comme les données FSE+. |
 
 **Ce qu'il faut dire à la personne, et qui n'est pas dans l'outil** : que ses réponses au questionnaire FSE+ partent dans un dossier européen conservé au moins cinq ans, qu'une fausse déclaration l'engage, et qu'elle sera recontactée six mois après sa sortie — elle peut s'y opposer, et l'opposition est consignée.
 
 ---
 
-## 10. FAQ — 8 questions
+## 12. FAQ — 9 questions
 
 **1. Je n'ai pas les justificatifs d'éligibilité sous la main : je bloque le dossier ?** Non. Cochez les critères, mettez la date de vérification quand vous l'aurez, et notez la référence du dossier sur les Emplois de l'inclusion. La pièce « Éligibilité IAE référencée » restera « en cours » — c'est un signalement, pas un verrou.
 
@@ -279,8 +375,10 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 
 **7. Dois-je encore saisir sur les Emplois de l'inclusion et sur Ma Démarche FSE+ ?** Oui, comme avant. SOLIDATA **prépare, contrôle et trace** ; les plateformes de l'État font foi, et chaque export le rappelle en toutes lettres. Le bloc à copier du dossier administratif est là précisément pour raccourcir la saisie sur la plateforme, pas pour la remplacer.
 
-**8. Qu'est-ce qui n'est pas encore livré ?** Quatre choses, annoncées : la **feuille de temps mensuelle par intervenant** (signée, cohérente avec les congés) et l'agrégat des heures d'accompagnement arrivent avec la **PR B** ; la **réorganisation de la fiche en quatre onglets** et la remontée du questionnaire FSE+ dans le socle du diagnostic, avec la **PR C** ; un **écran encadrant accessible par lien** (sans compte SOLIDATA) pour les renouvellements ; et la **fiche pour le référent** externe, ce document limitatif qui sortira vers le CMS ou France Travail. Aujourd'hui, l'écran de renouvellement demande toujours un compte, et le bilan d'exécution écrit « non comptabilisable » là où les heures manquent — jamais un zéro.
+**8. Qu'est-ce qui n'est pas encore livré ?** Deux choses, annoncées : la **réorganisation de la fiche en quatre onglets** et la remontée du questionnaire FSE+ dans le socle du diagnostic, avec la **PR C** ; et un **écran encadrant accessible par lien** (sans compte SOLIDATA) pour les renouvellements. La **feuille de temps mensuelle par intervenant**, l'**agrégat des heures d'accompagnement** et la **fiche pour le référent** externe (§ 9 et § 10) sont, eux, **livrés** depuis la PR B. Aujourd'hui, l'écran de renouvellement demande toujours un compte SOLIDATA.
+
+**9. La base légale de la fiche pour le référent, c'est réglé ?** Pas encore, et nous le disons sans détour. L'entrée au registre est posée sur la mission d'intérêt public du dispositif, mais **c'est notre délégué à la protection des données qui doit la confirmer** avant que le traitement soit définitivement établi, et l'analyse d'impact déjà engagée pour le module doit être complétée de ce point précis. En attendant, la fiche continue d'être produite quand le référent en a besoin — la structure ne peut pas faire autrement — mais ce point figure explicitement parmi ce qui reste à trancher (voir [`PRESENTATION_AUTORITE_INSERTION.md`](PRESENTATION_AUTORITE_INSERTION.md) § 12).
 
 ---
 
-*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution). Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail. À réviser après la première recette avec la CIP et à la livraison de la PR B.*
+*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée). Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail. À réviser après la première recette avec la CIP et à la livraison de la PR C.*
