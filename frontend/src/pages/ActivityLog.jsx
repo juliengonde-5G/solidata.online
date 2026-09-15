@@ -67,6 +67,11 @@ const ENTITY_LABELS = {
   employee: 'Collaborateur', candidate: 'Candidat', team: 'Équipe',
   insertion: 'Insertion', pointage: 'Pointage', effectifs: 'Effectifs ETP',
   badgeuse: 'Temps & Présence',
+  // PR A (13/09) — la consultation d'une pièce signée est tracée DEUX fois :
+  // au registre RGPD et ici. L'autorité pose « consultation journalisée » en
+  // condition de son acceptation du stockage de ces pièces ; un seul journal,
+  // écrit en best effort, pouvait ne laisser aucune trace.
+  insertion_piece: 'Pièce du dossier d\'insertion',
   // 2.43.0 — le module PCM journalise enfin (audit PCM D4/R6). Sans ce
   // libellé, la garde anti-dérive `activity-log-libelles.test.js` échoue et
   // l'entité serait introuvable au filtre.

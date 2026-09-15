@@ -2,6 +2,7 @@
 
 > **Pour** : Tous les utilisateurs de Solidarité Textile
 > **Version** : 1.2.1 | **Date** : 24 mars 2026
+> **Révision du 13/09/2026** — section 4.4 « Parcours Insertion » entièrement réécrite (elle décrivait encore 7 freins et trois jalons M1/M6/M12, et donnait **l'échelle des freins à l'envers**), numérotation du chapitre 4 corrigée (deux sections portaient le n° 4.4). Le reste du guide n'a pas été revu à cette date.
 >
 > **Voir aussi les guides de formation par profil** :
 > - [Formation Chauffeurs](FORMATION_CHAUFFEURS.md) — Guide visuel simplifié
@@ -288,43 +289,50 @@ Depuis l'**onglet PCM du dossier candidat** (là où le profil s'affiche), deux 
 
 ### 4.4 Parcours Insertion (CDDI)
 
-Pour les salariés en Contrat à Durée Déterminée d'Insertion :
+Espace de travail de la **CIP** (Conseillère en Insertion Professionnelle) pour les salariés en Contrat à Durée Déterminée d'Insertion. Menu → **Gestion du personnel** → **Parcours insertion**.
+*Un guide dédié, pas à pas et par cas d'usage, existe pour ce module : [`GUIDE_CIP_INSERTION.md`](GUIDE_CIP_INSERTION.md). La présente section n'en donne que les repères.*
 
-**Créer un parcours** :
-1. Menu → Gestion Équipe → **Parcours insertion**
-2. Cliquez sur **Nouveau parcours**
-3. Sélectionnez le salarié CDDI
-4. Réalisez le **diagnostic initial** (évaluation des 7 freins périphériques)
+**Rôles** : ADMIN et RH voient l'intégralité du dossier ; **MANAGER** y accède avec les volets sensibles masqués (santé, judiciaire, budget, notes de suivi).
 
-**Les 7 freins périphériques** :
-Le système évalue automatiquement les freins à l'emploi sur un radar :
-- Logement, Mobilité, Santé, Administratif, Financier, Familial, Justice
-- Notation de 1 (frein fort) à 5 (aucun frein)
-- Visualisation en **graphique radar** pour identifier rapidement les points bloquants
+**Le parcours démarre tout seul.** À la liaison d'une fiche de recrutement avec un collaborateur — ou à l'import de paye pour un poste marqué CDDI — le parcours s'ouvre et les **échéances** sont posées, calées sur les **dates réelles du contrat**. Il n'y a pas de « bouton créer un parcours » à ne pas oublier.
 
-**3 jalons obligatoires** :
-Le parcours est jalonné de 3 évaluations planifiées automatiquement :
-- **M1** (1 mois) : première évaluation — le salarié s'adapte-t-il ?
-- **M6** (6 mois) : bilan intermédiaire — progression sur les freins
-- **M12** (12 mois) : bilan final — objectifs atteints ?
-Des alertes automatiques rappellent au CIP quand un jalon approche.
+**Les entretiens (appelés « jalons » dans les écrans techniques)** — six types, et non trois rendez-vous fixes :
+- **Diagnostic d'accueil** — l'entretien approfondi d'entrée, à réaliser dans les **30 jours** (délai paramétrable) ;
+- **Entretien de période d'essai** — posé automatiquement à environ un mois (décision confirmée / à revoir / rompue) ;
+- **Bilans intermédiaires** — en nombre **illimité** (« Bilan n° 1, n° 2… »), au rythme réel de l'accompagnement ;
+- **Renouvellement de contrat** — lié au contrat, avec le volet rempli par l'encadrant technique sur son écran dédié, puis triple validation ;
+- **Bilan de sortie** — classement de la sortie en **4 catégories** (emploi durable / emploi de transition / sortie positive / autre) et check-list des documents remis ;
+- **Suivi post-sortie** — posé automatiquement **six mois** après la sortie (délai paramétrable), pour relever la situation de la personne : c'est l'indicateur de résultat attendu par la DREETS et par le cofinanceur FSE+.
 
-**Plans d'action CIP** :
-Le Conseiller en Insertion Professionnelle peut définir des actions correctives pour chaque frein identifié (ex : aide au permis pour le frein mobilité, accompagnement Pôle emploi pour le frein administratif).
+**Enregistrer n'est pas clôturer.** Un entretien se sauvegarde librement en brouillon (la saisie est conservée en continu, on peut reprendre en deux séances). La **clôture** contrôle la trame, **verrouille** l'entretien et l'**historise** : elle fait foi. Une réouverture est possible pour ADMIN/RH, avec motif obligatoire et trace conservée.
 
-**Suivi de progression** :
-- Un graphique montre l'**évolution des notes** dans le temps
-- Les objectifs atteints sont marqués en vert
-- Le bilan final est exportable pour les partenaires (DREETS, Conseil Départemental)
+**Les 9 freins périphériques** (et non 7) : mobilité, santé, finances, famille, linguistique, administratif, numérique, **logement**, **judiciaire**.
 
-### 4.4 Planning Hebdomadaire
+> **Sens de l'échelle.** **1 = pas de difficulté. 5 = difficulté bloquante.** Le chiffre **monte avec la difficulté** (couleurs à l'écran : 1-2 vert, 3 jaune, 4-5 orange puis rouge), et une flèche ↗ signale un frein **qui s'aggrave**. *Les éditions précédentes de ce guide donnaient l'échelle inversée : c'est cette version qui fait foi.*
+
+- Un axe non abordé se saisit **« Non évalué »** — il n'est alors ni tracé sur le radar ni compté dans les moyennes. Il n'est **jamais** ramené à 1 : « aucune difficulté » et « on n'en a pas parlé » sont deux choses différentes.
+- Les niveaux sont **suggérés** par le système à partir des réponses du diagnostic, jamais imposés : la CIP confirme ou corrige d'un clic.
+- **Santé** (art. 9) et **judiciaire** (art. 10) sont **chiffrés en base**, invisibles d'un MANAGER, et le judiciaire n'est jamais suggéré automatiquement. On n'y écrit que le niveau et l'impact sur l'organisation du travail — **jamais la nature des faits**.
+- La **toile d'araignée** (radar 9 axes) superpose les évaluations successives : l'évolution du parcours se lit d'un coup d'œil.
+
+**Le reste du dossier** : objectifs individualisés (avec sous-objectifs, et une origine « salarié » ou « CIP »), actions CIP rattachées à un partenaire du référentiel, **journal de suivi** (ce qui se passe entre deux entretiens — chiffré, ADMIN/RH), **PMSMP** (immersions, bornes légales contrôlées), **Pass IAE** avec alertes d'échéance et bilan de prolongation, **satisfaction de sortie**, grilles de compétences métier notées par l'encadrant, et frise du parcours en couloirs.
+
+**Alertes** : entretien en retard ou à planifier, diagnostic hors délai, Pass IAE proche de son terme, cumul CDDI à 22/24 mois, actions critiques en retard. L'acquittement « Vu » est **enregistré en base et partagé entre CIP** (il ne se limite pas au poste de travail de celle qui a cliqué).
+
+**Pilotage & indicateurs** (`/insertion/audit`) : taux de sorties par catégorie comparés aux **cibles conventionnelles** — affichées « objectif non paramétré » tant que la direction ne les a pas confirmées, jamais une valeur inventée —, ETP « contrôle » (la saisie ASP fait foi), typologies de publics non nominatives, délai moyen des diagnostics, cartographie des freins.
+
+**Exports** : extraction complète (Excel 5 feuilles ou CSV par jeu de données), **tableau des freins 23 colonnes** (avec sa complétude affichée avant génération, et le frein judiciaire exclu par défaut), synthèse de comité agrégée non nominative, export **FSE+** trimestriel des participants.
+
+> **Traçabilité.** Chaque génération d'un export nominatif est inscrite au **journal d'audit RGPD** (qui, quand, quel périmètre, combien de lignes — jamais le contenu), et chaque fichier porte un **en-tête de traçabilité** : date et heure, générateur, périmètre, nombre de lignes. Un export qui ne ramène **aucune ligne** est refusé avec un message explicite, plutôt que de produire un fichier vide qui se lirait « il n'y a personne ».
+
+### 4.5 Planning Hebdomadaire
 
 1. Menu → Gestion Équipe → **Planning hebdo**
 2. Sélectionnez la semaine
 3. Glissez-déposez les collaborateurs dans les créneaux
 4. Les **conflits** (même personne affectée deux fois) sont signalés en rouge
 
-### 4.5 La note de profil initial (CIP)
+### 4.6 La note de profil initial (CIP)
 
 **Depuis la version 2.43.0**, dès qu'une fiche de recrutement est liée à un collaborateur, une **note de profil initial** est générée automatiquement par IA à partir de son dossier (CV, entretien de recrutement, mises en situation, et profil PCM s'il a été passé). Elle est pensée pour **préparer le premier entretien** (diagnostic d'accueil), pas pour le remplacer.
 

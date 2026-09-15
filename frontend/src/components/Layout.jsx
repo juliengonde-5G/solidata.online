@@ -14,8 +14,7 @@ import {
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
   TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, MessageCircle, ShoppingCart,
-  GraduationCap, Shirt, Fingerprint, MapPinned, Workflow,
-} from 'lucide-react';
+  GraduationCap, Shirt, Fingerprint, MapPinned, Workflow, FolderOpen } from 'lucide-react';
 import api from '../services/api';
 
 // ══════════════════════════════════════════
@@ -147,6 +146,7 @@ const NAV_TREE = [
           { label: 'Collaborateurs', path: '/employees', icon: Users, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Espace CIP (insertion)', path: '/insertion', icon: Heart, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Actions CIP', path: '/insertion/actions', icon: ListChecks, roles: ['ADMIN', 'RH', 'MANAGER'] },
+          { label: 'Dossiers FSE+', path: '/insertion/conformite', icon: FolderOpen, roles: ['ADMIN', 'RH'] },
           { label: 'Pilotage & indicateurs', path: '/insertion/audit', icon: ClipboardList, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Effectifs ETP', path: '/rh/effectifs', icon: Gauge, roles: ['ADMIN', 'RH', 'MANAGER'] },
           { label: 'Compétences', path: '/skills', icon: Star, roles: ['ADMIN', 'RH'] },

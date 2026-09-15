@@ -16,6 +16,12 @@ const TABLE_COLUMNS = {
     // extension 2026-08 (import paie lot 3) : contacts d'urgence (tiers)
     'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_email',
     'emergency_contact2_name', 'emergency_contact2_phone', 'emergency_contact2_email',
+    // PR A lot 1 (2026-09) : dossier administratif d'insertion
+    'brsa', 'brsa_date_constat', 'ft_categorie', 'ft_categorie_date',
+    'orienteur_type', 'orienteur_nom',
+    'referent_unique_type', 'referent_unique_nom', 'referent_unique_contact',
+    'actualisation_ft_requise', 'actualisation_ft_derniere_date', 'actualisation_ft_rappels_non_honores',
+    'pass_iae_statut', 'eligibilite_verifiee_le', 'eligibilite_source',
     // colonnes conservées (agrégats)
     'contract_type', 'contract_start', 'contract_end', 'weekly_hours', 'team_id', 'position',
     'insertion_status', 'insertion_start_date', 'insertion_end_date', 'prescripteur_id', 'date_prescription', 'user_id',
@@ -47,6 +53,12 @@ const TABLE_COLUMNS = {
   messagerie_messages: ['id', 'conversation_id', 'auteur_type', 'auteur_user_id', 'auteur_vehicle_id', 'texte', 'type', 'source', 'lien', 'created_at'],
   messagerie_mentions: ['id', 'message_id', 'user_id', 'vehicle_id'],
   messagerie_participants: ['id', 'conversation_id', 'user_id', 'vehicle_id', 'dernier_lu_message_id'],
+  // PR A (2026-09) — lot 1 : tables PURGÉES ; lot 2 : tables CONSERVÉES.
+  employee_eligibilite: ['id', 'employee_id', 'critere_code', 'date_constat', 'created_by'],
+  insertion_pass_iae_evenements: ['id', 'employee_id', 'type', 'date_debut', 'date_fin', 'motif', 'reference_externe'],
+  insertion_pieces: ['id', 'employee_id', 'type', 'nom_fichier', 'mime', 'taille', 'contenu', 'sha256', 'depose_par'],
+  insertion_fse_sorties: ['id', 'employee_id', 'parcours_num', 'projet_id', 'source', 'date_sortie', 'situation_sortie', 'fse_sortie', 'situation_6mois'],
+  insertion_projet_participants: ['id', 'projet_id', 'employee_id', 'date_entree', 'date_sortie'],
 };
 
 function makeMockClient(userIdLie = null) {
@@ -281,5 +293,87 @@ describe('anonymization — messagerie interne', () => {
     await anonymizeEmployee(client, 5);
     const sqls = dataSql(client.calls);
     expect(sqls.some((s) => /messagerie_/i.test(s))).toBe(false);
+  });
+});
+
+// ── PR A lot 1 (2026-09) — dossier administratif d'insertion ───────────────
+describe('anonymization — dossier administratif d’insertion (PR A)', () => {
+  it('efface ce qui NOMME (orienteur, référent unique) et les DATES de constat des statuts', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const empUpdate = dataSql(client.calls).find((s) => /^UPDATE employees SET/i.test(s));
+    for (const col of ['orienteur_nom', 'referent_unique_nom', 'referent_unique_contact',
+      'brsa_date_constat', 'ft_categorie_date']) {
+      expect(empUpdate).toContain(col);
+    }
+  });
+
+  it('CONSERVE les valeurs catégorielles non nominatives (typologies de cohorte)', async () => {
+    // Même doctrine que les scores de freins et la classification de sortie :
+    // `brsa`, `ft_categorie`, les TYPES d'orienteur et de référent, la source
+    // d'éligibilité et le statut du Pass alimentent le reporting DREETS /
+    // Département sans désigner personne.
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const empUpdate = dataSql(client.calls).find((s) => /^UPDATE employees SET/i.test(s));
+    for (const kept of ['brsa', 'ft_categorie', 'orienteur_type', 'referent_unique_type',
+      'eligibilite_source', 'pass_iae_statut']) {
+      expect(empUpdate).not.toContain(`${kept} =`);
+    }
+  });
+
+  it('SUPPRIME critères d’éligibilité, événements du Pass et pièces signées', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    for (const t of ['employee_eligibilite', 'insertion_pass_iae_evenements', 'insertion_pieces']) {
+      expect(sqls.some((s) => new RegExp(`DELETE FROM ${t} WHERE employee_id = \\$1`, 'i').test(s))).toBe(true);
+    }
+  });
+
+  it('CONSERVE les LIGNES des tables FSE+ (piste d’audit ≥ 5 ans) — lot 2', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    // Aucune suppression : la piste d'audit survit à l'anonymisation.
+    expect(sqls.some((s) => /DELETE FROM insertion_fse_sorties/i.test(s))).toBe(false);
+    expect(sqls.some((s) => /insertion_projet_participants/i.test(s))).toBe(false);
+  });
+
+  it('M-03 — RETIRE le commentaire libre des deux questionnaires FSE+', async () => {
+    // Les réponses TYPÉES sont la piste d'audit et restent ; le commentaire
+    // libre, lui, n'entre dans aucun export ni dans le bilan — il ne sert donc
+    // pas la conservation qui le protégeait, et il porte par nature de la santé
+    // ou du judiciaire sans qu'aucune colonne ne l'annonce.
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    const attendus = [
+      /UPDATE insertion_fse_sorties SET fse_sortie = fse_sortie - 'commentaire'/i,
+      /UPDATE insertion_diagnostics SET fse_entree = fse_entree - 'commentaire'/i,
+      /UPDATE insertion_milestones SET fse_sortie = fse_sortie - 'commentaire'/i,
+    ];
+    for (const re of attendus) expect(sqls.some((s) => re.test(s))).toBe(true);
+    // Et JAMAIS une réécriture du JSONB entier : seules les réponses typées
+    // doivent survivre, on ne les remplace pas par un objet vide.
+    expect(sqls.some((s) => /SET fse_sortie = '\{\}'/i.test(s))).toBe(false);
+    expect(sqls.some((s) => /SET fse_entree = NULL/i.test(s))).toBe(false);
+  });
+
+  it('m-01 — UN SAVEPOINT PAR TABLE (une table absente n’en épargne pas deux autres)', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = client.calls.map((c) => c.sql);
+    // Les 3 purges du dossier administratif + les 3 retraits de commentaire.
+    for (const t of ['insertion_pieces', 'insertion_pass_iae_evenements', 'employee_eligibilite']) {
+      expect(sqls).toContain(`SAVEPOINT anon_${t}`);
+      expect(sqls).toContain(`RELEASE SAVEPOINT anon_${t}`);
+    }
+    for (let i = 0; i < 3; i += 1) {
+      expect(sqls).toContain(`SAVEPOINT anon_fse_commentaire_${i}`);
+      expect(sqls).toContain(`RELEASE SAVEPOINT anon_fse_commentaire_${i}`);
+    }
+    // Le point de reprise PARTAGÉ a disparu : c'était lui le défaut.
+    expect(sqls).not.toContain('SAVEPOINT dossier_administratif_insertion');
   });
 });

@@ -26,6 +26,15 @@ const { requireMfa } = require('../../middleware/mfa');
 // franchi le défi TOTP. No-op intégral pour les autres rôles.
 router.use(authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER'));
 
+// Sous-routeurs de la PR A « Conformité immédiate » (2026-09) — montés AVANT routes.js :
+// routes.js termine par GET /:employeeId qui capturerait n'importe quel segment.
+router.use('/eligibilite-criteres', require('./eligibilite'));
+router.use('/cadre', require('./cadre'));
+router.use('/pieces', require('./pieces'));
+router.use('/projets', require('./projets'));
+router.use('/fse', require('./fse'));
+router.use('/conformite', require('./conformite'));
+
 // Mount routes
 const routes = require('./routes');
 router.use('/', routes);

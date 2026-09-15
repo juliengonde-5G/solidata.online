@@ -8782,6 +8782,10 @@ async function executerInitialisation() {
       console.warn(`[INIT-DB] Marquage des déchèteries ignoré : ${e.message}`);
     }
 
+    // ── Refonte CIP (PR A, 2026-09) : migrations déléguées à des modules par lot ──
+    await require('./migrations/insertion-cadre').run(client);
+    await require('./migrations/insertion-fse').run(client);
+
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
     console.log('[INIT-DB] ══════════════════════════════════════\n');
