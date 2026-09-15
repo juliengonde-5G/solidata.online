@@ -483,11 +483,18 @@ describe('CONTRAT GET /insertion/alertes/:id — obligations FSE+', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('CONTRAT /insertion/projets et /insertion/fse — habilitations', () => {
-  it('la lecture des projets est ouverte au module (le MANAGER voit l’existence d’un rattachement)', async () => {
+  it('la lecture des projets est ouverte AUX RÔLES DU MODULE (ADMIN/RH)', async () => {
+    // RÉCONCILIÉ 15/09 : « ouverte au module » se lisait ADMIN/RH/MANAGER quand
+    // la PR A a été écrite. Le profil MANAGER a été retiré en 2.52.0 et le
+    // routeur impose désormais `authorize('ADMIN','RH')` — la lecture reste
+    // donc ouverte à tout rôle du module, mais le module n'en compte plus que
+    // deux. L'écriture, elle, reste ADMIN seul (test suivant, inchangé).
     mockQuery.mockResolvedValue({ rows: [{ ...PROJET, nb_participants: 14 }] });
-    const res = await get('/api/insertion/projets', 'MANAGER');
+    const res = await get('/api/insertion/projets', 'RH');
     expect(res.status).toBe(200);
     expect(res.body[0].nb_participants).toBe(14);
+    // Et un rôle hors module ne lit rien du tout.
+    expect((await get('/api/insertion/projets', 'MANAGER')).status).toBe(403);
   });
 
   it('l’écriture d’un projet est refusée au MANAGER', async () => {

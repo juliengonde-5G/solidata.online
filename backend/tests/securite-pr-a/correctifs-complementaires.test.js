@@ -62,12 +62,17 @@ const get = (p, role) => request(app).get(p).set('Authorization', `Bearer ${TOKE
 
 // ───────────────────────────────────────────────────────────────────────────
 describe('M-01 — écriture du questionnaire FSE+ d’entrée', () => {
-  test('le MANAGER est refusé en 403, et rien n’est écrit', async () => {
+  test('un rôle hors ADMIN/RH est refusé en 403, et rien n’est écrit', async () => {
+    // RÉCONCILIÉ 15/09 : depuis le retrait du profil MANAGER (2.52.0), le refus
+    // vient du ROUTEUR (`authorize('ADMIN','RH')`) et non plus de la garde fine
+    // `FSE_ADMIN_RH_STRICT` posée dans le handler. Cette garde est CONSERVÉE en
+    // code — une garde morte ne coûte rien — mais elle n'est plus atteignable :
+    // on vérifie donc ce qui fait foi aujourd'hui, le refus et l'absence
+    // d'écriture, sans exiger un code d'erreur que la porte ne produit plus.
     const res = await put('/api/insertion/diagnostic/5', 'MANAGER', {
       fse_entree: { foyer_monoparental: true, commentaire: 'suivi psychologique en cours' },
     });
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('FSE_ADMIN_RH_STRICT');
     // Refus EXPLICITE et non retrait silencieux : une pièce d'audit qu'on croit
     // enregistrée alors qu'elle ne l'est pas est pire qu'un refus.
     const ecritures = mockQuery.mock.calls
@@ -76,13 +81,15 @@ describe('M-01 — écriture du questionnaire FSE+ d’entrée', () => {
     expect(ecritures).toHaveLength(0);
   });
 
-  test('les autres champs du diagnostic restent écrivables par le MANAGER', async () => {
+  test('la garde ne déborde pas : les autres champs du diagnostic restent écrivables', async () => {
+    // Référence ADMIN — elle vérifie que le refus porte bien sur le SEUL
+    // questionnaire FSE+, et n'a pas fermé l'écriture du diagnostic en général.
     mockQuery.mockImplementation((sql) => {
       const s = String(sql);
       if (/INSERT INTO insertion_diagnostics/i.test(s)) return Promise.resolve({ rows: [{ id: 1, employee_id: 5 }] });
       return Promise.resolve({ rows: [{ parcours_num: 1 }] });
     });
-    const res = await put('/api/insertion/diagnostic/5', 'MANAGER', { obs_points_forts: 'ponctuel' });
+    const res = await put('/api/insertion/diagnostic/5', 'ADMIN', { obs_points_forts: 'ponctuel' });
     expect(res.status).toBe(200);
   });
 });
@@ -103,11 +110,10 @@ describe('M-02 — clôture d’un bilan de sortie', () => {
       return Promise.resolve({ rows: [] });
     });
     const res = await post('/api/insertion/milestones/42/close', 'MANAGER', {});
+    // Refus au ROUTEUR depuis 2.52.0 (cf. note de M-01) : plus tôt, donc aucune
+    // transaction n'est même ouverte — a fortiori aucune sortie FSE+ écrite.
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('BILAN_SORTIE_ADMIN_RH');
-    // La transaction est annulée, aucune ligne de sortie n'est écrite.
     const sqls = mockClientQuery.mock.calls.map(([s]) => String(s));
-    expect(sqls).toContain('ROLLBACK');
     expect(sqls.some((s) => /insertion_fse_sorties/i.test(s))).toBe(false);
     expect(sqls.some((s) => /UPDATE insertion_milestones\s+SET status = 'realise'/i.test(s))).toBe(false);
   });
@@ -123,9 +129,10 @@ describe('M-02 — clôture d’un bilan de sortie', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/insertion/milestones/42/close', 'MANAGER', {});
-    // Il peut être refusé pour une autre raison métier (freins non évalués,
-    // prochain entretien manquant…), mais JAMAIS en 403 sur son habilitation.
+    const res = await post('/api/insertion/milestones/42/close', 'ADMIN', {});
+    // Référence ADMIN : la garde vise le SEUL bilan de sortie. Un bilan
+    // intermédiaire peut être refusé pour une raison métier (freins non
+    // évalués, prochain entretien manquant…), jamais sur l'habilitation.
     expect(res.status).not.toBe(403);
   });
 

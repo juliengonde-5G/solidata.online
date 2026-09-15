@@ -1,7 +1,9 @@
 /**
  * Questionnaires FSE+ d'un participant — PR A lot 2 (items 2.2 et 2.3 du plan).
- * Monté sur `/fse` AVANT routes.js ; hérite de `authenticate + requireMfa +
- * authorize('ADMIN','RH','MANAGER')` et RESSERRE tout à ADMIN/RH.
+ * Monté sur `/fse` AVANT routes.js ; hérite de `authenticate + requireMfa + authorize('ADMIN','RH')`. (La PR A visait
+ * ADMIN/RH/MANAGER ; MANAGER a été retiré de l'application en 2.52.0 — la
+ * porte du module s'est donc resserrée sur ADMIN/RH.)
+ * Ce fichier RESSERRE en outre toute écriture à ADMIN/RH.
  *
  * POURQUOI ADMIN/RH STRICT, Y COMPRIS EN LECTURE. Le questionnaire d'entrée
  * porte la composition du foyer, la stabilité du logement et la nature des
