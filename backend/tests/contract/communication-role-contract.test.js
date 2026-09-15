@@ -285,7 +285,10 @@ describe('les écrans suivent le périmètre du serveur', () => {
   });
 
   test('la barre latérale lui montre Temps & Présence', () => {
-    expect(lire('components/Layout.jsx')).toContain(
+    // L'arbre de navigation a quitté Layout.jsx pour navigation/navTree.js en
+    // 2.56.0 (ProtectedRoute doit le lire sans tirer tout le Layout dans le
+    // bundle d'entrée). Cette garde suit la donnée, pas le fichier historique.
+    expect(lire('navigation/navTree.js')).toContain(
       "path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'COMMUNICATION']"
     );
   });

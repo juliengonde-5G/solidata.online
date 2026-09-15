@@ -1,5 +1,10 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+// Correspondance chemin → module, DÉRIVÉE de l'arbre de navigation (aucune
+// seconde liste à tenir : cf. Layout.jsx). Le menu et la route doivent lire la
+// même chose, faute de quoi un module accordé afficherait un lien qui renvoie
+// aussitôt sur l'accueil.
+import { modulesDuChemin } from './navigation/navTree';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ErreurApplication from './components/ErreurApplication';
 import { ToastProvider } from './components/Toast';
@@ -130,11 +135,19 @@ function PageFallback() {
 // d'API du module sont gardées) ; ceci évite d'afficher une page qui se
 // remplirait de 403.
 function ProtectedRoute({ children, roles, module }) {
-  const { user, loading, canAccessModule } = useAuth();
+  const { user, loading, canAccessModule, isModuleGranted } = useAuth();
+  const location = useLocation();
   if (loading) return <PageFallback />;
   if (!user) return <Navigate to="/login" />;
   // Un rôle personnalisé est autorisé si son rôle de base (base_role) l'est.
-  if (roles && !roles.includes(user.role) && !roles.includes(user.base_role)) return <Navigate to="/" />;
+  const roleOk = !roles || roles.includes(user.role) || roles.includes(user.base_role);
+  // 2.56.0 — troisième voie : la SECTION de cet écran a été accordée au rôle
+  // dans `/admin/permissions`. Même règle que la barre latérale (Layout.jsx
+  // filterByRole), et même garde côté serveur (middleware/auth.js authorize) :
+  // les trois répondent la même chose, donc un lien affiché s'ouvre vraiment.
+  const accorde = !roleOk && modulesDuChemin(location.pathname).some(isModuleGranted);
+  if (!roleOk && !accorde) return <Navigate to="/" />;
+  // Le REFUS reste évalué EN DERNIER, donc il prime sur l'accord.
   if (module && !canAccessModule(module)) return <Navigate to="/" />;
   return children;
 }

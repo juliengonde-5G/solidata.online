@@ -35,13 +35,24 @@
  *    l'API lui refuse, ou l'inverse. La barre latérale et la porte doivent
  *    répondre la même chose.
  *
- * 3. UNE PANNE DE BASE LAISSE PASSER, ET LE DIT. Le choix se discute, donc il
- *    est motivé : la matrice ne DONNE aucun droit, elle en RETIRE. Quand elle
- *    est illisible, retomber sur « rôle seul » rend exactement le comportement
- *    d'avant ce middleware — jamais plus. Fermer à la place fermerait l'atelier
- *    entier sur un incident de connexion, pour protéger une restriction de
- *    confort. L'incident est journalisé (`console.warn`), il ne passe pas sous
- *    silence.
+ * 3. UNE PANNE DE BASE LAISSE PASSER LES REFUS, ET N'INVENTE AUCUN ACCORD.
+ *    Le choix se discute, donc il est motivé — et depuis la 2.56.0 il est
+ *    ASYMÉTRIQUE, parce que les deux sens de la matrice n'ont pas les mêmes
+ *    conséquences quand elle devient illisible :
+ *
+ *      • REFUS → on laisse passer (inchangé). Un refus est une restriction de
+ *        confort ; retomber sur « rôle seul » rend exactement le comportement
+ *        d'avant ce middleware, jamais plus. Fermer à la place fermerait
+ *        l'atelier entier sur un incident de connexion.
+ *
+ *      • ACCORD → on NE l'applique PAS. Un accord ÉLARGIT le périmètre d'un
+ *        rôle : le présumer sur une base injoignable reviendrait à ouvrir des
+ *        écrans précisément au moment où plus rien ne permet de vérifier qu'ils
+ *        étaient accordés. L'utilisateur retrouve alors les droits de son rôle
+ *        — une dégradation visible, jamais une ouverture invisible.
+ *
+ *    Dans les deux cas l'incident est journalisé (`console.warn`) : il ne passe
+ *    pas sous silence.
  *
  * ──────────────────────────────────────────────────────────────────────────
  * CACHE — la table est minuscule et lue à chaque requête d'un routeur gardé :
@@ -62,6 +73,8 @@ let cachedAt = 0;
 function refreshModuleAccess() {
   cachedRefus = null;
   cachedAt = 0;
+  cachedAccords = null;
+  cachedAccordsAt = 0;
 }
 
 /**
@@ -82,6 +95,66 @@ async function chargerRefus() {
   cachedRefus = map;
   cachedAt = Date.now();
   return map;
+}
+
+// Map<role, Set<module_key>> des ACCORDS explicites (allowed = true ET
+// grant_access = true). Volontairement une SECONDE lecture plutôt qu'un seul
+// chargement à deux facettes : `allowed = true` seul ne veut pas dire
+// « accordé » mais « non refusé » — l'écran d'administration enregistre une
+// ligne pour chaque rôle × chaque module à chaque sauvegarde. Confondre les
+// deux donnerait tous les modules à tous les rôles déjà enregistrés.
+let cachedAccords = null;
+let cachedAccordsAt = 0;
+
+/**
+ * Accords explicites, par rôle. Lève si la base est injoignable — l'appelant
+ * décide quoi en faire (cf. règle 3 : un accord ne se présume pas).
+ * @returns {Promise<Map<string, Set<string>>>}
+ */
+async function chargerAccords() {
+  if (cachedAccords && Date.now() - cachedAccordsAt < CACHE_TTL_MS) return cachedAccords;
+  const r = await pool.query(
+    'SELECT role, module_key FROM role_module_access WHERE allowed = true AND grant_access = true'
+  );
+  const map = new Map();
+  for (const row of r.rows) {
+    if (!map.has(row.role)) map.set(row.role, new Set());
+    map.get(row.role).add(row.module_key);
+  }
+  cachedAccords = map;
+  cachedAccordsAt = Date.now();
+  return map;
+}
+
+/**
+ * Le rôle a-t-il reçu un accord explicite sur AU MOINS UN des modules donnés ?
+ *
+ * Utilisé par `authorize()` (middleware/auth.js) pour qu'un module accordé dans
+ * la matrice ouvre réellement l'API, et pas seulement le lien de la barre
+ * latérale. Trois garanties :
+ *
+ *   • L'ADMIN n'a besoin d'aucun accord (il passe déjà partout) — on ne le
+ *     consulte donc jamais, et la matrice ne le concerne pas (règle 1).
+ *   • Le rôle lu est le rôle BRUT (règle 2), comme pour les refus et comme
+ *     `GET /permissions/my-modules` qui alimente la barre latérale : l'écran et
+ *     la porte doivent répondre la même chose.
+ *   • Une base illisible rend `false` (règle 3) : jamais d'accord présumé.
+ *
+ * @param {string} role clé de rôle brute
+ * @param {string[]} moduleKeys modules dont relève la route (peut être vide)
+ * @returns {Promise<boolean>}
+ */
+async function aAccordSurModule(role, moduleKeys) {
+  if (!role || !Array.isArray(moduleKeys) || moduleKeys.length === 0) return false;
+  try {
+    const accords = await chargerAccords();
+    const accordsDuRole = accords.get(role);
+    if (!accordsDuRole) return false;
+    return moduleKeys.some((m) => accordsDuRole.has(m));
+  } catch (err) {
+    console.warn(`[HABILITATIONS] matrice illisible (${err.message}) — aucun accord appliqué, retour aux droits du rôle`);
+    return false;
+  }
 }
 
 /**
@@ -118,4 +191,4 @@ function requireModule(moduleKey) {
   };
 }
 
-module.exports = { requireModule, refreshModuleAccess };
+module.exports = { requireModule, refreshModuleAccess, aAccordSurModule };

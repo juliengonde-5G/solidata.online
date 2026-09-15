@@ -124,19 +124,52 @@ async function executerInitialisation() {
       );
     `);
 
-    // Habilitations par module (V2.4) : DENY-overlay par rôle sur les sections
-    // de 1er niveau de la sidebar. Absence de ligne = autorisé (défaut).
+    // Habilitations par module (V2.4) : matrice par rôle sur les sections de la
+    // sidebar. Historiquement un DENY-overlay pur — absence de ligne = autorisé,
+    // l'ADMIN ne pouvait que RETIRER.
+    //
+    // 2.56.0 — LA MATRICE PEUT AUSSI ACCORDER (demande client). Le retrait des
+    // profils MANAGER/QHSE/FINANCE (2.52.0) a resserré 44 entrées de la barre
+    // latérale sur le seul ADMIN : plus aucun profil assignable, ni aucun rôle
+    // personnalisé (bornés aux droits de leur rôle de base), ne pouvait recevoir
+    // la Collecte, le Tri, l'Analyse ou la Frip. Donner ces écrans supposait de
+    // donner ADMIN — donc aussi Utilisateurs, Base de données, Configuration et
+    // le registre RGPD. La matrice devient donc capable d'AJOUTER un module à un
+    // rôle, et pas seulement de lui en retirer un.
+    //
+    // POURQUOI UNE COLONNE À PART, ET SURTOUT PAS `allowed = true` : l'écran
+    // d'administration enregistre une ligne pour CHAQUE rôle × CHAQUE module à
+    // chaque sauvegarde (AdminPermissions.jsx). Les lignes `allowed = true`
+    // déjà en base ne veulent donc pas dire « accordé », elles veulent dire
+    // « non refusé ». Les relire comme des accords donnerait, au premier
+    // déploiement, TOUS les modules à TOUS les rôles ayant déjà été enregistrés
+    // — une escalade générale posée par une migration. D'où `grant_access`,
+    // colonne distincte à défaut `false` : après migration, la matrice se
+    // comporte EXACTEMENT comme avant, et rien n'est accordé tant qu'un
+    // administrateur ne l'a pas décidé explicitement.
+    //
+    // Les trois états d'une case se lisent donc :
+    //   allowed = false                     → REFUSÉ    (retire le module)
+    //   allowed = true,  grant_access=false → PAR DÉFAUT (le rôle décide seul)
+    //   allowed = true,  grant_access=true  → ACCORDÉ   (ajoute le module)
     await client.query(`
       CREATE TABLE IF NOT EXISTS role_module_access (
         role VARCHAR(50) NOT NULL,
         module_key VARCHAR(50) NOT NULL,
         allowed BOOLEAN NOT NULL DEFAULT true,
+        grant_access BOOLEAN NOT NULL DEFAULT false,
         updated_at TIMESTAMP DEFAULT NOW(),
         PRIMARY KEY (role, module_key)
       );
     `);
     // Élargit role si la table préexistait en VARCHAR(30) (clés de rôles custom).
     await client.query(`DO $$ BEGIN ALTER TABLE role_module_access ALTER COLUMN role TYPE VARCHAR(50); EXCEPTION WHEN others THEN NULL; END $$;`);
+    // Base déjà déployée : la colonne d'accord manque. Ajoutée à `false` — la
+    // migration ne peut donc RIEN ouvrir (cf. commentaire ci-dessus).
+    await client.query(`
+      ALTER TABLE role_module_access
+      ADD COLUMN IF NOT EXISTS grant_access BOOLEAN NOT NULL DEFAULT false;
+    `);
 
     // Rôles personnalisés (V2.4.1) : un rôle custom hérite des accès d'un rôle
     // de base intégré (base_role) et se restreint via role_module_access.
