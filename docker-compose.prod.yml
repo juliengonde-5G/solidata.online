@@ -66,6 +66,15 @@ services:
       JWT_REFRESH_EXPIRES_IN: 7d
       PORT: 3001
       NODE_ENV: production
+      # Version de l'outil portée par l'EN-TÊTE DE TRAÇABILITÉ des documents
+      # transmis à l'autorité — export FSE+ participants, tableau des freins,
+      # synthèse de dialogue de gestion — et enregistrée dans le snapshot de
+      # chaque synthèse générée. C'est une règle commune impérative de la
+      # matrice de l'autorité (09 § 2) : sans elle, « quelle version a produit
+      # ce document ? » n'a pas de réponse, et le snapshot perd une part de sa
+      # valeur probante. Repli sur `backend/package.json`, tenu à jour au même
+      # commit que `CLAUDE.md`.
+      APP_VERSION: ${APP_VERSION:-2.55.0}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       OPENAGENDA_API_KEY: ${OPENAGENDA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

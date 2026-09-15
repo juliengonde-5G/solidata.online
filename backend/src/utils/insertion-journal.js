@@ -45,14 +45,26 @@
  * @param {string} entityType type d'entité du registre
  */
 async function ecrireJournal(db, req, action, employeeId, details, entityType = 'insertion') {
+  const u = (req && req.user) || {};
+  // CORRECTIF m-04 — une clé d'API de SERVICE n'a pas d'identifiant utilisateur
+  // (`middleware/auth.js` lui donne `id: null`, `username: 'api:<nom>'`) : la
+  // trace d'un export tiré par une clé s'écrivait avec `user_id = NULL` et
+  // AUCUNE autre identité, donc indiscernable d'une trace orpheline. Ces clés
+  // sont exemptées de second facteur et autorisées en lecture : leur usage est
+  // précisément ce qu'un journal doit pouvoir nommer. `username` et
+  // `is_service` ne sont pas des données personnelles d'un accompagné — ce sont
+  // l'identité de l'APPELANT, qui est l'objet même de la trace.
+  const identite = u.id == null && u.username
+    ? { appelant: String(u.username), is_service: u.is_service === true }
+    : {};
   await db.query(
     'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
     [
-      req && req.user && req.user.id != null ? req.user.id : null,
+      u.id != null ? u.id : null,
       action,
       entityType,
       employeeId,
-      JSON.stringify({ employee_id: employeeId, ...(details || {}) }),
+      JSON.stringify({ employee_id: employeeId, ...identite, ...(details || {}) }),
     ]
   );
 }

@@ -1,5 +1,5 @@
 const express = require('express');
-const { isoDate } = require('../utils/date-iso');
+const { isoDate, aujourdhuiParis } = require('../utils/date-iso');
 const router = express.Router();
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
@@ -9,7 +9,7 @@ const { requireMfa } = require('../middleware/mfa');
 const { query } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { monthBounds } = require('../utils/month-range');
-const { FREINS, freinColumns } = require('./insertion/freins-registry');
+const { freinColumns } = require('./insertion/freins-registry');
 const { freinsExportColumns, rowToCells, computeCompletude } = require('../utils/insertion-freins-export');
 
 // Double authentification (2.43.0) : pour les rôles soumis (settings
@@ -62,7 +62,10 @@ router.get('/collecte', async (req, res) => {
 // GET /api/exports/production — Export Excel production
 router.get('/production', async (req, res) => {
   try {
-    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    // Mois civil de PARIS par défaut (et non le mois UTC) : un export tiré le
+    // 1er janvier à 00 h 30 sortait sinon le mois de décembre. Dernière
+    // occurrence de cette conversion dans `exports.js`.
+    const month = req.query.month || aujourdhuiParis().slice(0, 7);
     const result = await pool.query(
       'SELECT * FROM production_daily WHERE date BETWEEN $1 AND $2 ORDER BY date',
       monthBounds(month)
@@ -532,7 +535,9 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
     `);
 
     const genere = new Date();
-    const stamp = genere.toISOString().slice(0, 10);
+    // Jour civil de PARIS (et non le jour UTC) : un export tiré le 1er janvier
+    // à 00 h 30 porterait sinon la date du 31 décembre dans son nom de fichier.
+    const stamp = aujourdhuiParis();
     const horodatage = genere.toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
     const lead = ['matricule', 'nom', 'prenom'];
     const format = (req.query.format || 'xlsx').toLowerCase() === 'csv' ? 'csv' : 'xlsx';
@@ -659,6 +664,20 @@ router.get('/insertion', authorize('ADMIN', 'RH'), async (req, res) => {
 
 const FREINS_STATUTS = ['all', 'en_parcours', 'sortis'];
 
+/**
+ * Périmètre EN TOUTES LETTRES pour l'en-tête de traçabilité — l'autorité exige
+ * « les filtres appliqués en toutes lettres », pas `statut=all` : un code
+ * technique dans un en-tête de fichier de contrôle n'est pas un périmètre.
+ */
+const PERIMETRES_FREINS = {
+  all: "Toute personne passée en parcours d'insertion (en parcours ou sortie)",
+  en_parcours: "Personnes actuellement en parcours d'insertion",
+  sortis: "Personnes dont le parcours d'insertion est terminé ou abandonné",
+};
+
+/** Version de l'outil portée par l'en-tête (même source que les exports FSE+). */
+const APP_VERSION_EXPORTS = process.env.APP_VERSION || require('../../package.json').version;
+
 const freinsFilterValidators = [
   query('sensibles').optional().isIn(['0', '1']).withMessage('sensibles invalide (0 ou 1)'),
   query('annee').optional().isInt({ min: 2000, max: 2100 }).withMessage('annee invalide'),
@@ -689,6 +708,12 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
   const axes = sensibles ? freinColumns() : freinColumns().filter((c) => c !== 'frein_judiciaire');
   const lmCols = axes.map((c) => `im.${c}`).join(', ');
   const coalesced = axes.map((c) => `COALESCE(lm.${c}, d.${c}) AS ${c}`).join(', ');
+  // CORRECTIF D-02 — la dernière évaluation BRUTE, à côté de la valeur repliée.
+  // La colonne « évolution » comparait jusqu'ici l'entrée à `COALESCE(lm, d)`,
+  // c'est-à-dire le diagnostic à lui-même quand aucun entretien n'a été réalisé :
+  // elle rendait toujours « stable ». La valeur COURANTE (colonnes 14-20) reste
+  // repliée, comme le CDC le demande ; seule l'évolution change de source.
+  const actuels = axes.map((c) => `lm.${c} AS ${c}_actuel`).join(', ');
 
   const params = [];
   const where = [
@@ -706,6 +731,12 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
   }
   if (cip) { params.push(cip); where.push(`e.cip_referent_user_id = $${params.length}`); }
 
+  // Valeurs d'ENTRÉE (diagnostic d'accueil) rendues À CÔTÉ des valeurs courantes
+  // — c'est la comparaison des deux qui produit la colonne « évolution »
+  // (PR D, export (d)). Le judiciaire suit `axes` : quand `sensibles=0`, ni sa
+  // valeur courante ni sa valeur d'entrée ne sont lues en SQL.
+  const entrees = axes.map((c) => `d.${c} AS ${c}_entree`).join(', ');
+
   const { rows } = await pool.query(`
     SELECT e.id, e.last_name, e.first_name, e.nationality, e.gender, e.birth_date,
            e.city, e.qualification, e.disability_status, e.pass_iae_end,
@@ -714,8 +745,28 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
            d.rqth, d.niveau_formation, d.ressources, d.logement_statut,
            d.situation_familiale, d.projet_formation, d.emploi_vise, d.emploi_vise_rome,
            ${coalesced},
+           ${entrees},
+           ${actuels},
+           e.brsa, e.brsa_date_constat, e.ft_categorie, e.pass_iae_statut,
+           e.referent_unique_type, e.referent_unique_nom, e.eligibilite_source,
+           elig.criteres_eligibilite, proj.projets_cofinances,
            pm.nb_pmsmp, pm.derniere_pmsmp
     FROM employees e
+    LEFT JOIN LATERAL (
+      -- Critères d'éligibilité IAE : les critères marqués art. 10
+      -- (« sortant de détention ») ne sont PAS LUS, quelle que soit la variante
+      -- — le drapeau vit dans le référentiel, pas dans une liste recopiée ici.
+      SELECT ARRAY_AGG(c.libelle ORDER BY c.ordre, c.code) AS criteres_eligibilite
+      FROM employee_eligibilite ee
+      JOIN insertion_eligibilite_criteres c ON c.code = ee.critere_code
+      WHERE ee.employee_id = e.id AND COALESCE(c.sensible_art10, false) = false
+    ) elig ON true
+    LEFT JOIN LATERAL (
+      SELECT ARRAY_AGG(DISTINCT pr.code) AS projets_cofinances
+      FROM insertion_projet_participants pp
+      JOIN insertion_projets pr ON pr.id = pp.projet_id
+      WHERE pp.employee_id = e.id
+    ) proj ON true
     LEFT JOIN LATERAL (
       SELECT MIN(ec.start_date) AS premier_cddi
       FROM employee_contracts ec
@@ -745,6 +796,28 @@ async function fetchFreinsRows({ statut = 'all', annee = null, cip = null, sensi
     WHERE ${where.join('\n      AND ')}
     ORDER BY e.last_name, e.first_name
   `, params);
+
+  // Semaines sous le plancher d'activité — l'indicateur que l'autorité a EXIGÉ
+  // à la place de la moyenne d'heures (A4). Calculé par le moteur PARTAGÉ, en
+  // UNE passe pour toute la cohorte (8 requêtes au total, quelle que soit sa
+  // taille) et non salarié par salarié. Une source absente laisse la colonne
+  // VIDE — jamais 0, qui se lirait « aucune semaine sous le plancher ».
+  try {
+    const an = annee || new Date().getFullYear();
+    const { activiteHebdoCohorte } = require('../services/activite-hebdo');
+    const m = await activiteHebdoCohorte({ employeeIds: rows.map((r) => r.id), annee: an });
+    for (const r of rows) {
+      const v = m.get(Number(r.id));
+      r.semaines_sous_seuil = v && v.nb_semaines_sous_seuil != null ? v.nb_semaines_sous_seuil : null;
+      // CORRECTIF D-03 — le nombre de semaines RELEVÉES accompagne le compte :
+      // sans lui, « aucune semaine relevée » et « aucune semaine sous le
+      // plancher » s'écrivent tous deux « 0 » dans la colonne d'un document de
+      // contrôle, et disent le contraire l'un de l'autre.
+      r.semaines_relevees = v && v.nb_semaines_relevees != null ? v.nb_semaines_relevees : null;
+    }
+  } catch (err) {
+    console.error('[EXPORTS] « semaines sous seuil » ignorées :', err.message);
+  }
   return rows;
 }
 
@@ -754,7 +827,11 @@ async function logExportFreins(req, { format, sensibles, statut, annee, cip, lig
   await pool.query(
     'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
     [req.user.id,
-      sensibles ? 'EXPORT_INSERTION_FREINS_SENSIBLE' : 'EXPORT_INSERTION_FREINS',
+      // Code DISTINCT pour la variante enrichie du cadre 2026 : elle emporte des
+      // colonnes que l'export historique ne portait pas (BRSA, catégorie France
+      // Travail, référent unique, projet cofinancé). Un journal qui les
+      // confondrait ne permettrait plus de savoir CE QUI est sorti.
+      sensibles ? 'EXPORT_INSERTION_FREINS_SENSIBLE' : 'EXPORT_INSERTION_FREINS_ENRICHI',
       'insertion_freins', null,
       JSON.stringify({ format, sensibles, statut, annee, cip, lignes, requested_by: req.user.id })]
   );
@@ -772,21 +849,52 @@ router.get('/insertion-freins', authorize('ADMIN', 'RH'), [
     const cols = freinsExportColumns(filtres.sensibles);
     const cellRows = rows.map((r) => rowToCells(r, filtres.sensibles));
 
+    // Règle commune des exports (09 § 2) : zéro ligne → REFUS motivé, jamais un
+    // fichier vide. Un fichier vide classé dans un dossier se lit « aucune
+    // personne accompagnée », ce qui serait faux — c'est un filtre trop étroit.
+    if (cellRows.length === 0) {
+      return res.status(409).json({
+        error: "Aucune fiche dans ce périmètre — aucun fichier n'est produit.",
+        code: 'EXPORT_VIDE',
+        hint: 'Élargissez les filtres (année, population, CIP référent) et réessayez.',
+      });
+    }
     // EXG-43 : journal AVANT l'envoi — un échec de journalisation fait échouer
     // l'export (jamais de fichier nominatif non tracé).
     await logExportFreins(req, { format, ...filtres, lignes: cellRows.length });
 
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = aujourdhuiParis();
 
     if (format === 'csv') {
-      const esc = (v) => {
-        const s = String(v ?? '');
-        return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-      };
-      // CSV STRICT (pas de ligne de méta : le tableau doit rester importable
-      // colonne à colonne — la traçabilité vit dans rgpd_audit_log).
+      // Échappement PARTAGÉ (`utils/export-csv.js`) : il neutralise en plus les
+      // cellules commençant par `=`, `+`, `-`, `@` — une commune de résidence
+      // valant `=HYPERLINK(…)` compose une exfiltration en un clic sur le poste
+      // de l'instructrice. La fonction locale qui vivait ici ne faisait que du
+      // guillemetage : même famille que le constat M-04 de la PR A.
+      const esc = (v) => escCsv(v);
+      // CORRECTIF m-08 — en-tête de traçabilité EN LIGNES COMMENTÉES.
+      // La règle commune de la matrice (09 § 2) l'impose « en première feuille
+      // (tableur) OU en première ligne (CSV) », et le rapport de lot annonçait
+      // « en-tête de traçabilité complet » : la variante CSV n'en avait aucun.
+      // Le préfixe `#` la rend ignorable par tout import qui le filtre, ce qui
+      // préserve l'argument d'origine — « le tableau doit rester importable
+      // colonne à colonne » — sans laisser partir un fichier de contrôle sans
+      // date, sans périmètre et sans version.
+      const perimetre = `${PERIMETRES_FREINS[filtres.statut] || filtres.statut}`
+        + `${filtres.annee ? ` — année ${filtres.annee}` : ' — toutes années'}`
+        + `${filtres.cip ? ' — un seul CIP référent' : ' — tous CIP référents'}`;
+      const meta = [
+        '# Export;Tableau des freins — cadre 2026 (23 colonnes du CDC + colonnes du cadre 2026)',
+        `# Généré le;${new Date().toLocaleString('fr-FR')};Généré par;${esc(nomGenerateur(req.user))}`,
+        `# Périmètre;${esc(perimetre)}`,
+        `# Nombre de lignes;${cellRows.length};Version de l'outil;${esc(APP_VERSION_EXPORTS)}`,
+        `# Colonnes sensibles;${filtres.sensibles ? 'OUI — frein judiciaire inclus (art. 10 RGPD, diffusion interdite hors ADMIN/RH)' : 'Non (frein judiciaire exclu)'}`,
+        '# Cellule vide;Champ non renseigné — jamais un zéro, jamais une valeur par défaut',
+        "# Mention;Document de travail ERP — les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi",
+        '',
+      ].join('\n');
       const lines = cellRows.map((row) => cols.map((c) => esc(row[c.key])).join(';'));
-      const csv = '﻿' + cols.map((c) => c.header).join(';') + '\n'
+      const csv = '﻿' + meta + cols.map((c) => c.header).join(';') + '\n'
         + lines.join('\n') + (lines.length ? '\n' : '');
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename=insertion_freins_${stamp}.csv`);
@@ -804,14 +912,27 @@ router.get('/insertion-freins', authorize('ADMIN', 'RH'), [
 
     const info = workbook.addWorksheet('Informations');
     info.columns = [{ header: 'Champ', key: 'k', width: 30 }, { header: 'Valeur', key: 'v', width: 80 }];
+    // En-tête de traçabilité DICTÉ par l'autorité (09 § 2, règles communes) :
+    // export, généré le, généré par, périmètre en toutes lettres, nombre de
+    // lignes, version de l'outil, et la mention des saisies qui font foi.
     info.addRows([
-      { k: 'Export', v: 'Tableau des freins (CDC — 23 colonnes)' },
-      { k: 'Généré le', v: new Date().toISOString() },
-      { k: 'Lignes', v: cellRows.length },
+      { k: 'Export', v: 'Tableau des freins — cadre 2026 (23 colonnes du CDC + colonnes du cadre 2026)' },
+      { k: 'Généré le', v: new Date().toLocaleString('fr-FR') },
+      { k: 'Généré par', v: nomGenerateur(req.user) },
+      { k: 'Périmètre', v: `${PERIMETRES_FREINS[filtres.statut] || filtres.statut}`
+        + `${filtres.annee ? ` — année ${filtres.annee}` : ' — toutes années'}`
+        + `${filtres.cip ? ' — un seul CIP référent' : ' — tous CIP référents'}` },
+      { k: 'Nombre de lignes', v: cellRows.length },
+      { k: "Version de l'outil", v: APP_VERSION_EXPORTS },
       { k: 'Filtres', v: `statut=${filtres.statut}${filtres.annee ? `, annee=${filtres.annee}` : ''}${filtres.cip ? `, cip=${filtres.cip}` : ''}` },
       { k: 'Colonnes sensibles', v: filtres.sensibles ? 'OUI — frein judiciaire inclus (art. 10 RGPD, diffusion interdite hors ADMIN/RH)' : 'Non (frein judiciaire exclu — EXG-38)' },
-      { k: 'Règle des freins', v: "Dernière évaluation en date : dernier entretien réalisé du parcours courant portant au moins un frein, repli axe par axe sur le diagnostic d'accueil. Vide = non évalué." },
+      { k: 'Règle des freins (valeur courante)', v: "Dernière évaluation en date : dernier entretien réalisé du parcours courant portant au moins un frein, repli axe par axe sur le diagnostic d'accueil. Vide = non évalué." },
+      { k: "Règle des colonnes « entrée » et « évolution »", v: "« Entrée » = niveau relevé au diagnostic d'accueil. « Évolution » compare l'entrée et la valeur courante sur une échelle de 1 (pas de difficulté) à 5 (bloquant) : levé = baisse d'au moins un niveau, aggravé = hausse d'au moins un niveau, stable sinon, « non évalué » dès qu'une des deux valeurs manque." },
+      { k: 'Règle « Heures par semaine »', v: "Quotité CONTRACTUELLE (contrat en cours, repli fiche salarié) — ce n'est pas l'activité constatée. L'activité réelle se lit dans la colonne « Semaines sous 15 h (année) »." },
+      { k: 'Règle « Semaines sous 15 h »', v: "Nombre de semaines RELEVÉES dont l'activité cumulée (travail en CDDI, accompagnement, immersion) est inférieure au plancher paramétré. Une semaine sans relevé de paie n'est jamais comptée comme une semaine à zéro heure. Cellule VIDE = aucune semaine relevée sur l'année, ou activité non calculable : ce n'est PAS « zéro semaine sous le plancher »." },
+      { k: 'Cellule vide', v: "Champ non renseigné. Jamais un zéro, jamais une valeur par défaut." },
       { k: 'Confidentialité', v: 'Données personnelles (dont santé). Diffusion restreinte ADMIN/RH — génération journalisée (registre RGPD). Toute transmission externe passe par la synthèse agrégée non nominative.' },
+      { k: 'Mention', v: "Document de travail ERP — les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi" },
     ]);
     info.getRow(1).font = { bold: true };
     info.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8BC540' } };
@@ -864,69 +985,78 @@ const SYNTHESE_MENTION = 'Document agrégé non nominatif — comité de pilotag
 router.get('/insertion-synthese', [
   query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('year invalide'),
   query('format').optional().isIn(['json', 'csv']).withMessage('format invalide (json ou csv)'),
+  query('trimestre').optional({ nullable: true, checkFalsy: true })
+    .isInt({ min: 1, max: 4 }).withMessage('trimestre invalide (1 à 4)'),
 ], validate, async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    // Require paresseux : routes.js vérifie PCM_ENCRYPTION_KEY/JWT_SECRET au
-    // chargement — on ne le charge qu'à l'usage (env déjà posé à ce stade).
-    const { gatherAuditKpis } = require('./insertion/routes');
-    const k = await gatherAuditKpis(year);
+    const tRaw = parseInt(req.query.trimestre, 10);
+    const trimestre = Number.isFinite(tRaw) && tRaw >= 1 && tRaw <= 4 ? tRaw : null;
 
     if ((req.query.format || 'json').toLowerCase() === 'csv') {
-      const rows = [];
-      const cible = (v) => (v == null ? 'objectif non paramétré' : v);
-      rows.push(['Général', 'Année', k.annee]);
-      rows.push(['Général', 'Salariés en parcours', k.nb_en_parcours]);
-      rows.push(['Général', 'Délai moyen du diagnostic (jours)', k.delai_moyen_diagnostic_jours ?? '']);
-      rows.push(['ETP (contrôle ERP)', 'ETP réalisés approchés', k.etp_realises_approx?.valeur ?? '']);
-      rows.push(['ETP (contrôle ERP)', 'CDDI actifs', k.etp_realises_approx?.nb_cddi_actifs ?? '']);
-      rows.push(['ETP (contrôle ERP)', 'Cible conventionnée', cible(k.conventionnel?.cibles?.cible_etp_conventionnes)]);
-      rows.push(['ETP (contrôle ERP)', 'Note', k.etp_realises_approx?.note || '']);
-      rows.push(['Typologies', 'RQTH', k.typologies?.rqth ?? '']);
-      for (const [src, n] of Object.entries(k.typologies?.ressources || {})) rows.push(['Typologies', `Ressource — ${src}`, n]);
-      for (const [niv, n] of Object.entries(k.typologies?.niveaux_formation || {})) rows.push(['Typologies', `Niveau de formation — ${niv}`, n]);
-      for (const [tr, n] of Object.entries(k.typologies?.tranches_age || {})) rows.push(['Typologies', `Tranche d'âge — ${tr}`, n]);
-      for (const m of k.milestones?.par_type || []) {
-        rows.push(['Entretiens', `${m.label} — réalisés / échus`, `${m.realises_echus} / ${m.echus}`]);
-      }
-      rows.push(['Entretiens', 'Taux de réalisation global (échus) %', k.milestones?.global?.taux ?? '']);
-      for (const f of FREINS) {
-        const moy = k.freins_moyennes?.[f.column];
-        rows.push(['Freins (moyenne cohorte /5)', f.label, moy ?? 'non évalué']);
-      }
-      rows.push(['Sorties', 'Total constaté', k.sorties?.total ?? 0]);
-      rows.push(['Sorties', 'Dynamiques — nb', k.sorties?.dynamiques ?? 0]);
-      rows.push(['Sorties', 'Taux dynamiques (%)', k.sorties?.taux_dynamiques ?? '']);
-      rows.push(['Sorties', 'Cible dynamiques (%)', cible(k.conventionnel?.cibles?.cible_taux_dynamiques)]);
-      for (const [cls, cKey] of [['emploi_durable', 'cible_taux_durable'], ['emploi_transition', 'cible_taux_transition'], ['sortie_positive', 'cible_taux_positive']]) {
-        rows.push(['Sorties', `${cls} — nb`, k.sorties?.par_classification?.[cls] ?? 0]);
-        rows.push(['Sorties', `${cls} — taux (%)`, k.sorties?.taux_par_classification?.[cls] ?? '']);
-        rows.push(['Sorties', `${cls} — cible (%)`, cible(k.conventionnel?.cibles?.[cKey])]);
-      }
-      rows.push(['Sorties', 'Méthode', k.conventionnel?.methode || '']);
-      rows.push(['PMSMP', 'Conventions de l\'année', k.pmsmp?.nb ?? 0]);
-      rows.push(['PMSMP', 'Jours calendaires', k.pmsmp?.jours ?? 0]);
-      rows.push(['PMSMP', 'Salariés concernés', k.pmsmp?.nb_salaries ?? 0]);
-      rows.push(['Satisfaction de sortie', 'Réponses', k.satisfaction?.nb_reponses ?? 0]);
-      rows.push(['Satisfaction de sortie', 'Moyenne globale (1-4)', k.satisfaction?.moyenne_globale ?? '']);
-      rows.push(['Actions CIP', 'En cours', k.actions?.total_en_cours ?? 0]);
+      // ═══ PR D lot 6 — LE CSV EST DÉLÉGUÉ AU SERVICE DE SYNTHÈSE ══════════
+      //
+      // Ce fichier composait jusqu'ici SA PROPRE liste d'indicateurs, à côté de
+      // la synthèse de dialogue de gestion qui en compose une autre. Deux
+      // documents « agrégés non nominatifs » produits par deux codes différents,
+      // c'est deux chiffres pour le même indicateur le jour où l'un est corrigé
+      // et pas l'autre. Le CSV est donc la SYNTHÈSE (e), servie sous son nom.
+      const { composerDialogueGestion, aplatirEnLignes, MENTION } = require('../services/dialogue-gestion');
+      const synthese = await composerDialogueGestion({ annee: year, trimestre, user: req.user });
 
-      // CORRECTIF m-10 — cet `esc` LOCAL n'échappait que les guillemets et les
-      // sauts de ligne : une cellule commençant par « = », « + », « - », « @ »,
-      // TAB ou CR était évaluée comme une FORMULE à l'ouverture du fichier. Ce
-      // document part à la DDETS. Le fichier importe déjà la règle partagée
-      // (`utils/export-csv.js`) pour ses autres exports — c'est le constat M-04
-      // de la PR A qui survivait ici, sur un export destiné à l'autorité.
-      const esc = (v) => escCsv(v);
-      const csv = '﻿' + `${SYNTHESE_MENTION}\n`
-        + 'Section;Indicateur;Valeur\n'
-        + rows.map((r) => r.map(esc).join(';')).join('\n') + '\n';
+      // Règle commune des exports : zéro donnée → refus motivé, jamais un
+      // fichier vide (la même garde que la route `/insertion/reporting`).
+      const { estVide } = require('./insertion/reporting');
+      if (estVide(synthese)) {
+        return res.status(409).json({
+          error: `Aucune donnée d'insertion sur ${trimestre ? `le T${trimestre} ${year}` : `l'année ${year}`} — aucun fichier n'est produit.`,
+          code: 'EXPORT_VIDE',
+          hint: "Vérifiez l'année demandée, ou saisissez les fins de parcours et les dossiers de la période.",
+        });
+      }
+
+      // Journal BLOQUANT avant l'envoi : le document part vers l'autorité, il
+      // n'existe pas sans la ligne qui dit qu'il a été produit.
+      await pool.query(
+        'INSERT INTO rgpd_audit_log (user_id, action, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5)',
+        [req.user?.id ?? null, 'EXPORT_DIALOGUE_GESTION', 'insertion_reporting', null,
+          JSON.stringify({ annee: year, trimestre, format: 'csv', source: 'exports/insertion-synthese' })]
+      );
+
+      const lignesSynthese = aplatirEnLignes(synthese);
+      const e = synthese.en_tete || {};
+      const meta = [
+        `# Export;Synthèse de dialogue de gestion;Période;${trimestre ? `${year} T${trimestre} (version allégée)` : `Année ${year}`}`,
+        `# Généré le;${new Date().toLocaleString('fr-FR')};Généré par (rôle);${escCsv(req.user?.role || '')}`,
+        `# Périmètre;${escCsv(e.perimetre || '')}`,
+        `# Nombre de lignes;${lignesSynthese.length};Version de l'outil;${escCsv(e.version || APP_VERSION_EXPORTS)}`,
+        `# Méthode;Les règles de calcul de chaque indicateur figurent dans le bloc « 9. Méthode » de ce fichier`,
+        `# ${MENTION}`,
+        "# Document de travail ERP — les saisies officielles (ASP, emplois de l'inclusion, Immersion Facilitée, Ma Démarche FSE+) font foi",
+        '',
+      ].join('\n');
+      const csv = '\ufeff' + meta + 'Bloc;Indicateur;Valeur\n'
+        + lignesSynthese.map((l) => l.map((c) => escCsv(c)).join(';')).join('\n') + '\n';
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename=insertion_synthese_${year}.csv`);
+      res.setHeader('Content-Disposition',
+        `attachment; filename="dialogue-gestion_${year}${trimestre ? `_T${trimestre}` : ''}.csv"`);
       return res.send(csv);
     }
 
-    res.json({ mention: SYNTHESE_MENTION, ...k });
+    // Format JSON : INCHANGÉ (les indicateurs de l'écran d'audit, consommés
+    // tels quels depuis la PR 2). C'est le FICHIER qui change, pas l'API.
+    // Require paresseux : routes.js vérifie PCM_ENCRYPTION_KEY/JWT_SECRET au
+    // chargement — on ne le charge qu'à l'usage (env déjà posé à ce stade).
+    // CORRECTIF B-02 — même frontière de rôle que `GET /insertion/audit` : ce
+    // JSON est servi à ADMIN/MANAGER/RH sous la bannière « document agrégé non
+    // nominatif », et il portait BRSA, catégorie France Travail, référent
+    // unique et critères d'éligibilité (dont RQTH) sans aucune suppression. Les
+    // blocs de statut social ne sont ni lus ni composés pour un MANAGER, et la
+    // projection est reposée avant l'envoi.
+    const { gatherAuditKpis, baseRoleOf, projeterAuditPourRole } = require('./insertion/routes');
+    const baseRole = baseRoleOf(req);
+    const k = await gatherAuditKpis(year, { baseRole });
+    res.json({ mention: SYNTHESE_MENTION, ...projeterAuditPourRole(k, baseRole) });
   } catch (err) {
     console.error('[EXPORTS] Erreur insertion-synthese :', err);
     res.status(500).json({ error: 'Erreur serveur' });

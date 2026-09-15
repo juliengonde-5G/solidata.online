@@ -114,7 +114,44 @@ export const SORTIE_CLASS_LABELS = {
 
 // ── Actions CIP ──
 export const ACTION_STATUS_LABELS = { a_faire: 'À faire', en_cours: 'En cours', realise: 'Réalisée', abandonne: 'Abandonnée' };
-export const ACTION_CATEGORY_LABELS = { competence: 'Compétence', insertion: 'Insertion', socialisation: 'Socialisation', frein: 'Levée de frein' };
+// Catégories d'action — MIROIR du CHECK de `cip_action_plans.category`
+// (7 valeurs depuis la PR D). Les trois dernières manquaient : une action de
+// job dating ou de formation s'affichait sous son code brut.
+export const ACTION_CATEGORY_LABELS = {
+  competence: 'Compétence', insertion: 'Insertion', socialisation: 'Socialisation',
+  frein: 'Levée de frein', job_dating: 'Rencontre employeurs', formation: 'Formation',
+  formation_fle: 'Formation linguistique (FLE)',
+};
+
+// ── PR D lot 6 — orientation DORA et aide mobilisée sur une action ──────────
+// DORA est l'annuaire national des services de levée de frein ; l'autorité veut
+// le RÉSULTAT de l'orientation (P2), pas seulement le fait qu'elle ait eu lieu.
+export const DORA_RESULTAT_LABELS = {
+  oriente: 'Orientée (en attente)',
+  pris_en_charge: 'Prise en charge',
+  refuse: 'Refusée',
+  sans_suite: 'Sans suite',
+};
+
+// Le Département finance ces aides et demande ce qu'elles produisent (C5).
+export const AIDE_NATURE_LABELS = {
+  mobilite: 'Mobilité', logement: 'Logement', sante: 'Santé', numerique: 'Numérique',
+  garde_enfants: "Garde d'enfants", formation: 'Formation',
+  administrative: 'Démarche administrative', financiere_urgence: "Aide financière d'urgence",
+  autre: 'Autre',
+};
+
+// Débouché d'une immersion — liste fermée (S1 / S7). « Non connu à ce jour »
+// n'est pas « aucun débouché » : une immersion close hier n'a pas encore de
+// réponse, et la confusion ferait disparaître des embauches du comptage.
+export const PMSMP_DEBOUCHE_LABELS = {
+  embauche_accueillant: "Embauche chez l'entreprise d'accueil",
+  embauche_autre: 'Embauche chez un autre employeur',
+  formation: 'Entrée en formation',
+  poursuite_parcours: 'Poursuite du parcours',
+  aucun: 'Aucun débouché',
+  inconnu: 'Non connu à ce jour',
+};
 export const ACTION_PRIORITY_LABELS = { haute: 'Haute', moyenne: 'Moyenne', basse: 'Basse' };
 export const ACTION_PRIORITY_COLORS = {
   haute: 'bg-red-100 text-red-700',

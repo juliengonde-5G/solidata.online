@@ -98,8 +98,14 @@ export default function ReportingRH() {
     fill: STATUS_COLORS_MAP[s] || '#94A3B8',
   }));
 
-  const sortiesPositives = insertionStats && insertionStats.total > 0
-    ? Math.round(insertionStats.parcours_termines / insertionStats.total * 100) : 0;
+  // PR D lot 6 (item 6.5) — l'indicateur legacy « parcours terminés / total »
+  // était présenté comme un « taux de sorties positives ». Il n'en était pas
+  // un : il rapportait les parcours terminés DEPUIS TOUJOURS à l'ensemble des
+  // parcours connus, sans classification de sortie ni borne de temps. Il est
+  // remplacé par la nomenclature de la convention, calculée par le moteur
+  // partagé du backend. `null` quand aucune fin de parcours n'est constatée :
+  // ce n'est pas un taux de 0 %, c'est l'absence de quoi que ce soit à mesurer.
+  const sorties = insertionStats?.sorties || null;
 
   // Absentéisme : transformer pour le chart (format mois court FR)
   const monthLabel = (yyyymm) => {
@@ -131,7 +137,7 @@ export default function ReportingRH() {
           <KPICard title="Équipes" value={teams.length} icon={ClipboardList} accent="slate" />
           <KPICard title="Candidatures" value={candidates.length} icon={UserPlus} accent="amber" />
           <KPICard title="Recrutés" value={candidateStatuses.recruited || 0} icon={UserPlus} accent="emerald" />
-          <KPICard title="Parcours insertion" value={insertionStats?.parcours_actifs || '—'} unit="actifs" icon={Heart} accent="red" />
+          <KPICard title="Parcours insertion" value={insertionStats?.en_parcours ?? insertionStats?.parcours_actifs ?? '—'} unit="en parcours" icon={Heart} accent="red" />
         </div>
 
         {/* KPI audit Métropole (P1-D) */}
@@ -318,27 +324,38 @@ export default function ReportingRH() {
           </Section>
         )}
 
-        {/* Insertion summary */}
+        {/* Insertion summary — nomenclature de la convention (PR D lot 6) */}
         {insertionStats && (
           <Section title="Insertion professionnelle" icon={Heart}>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="bg-slate-50 rounded-card p-4 text-center">
-                <p className="text-2xl font-bold text-slate-800">{insertionStats.parcours_actifs}</p>
-                <p className="text-xs text-slate-500 mt-1">Parcours actifs</p>
+                <p className="text-2xl font-bold text-slate-800">{insertionStats.en_parcours ?? insertionStats.parcours_actifs}</p>
+                <p className="text-xs text-slate-500 mt-1">En parcours</p>
               </div>
               <div className="bg-slate-50 rounded-card p-4 text-center">
-                <p className="text-2xl font-bold text-emerald-600">{insertionStats.parcours_termines}</p>
-                <p className="text-xs text-slate-500 mt-1">Terminés</p>
+                <p className="text-2xl font-bold text-slate-800">
+                  {insertionStats.fins_parcours_annee ?? <span className="text-base font-normal text-slate-400">non calculé</span>}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Fins de parcours (année)</p>
               </div>
               <div className="bg-slate-50 rounded-card p-4 text-center">
-                <p className="text-2xl font-bold text-slate-800">{insertionStats.total}</p>
-                <p className="text-xs text-slate-500 mt-1">Total historique</p>
+                <p className={`text-2xl font-bold ${sorties?.non_documentees > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                  {sorties ? sorties.non_documentees : <span className="text-base font-normal text-slate-400">—</span>}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Sorties non documentées</p>
               </div>
               <div className="bg-slate-50 rounded-card p-4 text-center">
-                <p className="text-2xl font-bold text-primary">{sortiesPositives}%</p>
-                <p className="text-xs text-slate-500 mt-1">Sorties positives</p>
+                <p className="text-2xl font-bold text-primary">
+                  {sorties?.taux_dynamiques_pct != null
+                    ? `${sorties.taux_dynamiques_pct}%`
+                    : <span className="text-base font-normal text-slate-400">non calculé</span>}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Sorties dynamiques (méthode B)</p>
               </div>
             </div>
+            {insertionStats.methode && (
+              <p className="mt-3 text-xs text-slate-400 italic">{insertionStats.methode}</p>
+            )}
           </Section>
         )}
       </div>

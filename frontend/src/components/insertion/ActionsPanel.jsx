@@ -3,7 +3,7 @@ import api from '../../services/api';
 import QuickActionButton from './QuickActionButton';
 import {
   ACTION_STATUS_LABELS, ACTION_CATEGORY_LABELS, ACTION_PRIORITY_LABELS,
-  ACTION_PRIORITY_COLORS, frDate,
+  ACTION_PRIORITY_COLORS, DORA_RESULTAT_LABELS, AIDE_NATURE_LABELS, frDate,
 } from './freins';
 
 /**
@@ -14,6 +14,13 @@ import {
  *
  * milestoneId : limite l'affichage aux actions rattachées à cet entretien.
  * readOnly : consultation (onglet /employees — REC-UX-12).
+ *
+ * PR D lot 6 — deux blocs repliables par action : l'ORIENTATION DORA (le service
+ * vers lequel la personne a été orientée, et son RÉSULTAT — c'est le résultat
+ * que l'autorité demande, pas le fait d'avoir orienté) et l'AIDE MOBILISÉE
+ * (nature, organisme, montant). Le montant reste FACULTATIF : une aide non
+ * chiffrée ne vaut pas zéro euro, et un total qui additionnerait des zéros
+ * inventés dirait au Département moins que ce qu'il finance réellement.
  */
 export default function ActionsPanel({ employeeId, employeeName = '', milestoneId = null, readOnly = false, compact = false, onChanged }) {
   const [actions, setActions] = useState([]);
@@ -115,6 +122,9 @@ export default function ActionsPanel({ employeeId, employeeName = '', milestoneI
                 {!milestoneId && a.milestone_titre && <span className="px-1.5 py-0.5 rounded bg-slate-50 text-slate-500">Entretien : {a.milestone_titre}</span>}
               </div>
             )}
+            {/* PR D — orientation DORA et aide mobilisée */}
+            {!compact && <DoraAideBloc action={a} readOnly={readOnly} onSave={(patch) => update(a.id, patch)} />}
+
             {/* Résultat (visible dès qu'il existe ; éditable au clic hors lecture seule) */}
             {editingResult?.id === a.id ? (
               <div className="flex items-center gap-2 mt-1.5">
@@ -134,6 +144,150 @@ export default function ActionsPanel({ employeeId, employeeName = '', milestoneI
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Orientation DORA et aide mobilisée d'une action — bloc REPLIÉ par défaut.
+ *
+ * Replié, parce que la majorité des actions n'en portent pas et que le journal
+ * des actions doit rester lisible d'un coup d'œil : il s'ouvre de lui-même
+ * quand l'action porte déjà l'une des deux informations, pour qu'on ne puisse
+ * pas passer à côté d'une orientation déjà saisie.
+ */
+function DoraAideBloc({ action, readOnly, onSave }) {
+  const aDeja = !!(action.dora_service || action.dora_url || action.dora_resultat
+    || action.aide_nature || action.aide_organisme || action.aide_montant != null);
+  const [ouvert, setOuvert] = useState(aDeja);
+  const [form, setForm] = useState(null);
+  const [erreur, setErreur] = useState(null);
+
+  const ouvrirEdition = () => {
+    setErreur(null);
+    setForm({
+      dora_service: action.dora_service || '',
+      dora_url: action.dora_url || '',
+      dora_resultat: action.dora_resultat || '',
+      aide_nature: action.aide_nature || '',
+      aide_organisme: action.aide_organisme || '',
+      aide_montant: action.aide_montant != null ? String(action.aide_montant) : '',
+    });
+  };
+
+  const enregistrer = async () => {
+    // Contrôle AVANT l'appel, pour rendre le motif dans le bloc plutôt que de
+    // laisser remonter un 400 générique. Le serveur revérifie : c'est lui qui
+    // fait foi (le contrôle de saisie est un confort, pas une garantie).
+    if (form.dora_url && !/^https:\/\//i.test(form.dora_url.trim())) {
+      setErreur("Le lien DORA doit commencer par « https:// ».");
+      return;
+    }
+    const montant = form.aide_montant.trim().replace(',', '.');
+    if (montant !== '' && (Number.isNaN(Number(montant)) || Number(montant) < 0)) {
+      setErreur('Le montant doit être un nombre positif, ou rester vide.');
+      return;
+    }
+    setErreur(null);
+    await onSave({
+      dora_service: form.dora_service.trim() || null,
+      dora_url: form.dora_url.trim() || null,
+      dora_resultat: form.dora_resultat || null,
+      aide_nature: form.aide_nature || null,
+      aide_organisme: form.aide_organisme.trim() || null,
+      // Vide = NON CHIFFRÉE, jamais 0 € : c'est la distinction que le bloc
+      // « Aides mobilisées » de la synthèse de dialogue de gestion imprime.
+      aide_montant: montant === '' ? null : Number(montant),
+    });
+    setForm(null);
+  };
+
+  if (form) {
+    return (
+      <div className="mt-1.5 rounded-lg border border-indigo-200 bg-indigo-50/50 p-2 space-y-2">
+        {erreur && <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-1.5">{erreur}</div>}
+        <div>
+          <p className="text-[10px] font-semibold text-indigo-700 uppercase mb-1">Orientation DORA</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+            <input value={form.dora_service} onChange={(e) => setForm({ ...form, dora_service: e.target.value })}
+              placeholder="Service (ex. auto-école sociale)" maxLength={150} className="input-modern py-1 text-xs" />
+            <input value={form.dora_url} onChange={(e) => setForm({ ...form, dora_url: e.target.value })}
+              placeholder="https://dora.inclusion.beta.gouv.fr/…" className="input-modern py-1 text-xs" />
+            <select value={form.dora_resultat} onChange={(e) => setForm({ ...form, dora_resultat: e.target.value })}
+              className="input-modern py-1 text-xs">
+              <option value="">Résultat non renseigné</option>
+              {Object.entries(DORA_RESULTAT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold text-indigo-700 uppercase mb-1">Aide mobilisée</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+            <select value={form.aide_nature} onChange={(e) => setForm({ ...form, aide_nature: e.target.value })}
+              className="input-modern py-1 text-xs">
+              <option value="">Aucune aide</option>
+              {Object.entries(AIDE_NATURE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <input value={form.aide_organisme} onChange={(e) => setForm({ ...form, aide_organisme: e.target.value })}
+              placeholder="Organisme financeur" maxLength={150} className="input-modern py-1 text-xs" />
+            <input type="number" min="0" step="0.01" value={form.aide_montant}
+              onChange={(e) => setForm({ ...form, aide_montant: e.target.value })}
+              placeholder="Montant € (facultatif)" className="input-modern py-1 text-xs" />
+          </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            Montant laissé vide = <strong>aide non chiffrée</strong>. Ce n'est pas 0 € : la synthèse transmise
+            au Département distingue les deux.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setForm(null)} className="text-xs px-2 py-1 text-gray-500 hover:text-gray-700">Annuler</button>
+          <button type="button" onClick={enregistrer} className="text-xs px-2.5 py-1 rounded bg-indigo-600 text-white">Enregistrer</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!aDeja && readOnly) return null;
+
+  return (
+    <div className="mt-1">
+      <button type="button" onClick={() => setOuvert((v) => !v)}
+        className="text-[11px] text-indigo-600 hover:underline">
+        {ouvert ? '− ' : '+ '}Orientation DORA / aide mobilisée{aDeja ? '' : ' (non renseignées)'}
+      </button>
+      {ouvert && (
+        <div className="mt-1 text-[11px] text-gray-600 space-y-0.5 pl-2 border-l-2 border-indigo-100">
+          <p>
+            <span className="text-gray-400">DORA :</span>{' '}
+            {action.dora_service || action.dora_url ? (
+              <>
+                {action.dora_service || 'service non nommé'}
+                {action.dora_url && (
+                  <> — <a href={action.dora_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">lien</a></>
+                )}
+                {action.dora_resultat && <> — <strong>{DORA_RESULTAT_LABELS[action.dora_resultat]}</strong></>}
+              </>
+            ) : <span className="text-gray-300">aucune orientation</span>}
+          </p>
+          <p>
+            <span className="text-gray-400">Aide :</span>{' '}
+            {action.aide_nature ? (
+              <>
+                {AIDE_NATURE_LABELS[action.aide_nature] || action.aide_nature}
+                {action.aide_organisme && <> — {action.aide_organisme}</>}
+                {action.aide_montant != null
+                  ? <> — <strong>{action.aide_montant} €</strong></>
+                  : <span className="text-gray-400"> — montant non chiffré</span>}
+              </>
+            ) : <span className="text-gray-300">aucune aide</span>}
+          </p>
+          {!readOnly && (
+            <button type="button" onClick={ouvrirEdition} className="text-[11px] text-indigo-600 hover:underline">
+              Modifier
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

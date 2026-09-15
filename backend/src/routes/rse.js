@@ -185,7 +185,17 @@ async function gather3Volets(annee) {
       etp_realises_approx: k.etp_realises_approx || null,
       typologies: k.typologies ? { effectif: k.typologies.effectif, rqth: k.typologies.rqth, tranches_age: k.typologies.tranches_age || {} } : null,
       conventionnel: k.conventionnel ? { cibles: k.conventionnel.cibles, taux_realises: k.conventionnel.taux_realises, ecarts: k.conventionnel.ecarts } : null,
-      pmsmp: k.pmsmp || null,
+      // CORRECTIF m-11 — projection EXPLICITE, comme les autres blocs de ce
+      // bilan. `k.pmsmp` a gagné en PR D `liste_entreprises`, `par_debouche` et
+      // « embauches chez l'accueillant » : étalé en entier, le bilan RSE (rôle
+      // REF_RSE, base MANAGER) recevait la liste des entreprises d'accueil, ce
+      // qu'un module qui promet « agrégats non nominatifs uniquement » n'a pas
+      // à porter. Trois compteurs suffisent au critère servi.
+      pmsmp: k.pmsmp ? {
+        nb: k.pmsmp.nb ?? null,
+        jours: k.pmsmp.jours ?? null,
+        nb_salaries: k.pmsmp.nb_salaries ?? null,
+      } : null,
       satisfaction: k.satisfaction || null,
       effectifs_fh: fh,
     };

@@ -84,6 +84,94 @@ const get = (path, role = 'ADMIN') => request(app).get(path).set('Authorization'
 /** Les deux patronymes du jeu d'essai — ils ne doivent apparaître NULLE PART. */
 const PATRONYMES = /PREVOST|Sandrine|BENALI|Karim|DURAND|Amel/;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CORRECTIF B-02 (PR D) — LES STATUTS SOCIAUX NE SONT PAS SERVIS AU MANAGER
+// ───────────────────────────────────────────────────────────────────────────
+// La PR D verse dans `gatherAuditKpis` un bloc `publics_entree` qui porte le
+// statut BRSA, la catégorie France Travail, le type de référent unique et les
+// critères d'éligibilité IAE — dont « Travailleur handicapé (RQTH) ». Ces
+// données sont ADMIN/RH strict (`CLAUDE.md` module 5 ; PR C : « brsa jamais LU
+// pour un MANAGER » ; constat bloquant de la PR A sur la liste des critères
+// servie à l'encadrant). Elles partaient pourtant vers `/insertion/audit` et
+// `/exports/insertion-synthese`, tous deux ouverts au MANAGER, SANS aucune
+// suppression : sur une période à UNE personne, l'encadrant lisait `brsa: 1` et
+// « RQTH (1) », c'est-à-dire la donnée individuelle elle-même.
+//
+// La protection dont ces données bénéficiaient n'était pas « pas de clé par
+// salarié » — c'était LE RÔLE. Ces tests cherchent les clés dans la RÉPONSE :
+// une projection explicite oublie à la colonne suivante, un test qui lit ce qui
+// part, non.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('B-02 (PR D) — statuts sociaux réservés à ADMIN/RH', () => {
+  /** Aiguillage minimal : la cohorte porte un BRSA, un RQTH, une catégorie G. */
+  const brancherPublics = () => mockQuery.mockImplementation((sql) => {
+    const s = String(sql);
+    if (/FROM employee_eligibilite/.test(s)) {
+      return Promise.resolve({ rows: [{ code: 'TH', libelle: 'Travailleur handicapé (RQTH)', ordre: 1, n: 1 }] });
+    }
+    // ⚠ ORDRE : la requête des typologies part elle aussi de `employees LEFT
+    // JOIN insertion_diagnostics` — elle doit être reconnue AVANT celle de la
+    // cohorte, sinon elle reçoit les lignes de la cohorte et `rqth` vaut 0 sans
+    // que rien ne le dise.
+    if (/d\.rqth, d\.ressources/.test(s)) {
+      return Promise.resolve({ rows: [{ birth_date: '1980-01-01', disability_status: 'RQTH 2024', rqth: true, ressources: ['RSA'], niveau_formation: 'niv3' }] });
+    }
+    if (/FROM employees e\s+LEFT JOIN insertion_diagnostics d/.test(s) && !/AS entree_frein_/.test(s)) {
+      return Promise.resolve({
+        rows: [{ id: 1, gender: 'F', birth_date: '1980-01-01', brsa: true, ft_categorie: 'G', referent_unique_type: 'cms', niveau_formation: 'niv3' }],
+      });
+    }
+    return Promise.resolve({ rows: [] });
+  });
+
+  test('GET /insertion/audit — un MANAGER ne reçoit ni BRSA, ni catégorie FT, ni RQTH', async () => {
+    brancherPublics();
+    const res = await get('/api/insertion/audit?year=2026', 'MANAGER');
+    expect(res.status).toBe(200);
+    const { projection_role: _note, ...donnees } = res.body;
+    const brut = JSON.stringify(donnees);
+    expect('publics_entree' in res.body).toBe(false);
+    expect(brut).not.toMatch(/"brsa"/);
+    expect(brut).not.toMatch(/RQTH/);
+    expect(brut).not.toMatch(/ft_categorie|par_categorie_ft|par_referent_unique/);
+    // Clé RETIRÉE, jamais nullifiée : « non habilité » ne se lit pas comme « non lu ».
+    expect('rqth' in res.body.typologies).toBe(false);
+    expect('ressources' in res.body.typologies).toBe(false);
+    // Le refus est posé AVANT la lecture : la requête des critères ne part pas.
+    const sqls = mockQuery.mock.calls.map(([x]) => String(x));
+    expect(sqls.some((x) => /FROM employee_eligibilite/.test(x))).toBe(false);
+    expect(sqls.some((x) => /d\.rqth, d\.ressources/.test(x))).toBe(false);
+  });
+
+  test('GET /insertion/audit — un ADMIN, lui, les reçoit (le correctif n’appauvrit pas la CIP)', async () => {
+    brancherPublics();
+    const res = await get('/api/insertion/audit?year=2026', 'ADMIN');
+    expect(res.status).toBe(200);
+    expect(res.body.publics_entree).toBeTruthy();
+    expect(res.body.publics_entree.brsa.n).toBe(1);
+    expect(JSON.stringify(res.body.publics_entree)).toMatch(/RQTH/);
+    expect(res.body.typologies.rqth).toBe(1);
+  });
+
+  test('GET /exports/insertion-synthese (JSON) — même frontière sur la route voisine', async () => {
+    brancherPublics();
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=json', 'MANAGER');
+    expect(res.status).toBe(200);
+    const { projection_role: _note, ...donnees } = res.body;
+    const brut = JSON.stringify(donnees);
+    expect(brut).not.toMatch(/"brsa"/);
+    expect(brut).not.toMatch(/RQTH/);
+    expect('publics_entree' in res.body).toBe(false);
+    expect(res.body.projection_role.applique).toBe(true);
+  });
+
+  test('la projection est ANNONCÉE, pas silencieuse', async () => {
+    brancherPublics();
+    const res = await get('/api/insertion/audit?year=2026', 'MANAGER');
+    expect(res.body.projection_role.note).toMatch(/ADMIN \/ RH/);
+  });
+});
+
 describe('B-02 — les indicateurs d’audit ne transportent aucune ventilation nominative', () => {
   test('`gatherAuditKpis` projette : ni `par_salarie`, ni `par_intervenant`', async () => {
     const { gatherAuditKpis } = require('../../src/routes/insertion/routes');
@@ -131,8 +219,26 @@ describe('B-02 — les indicateurs d’audit ne transportent aucune ventilation 
   });
 
   test('GET /exports/insertion-synthese (CSV) — aucun patronyme non plus', async () => {
+    // PR D : le CSV est désormais la SYNTHÈSE DE DIALOGUE DE GESTION, et elle
+    // refuse (409) une période sans aucune donnée. On pose donc une cohorte
+    // d'une personne — le point du test reste le même : la ventilation
+    // NOMINATIVE des heures d'accompagnement ne doit pas ressortir par le
+    // fichier, alors même que le service simulé la rend en entier.
+    mockQuery.mockImplementation((sql) => {
+      if (/FROM employees e\s+LEFT JOIN insertion_diagnostics d/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ id: 1, gender: 'F', birth_date: '1985-04-02', brsa: null, ft_categorie: null, referent_unique_type: 'non_determine', niveau_formation: null }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
     const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
     expect(res.status).toBe(200);
     expect(String(res.text)).not.toMatch(PATRONYMES);
+    expect(String(res.text)).not.toMatch(/par_salarie|par_intervenant/);
+  });
+
+  test('GET /exports/insertion-synthese (CSV) — période vide → 409, jamais un fichier vide', async () => {
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('EXPORT_VIDE');
   });
 });

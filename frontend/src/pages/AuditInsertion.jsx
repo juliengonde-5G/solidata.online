@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
-import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil } from 'lucide-react';
+import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil, FileText, BarChart3 } from 'lucide-react';
+import DialogueGestionPanel from '../components/insertion/DialogueGestionPanel';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { getInsertionParametres, PARAMETRES_DEFAUTS } from '../components/insertion/parametres';
@@ -21,6 +22,28 @@ const FREIN_LABELS = {
 const CATEGORY_LABELS = { competence: 'Compétence', insertion: 'Insertion pro', socialisation: 'Socialisation', frein: 'Levée de frein' };
 const PRIORITY_LABELS = { haute: 'Haute', moyenne: 'Moyenne', basse: 'Basse' };
 const STATUS_LABELS = { a_faire: 'À faire', en_cours: 'En cours' };
+
+// ── PR D lot 6 — libellés des blocs du reporting autorité ───────────────────
+const CLASSIFICATION_LABELS = {
+  emploi_durable: 'Emploi durable', emploi_transition: 'Emploi de transition',
+  sortie_positive: 'Autre sortie positive', autre: 'Autre sortie',
+  non_documentee: 'Sortie NON documentée',
+};
+const DEBOUCHE_LABELS = {
+  embauche_accueillant: "Embauche chez l'entreprise d'accueil",
+  embauche_autre: 'Embauche chez un autre employeur',
+  formation: 'Entrée en formation', poursuite_parcours: 'Poursuite du parcours',
+  aucun: 'Aucun débouché', inconnu: 'Non connu à ce jour', non_renseigne: 'Non renseigné',
+};
+const TAUX_LABELS = {
+  emploi_durable: 'Emploi durable', emploi_transition: 'Emploi de transition',
+  sortie_positive: 'Autre sortie positive', dynamiques: 'Sorties dynamiques',
+};
+
+/** Valeur d'affichage : `null` reste un tiret, jamais un zéro inventé. */
+const nb = (v, suffixe = '') => (v === null || v === undefined
+  ? <span className="text-gray-300">—</span>
+  : <>{v}{suffixe}</>);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -292,7 +315,7 @@ function ExportFreinsModal({ year, onClose }) {
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-4 space-y-3 my-auto max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="font-semibold text-gray-800">Export « Tableau des freins » (23 colonnes)</h3>
+            <h3 className="font-semibold text-gray-800">Export « Tableau des freins » (45 colonnes — les 23 du cahier des charges en tête)</h3>
             <p className="text-[11px] text-gray-400">Vérifiez la complétude avant de générer — chaque génération est <strong>journalisée</strong> au registre RGPD.</p>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none" aria-label="Fermer">×</button>
@@ -389,6 +412,283 @@ function ExportFreinsModal({ year, onClose }) {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BLOCS DU REPORTING AUTORITÉ (PR D lot 6)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sorties — la MÉTHODE B en premier, la ligne « non documentée » en clair, la
+ * méthode historique à côté avec sa mention, et le rapprochement ASP.
+ *
+ * L'ordre n'est pas cosmétique : le chiffre que la structure présentera à son
+ * financeur est celui de la méthode B. La méthode A n'est là que le temps de
+ * l'exercice 2026, pour que l'écart avec ce qui a été présenté en juillet ne
+ * passe pas pour une erreur de calcul.
+ */
+function BlocSorties({ sorties, annee }) {
+  const mb = sorties?.methode_b;
+  const ma = sorties?.methode_a_imprimee;
+  const asp = sorties?.rapprochement_asp;
+  if (!mb) {
+    return (
+      <div className="bg-white rounded-xl border p-5">
+        <h3 className="font-semibold text-gray-800 mb-2">Sorties ({annee})</h3>
+        <p className="text-sm text-gray-400">
+          Le dénominateur des sorties n'a pas pu être calculé sur cette période (source indisponible).
+          Aucun taux n'est affiché — aucune valeur n'est estimée.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <div className="flex items-start justify-between gap-2 flex-wrap mb-1">
+        <h3 className="font-semibold text-gray-800">Sorties ({annee})</h3>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-100">
+          Méthode B — dénominateur = toutes les fins de parcours
+        </span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 my-3">
+        <div className="text-center rounded-lg border border-gray-200 p-2">
+          <div className="text-2xl font-bold text-gray-800">{nb(mb.denominateur)}</div>
+          <div className="text-xs text-gray-500">Fins de parcours</div>
+        </div>
+        <div className="text-center rounded-lg border border-gray-200 p-2">
+          <div className="text-2xl font-bold text-green-600">{nb(mb.documentees)}</div>
+          <div className="text-xs text-gray-500">Documentées</div>
+        </div>
+        <div className={`text-center rounded-lg border p-2 ${mb.non_documentees > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
+          <div className={`text-2xl font-bold ${mb.non_documentees > 0 ? 'text-amber-700' : 'text-gray-400'}`}>
+            {nb(mb.non_documentees)}
+          </div>
+          <div className="text-xs text-gray-500">Non documentées</div>
+        </div>
+      </div>
+      <p className="text-[11px] text-gray-500 mb-3">
+        Une <strong>sortie non documentée</strong> est un parcours terminé sans bilan de sortie classé :
+        c'est un indicateur de qualité de la saisie, <strong>pas une faute</strong>.
+      </p>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase text-gray-400 border-b">
+              <th className="py-1.5 pr-2">Catégorie</th>
+              <th className="py-1.5 pr-2 text-right">Nombre</th>
+              <th className="py-1.5 pr-2 text-right">Taux (méthode B)</th>
+              <th className="py-1.5 pr-2 text-right">Écart à la cible</th>
+              {ma && <th className="py-1.5 text-right text-gray-300">Taux (méthode A)</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {['emploi_durable', 'emploi_transition', 'sortie_positive', 'autre', 'non_documentee'].map((c) => (
+              <tr key={c} className="border-b border-gray-50">
+                <td className="py-1.5 pr-2 text-gray-700">{CLASSIFICATION_LABELS[c]}</td>
+                <td className="py-1.5 pr-2 text-right font-medium">{nb(mb.par_classification?.[c])}</td>
+                <td className="py-1.5 pr-2 text-right">{nb(mb.taux_pct?.[c], ' %')}</td>
+                <td className="py-1.5 pr-2 text-right">
+                  {mb.ecart_cible
+                    ? nb(mb.ecart_cible[c] != null ? (mb.ecart_cible[c] >= 0 ? `+${mb.ecart_cible[c]}` : mb.ecart_cible[c]) : null, ' pt')
+                    : <span className="text-[10px] text-gray-400">objectif non paramétré</span>}
+                </td>
+                {ma && <td className="py-1.5 text-right text-gray-400">{nb(ma.taux_pct?.[c], ' %')}</td>}
+              </tr>
+            ))}
+            <tr className="bg-teal-50/60">
+              <td className="py-1.5 pr-2 font-semibold text-teal-800">{TAUX_LABELS.dynamiques}</td>
+              <td className="py-1.5 pr-2 text-right font-semibold">
+                {nb(['emploi_durable', 'emploi_transition', 'sortie_positive']
+                  .reduce((a, c) => a + (Number(mb.par_classification?.[c]) || 0), 0))}
+              </td>
+              <td className="py-1.5 pr-2 text-right font-bold text-teal-800">{nb(mb.taux_pct?.dynamiques, ' %')}</td>
+              <td className="py-1.5 pr-2 text-right">
+                {mb.ecart_cible
+                  ? nb(mb.ecart_cible.dynamiques != null ? (mb.ecart_cible.dynamiques >= 0 ? `+${mb.ecart_cible.dynamiques}` : mb.ecart_cible.dynamiques) : null, ' pt')
+                  : <span className="text-[10px] text-gray-400">objectif non paramétré</span>}
+              </td>
+              {ma && <td className="py-1.5 text-right text-gray-400">{nb(ma.taux_pct?.dynamiques, ' %')}</td>}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {ma && (
+        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded p-2 mt-3">
+          <strong>Méthode A (historique)</strong> — dénominateur = {ma.denominateur} bilan(s) de sortie classé(s).
+          Imprimée pour l'exercice {annee} seulement : le changement de dénominateur crée une rupture de série
+          avec les chiffres présentés précédemment.
+        </p>
+      )}
+
+      {asp && (
+        <div className="mt-3 border-t pt-2">
+          <p className="text-xs text-gray-600">
+            <strong>Rapprochement ASP</strong> — sorties déclarées : {nb(asp.sorties_asp)} ·
+            écart : {nb(asp.ecart)}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">{asp.note}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Freins — entrée → dernière évaluation, axe par axe (indicateur central S2). */
+function BlocFreinsEvolution({ freins }) {
+  if (!freins?.par_axe?.length) return null;
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <h3 className="font-semibold text-gray-800 mb-1">Freins — évolution entrée → dernière évaluation</h3>
+      <p className="text-[11px] text-gray-400 mb-3">
+        {freins.echelle} Sur {nb(freins.nb_dossiers)} dossier(s).
+        Le frein judiciaire n'entre pas dans ce tableau.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase text-gray-400 border-b">
+              <th className="py-1.5 pr-2">Axe</th>
+              <th className="py-1.5 pr-2 text-right">Concernés à l'entrée</th>
+              <th className="py-1.5 pr-2 text-right">Levés</th>
+              <th className="py-1.5 pr-2 text-right">Stables</th>
+              <th className="py-1.5 pr-2 text-right">Aggravés</th>
+              <th className="py-1.5 pr-2 text-right">Non évalués</th>
+              <th className="py-1.5 pr-2 text-right">Actions</th>
+              <th className="py-1.5 pr-2">Partenaire principal</th>
+              <th className="py-1.5 text-right">DORA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {freins.par_axe.map((a) => (
+              <tr key={a.axe} className="border-b border-gray-50">
+                <td className="py-1.5 pr-2 text-gray-700">{a.label}</td>
+                <td className="py-1.5 pr-2 text-right">{nb(a.concernes_entree)}</td>
+                <td className="py-1.5 pr-2 text-right font-semibold text-green-700">{nb(a.leves)}</td>
+                <td className="py-1.5 pr-2 text-right">{nb(a.stables)}</td>
+                <td className="py-1.5 pr-2 text-right font-semibold text-red-700">{nb(a.aggraves)}</td>
+                <td className="py-1.5 pr-2 text-right text-gray-400">{nb(a.non_evalues)}</td>
+                <td className="py-1.5 pr-2 text-right">{nb(a.actions_engagees)}</td>
+                <td className="py-1.5 pr-2 text-xs text-gray-500">{a.partenaire_principal || <span className="text-gray-300">—</span>}</td>
+                <td className="py-1.5 text-right">{nb(a.orientations_dora)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Immersions — conventions, jours, débouchés et trajectoire vers l'emploi (S7). */
+function BlocImmersions({ immersions }) {
+  if (!immersions || immersions.indisponible) return null;
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <h3 className="font-semibold text-gray-800 mb-3">Immersions (PMSMP) — débouchés</h3>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+        <div className="text-center rounded-lg border border-gray-200 p-2">
+          <div className="text-2xl font-bold text-gray-800">{nb(immersions.conventions)}</div>
+          <div className="text-xs text-gray-500">Conventions</div>
+        </div>
+        <div className="text-center rounded-lg border border-gray-200 p-2">
+          <div className="text-2xl font-bold text-gray-800">{nb(immersions.jours)}</div>
+          <div className="text-xs text-gray-500">Jours</div>
+        </div>
+        <div className="text-center rounded-lg border border-gray-200 p-2">
+          <div className="text-2xl font-bold text-gray-800">{nb(immersions.entreprises_distinctes)}</div>
+          <div className="text-xs text-gray-500">Entreprises</div>
+        </div>
+        <div className="text-center rounded-lg border border-teal-200 bg-teal-50 p-2">
+          <div className="text-2xl font-bold text-teal-700">{nb(immersions.embauches_chez_accueillant)}</div>
+          <div className="text-xs text-teal-700">Embauches chez l'accueillant</div>
+        </div>
+      </div>
+      <div className="space-y-1">
+        {Object.entries(immersions.par_debouche || {}).map(([d, n]) => (
+          <div key={d} className="flex justify-between text-sm border-b border-gray-50 py-1">
+            <span className="text-gray-600">{DEBOUCHE_LABELS[d] || d}</span>
+            <span className="font-medium text-gray-700">{nb(n)}</span>
+          </div>
+        ))}
+      </div>
+      {(immersions.liste_entreprises || []).length > 0 && (
+        <p className="text-[11px] text-gray-400 mt-2">
+          Entreprises d'accueil : {immersions.liste_entreprises.join(' · ')}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Conformité — les huit indicateurs que l'autorité contrôle. */
+function BlocConformite({ conformite }) {
+  if (!conformite) return null;
+  const r = conformite.ruptures_droits_evitees || {};
+  const ligne = (label, valeur, aide) => (
+    <div className="flex items-start justify-between gap-3 border-b border-gray-50 py-1.5">
+      <div className="min-w-0">
+        <span className="text-sm text-gray-700">{label}</span>
+        {aide && <p className="text-[10px] text-gray-400">{aide}</p>}
+      </div>
+      <span className="font-semibold text-gray-800 whitespace-nowrap">{nb(valeur)}</span>
+    </div>
+  );
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <h3 className="font-semibold text-gray-800 mb-3">Conformité</h3>
+      {(conformite.completude_fse_par_projet || []).length > 0 && (
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Complétude FSE+ par projet</p>
+          {conformite.completude_fse_par_projet.map((c) => (
+            <div key={c.code} className="flex items-center gap-2 py-1">
+              <span className="w-40 text-xs text-gray-600 truncate" title={c.projet}>{c.projet}</span>
+              {/* CORRECTIF m-13 — une complétude NON CALCULABLE ne peint pas une
+                  barre vide, qui se lit « 0 % » à côté d'un texte qui dit « — ».
+                  Un trait neutre dit « pas de mesure », un vide dit « zéro ». */}
+              <div className="flex-1">
+                {c.pct == null
+                  ? <div className="h-2 rounded-full bg-slate-100 border border-dashed border-slate-300" title="Complétude non calculable" />
+                  : <Bar pct={c.pct} tone={c.pct >= 80 ? 'green' : c.pct >= 50 ? 'amber' : 'red'} />}
+              </div>
+              <span className="w-24 text-right text-[11px] text-gray-500">
+                {nb(c.pct, ' %')} ({c.complets}/{c.participants})
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {ligne('Points d\'étape tenus avec le référent unique', conformite.points_etape_referent)}
+      {ligne('Fiches d\'alimentation remises au référent', conformite.fiches_referent_transmises,
+        'Une fiche générée et non remise n\'est pas comptée.')}
+      {ligne('Actualisations France Travail rappelées', conformite.actualisations_ft_rappelees)}
+      {ligne('Entretiens de conciliation', conformite.conciliations)}
+      {ligne('Personnes ayant connu au moins une semaine sous le plancher',
+        conformite.semaines_sous_15h?.nb_personnes_concernees,
+        'Une semaine sans relevé de paie n\'est jamais comptée comme une semaine à zéro heure.')}
+      {ligne('Nombre total de semaines sous le plancher', conformite.semaines_sous_15h?.nb_semaines)}
+      {/* CORRECTIF D-03 — « aucune semaine relevée » se DIT. Sans cette ligne,
+          deux tirets se lisent « rien à signaler » là où l'activité n'a
+          simplement pas pu être mesurée. */}
+      {conformite.semaines_sous_15h?.nb_semaines_relevees === 0 && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-1">
+          {conformite.semaines_sous_15h.note
+            || "Aucune semaine relevée sur la période : l'indicateur n'est pas calculable — ce n'est PAS « zéro semaine sous le plancher »."}
+        </p>
+      )}
+      <div className="mt-3 rounded-lg bg-teal-50 border border-teal-100 p-2.5">
+        <p className="text-xs font-semibold text-teal-800">Ruptures de droits évitées : {nb(r.total)}</p>
+        <p className="text-[11px] text-teal-700 mt-0.5">
+          {nb(r.actualisations_rappelees)} actualisation(s) rappelée(s) · {nb(r.motifs_legitimes_documentes)} motif(s)
+          légitime(s) documenté(s) · {nb(r.conciliations_tracees)} conciliation(s) tracée(s). Ce n'est pas un
+          indicateur de performance : c'est le compte des gestes de protection que la structure est seule à pouvoir poser.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function AuditInsertion() {
   const { user } = useAuth();
   const canIa = ['ADMIN', 'RH'].includes(user?.base_role || user?.role); // ADMIN/RH : IA, cibles, export freins
@@ -401,6 +701,11 @@ export default function AuditInsertion() {
   const [iaLoading, setIaLoading] = useState(false);
   const [iaError, setIaError] = useState(null);
 
+  // PR D lot 6 — deux onglets : le pilotage INTERNE (chiffres complets, lus par
+  // les personnes qui tiennent les dossiers) et le document qui SORT de la
+  // structure (agrégé, k-anonymisé, signé par la direction). Les confondre
+  // reviendrait à publier l'un à la place de l'autre.
+  const [onglet, setOnglet] = useState('pilotage');
   const [ciblesOpen, setCiblesOpen] = useState(false);
   const [exportFreinsOpen, setExportFreinsOpen] = useState(false);
   const [syntheseLoading, setSyntheseLoading] = useState(false);
@@ -546,14 +851,29 @@ export default function AuditInsertion() {
       + `<div class="note">Sur ${data.freins_nb_evalues || 0} salarié(s) évalué(s)${data.frein_dominant ? ` — frein dominant : ${FREIN_LABELS[data.frein_dominant]}` : ''}.</div>`
       + `</div></div></div>`;
 
-    // 4. Sorties & statistiques
-    const sortieBox = (v, l, color) => `<div class="statbox"><div class="statv" style="color:${color}">${v}</div><div class="statl">${l}</div></div>`;
-    body += `<div class="section"><div class="section-title">Sorties &amp; statistiques (${data.annee})</div><div class="statrow">`
-      + sortieBox(s.total || 0, 'Total', '#0f172a') + sortieBox(s.dynamiques || 0, 'Dynamiques', '#16a34a') + sortieBox(s.autres || 0, 'Autres', '#64748b')
-      + `</div>`
-      + (s.total > 0 ? `<div class="bar-row" style="margin-top:6px"><div class="bar-label">Taux dynamiques</div><div class="bar-bg"><div class="bar-fill" style="width:${s.taux_dynamiques ?? 0}%;background:#16a34a"></div></div><div class="bar-val">${s.taux_dynamiques ?? '—'} %</div></div>` : '')
-      + (Object.keys(s.par_type || {}).length ? `<table><tr><th>Type de sortie</th><th style="text-align:right">Nombre</th></tr>${Object.entries(s.par_type).map(([t, n]) => `<tr><td>${esc(t)}</td><td style="text-align:right">${n}</td></tr>`).join('')}</table>` : `<div class="note">Aucune sortie enregistrée sur la période.</div>`)
-      + `</div>`;
+    // 4. Sorties — MÉTHODE B en premier (PR D lot 6, décision 9)
+    const mb = s.methode_b;
+    const sortieBox = (v, l, color) => `<div class="statbox"><div class="statv" style="color:${color}">${v ?? '—'}</div><div class="statl">${l}</div></div>`;
+    body += `<div class="section"><div class="section-title">Sorties (${data.annee})</div>`;
+    if (mb) {
+      body += `<div class="statrow">`
+        + sortieBox(mb.denominateur, 'Fins de parcours', '#0f172a')
+        + sortieBox(mb.documentees, 'Documentées', '#16a34a')
+        + sortieBox(mb.non_documentees, 'NON documentées', '#d97706')
+        + `</div>`
+        + `<div class="bar-row" style="margin-top:6px"><div class="bar-label">Sorties dynamiques</div><div class="bar-bg"><div class="bar-fill" style="width:${mb.taux_pct?.dynamiques ?? 0}%;background:#16a34a"></div></div><div class="bar-val">${mb.taux_pct?.dynamiques ?? '—'} %</div></div>`
+        + `<table><tr><th>Catégorie</th><th style="text-align:right">Nombre</th><th style="text-align:right">Taux</th></tr>`
+        + ['emploi_durable', 'emploi_transition', 'sortie_positive', 'autre', 'non_documentee'].map((c) =>
+          `<tr><td>${esc(CLASSIFICATION_LABELS[c])}</td><td style="text-align:right">${mb.par_classification?.[c] ?? '—'}</td><td style="text-align:right">${mb.taux_pct?.[c] != null ? mb.taux_pct[c] + ' %' : '—'}</td></tr>`).join('')
+        + `</table>`
+        + `<div class="note">Dénominateur = toutes les fins de parcours de l'année. Une sortie non documentée est un parcours terminé sans bilan de sortie classé : indicateur de qualité de la saisie, pas une faute.</div>`;
+      if (s.methode_a_imprimee) {
+        body += `<div class="note">Méthode historique (dénominateur = ${s.methode_a_imprimee.denominateur} bilan(s) classé(s)) : ${s.methode_a_imprimee.taux_pct?.dynamiques ?? '—'} % de sorties dynamiques — imprimée pour l'exercice ${data.annee} seulement.</div>`;
+      }
+    } else {
+      body += `<div class="note">Dénominateur des sorties non calculable sur la période — aucun taux n'est affiché.</div>`;
+    }
+    body += `</div>`;
 
     // 5. Plans d'action en cours
     body += `<div class="section"><div class="section-title">Plans d'action en cours</div>`
@@ -584,7 +904,12 @@ export default function AuditInsertion() {
     body += `<div class="footer">Document confidentiel — données personnelles sensibles (RGPD). Diffusion restreinte direction / CIP.</div>`;
 
     const w = window.open('', '_blank', 'width=820,height=1100');
-    if (!w) { alert('Popup bloquée — autorisez les popups pour exporter le PDF.'); return; }
+    if (!w) {
+      // Aucune boîte native : la règle vaut pour le dernier écran du module
+      // comme pour les autres (correctif m-08 de la PR C).
+      setError("La fenêtre d'impression a été bloquée par le navigateur — autorisez les fenêtres pour ce site, puis réessayez.");
+      return;
+    }
     w.document.write('<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><title>Audit_Insertion_' + data.annee + '</title><style>'
       + '@page { size: A4; margin: 14mm 12mm; } * { box-sizing: border-box; margin: 0; padding: 0; }'
       + "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; line-height: 1.45; }"
@@ -655,10 +980,29 @@ export default function AuditInsertion() {
           }
         />
 
-        {error && <div className="mb-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-3">Impossible de charger l'audit : {error}</div>}
-        {syntheseError && <div className="mb-4 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{syntheseError}</div>}
+        {/* Deux onglets : le pilotage interne, et le document transmis. */}
+        <div className="flex gap-1 border-b mb-4" role="tablist">
+          {[
+            ['pilotage', 'Pilotage & indicateurs', BarChart3],
+            ['dialogue', 'Dialogue de gestion', FileText],
+          ].map(([cle, label, Icon]) => (
+            <button key={cle} type="button" role="tab" aria-selected={onglet === cle}
+              onClick={() => setOnglet(cle)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px inline-flex items-center gap-1.5 transition ${
+                onglet === cle ? 'border-teal-600 text-teal-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              <Icon className="w-4 h-4" /> {label}
+            </button>
+          ))}
+        </div>
 
-        {data && (
+        {onglet === 'dialogue' && (
+          <DialogueGestionPanel year={year} canGenerer={canIa} />
+        )}
+
+        {error && onglet === 'pilotage' && <div className="mb-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-3">Impossible de charger l'audit : {error}</div>}
+        {syntheseError && onglet === 'pilotage' && <div className="mb-4 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{syntheseError}</div>}
+
+        {onglet === 'pilotage' && data && (
           <div className="space-y-6">
             {/* 0. Indicateurs conventionnels (EXG-47/D12) — EN TÊTE : réalisé vs
                 cibles de l'annexe financière, ETP « contrôle ERP », typologies,
@@ -793,8 +1137,8 @@ export default function AuditInsertion() {
               <p className="text-[11px] text-gray-400 mt-3">Taux = jalons réalisés parmi ceux dont l'échéance est passée.</p>
             </div>
 
-            {/* 3. Radar freins + 5. Sorties */}
-            <div className="grid lg:grid-cols-2 gap-6">
+            {/* 3. Cartographie consolidée des freins (moyennes de cohorte) */}
+            <div>
               <div className="bg-white rounded-xl border p-5">
                 <h3 className="font-semibold text-gray-800 mb-2">Cartographie consolidée des 9 freins</h3>
                 <p className="text-[11px] text-gray-400 mb-2">Moyenne cohorte (/5) sur {data.freins_nb_evalues || 0} salarié(s) évalué(s){data.frein_dominant ? ` — frein dominant : ${FREIN_LABELS[data.frein_dominant]}` : ''}.</p>
@@ -808,26 +1152,17 @@ export default function AuditInsertion() {
                   ))}
                 </div>
               </div>
+            </div>
 
-              <div className="bg-white rounded-xl border p-5">
-                <h3 className="font-semibold text-gray-800 mb-3">Sorties &amp; statistiques ({data.annee})</h3>
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="text-center"><div className="text-2xl font-bold text-gray-800">{s.total || 0}</div><div className="text-xs text-gray-500">Total</div></div>
-                  <div className="text-center"><div className="text-2xl font-bold text-green-600">{s.dynamiques || 0}</div><div className="text-xs text-gray-500">Dynamiques</div></div>
-                  <div className="text-center"><div className="text-2xl font-bold text-gray-400">{s.autres || 0}</div><div className="text-xs text-gray-500">Autres</div></div>
-                </div>
-                {s.total > 0 && (
-                  <>
-                    <Bar pct={s.taux_dynamiques ?? 0} tone="green" />
-                    <p className="text-xs text-gray-500 mt-1 mb-3">Taux de sorties dynamiques : <span className="font-semibold text-gray-700">{s.taux_dynamiques ?? '—'} %</span></p>
-                  </>
-                )}
-                <div className="space-y-1">
-                  {Object.keys(s.par_type || {}).length ? Object.entries(s.par_type).map(([t, n]) => (
-                    <div key={t} className="flex justify-between text-sm border-b border-gray-50 py-1"><span className="text-gray-600">{t}</span><span className="font-medium text-gray-700">{n}</span></div>
-                  )) : <p className="text-sm text-gray-400">Aucune sortie enregistrée sur la période.</p>}
-                </div>
-              </div>
+            {/* ── PR D lot 6 — les quatre blocs du reporting autorité ────────
+                Sorties (méthode B en premier), évolution des freins, immersions
+                et conformité. Ils remplacent la carte « Sorties & statistiques »
+                qui présentait le taux calculé sur les BILANS rédigés. */}
+            <BlocSorties sorties={s} annee={data.annee} />
+            <BlocFreinsEvolution freins={data.freins_evolution} />
+            <div className="grid lg:grid-cols-2 gap-6">
+              <BlocImmersions immersions={data.immersions} />
+              <BlocConformite conformite={data.conformite} />
             </div>
 
             {/* 4. Plans d'action en cours */}

@@ -324,7 +324,7 @@ describe('purges déplacées — comportement automatique inchangé', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('registre PURGES_RGPD — source unique', () => {
-  it('couvre les 10 purges de rétention, avec des clés uniques', () => {
+  it('couvre les 11 purges de rétention, avec des clés uniques', () => {
     const cles = purges.PURGES_RGPD.map((p) => p.cle);
     // 2.45.0 : `pcm_reponses` s'intercale juste après `pcm_non_recrute` — les
     // deux règles PCM se lisent d'affilée à l'écran comme au journal des jobs.
@@ -334,10 +334,14 @@ describe('registre PURGES_RGPD — source unique', () => {
     // une trace d'accompagnement fondée sur un consentement révocable, et elle
     // se lit à la suite des purges de données personnelles, pas des purges
     // techniques.
+    // PR D (correctif m-09) : `dialogues_gestion` vient ensuite — la table
+    // n'avait NI rétention, NI purge, NI règle écrite. Le document est agrégé
+    // et non nominatif, mais c'est une pièce de conventionnement : six ans,
+    // et non « indéfiniment ».
     expect(cles).toEqual([
       'pcm_non_recrute', 'pcm_reponses', 'candidats_expires', 'insertion_dossiers',
       'gps_positions', 'arrets_gps', 'bordereaux_decheterie', 'messagerie',
-      'rappels_rdv', 'refresh_tokens',
+      'rappels_rdv', 'dialogues_gestion', 'refresh_tokens',
     ]);
     expect(new Set(cles).size).toBe(cles.length);
   });

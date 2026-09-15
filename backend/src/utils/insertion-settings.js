@@ -132,6 +132,19 @@ const INSERTION_SETTING_DEFAULTS = {
   // de la minimisation (point 4 des arbitrages de la revue de sécurité) ; la
   // direction peut la relever dans `settings` si elle le décide.
   'insertion.rappels_retention_jours': 90,
+  // ── PR D lot 6 — reporting autorité ──
+  // Année pour laquelle la synthèse de dialogue de gestion imprime les DEUX
+  // méthodes de dénominateur des sorties côte à côte (décision 9 : la
+  // méthode historique « bilans classés seuls » et la méthode « toutes les fins
+  // de parcours »). Hors de cette année, seule la seconde est produite.
+  'insertion.sorties_methode_double_annee': 2026,
+  // Effectif sous lequel un agrégat de la synthèse n'est pas rendu (k-anonymat,
+  // même seuil que les enquêtes) : un document qui sort de la structure ne doit
+  // pas permettre de reconnaître une personne par recoupement.
+  'insertion.k_anonymat_min': 5,
+  // Base unique des documents de conventionnement (repli si l'annexe financière
+  // `effectifs.convention_<annee>` ne porte pas d'heures annuelles par ETP).
+  'insertion.heures_annuelles_etp': 1820,
   // « Mon Récap » est fait pour CIRCULER (la personne peut le remettre à un
   // employeur). Deux libellés y disaient plus que ce que la personne croit
   // partager : « Entretien de conciliation (protection des droits) » — la

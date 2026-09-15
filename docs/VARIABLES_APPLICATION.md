@@ -53,8 +53,9 @@ Utilisées dans : `backend/src/middleware/auth.js`, `backend/src/routes/auth.js`
 | `PORT` | `3001` | Non | Port d'écoute du serveur Express |
 | `NODE_ENV` | `development` | Non | Environnement : `development` ou `production` |
 | `CORS_ORIGINS` | *(non défini)* | Non | Origines CORS autorisées, séparées par des virgules. Si absent, défaut = `['http://localhost:5173', 'http://localhost:3000']` |
+| `APP_VERSION` | *(version de `backend/package.json`)* | Non — **recommandée en production** | Version de l'outil portée par l'**en-tête de traçabilité** des documents transmis à l'autorité (synthèse de dialogue de gestion, tableau des freins, export FSE+). Déclarée dans `docker-compose.prod.yml` (`${APP_VERSION:-2.55.0}`) et dans les deux `.env.example` depuis la 2.55.0 — avant, tous les documents transmis portaient « 1.0.0 ». À poser dans le `.env` serveur à chaque déploiement (`APP_VERSION=2.55.0`). |
 
-Utilisées dans : `backend/src/index.js`
+Utilisées dans : `backend/src/index.js`, `backend/src/services/dialogue-gestion.js`, `backend/src/routes/exports.js`
 
 ---
 
@@ -289,9 +290,12 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 | `securite.mfa_duree_heures` | `backend/src/middleware/mfa.js` | `24` — durée de validité d'un second facteur. Au-delà, la session est renvoyée au code TOTP (403 `MFA_EXPIREE`), même si son jeton de renouvellement court encore. Bornée à [1 ; 168] h : une valeur hors bornes, illisible ou absente retombe sur le défaut en code. Le renouvellement de jeton NE repousse PAS l'horodatage — sans quoi une session simplement restée active ne se périmerait jamais. |
 | `vak.caisses_exclues` | `backend/src/services/sumup.js` | `Caisse Vintiz` — caisses EXCLUES de **toutes** les VAK, sans saisie par événement (alias séparés par des virgules, comme `vaks.compte_caisse`). Se combine à la liste blanche facultative `compte_caisse` : un ticket est compté s'il n'est pas exclu ET s'il passe le périmètre de sa VAK. Un compte **inconnu** n'est jamais exclu (sinon l'écran TV, alimenté par des webhooks sans identifiant de caisse, se viderait). Réglage **vidé** = plus aucune exclusion (décision respectée) ; réglage **absent** = défaut en code. |
 
-### Purges de rétention RGPD (2.44.0, étendues en 2.45.0, 2.50.0, 2.54.0)
+### Purges de rétention RGPD (2.44.0, étendues en 2.45.0, 2.50.0, 2.54.0, 2.55.0)
 
-Les dix purges (2.50.0 : bordereaux de collecte en déchèterie ; 2.54.0 / PR C : trace des rappels
+Les onze purges (2.50.0 : bordereaux de collecte en déchèterie ; 2.55.0 / PR D : snapshots de la
+synthèse de dialogue de gestion — `purgeDialoguesGestion`, seuil `rgpd.dialogues_gestion_retention_jours`
+**défaut 2 190 jours** (six ans, durée de conservation des pièces de dialogue de gestion), ajouté par le
+correctif m-09 de la revue de sécurité de la PR D : la table n'avait ni rétention ni purge ; 2.54.0 / PR C : trace des rappels
 de rendez-vous — `purgeRappelsRdv`, seuil `insertion.rappels_retention_jours` **défaut 90 jours**
 *(90 depuis les correctifs de revue de sécurité de la PR C, rapport `24-correctifs-PR-C.md` § 7
 point 4 — minimisation, ramené de 365 à 90)*,
@@ -318,6 +322,7 @@ comportement**.
 
 | Clé `settings` | Purge concernée | Valeur par défaut |
 |-----------------|-----------------|--------------------|
+| `rgpd.dialogues_gestion_retention_jours` | **Snapshots de la synthèse de dialogue de gestion** (`insertion_dialogues_gestion`) — document **agrégé et non nominatif** (k-anonymat structurel), conservé comme pièce du dialogue de gestion avec l'autorité. Suppression (`DELETE`) depuis `genere_le`. 11ᵉ purge de `services/rgpd-purges.js`. | `2190` (jours, six ans) |
 | `rgpd.bordereaux_decheterie_retention_jours` | **Bordereaux de collecte en déchèterie** (`tour_decheterie_bordereaux`) — PDF et les deux signatures manuscrites qu'il porte (dont celle d'un agent de déchèterie, tiers). Le délai court depuis `created_at`, c'est-à-dire depuis le passage du camion — une validation par le gestionnaire est un événement de gestion interne, elle ne prolonge pas la durée de vie de la signature d'un tiers. Suppression (`DELETE`), pas anonymisation : ce qui resterait après retrait des signatures et du PDF n'aurait plus aucun usage. | `1095` (jours, soit 3 ans — arbitrage client 06/09/2026) |
 
 ### Bordereau de collecte en déchèterie — seed du référentiel Métropole (2.50.0)
@@ -382,3 +387,22 @@ de rendez-vous **tourne quand même** — il ne prétend jamais avoir envoyé ce
 et marque chaque ligne `insertion_rappels_rdv.statut = 'dry_run'` plutôt que `'envoye'`. Aucun
 rappel ne part de toute façon sans le **consentement individuel** de la personne
 (`employees.rappel_rdv_consent = true`), recueilli dans l'onglet Dossier administratif de sa fiche.
+
+### Reporting autorité — PR D (2.55.0, 14 septembre 2026)
+
+Chantier `rapports/cip-refonte-2026-09-12/` (contrat `25-contrats-techniques-PR-D.md` § 4). Ces trois
+réglages gouvernent la **synthèse de dialogue de gestion** et le nouveau calcul du dénominateur des
+sorties (`services/sorties-engine.js`, `services/dialogue-gestion.js`). Ils ne figurent **pas** dans
+l'écran « Réglages insertion » (`/admin/insertion`) : ils prennent leur valeur par défaut, en code, dans
+`backend/src/utils/insertion-settings.js`, et se modifient dans `settings` (`PUT /api/settings/:key`,
+ADMIN). Le plancher de k-anonymat, lui, n'est pas un réglage (voir la ligne correspondante).
+
+| Clé `settings` | Défaut | Usage |
+|-----------------|--------|-------|
+| `insertion.sorties_methode_double_annee` | `2026` | Année pour laquelle les deux méthodes de calcul du dénominateur des sorties (l'historique et la nouvelle) sont imprimées côte à côte, pour que la rupture de série soit annoncée plutôt que découverte. Toute autre année ne reçoit que la nouvelle méthode (`methode_a: null`). |
+| `insertion.k_anonymat_min` | `5` **(plancher)** | Seuil de k-anonymat de la synthèse de dialogue de gestion : tout entier compris entre 1 et k−1 est retiré du document entier en une seule passe (comptes de personnes, d'actions, d'orientations, d'aides, de gestes de conformité ; liste des entreprises d'accueil ; suppression complémentaire contre la reconstitution par soustraction ; taux miroirs). Le réglage ne sert qu'à **durcir** : une valeur inférieure à 5, illisible ou absente vaut 5 — **abaisser le plancher est une décision du DPO, pas un réglage** (correctif B-01 de la revue de sécurité PR D). La synthèse rend `sous_seuil` comme un **compte d'agrégats retirés par bloc** et `sous_seuil_total`, jamais le chemin de la case retirée. Même règle que la restitution des enquêtes anonymes du module RSE, appliquée ici à un document qui sort de la structure. |
+| `insertion.heures_annuelles_etp` | `1820` | Base horaire unique employée dans tout document de conventionnement produit par ce chantier. Repli si `effectifs.convention_<année>.heures_annuelles_etp` (module Effectifs ETP) n'est pas paramétré pour l'année demandée — **jamais deux bases différentes dans le même document**. |
+
+Réutilisés par ce chantier, déjà en place depuis des lots antérieurs : `insertion.cible_etp_conventionnes`,
+les cibles de sorties (`PUT /cibles`), `effectifs.convention_<année>`, `insertion.cer_heures_min` (15),
+`insertion.post_sortie_mois`.

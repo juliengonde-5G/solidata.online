@@ -840,12 +840,17 @@ const brut = (o) => JSON.stringify(o);
       expect(j.rows.length).toBe(1);
     });
 
-    test('V-114 le registre expose 10 purges, dont celle des rappels', async () => {
+    test('V-114 le registre expose toutes les purges, dont celle des rappels', async () => {
       expect(PURGES_RGPD.map((p) => p.cle)).toContain('rappels_rdv');
       const r = await auth(request(app).get('/api/rgpd/purges'), 'ADMIN');
       expect(r.status).toBe(200);
       const liste = Array.isArray(r.body) ? r.body : r.body.purges;
-      expect(liste.length).toBe(10);
+      // Le nombre suit le registre — source unique. Une 11ᵉ purge est arrivée
+      // en PR D (synthèses de dialogue de gestion, correctif m-09) : figer le
+      // compte ici ferait tomber une suite de PR C pour une évolution de PR D,
+      // sans rien prouver de plus que « la route rend ce que le registre porte ».
+      expect(liste.length).toBe(PURGES_RGPD.length);
+      expect(liste.length).toBeGreaterThanOrEqual(10);
       const p = liste.find((x) => x.cle === 'rappels_rdv');
       expect(p).toBeDefined();
       // 90 jours depuis l'arbitrage de minimisation (point 4 de la revue de

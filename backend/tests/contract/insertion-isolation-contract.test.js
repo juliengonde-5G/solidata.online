@@ -176,7 +176,16 @@ describe('[CRITIQUE] GET /insertion/:employeeId — le PCM ne fuit plus vers un 
 describe('[MOYEN] Actions CIP — texte libre santé/judiciaire masqué au MANAGER', () => {
   const ACTIONS = [
     { id: 1, employee_id: 7, action_label: 'Dossier logement', category: 'insertion', frein_type: 'logement', notes: 'RDV bailleur', resultat: 'en attente' },
-    { id: 2, employee_id: 7, action_label: 'Suivi médical', category: 'frein', frein_type: 'sante', notes: 'Rendez-vous cardiologue le 12', resultat: 'traitement en cours' },
+    {
+      id: 2, employee_id: 7, action_label: 'Suivi médical', category: 'frein', frein_type: 'sante',
+      notes: 'Rendez-vous cardiologue le 12', resultat: 'traitement en cours',
+      // PR D — les trois champs libres ajoutés à l'action (correctif B-03).
+      dora_service: 'CSAPA de Rouen — addictologie',
+      dora_url: 'https://dora.inclusion.beta.gouv.fr/service/csapa-rouen-sevrage',
+      dora_resultat: 'pris_en_charge',
+      aide_nature: 'sante', aide_organisme: 'CPAM 76 — complémentaire santé solidaire (ALD)',
+      aide_montant: '120.00',
+    },
     { id: 3, employee_id: 7, action_label: 'Rendez-vous SPIP', category: 'frein', frein_type: 'judiciaire', notes: 'Aménagement de peine', resultat: null },
   ];
   const mockActions = () => mockQuery.mockImplementation((sql) => {
@@ -220,6 +229,33 @@ describe('[MOYEN] Actions CIP — texte libre santé/judiciaire masqué au MANAG
     const logement = r.body.find((a) => a.frein_type === 'logement');
     expect(logement.notes).toBe('RDV bailleur');
     expect(logement.resultat).toBe('en attente');
+  });
+
+  // ── CORRECTIF B-03 (bloquant, PR D) ───────────────────────────────────────
+  it("un MANAGER ne reçoit NI le service DORA NI l'organisme d'aide d'une action santé", async () => {
+    mockActions();
+    const r = await get('/api/insertion/action-plans/7', 'MANAGER');
+    const sante = r.body.find((a) => a.frein_type === 'sante');
+    // `dora_service` EST par construction le nom du service vers lequel on a
+    // orienté : sur l'axe santé, c'est un service de soin (art. 9). L'URL porte
+    // le même nom dans son chemin, et l'organisme est le financeur de l'aide.
+    expect(sante).not.toHaveProperty('dora_service');
+    expect(sante).not.toHaveProperty('dora_url');
+    expect(sante).not.toHaveProperty('aide_organisme');
+    expect(JSON.stringify(r.body)).not.toMatch(/CSAPA|csapa|CPAM/);
+    // Ce qui reste : l'action est suivable (libellé, résultat codé, nature,
+    // montant) sans dire de QUOI la personne se soigne.
+    expect(sante.action_label).toBe('Suivi médical');
+    expect(sante.dora_resultat).toBe('pris_en_charge');
+    expect(sante.aide_nature).toBe('sante');
+  });
+
+  it('un ADMIN, lui, reçoit les trois champs (le correctif n\'appauvrit pas la CIP)', async () => {
+    mockActions();
+    const r = await get('/api/insertion/action-plans/7', 'ADMIN');
+    const sante = r.body.find((a) => a.frein_type === 'sante');
+    expect(sante.dora_service).toBe('CSAPA de Rouen — addictologie');
+    expect(sante.aide_organisme).toMatch(/CPAM 76/);
   });
 
   it('GET /actions-overview : même masquage, et le total suit le filtre SQL', async () => {

@@ -120,7 +120,22 @@ async function snapshotMilestone(db, row, action, userId, motif = null) {
 //    habilité, jamais nullifiés).
 // Le filtre judiciaire est doublé côté SQL dans les listes paginées pour que
 // le total affiché corresponde aux lignes rendues.
-const ACTIONS_TEXTE_LIBRE = ['notes', 'resultat'];
+//
+// ═══ CORRECTIF B-03 (bloquant) — le dictionnaire suit les colonnes ═══════
+// La PR D ajoute trois champs LIBRES à `cip_action_plans` : `dora_service`
+// (« CSAPA de Rouen — addictologie »), `dora_url` (qui porte le même nom dans
+// son chemin) et `aide_organisme` (le financeur d'une aide santé). Ils
+// échappaient au masquage : sur une action de l'axe SANTÉ, un MANAGER perdait
+// `notes` et `resultat` et recevait le nom du service de soin. C'est la
+// réouverture d'une fuite fermée par un correctif nommé (2.43.0, audit
+// d'isolement § B.3) sur une donnée d'article 9 — et le mécanisme est
+// exactement celui du `SELECT im.*` de la PR C : un dictionnaire de champs
+// sensibles qui ne suit pas les colonnes qu'on ajoute à la table.
+// Une garde statique (`tests/unit/actions-texte-libre.test.js`) recense
+// désormais les colonnes texte posées par les migrations et échoue si l'une
+// d'elles n'est ni ici ni dans la liste blanche explicite des champs réputés
+// non sensibles : la liste ne peut plus redevenir fausse en silence.
+const ACTIONS_TEXTE_LIBRE = ['notes', 'resultat', 'dora_service', 'dora_url', 'aide_organisme'];
 function maskActionPlansForRole(rows, baseRole) {
   if (!Array.isArray(rows) || baseRole !== 'MANAGER') return rows;
   return rows
@@ -1021,8 +1036,15 @@ router.post('/milestones/:id/close', [
   body('next.due_date').optional().isISO8601().withMessage('next.due_date invalide'),
   ...assiduiteValidators,
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const cur = await client.query('SELECT * FROM insertion_milestones WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (cur.rows.length === 0) {
@@ -1272,11 +1294,11 @@ router.post('/milestones/:id/close', [
       : null;
     res.json({ milestone: maskInsertionRow(closed.rows[0], baseRoleOf(req)), next: stripSecrets(createdNext), resync, sortie_fse: sortieFseProjetee });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur close milestone :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -1288,8 +1310,15 @@ router.post('/milestones/:id/reopen', authorize('ADMIN', 'RH'), [
   param('id').isInt().withMessage('ID invalide'),
   body('motif').isString().trim().notEmpty().withMessage('Motif de réouverture obligatoire'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const cur = await client.query('SELECT * FROM insertion_milestones WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (cur.rows.length === 0) {
@@ -1314,11 +1343,11 @@ router.post('/milestones/:id/reopen', authorize('ADMIN', 'RH'), [
     await client.query('COMMIT');
     res.json(maskInsertionRow(reopened.rows[0], baseRoleOf(req)));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur reopen milestone :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -1444,6 +1473,45 @@ router.post('/milestones/:employeeId/initialize', async (req, res) => {
 // PLAN D'ACTION CIP
 // ══════════════════════════════════════════════════════════════
 
+// Listes fermées de l'action CIP — MIROIR des CHECK posés en base
+// (`migrations/insertion-cadre.js` § 7 pour les six premières catégories,
+// `migrations/insertion-reporting.js` pour `formation_fle` et pour les champs
+// DORA / aide). Importées de la migration plutôt que recopiées : une valeur
+// ajoutée en base sans l'être ici serait refusée par le validateur, et
+// l'inverse produirait un 500 au lieu d'un 400 lisible.
+const {
+  ACTION_CATEGORIES, DORA_RESULTATS, AIDE_NATURES,
+} = require('../../scripts/migrations/insertion-reporting');
+
+/**
+ * Validateurs des six champs de la PR D sur une action CIP (orientation DORA,
+ * aide mobilisée). Partagés par le POST et le PUT : écrits deux fois, ils
+ * finiraient par diverger sur la borne qui compte.
+ *
+ * `dora_url` en **https uniquement** : le champ est rendu sous forme de lien
+ * cliquable dans la fiche, et un `javascript:` ou un `data:` y serait une porte
+ * d'entrée. Un montant d'aide est ≥ 0 ou absent — jamais négatif, il serait
+ * soustrait d'un total transmis au Département.
+ */
+const VALIDATEURS_DORA_AIDE = [
+  body('dora_service').optional({ nullable: true }).isLength({ max: 150 }).withMessage('dora_service trop long (150 max)'),
+  body('dora_url').optional({ nullable: true, checkFalsy: true })
+    .isURL({ protocols: ['https'], require_protocol: true })
+    .withMessage('dora_url invalide (une adresse https est attendue)'),
+  body('dora_resultat').optional({ nullable: true, checkFalsy: true })
+    .isIn(DORA_RESULTATS).withMessage(`dora_resultat invalide (${DORA_RESULTATS.join(', ')})`),
+  body('aide_nature').optional({ nullable: true, checkFalsy: true })
+    .isIn(AIDE_NATURES).withMessage(`aide_nature invalide (${AIDE_NATURES.join(', ')})`),
+  body('aide_organisme').optional({ nullable: true }).isLength({ max: 150 }).withMessage('aide_organisme trop long (150 max)'),
+  // CORRECTIF D-05 / m-01 — la borne HAUTE est celle de la colonne.
+  // `NUMERIC(9,2)` déborde en 22003, code que ni le POST ni le PUT ne
+  // traduisaient : la conseillère recevait « Erreur serveur » sans savoir quoi
+  // corriger. Un dépassement de capacité est une saisie invalide, pas une panne.
+  body('aide_montant').optional({ nullable: true, checkFalsy: true })
+    .isFloat({ min: 0, max: 9999999.99 })
+    .withMessage('aide_montant invalide (nombre positif, 9 999 999,99 € au plus, ou vide)'),
+];
+
 // GET /api/insertion/action-plans/:employeeId — Tous les plans d'action
 // (le rattachement à un entretien est désormais OPTIONNEL → LEFT JOIN)
 router.get('/action-plans/:employeeId', async (req, res) => {
@@ -1479,30 +1547,41 @@ router.post('/action-plans', [
   body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('action_label').notEmpty().withMessage('Libellé de l\'action requis'),
-  body('category').isIn(['competence', 'insertion', 'socialisation', 'frein']).withMessage('Catégorie invalide'),
+  body('category').isIn(ACTION_CATEGORIES).withMessage(`Catégorie invalide (${ACTION_CATEGORIES.join(', ')})`),
   body('priority').optional({ nullable: true }).isIn(['haute', 'moyenne', 'basse']).withMessage('Criticité invalide'),
   body('echeance').optional({ nullable: true }).isISO8601().withMessage('Échéance invalide'),
   body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
   body('partenaire_id').optional({ nullable: true }).isInt().withMessage('partenaire_id invalide'),
   body('duree_minutes').optional({ nullable: true }).isInt({ min: 0 }).withMessage('duree_minutes invalide'),
+  ...VALIDATEURS_DORA_AIDE,
 ], validate, async (req, res) => {
   try {
     const { milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes,
-      objectif_id, partenaire_id, resultat, duree_minutes } = req.body;
+      objectif_id, partenaire_id, resultat, duree_minutes,
+      dora_service, dora_url, dora_resultat, aide_nature, aide_organisme, aide_montant } = req.body;
+    // Chaîne vide → NULL : « non renseigné » ne doit pas s'écrire comme une
+    // valeur vide qui passerait les CHECK et fausserait les comptages.
+    const vide = (v) => (v === '' || v === undefined ? null : v);
     const result = await pool.query(
       `INSERT INTO cip_action_plans
          (milestone_id, employee_id, action_label, category, frein_type, priority, echeance, notes,
-          objectif_id, partenaire_id, resultat, duree_minutes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+          objectif_id, partenaire_id, resultat, duree_minutes, created_by,
+          dora_service, dora_url, dora_resultat, aide_nature, aide_organisme, aide_montant)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
       [milestone_id || null, employee_id, action_label, category, frein_type || null,
         priority || 'moyenne', echeance || null, notes || null,
         objectif_id || null, partenaire_id || null, resultat || null,
-        duree_minutes != null && duree_minutes !== '' ? duree_minutes : null, req.user.id]
+        duree_minutes != null && duree_minutes !== '' ? duree_minutes : null, req.user.id,
+        vide(dora_service), vide(dora_url), vide(dora_resultat),
+        vide(aide_nature), vide(aide_organisme), vide(aide_montant)]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23503') {
       return res.status(400).json({ error: 'Référence invalide (entretien, objectif ou partenaire inexistant).' });
+    }
+    if (err.code === '23514' || err.code === '22003') {
+      return res.status(400).json({ error: 'Valeur invalide (hors liste ou hors capacité de la colonne).', code: err.code });
     }
     console.error('[INSERTION] Erreur action-plans POST :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1521,12 +1600,16 @@ router.put('/action-plans/:id', [
   // l'action dans la semaine où elle s'est déroulée, pas dans celle où on l'a
   // notée. `updated_at` ne pouvait pas servir (elle bouge à chaque retouche).
   body('date_realisation').optional({ nullable: true }).isISO8601().withMessage('date_realisation invalide (AAAA-MM-JJ)'),
+  body('category').optional().isIn(ACTION_CATEGORIES).withMessage(`Catégorie invalide (${ACTION_CATEGORIES.join(', ')})`),
+  ...VALIDATEURS_DORA_AIDE,
 ], validate, async (req, res) => {
   try {
     const d = req.body;
     const editable = ['action_label', 'status', 'priority', 'echeance', 'notes',
       'category', 'frein_type', 'milestone_id', 'objectif_id', 'partenaire_id', 'resultat', 'duree_minutes',
-      'date_realisation'];
+      'date_realisation',
+      // PR D lot 6 — orientation DORA et aide mobilisée (P2 / C5).
+      'dora_service', 'dora_url', 'dora_resultat', 'aide_nature', 'aide_organisme', 'aide_montant'];
     const sets = [];
     const vals = [];
     for (const field of editable) {
@@ -1554,7 +1637,7 @@ router.put('/action-plans/:id', [
     if (result.rows.length === 0) return res.status(404).json({ error: 'Action non trouvee' });
     res.json(result.rows[0]);
   } catch (err) {
-    if (err.code === '23503' || err.code === '23514') {
+    if (err.code === '23503' || err.code === '23514' || err.code === '22003') {
       return res.status(400).json({ error: 'Valeur ou référence invalide.', code: err.code });
     }
     console.error('[INSERTION] Erreur action-plans PUT :', err);
@@ -1769,8 +1852,15 @@ router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
   body('milestone_id').optional({ nullable: true }).isInt().withMessage('milestone_id invalide'),
   body('objectif_id').optional({ nullable: true }).isInt().withMessage('objectif_id invalide'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const avant = await client.query('SELECT * FROM insertion_notes_suivi WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (avant.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Note non trouvée' }); }
@@ -1799,12 +1889,12 @@ router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
     });
     res.json(composerNoteSuivi(r.rows[0]));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (entretien ou objectif inexistant).' });
     console.error('[INSERTION] Erreur notes-suivi PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -1814,8 +1904,15 @@ router.put('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
 router.delete('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
   param('id').isInt().withMessage('ID invalide'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const avant = await client.query('SELECT * FROM insertion_notes_suivi WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (avant.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Note non trouvée' }); }
@@ -1827,11 +1924,11 @@ router.delete('/notes-suivi/:id', authorize('ADMIN', 'RH'), [
     });
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('[INSERTION] Erreur notes-suivi DELETE :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -2020,7 +2117,14 @@ router.delete('/objectifs/:id', authorize('ADMIN', 'RH'), [
 // Lecture tous rôles du module ; écriture A/RH. AVANT /:employeeId.
 // ══════════════════════════════════════════════════════════════
 
-const PARTENAIRE_CATEGORIES = ['administratif', 'emploi', 'logement', 'sante', 'justice', 'formation', 'mobilite', 'autre'];
+// Catégories de partenaires — liste fermée de la validation applicative.
+// PR D : ajout de `cms` (amendement A5 : le référent unique d'un bénéficiaire du
+// RSA est le plus souvent un travailleur social du centre médico-social, et sans
+// la catégorie les actions prises avec lui sortent des statistiques par
+// partenaire) et de `social`, que l'écran d'administration proposait DÉJÀ alors
+// que le serveur la refusait en 400 — divergence préexistante, corrigée ici
+// parce que le seed du CMS posé par la PR A porte précisément cette valeur.
+const PARTENAIRE_CATEGORIES = ['administratif', 'emploi', 'logement', 'sante', 'social', 'cms', 'justice', 'formation', 'mobilite', 'autre'];
 
 // GET /api/insertion/partenaires?actifs=1&categorie=
 router.get('/partenaires', async (req, res) => {
@@ -2578,6 +2682,76 @@ router.get('/pmsmp/:employeeId', [
   }
 });
 
+/**
+ * Débouché d'une immersion — liste fermée, MIROIR du CHECK
+ * (`migrations/insertion-reporting.js`). C'est la donnée que l'autorité réclame
+ * depuis son rapport 06 (exigence S7) : « PMSMP ayant donné lieu à une embauche
+ * chez l'accueillant — c'est la phrase qui justifie un financement ».
+ */
+const { PMSMP_DEBOUCHES } = require('../../scripts/migrations/insertion-reporting');
+
+/**
+ * `embauche_accueillant` est DÉDUIT du débouché, jamais saisi deux fois — deux
+ * champs qui disent la même chose finissent par se contredire. Trois états :
+ * `true` (embauche chez l'accueillant), `false` (on sait que non), `null` quand
+ * le débouché est « inconnu » ou n'est pas renseigné — « on ne sait pas encore »
+ * n'est pas « non », et une immersion close hier n'a pas encore de réponse.
+ */
+function embaucheAccueillantDepuisDebouche(debouche) {
+  if (debouche === 'embauche_accueillant') return true;
+  if (debouche == null || debouche === '' || debouche === 'inconnu') return null;
+  return false;
+}
+
+/**
+ * CORRECTIF m-12 — un débouché se constate à la CLÔTURE de l'immersion.
+ *
+ * La garde n'existait que dans `PmsmpPanel.jsx` : le serveur acceptait un
+ * débouché sur une immersion encore en cours, et ne confrontait jamais
+ * `debouche_date` à `date_fin`. L'indicateur S7 — « immersions ayant donné lieu
+ * à une embauche chez l'accueillant », la phrase qui justifie un financement —
+ * pouvait donc être alimenté avant la fin de l'immersion qu'il décrit. Une
+ * garde d'écran n'est pas une règle : elle ne protège que le chemin qui passe
+ * par l'écran.
+ *
+ * @returns {{status:number, body:object}|null} le refus, ou `null` si tout va bien.
+ */
+function refusDebouche(d, dateFinEffective) {
+  const debouche = d.debouche === '' ? null : d.debouche;
+  if (!debouche) return null;
+  const fin = isoDate(dateFinEffective);
+  const aujourdhui = aujourdhuiParis();
+  if (fin && fin > aujourdhui) {
+    return {
+      status: 409,
+      body: {
+        error: `Cette immersion se termine le ${fin} : son débouché ne peut être saisi qu'à sa clôture.`,
+        code: 'PMSMP_NON_TERMINEE',
+        hint: "Le débouché est un constat, pas une prévision — l'indicateur « embauche chez l'accueillant » est transmis à l'autorité.",
+      },
+    };
+  }
+  const dDeb = d.debouche_date === '' ? null : isoDate(d.debouche_date);
+  if (dDeb && fin && dDeb < fin) {
+    return {
+      status: 409,
+      body: {
+        error: `La date du débouché (${dDeb}) précède la fin de l'immersion (${fin}).`,
+        code: 'DEBOUCHE_AVANT_FIN',
+        hint: "Corrigez la date du débouché, ou la date de fin de l'immersion si c'est elle qui est fausse.",
+      },
+    };
+  }
+  return null;
+}
+
+const VALIDATEURS_DEBOUCHE = [
+  body('debouche').optional({ nullable: true, checkFalsy: true })
+    .isIn(PMSMP_DEBOUCHES).withMessage(`debouche invalide (${PMSMP_DEBOUCHES.join(', ')})`),
+  body('debouche_date').optional({ nullable: true, checkFalsy: true })
+    .isISO8601().withMessage('debouche_date invalide (AAAA-MM-JJ)'),
+];
+
 // POST /api/insertion/pmsmp — créer (ADMIN/RH)
 router.post('/pmsmp', authorize('ADMIN', 'RH'), [
   body('employee_id').isInt().withMessage('ID employé requis'),
@@ -2592,12 +2766,20 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
   body('autres_jours_connus').optional({ nullable: true }).isInt({ min: 0, max: 366 }).withMessage('autres_jours_connus invalide (0-366)'),
   body('force').optional().isBoolean().withMessage('force invalide'),
   body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+  ...VALIDATEURS_DEBOUCHE,
 ], validate, async (req, res) => {
   // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74) : le
   // contrôle de cumul et l'insertion sont sérialisés, sinon deux saisies
   // concurrentes pourraient chacune passer le plafond 60 j puis totaliser > 60 j.
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     await client.query('BEGIN');
     const emp = await client.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [d.employee_id]);
@@ -2609,17 +2791,22 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
     });
     if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
 
+    const refusD = refusDebouche(d, d.date_fin);
+    if (refusD) { await client.query('ROLLBACK'); return res.status(refusD.status).json(refusD.body); }
+
     let bilan = (d.bilan != null && d.bilan !== '') ? String(d.bilan) : null;
     if (check.forced) bilan = `${bilan ? bilan + '\n' : ''}${pmsmpForceTrace(check.motif, check.cumul)}`;
 
     const r = await client.query(
       `INSERT INTO insertion_pmsmp
-         (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11)
+         (employee_id, entreprise, siret, objet, date_debut, date_fin, tuteur, bilan, saisie_outil_officiel, convention_ref, created_by,
+          debouche, debouche_date, embauche_accueillant)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, false), $10, $11, $12, $13, $14)
        RETURNING *`,
       [d.employee_id, d.entreprise.trim(), d.siret || null, d.objet, d.date_debut, d.date_fin,
         d.tuteur || null, bilan, typeof d.saisie_outil_officiel === 'boolean' ? d.saisie_outil_officiel : null,
-        d.convention_ref || null, req.user.id]
+        d.convention_ref || null, req.user.id,
+        d.debouche || null, d.debouche_date || null, embaucheAccueillantDepuisDebouche(d.debouche)]
     );
     await client.query('COMMIT');
     const row = r.rows[0];
@@ -2627,12 +2814,12 @@ router.post('/pmsmp', authorize('ADMIN', 'RH'), [
     if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
     res.status(201).json(out);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié inexistant).' });
     console.error('[INSERTION] Erreur pmsmp POST :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -2650,11 +2837,19 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
   body('saisie_outil_officiel').optional({ nullable: true }).isBoolean().withMessage('saisie_outil_officiel invalide'),
   body('force').optional().isBoolean().withMessage('force invalide'),
   body('motif_depassement').optional({ nullable: true }).isLength({ max: 500 }).withMessage('motif_depassement trop long (500 max)'),
+  ...VALIDATEURS_DEBOUCHE,
 ], validate, async (req, res) => {
   // Transaction + verrou sur la fiche salarié (P2 revue Codex PR#74), même
   // motif que le POST : contrôle de cumul et écriture sérialisés.
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     await client.query('BEGIN');
     const cur = await client.query('SELECT * FROM insertion_pmsmp WHERE id = $1', [req.params.id]);
@@ -2671,13 +2866,22 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
     });
     if (check.refus) { await client.query('ROLLBACK'); return res.status(check.refus.status).json(check.refus.body); }
 
-    const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan', 'saisie_outil_officiel', 'convention_ref'];
+    const refusD = refusDebouche(d, dateFin);
+    if (refusD) { await client.query('ROLLBACK'); return res.status(refusD.status).json(refusD.body); }
+
+    const editable = ['entreprise', 'siret', 'objet', 'date_debut', 'date_fin', 'tuteur', 'bilan',
+      'saisie_outil_officiel', 'convention_ref', 'debouche', 'debouche_date'];
     const sets = [];
     const vals = [];
     for (const field of editable) {
       if (!(field in d)) continue;
       vals.push(d[field] === '' ? null : d[field]);
       sets.push(`${field} = $${vals.length}`);
+    }
+    // `embauche_accueillant` suit le débouché et n'est jamais saisi à part.
+    if ('debouche' in d) {
+      vals.push(embaucheAccueillantDepuisDebouche(d.debouche === '' ? null : d.debouche));
+      sets.push(`embauche_accueillant = $${vals.length}`);
     }
     if (check.forced) {
       // Trace du dépassement assumé dans le bilan (même si `bilan` absent du body).
@@ -2699,12 +2903,12 @@ router.put('/pmsmp/:id', authorize('ADMIN', 'RH'), [
     if (!row.saisie_outil_officiel) out.rappel = PMSMP_RAPPEL_OUTIL;
     res.json(out);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23514') return res.status(400).json({ error: 'Valeur rejetée par une contrainte de la base', code: err.code });
     console.error('[INSERTION] Erreur pmsmp PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -3639,7 +3843,19 @@ const FREIN_AXES = freinColumns(); // 9 axes du registre unique
 
 // Agrège les indicateurs chiffrés de l'audit. Résilient : chaque requête qui
 // échoue (colonne absente sur base ancienne) dégrade au lieu de tout casser.
-async function gatherAuditKpis(year) {
+/**
+ * Indicateurs chiffrés de l'audit d'insertion.
+ *
+ * @param {number} year année civile.
+ * @param {object} [opts]
+ * @param {string} [opts.baseRole] rôle de base de l'appelant. Les blocs de
+ *   STATUT SOCIAL (BRSA, catégorie France Travail, référent unique, critères
+ *   d'éligibilité dont RQTH, ressources perçues) ne sont ni lus ni composés
+ *   hors ADMIN/RH — voir le correctif B-02 plus bas. Par défaut ADMIN, pour que
+ *   les appelants internes (bilan RSE, rapport IA) gardent le comportement
+ *   qu'ils avaient ; les deux routes ouvertes au MANAGER passent le rôle.
+ */
+async function gatherAuditKpis(year, { baseRole = 'ADMIN' } = {}) {
   const soft = async (label, text, params = []) => {
     try { return (await pool.query(text, params)).rows; }
     catch (err) { console.error(`[INSERTION][AUDIT] « ${label} » ignorée (${err.code || '?'}) : ${err.message}`); return []; }
@@ -3759,20 +3975,36 @@ async function gatherAuditKpis(year) {
   // l'import paie), ressources perçues, niveaux de formation (nomenclature
   // officielle du diagnostic), tranches d'âge NON nominatives (ageBracket de
   // pii-pseudonymize — jamais la date de naissance en restitution).
+  // CORRECTIF B-02 (étendu) — `typologies` porte `rqth` (compte de travailleurs
+  // handicapés, nommé par l'exigence) et `ressources` (les prestations sociales
+  // perçues). Les deux colonnes ne sont pas LUES hors ADMIN/RH ; les tranches
+  // d'âge et les niveaux de formation, qui ne sont pas des statuts sociaux,
+  // restent servis à l'encadrant.
+  const adminRhTypo = ['ADMIN', 'RH'].includes(baseRole);
   const typoRows = await soft('typologies', `
-    SELECT e.birth_date, e.disability_status, d.rqth, d.ressources, d.niveau_formation
+    SELECT e.birth_date,
+           ${adminRhTypo ? 'e.disability_status, d.rqth, d.ressources,' : 'NULL AS disability_status, NULL::boolean AS rqth, NULL::text[] AS ressources,'}
+           d.niveau_formation
     FROM employees e
     LEFT JOIN insertion_diagnostics d ON d.employee_id = e.id
       AND COALESCE(d.parcours_num, 1) = COALESCE(e.parcours_num, 1)
     WHERE e.insertion_status = 'en_parcours' AND e.is_active = true`);
-  const typologies = { effectif: typoRows.length, rqth: 0, ressources: {}, niveaux_formation: {}, tranches_age: {} };
+  const typologies = {
+    effectif: typoRows.length,
+    rqth: adminRhTypo ? 0 : null,
+    ressources: adminRhTypo ? {} : null,
+    niveaux_formation: {},
+    tranches_age: {},
+  };
   for (const r of typoRows) {
-    const rqth = r.rqth === true
-      || (r.rqth == null && r.disability_status != null && String(r.disability_status).trim() !== '');
-    if (rqth) typologies.rqth += 1;
-    if (Array.isArray(r.ressources)) {
-      for (const src of r.ressources) {
-        if (src) typologies.ressources[src] = (typologies.ressources[src] || 0) + 1;
+    if (adminRhTypo) {
+      const rqth = r.rqth === true
+        || (r.rqth == null && r.disability_status != null && String(r.disability_status).trim() !== '');
+      if (rqth) typologies.rqth += 1;
+      if (Array.isArray(r.ressources)) {
+        for (const src of r.ressources) {
+          if (src) typologies.ressources[src] = (typologies.ressources[src] || 0) + 1;
+        }
       }
     }
     if (r.niveau_formation) {
@@ -3901,6 +4133,56 @@ async function gatherAuditKpis(year) {
     console.error(`[INSERTION][AUDIT] « heures_accompagnement » ignorée : ${err.message}`);
   }
 
+  // ═══ PR D lot 6 — blocs du reporting autorité ═══════════════════════════
+  //
+  // Ils sont composés par les MÊMES fonctions que la synthèse de dialogue de
+  // gestion (`services/dialogue-gestion.composerBlocsInternes`), avec une seule
+  // différence : aucune suppression k-anonymat, parce qu'il s'agit ici d'un
+  // ÉCRAN INTERNE consulté par les personnes qui tiennent les dossiers. Les
+  // recopier aurait produit deux chiffres pour le même indicateur — celui de
+  // l'écran de pilotage et celui du document signé transmis au financeur.
+  //
+  // Résilient : une base non migrée fait dégrader ces blocs à `null`, l'audit
+  // existant continue de s'afficher entier.
+  //
+  // ═══ CORRECTIF B-02 (bloquant) — LA FRONTIÈRE EST LE RÔLE ════════════════
+  //
+  // `publics_entree` porte le statut BRSA, la catégorie France Travail, le type
+  // de référent unique et les critères d'éligibilité IAE — dont « Travailleur
+  // handicapé (RQTH) ». `CLAUDE.md` réserve les statuts sociaux à ADMIN/RH
+  // strict, la PR C écrit « brsa jamais LU pour un MANAGER », et le constat
+  // bloquant de la PR A portait déjà sur la liste des critères d'éligibilité
+  // servie à l'encadrant avec ses libellés. Ces blocs partaient pourtant vers
+  // `GET /audit` et `GET /exports/insertion-synthese`, tous deux ouverts au
+  // MANAGER, sans aucune suppression — le chemin interne passant `k = identité`.
+  // Sur une période à UNE personne, l'encadrant lisait `brsa: 1` et « RQTH (1) »,
+  // c'est-à-dire la donnée individuelle elle-même, en regard d'une file active
+  // nominative qu'il a par ailleurs.
+  //
+  // Le contrat affirme que « les nouveaux blocs ne portent aucune clé par
+  // salarié » : c'est vrai au sens littéral, et c'est insuffisant. La protection
+  // dont ces données bénéficiaient n'était pas « pas de clé par salarié »,
+  // c'était LE RÔLE. La décision est donc prise ICI, dans la route, et le bloc
+  // n'est PAS COMPOSÉ hors ADMIN/RH : sa requête ne part pas. Un filtrage après
+  // lecture serait un refus d'affichage, pas un refus d'accès.
+  const adminRh = adminRhTypo;
+  let blocsAutorite = null;
+  try {
+    blocsAutorite = await require('../../services/dialogue-gestion')
+      .composerBlocsInternes({ annee: year, avecPublics: adminRh });
+  } catch (err) {
+    console.error(`[INSERTION][AUDIT] blocs reporting autorité ignorés : ${err.message}`);
+  }
+
+  // ── Sorties : la MÉTHODE B vient du moteur PUR partagé ────────────────────
+  //
+  // Les clés historiques (`total`, `dynamiques`, `taux_dynamiques`…) restent
+  // celles de la MÉTHODE A — elles alimentent des écrans et des exports qui
+  // existent depuis 2026-07 et dont la série ne doit pas bouger sans préavis.
+  // Le nouveau dénominateur arrive À CÔTÉ, dans `methode_b`, et c'est lui que
+  // l'écran affiche en premier depuis la PR D.
+  const sortiesB = blocsAutorite && blocsAutorite.sorties ? blocsAutorite.sorties : null;
+
   return {
     annee: year,
     nb_en_parcours: nbEnParcours,
@@ -3911,6 +4193,7 @@ async function gatherAuditKpis(year) {
     frein_dominant: freinDominant,
     actions,
     sorties: {
+      // ── Méthode A (historique) — clés INCHANGÉES ──
       total: totalSorties,
       dynamiques: nbDynamiques,
       autres: nbAutres,
@@ -3918,14 +4201,52 @@ async function gatherAuditKpis(year) {
       par_classification: parClassification,
       taux_par_classification: tauxParClassification,
       par_type: parType,
+      // ── PR D lot 6 — méthode B et ce qu'elle rend visible ──
+      methode_b: sortiesB ? sortiesB.methode_b : null,
+      methode_a_imprimee: sortiesB ? sortiesB.methode_a : null,
+      non_documentees: sortiesB && sortiesB.methode_b ? sortiesB.methode_b.non_documentees : null,
+      rapprochement_asp: sortiesB ? sortiesB.rapprochement_asp : null,
+      regles: sortiesB ? sortiesB.regles : null,
     },
     // ── Blocs PR 2 (EXG-10/14/24/47) ──
     conventionnel,
     typologies,
     delai_moyen_diagnostic_jours: delaiMoyenDiagnostic,
     etp_realises_approx: etpRealisesApprox,
-    pmsmp,
+    // PMSMP : clés historiques CONSERVÉES, enrichies des trois indicateurs que
+    // l'autorité réclame (S1 / S7) — débouché, embauche chez l'accueillant,
+    // entreprises d'accueil. `null` quand la source n'a pas pu être lue.
+    pmsmp: {
+      ...pmsmp,
+      par_debouche: blocsAutorite?.immersions?.par_debouche ?? null,
+      embauches_chez_accueillant: blocsAutorite?.immersions?.embauches_chez_accueillant ?? null,
+      entreprises: blocsAutorite?.immersions?.entreprises_distinctes ?? null,
+      liste_entreprises: blocsAutorite?.immersions?.liste_entreprises ?? null,
+    },
     satisfaction,
+    // ── Blocs PR D lot 6 « Reporting autorité » (non nominatifs) ──
+    // `null` quand la source n'a pas pu être lue — jamais un objet vide qui se
+    // lirait « rien à signaler ».
+    freins_evolution: blocsAutorite ? blocsAutorite.freins : null,
+    publics_entree: blocsAutorite ? blocsAutorite.publics : null,   // `null` hors ADMIN/RH (B-02)
+    immersions: blocsAutorite ? blocsAutorite.immersions : null,
+    conformite: blocsAutorite ? blocsAutorite.conformite : null,
+    accompagnement: blocsAutorite ? blocsAutorite.accompagnement : null,
+    etp_asp: blocsAutorite ? blocsAutorite.etp : null,
+    aides_mobilisees: blocsAutorite && blocsAutorite.accompagnement
+      ? blocsAutorite.accompagnement.aides_mobilisees : null,
+    dora: blocsAutorite && blocsAutorite.freins
+      ? (blocsAutorite.freins.par_axe || []).map((a) => ({
+        axe: a.axe, label: a.label, orientations: a.orientations_dora, resultats: a.dora_resultats,
+      }))
+      : null,
+    actions_partenaires: blocsAutorite && blocsAutorite.freins
+      ? (blocsAutorite.freins.par_axe || [])
+        .filter((a) => a.partenaire_principal)
+        .map((a) => ({ axe: a.axe, label: a.label, partenaire_principal: a.partenaire_principal, actions: a.actions_engagees }))
+      : null,
+    ruptures_droits_evitees: blocsAutorite && blocsAutorite.conformite
+      ? blocsAutorite.conformite.ruptures_droits_evitees : null,
     // Convergence (CVG, §6bis-2) : bloc réservé — le paramétrage précis attend
     // la trame de reporting CVG demandée à la direction ; les indicateurs
     // génériques (freins, sorties, actions) sont déjà couverts ci-dessus.
@@ -3954,12 +4275,39 @@ async function gatherAuditVerbatims() {
   return { observations_diagnostics: observations, bilans_jalons: bilans, notes_actions: notesActions };
 }
 
+/**
+ * Deuxième ceinture du correctif B-02 : la projection par rôle, posée à la
+ * FRONTIÈRE, juste avant l'envoi — comme `heures_accompagnement.par_salarie` en
+ * PR B. La première ceinture (ne pas composer le bloc) évite la lecture ; celle-ci
+ * garantit que rien ne revient par une clé dérivée écrite demain, et elle est ce
+ * que le test cherche : les clés interdites sont absentes de la RÉPONSE.
+ */
+function projeterAuditPourRole(kpis, baseRole) {
+  if (['ADMIN', 'RH'].includes(baseRole)) return kpis;
+  // Clé RETIRÉE, jamais nullifiée — doctrine du masquage de ce module
+  // (`maskActionPlansForRole`) : une clé absente dit « non habilité », une clé
+  // à `null` dit « nous n'avons pas su lire », et confondre les deux fait
+  // chercher une panne là où il y a une règle.
+  const out = { ...kpis };
+  delete out.publics_entree;
+  if (out.typologies) {
+    const { rqth, ressources, ...reste } = out.typologies;
+    out.typologies = reste;
+  }
+  out.projection_role = {
+    applique: true,
+    note: "Statuts sociaux (BRSA, catégorie France Travail, référent unique, critères d'éligibilité, RQTH, ressources) réservés aux profils ADMIN / RH.",
+  };
+  return out;
+}
+
 // GET /api/insertion/audit — Indicateurs chiffrés de l'audit (sans IA).
 // IMPORTANT: AVANT /:employeeId.
 router.get('/audit', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    res.json(await gatherAuditKpis(year));
+    const baseRole = baseRoleOf(req);
+    res.json(projeterAuditPourRole(await gatherAuditKpis(year, { baseRole }), baseRole));
   } catch (err) {
     console.error('[INSERTION][AUDIT] Erreur :', err.message);
     res.status(500).json({ error: 'Erreur serveur', detail: err.message });
@@ -3971,7 +4319,8 @@ router.get('/audit', async (req, res) => {
 router.get('/audit/ia', authorize('ADMIN', 'RH'), async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-    const [kpis, verbatims] = await Promise.all([gatherAuditKpis(year), gatherAuditVerbatims()]);
+    const [kpis, verbatims] = await Promise.all([
+      gatherAuditKpis(year, { baseRole: baseRoleOf(req) }), gatherAuditVerbatims()]);
     const { auditGlobalReport } = require('../../services/insertion-ai');
     res.json(await auditGlobalReport({ kpis, verbatims }));
   } catch (err) {
@@ -4207,11 +4556,20 @@ router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
   body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
   body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     const emp = await client.query('SELECT id FROM employees WHERE id = $1', [d.employee_id]);
-    if (emp.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Salarié non trouvé' }); }
+    // Pas de `client.release()` ici : le `finally` s'en charge. Relâcher deux
+    // fois lève une erreur DEPUIS le `finally`, hors de tout `catch`.
+    if (emp.rows.length === 0) return res.status(404).json({ error: 'Salarié non trouvé' });
     const pn = await currentParcoursNum(client, d.employee_id);
     await client.query('BEGIN');
     const ev = await client.query(
@@ -4228,13 +4586,13 @@ router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
     const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [evaluation.id]);
     res.status(201).json({ ...evaluation, scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (salarié ou item de référentiel inexistant).' });
     console.error('[INSERTION] Erreur competences POST :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -4248,11 +4606,18 @@ router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
   body('periode').optional({ nullable: true }).isLength({ max: 20 }).withMessage('periode trop longue (20 max)'),
   body('scores').optional({ nullable: true }).isArray().withMessage('scores doit être un tableau'),
 ], validate, async (req, res) => {
-  const client = await pool.connect();
+  // `pool.connect()` DANS le try (correctif M-02) : posé au-dessus, son rejet
+  // — un pool épuisé rend `53300 remaining connection slots` — n'est attrapé
+  // par aucun `catch`. Express 4 ne rattrape pas le rejet d'un gestionnaire
+  // `async`, aucun `process.on('unhandledRejection')` n'existe dans le dépôt,
+  // et Node ≥ 15 TERMINE alors le processus : ce n'est pas une requête
+  // pendante, c'est l'arrêt du backend.
+  let client;
   try {
+    client = await pool.connect();
     const d = req.body;
     const cur = await client.query('SELECT id FROM insertion_competence_evaluations WHERE id = $1', [req.params.id]);
-    if (cur.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Évaluation non trouvée' }); }
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Évaluation non trouvée' });
     await client.query('BEGIN');
     const editable = ['filiere', 'periode', 'date_evaluation', 'statut', 'synthese'];
     const sets = []; const vals = [];
@@ -4271,13 +4636,13 @@ router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
     const scoresRes = await pool.query('SELECT * FROM insertion_competence_scores WHERE evaluation_id = $1 ORDER BY id', [req.params.id]);
     res.json({ ...ev.rows[0], scores: scoresRes.rows, moyenne: competenceAverage(scoresRes.rows).moyenne });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     if (err.code === 'COMP_NOTE') return res.status(400).json({ error: 'Note de compétence hors bornes (0-10) — utilisez N/E (non_evalue) pour un item non évalué.' });
     if (err.code === '23503') return res.status(400).json({ error: 'Référence invalide (item de référentiel inexistant).' });
     console.error('[INSERTION] Erreur competences PUT :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -4895,3 +5260,4 @@ module.exports.gatherAuditKpis = gatherAuditKpis;
 module.exports.snapshotMilestone = snapshotMilestone;
 module.exports.managerOwnsEmployee = managerOwnsEmployee;
 module.exports.baseRoleOf = baseRoleOf;
+module.exports.projeterAuditPourRole = projeterAuditPourRole;

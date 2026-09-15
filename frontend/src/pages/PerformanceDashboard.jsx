@@ -220,8 +220,16 @@ export default function PerformanceDashboard() {
                 <IndustrialTile label="Productivité" value={industrialKpis.production.productivite_kg_pers_jour} unit="kg/p/j" />
                 <IndustrialTile label="Effectif moyen" value={industrialKpis.production.effectif_moyen} unit="pers" />
                 <IndustrialTile label="Jours travaillés" value={industrialKpis.production.jours_travailles} unit="j" />
-                <IndustrialTile label="Parcours insertion" value={industrialKpis.insertion.parcours_actifs} unit="actifs" />
-                <IndustrialTile label="Parcours terminés" value={industrialKpis.insertion.parcours_termines} unit="" />
+                {/* PR D lot 6 — « Parcours terminés » (compteur historique, sans
+                    borne de temps ni classification) remplacé par la nomenclature
+                    de la convention. Un taux n'est affiché que s'il a un
+                    dénominateur : « non calculé » et jamais « 0 % ». */}
+                <IndustrialTile label="Parcours insertion" value={industrialKpis.insertion.en_parcours ?? industrialKpis.insertion.parcours_actifs} unit="en parcours" />
+                <IndustrialTile label="Sorties dynamiques (année)"
+                  value={industrialKpis.insertion.sorties?.taux_dynamiques_pct ?? '—'}
+                  unit={industrialKpis.insertion.sorties?.taux_dynamiques_pct != null ? '%' : 'non calculé'} />
+                <IndustrialTile label="Sorties non documentées"
+                  value={industrialKpis.insertion.sorties?.non_documentees ?? '—'} unit="" />
               </div>
             ) : (
               <p className="text-sm text-slate-400 text-center py-12">Aucune donnée</p>
