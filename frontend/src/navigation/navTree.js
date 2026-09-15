@@ -15,9 +15,15 @@
  * main divergerait au premier écran déplacé, et l'accord porterait alors sur un
  * module différent de celui affiché dans le menu.
  */
+// `Map as MapIcon` N'EST PAS UNE COQUETTERIE DE STYLE : lucide expose une icône
+// nommée `Map`, qui MASQUE le `Map` du langage sur tout le module. Le `new Map()`
+// de l'index plus bas construisait alors l'icône — un objet React, pas un
+// constructeur —, l'entrée du bundle mourait à l'évaluation et TOUTES les pages,
+// connexion comprise, restaient blanches (aucun rempart React ne peut rattraper
+// cela : React n'a jamais démarré). Ne pas retirer l'alias.
 import {
   LayoutDashboard, Newspaper, UserPlus, Brain, Users, Clock, Star, Heart,
-  ClipboardList, IdCard, Truck, Sparkles, Map, BarChart3, MapPin, Factory, Route,
+  ClipboardList, IdCard, Truck, Sparkles, Map as MapIcon, BarChart3, MapPin, Factory, Route,
   ArrowUpDown, Package, Tag, CircleDollarSign, PieChart, BarChart2,
   RefreshCw, Lock, Settings, Car,
   Handshake, Warehouse, Scale, Activity, Radio,
@@ -63,7 +69,7 @@ export const NAV_TREE = [
           },
           { label: 'Collecte en direct', path: '/collections-live', icon: MapPin, roles: ['ADMIN'] },
           { label: 'Incidents', path: '/incidents', icon: AlertTriangle, roles: ['ADMIN'] },
-          { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['ADMIN'] },
+          { label: 'Carte des CAV', path: '/fill-rate', icon: MapIcon, roles: ['ADMIN'] },
           {
             // Réglages de la collecte — remontés d'« Administration > Collecte »
             // (demande client 27/08/2026) : ces écrans servent au quotidien du
@@ -72,14 +78,14 @@ export const NAV_TREE = [
             label: 'Réglages',
             icon: Settings,
             children: [
-              { label: 'Gestion des CAV', path: '/admin-cav', icon: Map, roles: ['ADMIN'] },
+              { label: 'Gestion des CAV', path: '/admin-cav', icon: MapIcon, roles: ['ADMIN'] },
               { label: 'Capteurs CAV', path: '/admin-sensors', icon: Radio, roles: ['ADMIN'] },
               { label: 'Associations', path: '/admin-associations', icon: Handshake, roles: ['ADMIN'] },
               { label: "Lieux d'arrêt", path: '/admin-lieux-techniques', icon: MapPinned, roles: ['ADMIN'] },
               { label: 'Véhicules', path: '/vehicles', icon: Car, roles: ['ADMIN'] },
               { label: 'Maintenance', path: '/vehicle-maintenance', icon: Wrench, roles: ['ADMIN'] },
               { label: 'Moteur prédictif', path: '/admin-predictive', icon: Brain, roles: ['ADMIN'] },
-              { label: 'Communes (INSEE)', path: '/admin/communes', icon: Map, roles: ['ADMIN'] },
+              { label: 'Communes (INSEE)', path: '/admin/communes', icon: MapIcon, roles: ['ADMIN'] },
             ],
           },
           { label: 'Historique des tournées', path: '/tours', icon: ClipboardList, roles: ['ADMIN'] },
@@ -270,7 +276,7 @@ export const NAV_TREE = [
     children: [
       { label: 'Reporting Métropole', path: '/reporting-metropole', icon: Building2, roles: ['AUTORITE'] },
       { label: 'Reporting Collecte', path: '/reporting-collecte', icon: BarChart3, roles: ['AUTORITE'] },
-      { label: 'Carte des CAV', path: '/fill-rate', icon: Map, roles: ['AUTORITE'] },
+      { label: 'Carte des CAV', path: '/fill-rate', icon: MapIcon, roles: ['AUTORITE'] },
       { label: 'Refashion (DPAV)', path: '/refashion', icon: RefreshCw, roles: ['AUTORITE'] },
       { label: "Exports d'audit DPAV", path: '/admin/refashion-exports', icon: Download, roles: ['AUTORITE'] },
     ],
