@@ -212,6 +212,14 @@ async function run(client) {
         n += r.rowCount;
       }
     }
+    // Ordre d'affichage du référentiel 2026 (une seule fois : un ordre retouché
+    // ensuite par l'exploitant n'est plus jamais écrasé). Sans lui, les valeurs
+    // déjà présentes gardaient l'ordre de l'ancien catalogue.
+    for (const [type, valeurs] of TYPES) {
+      for (const [i, v] of valeurs.entries()) {
+        await client.query(`UPDATE ref_dimensions SET ordre = $3 WHERE type = $1 AND valeur = $2`, [type, v.valeur, i]);
+      }
+    }
     // Retirées de la saisie, conservées pour l'historique.
     await client.query(`
       UPDATE ref_dimensions SET is_active = false
