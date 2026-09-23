@@ -87,7 +87,10 @@ export default function Layout({ children }) {
   // il n'est pas ouvert aux profils dont le périmètre est délibérément borné.
   // Le refus qui fait foi est côté serveur (routes/chat.js,
   // ROLES_SANS_ASSISTANT) ; ceci évite d'afficher un onglet qui répondrait 403.
-  const assistantActif = (user?.base_role || user?.role) !== 'COMMUNICATION';
+  // OPERATEUR_STOCK (2.57.0) : même règle, mêmes raisons — le serveur le refuse
+  // déjà (403 ASSISTANT_HORS_PERIMETRE), l'onglet ne doit pas l'annoncer.
+  const ROLES_SANS_ASSISTANT = ['COMMUNICATION', 'OPERATEUR_STOCK'];
+  const assistantActif = !ROLES_SANS_ASSISTANT.includes(user?.base_role || user?.role);
   const { total: messagesNonLus } = useNonLusBadge({ actif: messagerieActive });
   const notifications = useNotificationsNonLues(alerts);
 

@@ -48,6 +48,14 @@ function entierPositif(v) {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+/** Vrai si `s` est une date civile AAAA-MM-JJ qui existe (pas seulement une forme). */
+function dateCivileValide(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === m[0];
+}
+
 function tronquer(v, max) {
   if (v === null || v === undefined) return null;
   const s = String(v);
@@ -411,8 +419,12 @@ router.post('/annuler', async (req, res) => {
 // ══════════════════════════════════════════
 router.get('/journal', async (req, res) => {
   const { date, session_id, resultat } = req.query;
-  if (date !== undefined && date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
-    return res.status(400).json({ error: 'date au format AAAA-MM-JJ', code: 'PARAMETRES' });
+  // La forme AAAA-MM-JJ ne suffit pas : « 2026-13-45 » la respecte et faisait
+  // tomber le cast `$1::date` de PostgreSQL (22008) en 500. Une date qui
+  // n'existe pas dans le calendrier est refusée ici, en 400, comme les autres
+  // paramètres — l'écran n'a pas à distinguer une panne d'une saisie fausse.
+  if (date !== undefined && date !== '' && !dateCivileValide(date)) {
+    return res.status(400).json({ error: 'date au format AAAA-MM-JJ (date calendaire valide)', code: 'PARAMETRES' });
   }
   if (resultat && !RESULTATS.includes(resultat)) {
     return res.status(400).json({ error: `resultat parmi : ${RESULTATS.join(', ')}`, code: 'PARAMETRES' });

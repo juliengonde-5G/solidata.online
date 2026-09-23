@@ -217,11 +217,9 @@ export default function SortieCartons() {
     flashTimerRef.current = setTimeout(() => setFlash(null), FLASH_MIN_MS);
   }, []);
 
-  const handleScan = useCallback(async (codeBrut) => {
-    if (!scanning || busy) return;
-    const code = String(codeBrut || '').trim();
-    if (!code) return;
-    setBusy(true);
+  // Traitement d'UN code (requête + retour sonore/visuel). Ne décide pas de
+  // l'ordonnancement : c'est `handleScan` qui met en file.
+  const traiterCode = useCallback(async (code) => {
     try {
       const payload = {
         code_barre: code,
@@ -264,10 +262,45 @@ export default function SortieCartons() {
           message: body.error || 'Erreur',
         });
       }
-    } finally {
-      setBusy(false);
     }
-  }, [scanning, busy, mode, order, sessionId, afficherFlash]);
+  }, [mode, order, sessionId, afficherFlash]);
+
+  // La dernière version de `traiterCode` est lue au moment du traitement, pas
+  // au moment de la mise en file : un code posé dans la file pendant qu'un
+  // autre part est traité avec le mode/commande/session courants.
+  const traiterCodeRef = useRef(traiterCode);
+  useEffect(() => { traiterCodeRef.current = traiterCode; }, [traiterCode]);
+
+  // FILE D'ATTENTE DES SCANS (audit 2.57.0). Avant : `if (busy) return;` — un
+  // second scan arrivé pendant la requête du premier était JETÉ, sans bip, sans
+  // flash, sans ligne au journal. Or le contrat (arbitrage D1) journalise CHAQUE
+  // scan, et un carton scanné sans retour est précisément celui que l'opérateur
+  // croit sorti alors qu'il ne l'est pas. Les codes sont donc mis en file et
+  // traités UN PAR UN, dans l'ordre d'arrivée : chacun reçoit son verdict.
+  const fileRef = useRef([]);
+  const enCoursRef = useRef(false);
+
+  const handleScan = useCallback((codeBrut) => {
+    if (!scanning) return;
+    const code = String(codeBrut || '').trim();
+    if (!code) return;
+    fileRef.current.push(code);
+    if (enCoursRef.current) return;
+    enCoursRef.current = true;
+    setBusy(true);
+    (async () => {
+      try {
+        while (fileRef.current.length > 0) {
+          const suivant = fileRef.current.shift();
+          // eslint-disable-next-line no-await-in-loop
+          await traiterCodeRef.current(suivant);
+        }
+      } finally {
+        enCoursRef.current = false;
+        setBusy(false);
+      }
+    })();
+  }, [scanning]);
 
   // Écoute HID globale — n'agit pas quand le focus est dans un champ texte
   // (le champ de saisie manuelle ci-dessous, notamment).
@@ -309,6 +342,7 @@ export default function SortieCartons() {
   };
 
   const leaveScan = () => {
+    fileRef.current = []; // un scan encore en file n'appartient à aucune session
     setMode(null);
     setOrder(null);
     setScanned([]);

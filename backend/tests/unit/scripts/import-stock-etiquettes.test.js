@@ -7,6 +7,7 @@
  */
 const {
   resolverValeurCellule,
+  estFormuleRompue,
   resolverValeurDate,
   analyserLigne,
   reperocherDoublons,
@@ -279,6 +280,38 @@ describe('decidercAction', () => {
     const existant = { ...record(), poids_kg: 12 };
     const d = decidercAction(existant, record());
     expect(d.ecarts.some((e) => e.champ === 'poids_kg')).toBe(true);
+  });
+});
+
+describe('estFormuleRompue — formule #REF! (audit 2.57.0, classeur réel du client)', () => {
+  // Constaté sur « Dashboard 2026 — saisie » : les 14 387 « Date de sortie »
+  // sont `VLOOKUP(ID, #REF!, 2, FALSE)` → la table des sorties n'existe plus.
+  const FORMULE = 'IF(T[Gamme]="Pvak",T[Date de fabrication],IFERROR(VLOOKUP(T[ID],#REF!,2,FALSE),""))';
+  test('formule portant #REF! → rompue, avec ou sans résultat en cache', () => {
+    expect(estFormuleRompue({ formula: FORMULE })).toBe(true);
+    expect(estFormuleRompue({ formula: FORMULE, result: new Date('2025-07-07') })).toBe(true);
+    expect(estFormuleRompue({ sharedFormula: FORMULE })).toBe(true);
+  });
+  test('valeur nue, date, formule saine → pas rompue', () => {
+    expect(estFormuleRompue(null)).toBe(false);
+    expect(estFormuleRompue('2025-07-07')).toBe(false);
+    expect(estFormuleRompue(new Date())).toBe(false);
+    expect(estFormuleRompue({ formula: 'A1+1', result: 2 })).toBe(false);
+  });
+  test('lireLignes signale la ligne SANS changer la valeur lue (résultat en cache conservé)', () => {
+    const header = [null, 'ID', 'Produits', 'Catégorie Eco-org.', 'Genre', 'Saison', 'Gamme', 'Poids', 'Date de fabrication', 'Date de sortie', 'Inventaire'];
+    const colonnes = { ID: 2, Produits: 3, 'Catégorie Eco-org.': 4, Genre: 5, Saison: 6, Gamme: 7, Poids: 8, 'Date de fabrication': 9, 'Date de sortie': 10, Inventaire: 11 };
+    const rows = [
+      header,
+      [null, 'P10567', 'Pulls', 'Textiles', 'Homme', 'Hiver', 'Pvak', 10, new Date('2025-07-07'), { formula: FORMULE, result: new Date('2025-07-07') }, { formula: FORMULE }],
+      [null, 'P10568', 'Pulls', 'Textiles', 'Homme', 'Hiver', 'VAK', 10, new Date('2025-07-07'), { formula: FORMULE }, { formula: FORMULE }],
+    ];
+    const lignes = lireLignes(fakeWorksheet(rows), colonnes, 1);
+    expect(lignes[0].sortieFormuleRompue).toBe(true);
+    expect(lignes[0].dateSortie).toEqual(new Date('2025-07-07')); // valeur en cache respectée
+    expect(lignes[1].sortieFormuleRompue).toBe(true);
+    expect(lignes[1].dateSortie).toBeNull(); // « en stock » faute de mieux — mais SIGNALÉ
+    expect(lignes[1].inventaireFormuleRompue).toBe(true);
   });
 });
 

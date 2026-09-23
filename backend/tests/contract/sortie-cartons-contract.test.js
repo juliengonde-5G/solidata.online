@@ -312,6 +312,20 @@ describe('3. GET /journal et /session', () => {
     expect(ko.status).toBe(400);
   });
 
+  it('date de la bonne forme mais inexistante (2026-13-45, 2026-02-30) → 400, jamais un 500 du cast SQL', async () => {
+    // Audit 2.57.0 : la forme AAAA-MM-JJ passait, puis `$1::date` échouait en
+    // 22008 → « Erreur serveur ». Une saisie fausse n'est pas une panne.
+    for (const d of ['2026-13-45', '2026-02-30', '2026-00-10']) {
+      mockPoolQuery.mockClear();
+      const ko = await request(app).get(`/api/sortie-cartons/journal?date=${d}`).set('Authorization', `Bearer ${TOKENS.ADMIN}`);
+      expect(ko.status).toBe(400);
+      expect(ko.body.code).toBe('PARAMETRES');
+      expect(mockPoolQuery.mock.calls.some((c) => /sortie_cartons_journal/.test(String(c[0])))).toBe(false);
+    }
+    const ok = await request(app).get('/api/sortie-cartons/journal?date=2024-02-29').set('Authorization', `Bearer ${TOKENS.ADMIN}`);
+    expect(ok.status).toBe(200);
+  });
+
   it('GET /session/:type/:id → { items, count, total_kg }', async () => {
     const res = await request(app).get('/api/sortie-cartons/session/btq/10').set('Authorization', `Bearer ${TOKENS.ADMIN}`);
     expect(res.status).toBe(200);
@@ -375,6 +389,17 @@ describe('4. Habilitation `sortie_cartons` et rôle OPERATEUR_STOCK', () => {
     };
     parcourir(racine);
     expect(coupables).toEqual([]);
+  });
+
+  it("l'assistant est fermé à OPERATEUR_STOCK des DEUX côtés : serveur (chat.js) ET barre supérieure (Layout.jsx)", () => {
+    // Audit 2.57.0 : le serveur refusait déjà (403 ASSISTANT_HORS_PERIMETRE),
+    // mais Layout.jsx ne fermait l'onglet que pour COMMUNICATION — l'écran
+    // annonçait un assistant qui répondait 403 (règle 2.51.0).
+    const chat = fs.readFileSync(path.join(__dirname, '../../src/routes/chat.js'), 'utf8');
+    expect(chat).toMatch(/ROLES_SANS_ASSISTANT = new Set\(\[[^\]]*'OPERATEUR_STOCK'[^\]]*\]\)/);
+    const layout = fs.readFileSync(path.join(__dirname, '../../../frontend/src/components/Layout.jsx'), 'utf8');
+    expect(layout).toMatch(/ROLES_SANS_ASSISTANT = \[[^\]]*'OPERATEUR_STOCK'[^\]]*\]/);
+    expect(layout).toContain('!ROLES_SANS_ASSISTANT.includes(user?.base_role || user?.role)');
   });
 
   it('les routes de sortie ont quitté le routeur des étiquettes', async () => {

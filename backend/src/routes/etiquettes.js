@@ -308,7 +308,11 @@ function repondreErreurGeneration(res, err) {
 // Lecture
 // ══════════════════════════════════════════
 
-router.get('/postes', etiquettesHabilitees, async (req, res) => {
+// Audit 2.57.0 : ces trois lectures n'avaient que l'habilitation de module, pas
+// de rôle — n'importe quel compte connecté (RH, DPO, AUTORITE…) les lisait.
+// Contrat § 2 : « toutes les routes : rôles opérateur ». Aucune surface ne se
+// ferme pour les écrans (étiquetage : opérateur ; produits finis : ADMIN).
+router.get('/postes', operateur, etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, numero_poste, nom, compteur_actuel, is_active, derniere_etiquette_at
@@ -322,7 +326,7 @@ router.get('/postes', etiquettesHabilitees, async (req, res) => {
 });
 
 // Compatibilité : plus appelée par les écrans depuis la 2.57.0.
-router.get('/options', etiquettesHabilitees, async (req, res) => {
+router.get('/options', operateur, etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT MIN(id) AS id, nom, categorie_eco_org
@@ -358,7 +362,7 @@ router.get('/lots-actifs', operateur, etiquettesHabilitees, async (req, res) => 
 // `categories_sans_declinaison` est désormais vide : l'Upcycling est une
 // combinaison ordinaire (gamme UP, produit « Upcycling », Sans Genre, Sans
 // Saison) — il n'y a plus de catégorie qui se passe de déclinaisons à la saisie.
-router.get('/dimensions', etiquettesHabilitees, async (req, res) => {
+router.get('/dimensions', operateur, etiquettesHabilitees, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, type, valeur, ordre FROM ref_dimensions

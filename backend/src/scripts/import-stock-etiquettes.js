@@ -106,6 +106,22 @@ function resolverValeurCellule(value) {
   return null;
 }
 
+/**
+ * Vrai si la cellule est une FORMULE dont le texte porte « #REF! » — une
+ * référence rompue (table ou feuille supprimée). Constaté sur le classeur réel
+ * du client : les 14 387 cellules « Date de sortie » et « Inventaire » sont
+ * `VLOOKUP(ID, #REF!, 2, FALSE)` — la table des sorties n'est plus jointe au
+ * classeur. Excel affiche alors « » (IFERROR), et l'import lit « pas de date »
+ * donc « en stock » : une ABSENCE de date de sortie ne prouve plus rien. Ce
+ * n'est pas à l'import de deviner — mais il doit le DIRE, en tête du
+ * récapitulatif, plutôt que d'annoncer 13 740 cartons en stock comme un fait.
+ */
+function estFormuleRompue(value) {
+  if (!value || typeof value !== 'object' || value instanceof Date) return false;
+  const f = value.formula ?? value.sharedFormula;
+  return typeof f === 'string' && f.includes('#REF!');
+}
+
 /** Résout spécifiquement une cellule censée porter une date : Date directe, texte ISO, ou numéro de série Excel. */
 function resolverValeurDate(value) {
   const v = resolverValeurCellule(value);
@@ -282,6 +298,9 @@ function lireLignes(worksheet, colonnes, rowIndexEntete) {
       dateFabrication: resolverValeurDate(cell('Date de fabrication')),
       dateSortie: resolverValeurDate(cell('Date de sortie')),
       dateInventaire: resolverValeurDate(cell('Inventaire')),
+      // Signal, pas décision : la valeur lue reste celle du classeur.
+      sortieFormuleRompue: estFormuleRompue(cell('Date de sortie')),
+      inventaireFormuleRompue: estFormuleRompue(cell('Inventaire')),
     });
   }
   return lignes;
@@ -358,11 +377,20 @@ async function main() {
     poids_en_stock_kg: 0,
     ecarts: [],
     nb_ecarts_total: 0,
+    // Cellules « Date de sortie » / « Inventaire » calculées par une formule à
+    // référence rompue (#REF!) : la source des sorties n'est plus dans le
+    // classeur. Compté pour être DIT — jamais corrigé en silence.
+    formules_rompues: { date_sortie: 0, date_sortie_avec_resultat: 0, inventaire: 0 },
   };
 
   const candidats = [];
   for (const l of lignesBrutes) {
     if (l.enteteRepetee) { recap.ignores.ligne_entete_repetee++; continue; }
+    if (l.sortieFormuleRompue) {
+      recap.formules_rompues.date_sortie++;
+      if (l.dateSortie) recap.formules_rompues.date_sortie_avec_resultat++;
+    }
+    if (l.inventaireFormuleRompue) recap.formules_rompues.inventaire++;
     const decision = analyserLigne(l);
     if (!decision.ok) { recap.ignores[decision.motif] = (recap.ignores[decision.motif] || 0) + 1; continue; }
     candidats.push(decision.record);
@@ -435,6 +463,19 @@ async function main() {
 
   // ── Récapitulatif ──────────────────────────────────────────────────────
   console.log('\n--- Récapitulatif ---');
+  const fr = recap.formules_rompues;
+  if (fr.date_sortie > 0 || fr.inventaire > 0) {
+    console.log('');
+    console.log('!! AVERTISSEMENT — SORTIES NON FIABLES DANS CE CLASSEUR !!');
+    console.log(`   « Date de sortie » : ${fr.date_sortie} cellule(s) sont une formule à référence rompue (#REF!)`);
+    console.log(`   — la table des sorties n'est plus jointe au classeur. Seules ${fr.date_sortie_avec_resultat} de ces`);
+    console.log(`   lignes portent encore une date (résultat que la formule calcule sans la table, p. ex. Pvak).`);
+    console.log(`   Pour les ${fr.date_sortie - fr.date_sortie_avec_resultat} autres, l'ABSENCE de date ne prouve PAS que le carton est en stock :`);
+    console.log(`   il sera importé « en_stock » faute de mieux, et devra être sorti au scan ou corrigé à la main.`);
+    if (fr.inventaire > 0) console.log(`   « Inventaire » : ${fr.inventaire} cellule(s) dans le même cas (date d'inventaire ignorée).`);
+    console.log('   Demander au client un classeur où ces colonnes sont des VALEURS, ou la table des sorties elle-même.');
+    console.log('');
+  }
   console.log(`Lignes lues                    : ${recap.lus}`);
   console.log(`Cartons créés                  : ${recap.crees}`);
   console.log(`Cartons mis à jour (sortie)    : ${recap.mis_a_jour}`);
@@ -472,6 +513,7 @@ if (require.main === module) {
 
 module.exports = {
   resolverValeurCellule,
+  estFormuleRompue,
   resolverValeurDate,
   serialExcelVersDate,
   analyserLigne,

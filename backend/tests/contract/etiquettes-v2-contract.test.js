@@ -165,6 +165,16 @@ describe('1. GET /referentiel', () => {
     }
   });
 
+  it('les lectures /postes, /options, /dimensions sont AUSSI bornées aux rôles opérateur (audit 2.57.0)', async () => {
+    // Elles n'avaient que requireModule : un RH ou un DPO les lisait. Contrat § 2.
+    for (const p of ['/api/etiquettes/postes', '/api/etiquettes/options', '/api/etiquettes/dimensions']) {
+      const rh = await request(app).get(p).set('Authorization', `Bearer ${TOKENS.RH}`);
+      expect([p, rh.status]).toEqual([p, 403]);
+      const op = await request(app).get(p).set('Authorization', `Bearer ${TOKENS.OPERATEUR_STOCK}`);
+      expect([p, op.status]).toEqual([p, 200]);
+    }
+  });
+
   it('RH refusé (403), module retiré → 403 MODULE_NON_HABILITE', async () => {
     expect((await get('/api/etiquettes/referentiel', 'RH')).status).toBe(403);
     refus = [{ role: 'OPERATEUR_STOCK', module_key: 'etiquettes' }];
