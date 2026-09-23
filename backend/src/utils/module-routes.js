@@ -88,6 +88,9 @@ const MODULE_PAR_ROUTEUR = {
   // Accorder « Tri » emporte donc les étiquettes ; accorder « Étiquettes » seul
   // n'ouvre que cet écran. Le refus, lui, reste porté par requireModule.
   '/api/etiquettes': ['etiquettes', 'tri'],
+  // Sortie de cartons (2.57.0) : habilitation PROPRE, distincte des étiquettes —
+  // scanner un carton pour le sortir du stock n'est pas fabriquer une étiquette.
+  '/api/sortie-cartons': ['sortie_cartons'],
 
   // ── RH & Insertion ────────────────────────────────────────────────────────
   '/api/candidates': 'rh',

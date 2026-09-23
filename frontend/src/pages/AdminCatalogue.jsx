@@ -22,6 +22,22 @@ function codeHex(n) {
   return n == null ? null : n.toString(16).toUpperCase().padStart(2, '0');
 }
 
+// GET /etiquettes/admin/referentiel renvoie les dimensions en UNE liste typée
+// ({ dimensions:[{type,valeur,code,…}], produits, combinaisons }) : on la
+// ventile ici par type pour les onglets.
+function normaliserAdminRef(data) {
+  const dims = Array.isArray(data.dimensions) ? data.dimensions : [];
+  const deType = (t) => dims.filter((d) => d.type === t);
+  return {
+    gammes: data.gammes || deType('gamme'),
+    categories: data.categories || deType('categorie_eco_org'),
+    genres: data.genres || deType('genre'),
+    saisons: data.saisons || deType('saison'),
+    produits: data.produits || [],
+    combinaisons: data.combinaisons || [],
+  };
+}
+
 export default function AdminCatalogue() {
   const [tab, setTab] = useState('combinaisons');
   const [produits, setProduits] = useState([]);
@@ -51,12 +67,13 @@ export default function AdminCatalogue() {
         api.get('/etiquettes/admin/produits'),
         api.get('/etiquettes/admin/dimensions'),
         api.get('/referentiels/conteneurs').catch(() => ({ data: [] })),
-        api.get('/etiquettes/admin/referentiel').catch(() => ({ data: null })),
+        api.get('/etiquettes/admin/referentiel').catch((e) => ({ data: null, erreur: e.response?.data?.error || e.message })),
       ]);
       setProduits(p.data || []);
       setDimensions(d.data || []);
       setConteneurs(c.data || []);
-      if (ar.data) setAdminRef(ar.data);
+      if (ar.data) setAdminRef(normaliserAdminRef(ar.data));
+      else if (ar.erreur) setError(`Référentiel des étiquettes indisponible : ${ar.erreur}`);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     } finally { setLoading(false); }

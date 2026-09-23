@@ -34,7 +34,14 @@ const pool = require('../config/database');
 // dupliqué de COLLABORATEUR, il n'aurait rien pu publier. La matrice
 // /admin/permissions ne masque que la barre latérale, jamais l'API : elle ne
 // pouvait donc pas tenir ce périmètre à elle seule.
-const BUILTIN_ROLES = ['ADMIN', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'PCM', 'COMMUNICATION'];
+//
+// OPERATEUR_STOCK (2.57.0, arbitrage client D1) : profil UNIQUE et partagé des
+// postes d'étiquetage et de sortie de cartons — étiquetage + sortie, rien
+// d'autre. Il ne figure que dans les listes `authorize` de routes/etiquettes.js
+// (routes opérateur) et routes/sortie-cartons.js. Un rôle dupliqué de
+// COLLABORATEUR n'aurait pas convenu : il aurait hérité de tout ce que
+// COLLABORATEUR ouvre ailleurs (planning, messagerie, fil d'actualité…).
+const BUILTIN_ROLES = ['ADMIN', 'RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'PCM', 'COMMUNICATION', 'OPERATEUR_STOCK'];
 
 /** Un rôle est valide s'il est intégré ou personnalisé (table custom_roles). */
 async function isValidRole(role) {

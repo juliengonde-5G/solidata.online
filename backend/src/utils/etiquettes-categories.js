@@ -1,30 +1,20 @@
 /**
- * Catégories d'étiquette SANS DÉCLINAISON — source unique.
+ * Catégories d'étiquette SANS DÉCLINAISON — règle HISTORIQUE (2.53.0 → 2.56.x).
  *
- * La très grande majorité des cartons se décrit par cinq choix successifs :
- * catégorie, genre, saison, gamme, produit. L'UPCYCLING, lui, n'en a aucun —
- * c'est une pièce retransformée : il n'y a ni genre, ni saison, ni gamme, ni
- * type de produit à déclarer. L'opérateur choisit la catégorie et pèse.
- * (Demande client du 10/09/2026.)
+ * De la 2.53.0 à la 2.56.x, un carton UPCYCLING était imprimé avec la seule
+ * catégorie : produit, genre, saison et gamme restaient NULL (« sans objet »),
+ * sans rattachement au catalogue.
  *
- * CE QUI EST ÉCRIT EN BASE, ET POURQUOI. Les quatre déclinaisons restent
- * **NULL** — on n'invente pas une gamme « UPCYCLING » qui ne figure dans aucun
- * référentiel, ni un « Sans Genre » que personne n'a choisi : NULL dit
- * « sans objet », une valeur de remplissage dirait « voici la valeur », et
- * c'est faux. Corollaire assumé : ces cartons forment un groupe à part dans les
- * agrégats par gamme — c'est la réalité, ils n'en ont pas.
+ * DEPUIS LA 2.57.0 (arbitrage client B du 23/09/2026), l'Upcycling est une
+ * combinaison ORDINAIRE du référentiel : gamme UP, catégorie Upcycling, produit
+ * « Upcycling », Sans Genre, Sans Saison. Le générateur (routes/etiquettes.js)
+ * ne connaît plus de cas particulier : la table `etiquettes_combinaisons` suffit,
+ * et un corps sans déclinaisons est refusé en 400 quelle que soit la catégorie.
  *
- * Le rattachement au CATALOGUE produit est également ignoré pour ces
- * catégories : `produits_catalogue` est construit pour des déclinaisons
- * (nom, genre, saison, gamme, tous requis par sa clé d'unicité), il ne peut pas
- * représenter l'absence de produit. `produits_finis.catalogue_id` est nullable,
- * on s'en sert.
- *
- * POURQUOI UNE CONSTANTE ET PAS UNE COLONNE. La liste est servie au front par
- * `GET /etiquettes/dimensions` : l'écran ne la recopie donc jamais, il la
- * reçoit. Le jour où l'exploitant doit pouvoir en marquer d'autres lui-même,
- * cette constante devient le défaut d'une colonne de `ref_dimensions` sans que
- * ni l'API ni l'écran ne bougent.
+ * Ce module est CONSERVÉ pour relire les anciens cartons Upcycling à champs
+ * NULL, qui restent tels quels en base (on ne réécrit pas l'histoire) : un écran
+ * ou un export qui doit expliquer pourquoi ces champs sont vides peut s'appuyer
+ * sur `sansDeclinaison`. Il ne pilote plus AUCUNE saisie.
  */
 
 // Valeurs telles qu'elles figurent dans `ref_dimensions` (type categorie_eco_org).

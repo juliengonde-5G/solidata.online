@@ -2,12 +2,9 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
-const { body } = require('express-validator');
-const { validate } = require('../middleware/validate');
-// Générateur partagé avec la voie « étiquette » (item 32) — même code-barres
-// généré (base24 + compteur poste), mêmes champs, created_by + source systématiques.
-const { generateProduitFini } = require('./etiquettes');
-const { sansDeclinaison } = require('../utils/etiquettes-categories');
+// Générateur partagé avec la voie « étiquette » (item 32) — même code-barres v2
+// généré, même validation de combinaison, created_by + source systématiques.
+const { generateProduitFini, validerCorpsGeneration, repondreErreurGeneration } = require('./etiquettes');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -62,42 +59,26 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-// POST /api/produits-finis — Voie manuelle (item 32)
-// Harmonisée avec la voie étiquette : mêmes champs (poste + catalogue dérivé),
-// code-barres GÉNÉRÉ (plus de saisie libre), created_by + source='manuel'.
-router.post('/', [
-  body('poste_id').notEmpty().withMessage('Poste requis'),
-  body('poids_kg').isFloat({ gt: 0 }).withMessage('Poids requis (> 0)'),
-], validate, async (req, res) => {
-  const { poste_id, produit, categorie_eco_org, genre, saison, gamme, poids_kg, batch_id } = req.body;
-  if (!poste_id || !categorie_eco_org || !poids_kg || Number(poids_kg) <= 0) {
-    return res.status(400).json({ error: 'poste_id, categorie_eco_org et poids_kg (>0) requis' });
-  }
-  // Même règle que la voie étiquette, et pour la même raison : une catégorie
-  // sans déclinaison (upcycling) n'a ni produit ni genre ni gamme à exiger —
-  // les réclamer ici puis les laisser tomber au générateur ferait diverger les
-  // deux chemins qui écrivent le MÊME carton.
-  const sansDecl = sansDeclinaison(categorie_eco_org);
-  if (!sansDecl && (!produit || !genre || !gamme)) {
-    return res.status(400).json({ error: 'produit, genre et gamme requis pour cette catégorie' });
-  }
+// POST /api/produits-finis — Voie manuelle (item 32, codification v2 en 2.57.0)
+// Même corps et même générateur que la voie étiquette (POST /etiquettes/generer) :
+// { poste_id, gamme, categorie_eco_org, produit_id, genre, saison, poids_kg, batch_id? }.
+// La combinaison est validée CÔTÉ SERVEUR par le générateur partagé, code-barres
+// v2 généré (jamais saisi), created_by + source='manuel'.
+router.post('/', async (req, res) => {
+  const v = validerCorpsGeneration(req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error, code: 'PARAMETRES' });
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { row, poste_label } = await generateProduitFini(client, {
-      poste_id, produit, categorie_eco_org, genre,
-      saison: sansDecl ? null : (saison || 'Sans Saison'), gamme,
-      poids_kg, batch_id, created_by: req.user.id, source: 'manuel',
+    const { carton } = await generateProduitFini(client, {
+      ...v.valeurs, created_by: req.user.id ?? null, source: 'manuel',
     });
     await client.query('COMMIT');
-    res.status(201).json({ ...row, poste_label });
+    res.status(201).json(carton);
   } catch (err) {
-    await client.query('ROLLBACK');
-    if (err.pfStatus) return res.status(err.pfStatus).json({ error: err.message });
-    if (err.code === '23505') return res.status(409).json({ error: 'Code-barres déjà existant' });
-    console.error('[PRODUITS-FINIS] Erreur création :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    await client.query('ROLLBACK').catch(() => {});
+    repondreErreurGeneration(res, err);
   } finally {
     client.release();
   }

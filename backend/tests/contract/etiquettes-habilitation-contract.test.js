@@ -14,11 +14,13 @@
 //    comme /permissions/my-modules — sans quoi la barre latérale et la porte
 //    diraient deux choses différentes à un rôle personnalisé.
 //
-// 2. L'UPCYCLING SE PASSE DE GENRE / SAISON / GAMME / PRODUIT. On vérifie que
-//    rien n'est INVENTÉ à la place (NULL en base, aucune ligne de catalogue
-//    créée), et que c'est le SERVEUR qui en décide : envoyer des déclinaisons
-//    sur cette catégorie ne les fait pas entrer, ne pas en envoyer sur une
-//    catégorie ordinaire reste refusé.
+// 2. L'UPCYCLING EST UNE COMBINAISON ORDINAIRE (2.57.0, arbitrage client B).
+//    De la 2.53.0 à la 2.56.x, un carton Upcycling s'imprimait sans produit,
+//    genre, saison ni gamme (NULL). Désormais c'est la combinaison gamme UP /
+//    catégorie Upcycling / produit « Upcycling » / Sans Genre / Sans Saison :
+//    plus AUCUN chemin NULL pour une NOUVELLE étiquette — un corps sans
+//    déclinaisons est refusé quelle que soit la catégorie, et les anciens
+//    cartons à champs NULL restent tels quels en base.
 //
 // Auth réelle (JWT), base mockée : aucun accès disque ni réseau.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -44,7 +46,7 @@ const request = require('supertest');
 const etiquettes = require('../../src/routes/etiquettes');
 const { refreshModuleAccess } = require('../../src/middleware/module-access');
 const { refreshCustomRoles } = require('../../src/middleware/auth');
-const { CATEGORIES_SANS_DECLINAISON, sansDeclinaison } = require('../../src/utils/etiquettes-categories');
+const { sansDeclinaison } = require('../../src/utils/etiquettes-categories');
 
 const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
@@ -60,6 +62,7 @@ beforeAll(() => {
   app = express();
   app.use(express.json());
   app.use('/api/etiquettes', etiquettes);
+  app.use('/api/sortie-cartons', require('../../src/routes/sortie-cartons'));
 });
 
 // Refus courants — `refus` est la liste de lignes { role, module_key } que
@@ -110,20 +113,37 @@ beforeEach(async () => {
 
 const lecturesMetier = () => mockQuery.mock.calls.filter((c) => TABLES_METIER.test(String(c[0])));
 
-// Chemin nominal de POST /generer avec déclinaisons (catalogue existant).
-function generationAvecCatalogue() {
-  mockClientQuery
-    .mockResolvedValueOnce({})                                                            // BEGIN
-    .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 1, numero_poste: 1, compteur_actuel: 0 }] })
-    .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 5 }] })                            // catalogue trouvé
-    .mockResolvedValueOnce({ rows: [{ id: 1, code_barre: 'P10001', poids_kg: 10 }] })      // INSERT PF
-    .mockResolvedValueOnce({})                                                            // UPDATE poste
-    .mockResolvedValueOnce({});                                                           // COMMIT
+// Routage SQL du client de transaction pour POST /generer (codification v2).
+// `combis` : combinaisons considérées ACTIVES et codifiées par la base simulée.
+function routerGeneration(combis) {
+  mockClientQuery.mockImplementation(async (text, params = []) => {
+    const t = String(text);
+    if (/FROM etiquettes_combinaisons c/.test(t)) {
+      const [g, cat, pid, ge, sa] = params;
+      const c = combis.find((x) => x.gamme === g && x.categorie_eco_org === cat && x.produit_id === pid
+        && x.genre === ge && x.saison === sa);
+      return c ? { rowCount: 1, rows: [{ combinaison_id: c.id, produit: c.produit, ...c }] } : { rowCount: 0, rows: [] };
+    }
+    if (/FROM postes_etiquetage/.test(t)) return { rowCount: 1, rows: [{ id: 1, numero_poste: 1 }] };
+    if (/nextval/.test(t)) return { rows: [{ ref: '1' }] };
+    if (/FROM produits_catalogue/.test(t)) return { rowCount: 1, rows: [{ id: 5 }] };
+    if (/INSERT INTO produits_finis/.test(t)) return { rows: [{ id: 9, code_barre: params[0], poids_kg: params[7] }] };
+    return { rows: [], rowCount: 0 };
+  });
 }
 
+const COMBI_TEXTILES = {
+  id: 1, gamme: 'VAK', categorie_eco_org: 'Textiles', produit_id: 12, produit: 'Paréos', genre: 'Adulte Femme', saison: 'Hiver',
+  gamme_code: 3, categorie_code: 1, produit_code: 42, genre_code: 2, saison_code: 2,
+};
+const COMBI_UPCYCLING = {
+  id: 209, gamme: 'UP', categorie_eco_org: 'Upcycling', produit_id: 71, produit: 'Upcycling', genre: 'Sans Genre', saison: 'Sans Saison',
+  gamme_code: 5, categorie_code: 9, produit_code: 71, genre_code: 0, saison_code: 0,
+};
+
 const CORPS_COMPLET = {
-  poste_id: 1, produit: 'Pull', categorie_eco_org: 'Textiles',
-  genre: 'Homme', saison: 'Hiver', gamme: 'STANDARD', poids_kg: 10,
+  poste_id: 1, gamme: 'VAK', categorie_eco_org: 'Textiles', produit_id: 12,
+  genre: 'Adulte Femme', saison: 'Hiver', poids_kg: 10,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -133,6 +153,7 @@ describe("1. L'habilitation « étiquettes » ferme réellement l'API", () => {
     ['get', '/api/etiquettes/options'],
     ['get', '/api/etiquettes/dimensions'],
     ['get', '/api/etiquettes/lots-actifs'],
+    ['get', '/api/etiquettes/referentiel'],
   ];
 
   it('sans refus enregistré, tout passe (DENY-overlay : absence de ligne = autorisé)', async () => {
@@ -202,9 +223,9 @@ describe("1. L'habilitation « étiquettes » ferme réellement l'API", () => {
     expect(res.status).toBe(200);
   });
 
-  it("la sortie cartons n'est PAS emportée par le refus des étiquettes", async () => {
+  it("la sortie cartons (routeur et habilitation propres) n'est PAS emportée par le refus des étiquettes", async () => {
     refus = [{ role: 'COLLABORATEUR', module_key: 'etiquettes' }];
-    const res = await request(app).get('/api/etiquettes/commandes-actives/btq')
+    const res = await request(app).get('/api/sortie-cartons/commandes-actives/btq')
       .set('Authorization', `Bearer ${TOKENS.COLLABORATEUR}`);
     expect(res.status).not.toBe(403);
   });
@@ -218,9 +239,8 @@ describe("1. L'habilitation « étiquettes » ferme réellement l'API", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('2. Catégorie sans déclinaison (upcycling)', () => {
-  it('la règle est portée par une source unique et tolère casse et accents', () => {
-    expect(CATEGORIES_SANS_DECLINAISON).toContain('Upcycling');
+describe('2. Upcycling = combinaison ordinaire (gamme UP), plus aucun chemin NULL', () => {
+  it('la règle historique reste lisible pour les anciens cartons (casse et accents tolérés)', () => {
     expect(sansDeclinaison('Upcycling')).toBe(true);
     expect(sansDeclinaison('upcycling')).toBe(true);
     expect(sansDeclinaison('Textiles')).toBe(false);
@@ -228,85 +248,50 @@ describe('2. Catégorie sans déclinaison (upcycling)', () => {
     expect(sansDeclinaison(null)).toBe(false);
   });
 
-  it('GET /dimensions sert la liste au front (qui ne la recopie donc jamais)', async () => {
+  it('GET /dimensions (compatibilité) ne sert plus aucune catégorie sans déclinaison', async () => {
     const res = await request(app).get('/api/etiquettes/dimensions').set('Authorization', `Bearer ${TOKENS.ADMIN}`);
     expect(res.status).toBe(200);
     expect(res.body.categorie_eco_org).toEqual(['Textiles', 'Upcycling']);
-    expect(res.body.categories_sans_declinaison).toEqual(['Upcycling']);
-  });
-
-  it("la liste est bornée au référentiel : catégorie absente → liste vide", async () => {
-    mockQuery.mockImplementation((text) => {
-      if (/role_module_access/.test(String(text))) return Promise.resolve({ rows: [] });
-      if (/FROM ref_dimensions/.test(String(text))) {
-        return Promise.resolve({ rows: [{ id: 1, type: 'categorie_eco_org', valeur: 'Textiles', ordre: 0 }] });
-      }
-      return Promise.resolve({ rows: [] });
-    });
-    const res = await request(app).get('/api/etiquettes/dimensions').set('Authorization', `Bearer ${TOKENS.ADMIN}`);
     expect(res.body.categories_sans_declinaison).toEqual([]);
   });
 
-  it('POST /generer : catégorie + poids suffisent (201), et RIEN n\'est inventé', async () => {
-    mockClientQuery
-      .mockResolvedValueOnce({})                                                             // BEGIN
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 1, numero_poste: 1, compteur_actuel: 0 }] })
-      .mockResolvedValueOnce({ rows: [{ id: 9, code_barre: 'P10001', poids_kg: 4.2 }] })      // INSERT PF
-      .mockResolvedValueOnce({})                                                             // UPDATE poste
-      .mockResolvedValueOnce({});                                                            // COMMIT
+  it('POST /generer Upcycling (UP / Upcycling / Upcycling / Sans Genre / Sans Saison) → 201, déclinaisons écrites', async () => {
+    routerGeneration([COMBI_TEXTILES, COMBI_UPCYCLING]);
+    const res = await request(app).post('/api/etiquettes/generer')
+      .set('Authorization', `Bearer ${TOKENS.ADMIN}`)
+      .send({ poste_id: 1, gamme: 'UP', categorie_eco_org: 'Upcycling', produit_id: 71, genre: 'Sans Genre', saison: 'Sans Saison', poids_kg: 4.2 });
+    expect(res.status).toBe(201);
+    expect(res.body.code_barre).toBe('5947000000001');
+    const insert = mockClientQuery.mock.calls.find((c) => /INSERT INTO produits_finis/.test(String(c[0])));
+    const [, catalogue_id, produit, categorie, genre, saison, gamme] = insert[1];
+    expect([catalogue_id, produit, categorie, genre, saison, gamme])
+      .toEqual([5, 'Upcycling', 'Upcycling', 'Sans Genre', 'Sans Saison', 'UP']);
+    expect(insert[0]).toMatch(/'v2'/);
+  });
 
+  it('corps Upcycling SANS déclinaisons (forme 2.53.0) → 400, aucune transaction', async () => {
     const res = await request(app).post('/api/etiquettes/generer')
       .set('Authorization', `Bearer ${TOKENS.ADMIN}`)
       .send({ poste_id: 1, categorie_eco_org: 'Upcycling', poids_kg: 4.2 });
-    expect(res.status).toBe(201);
-
-    // Aucune ligne de catalogue cherchée NI créée : produits_catalogue ne sait
-    // pas représenter « pas de produit » (nom et gamme y sont NOT NULL).
-    const catalogue = mockClientQuery.mock.calls.filter((c) => /produits_catalogue/.test(String(c[0])));
-    expect(catalogue).toHaveLength(0);
-
-    const insert = mockClientQuery.mock.calls.find((c) => /INSERT INTO produits_finis/.test(String(c[0])));
-    expect(insert).toBeDefined();
-    const [, catalogue_id, produit, categorie, genre, saison, gamme] = insert[1];
-    expect(catalogue_id).toBeNull();
-    expect(produit).toBeNull();
-    expect(genre).toBeNull();
-    expect(saison).toBeNull();
-    expect(gamme).toBeNull();
-    // Seule vérité disponible : la catégorie.
-    expect(categorie).toBe('Upcycling');
-  });
-
-  it("c'est le SERVEUR qui décide : des déclinaisons envoyées sur cette catégorie n'entrent pas", async () => {
-    mockClientQuery
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 1, numero_poste: 1, compteur_actuel: 0 }] })
-      .mockResolvedValueOnce({ rows: [{ id: 9, code_barre: 'P10002', poids_kg: 3 }] })
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({});
-
-    const res = await request(app).post('/api/etiquettes/generer')
-      .set('Authorization', `Bearer ${TOKENS.ADMIN}`)
-      .send({ poste_id: 1, categorie_eco_org: 'Upcycling', produit: 'Pull', genre: 'Homme', saison: 'Hiver', gamme: 'EXTRA', poids_kg: 3 });
-    expect(res.status).toBe(201);
-    const insert = mockClientQuery.mock.calls.find((c) => /INSERT INTO produits_finis/.test(String(c[0])));
-    expect(insert[1].slice(2, 7)).toEqual([null, 'Upcycling', null, null, null]);
-  });
-
-  it('une catégorie ORDINAIRE exige toujours ses quatre déclinaisons (400)', async () => {
-    const res = await request(app).post('/api/etiquettes/generer')
-      .set('Authorization', `Bearer ${TOKENS.ADMIN}`)
-      .send({ poste_id: 1, categorie_eco_org: 'Textiles', poids_kg: 10 });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/produit, genre, saison et gamme/i);
+    expect(res.body.code).toBe('PARAMETRES');
     expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
-  it("le poids reste obligatoire, y compris sans déclinaison (400)", async () => {
+  it("Upcycling hors de sa gamme UP (combinaison absente) → 400 COMBINAISON_INVALIDE, rien n'est écrit", async () => {
+    routerGeneration([COMBI_TEXTILES, COMBI_UPCYCLING]);
+    const res = await request(app).post('/api/etiquettes/generer')
+      .set('Authorization', `Bearer ${TOKENS.ADMIN}`)
+      .send({ poste_id: 1, gamme: 'EXTRA', categorie_eco_org: 'Upcycling', produit_id: 71, genre: 'Sans Genre', saison: 'Sans Saison', poids_kg: 3 });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('COMBINAISON_INVALIDE');
+    expect(mockClientQuery.mock.calls.some((c) => /INSERT INTO produits_finis/.test(String(c[0])))).toBe(false);
+  });
+
+  it('le poids reste obligatoire (400)', async () => {
     for (const corps of [
-      { poste_id: 1, categorie_eco_org: 'Upcycling' },
-      { poste_id: 1, categorie_eco_org: 'Upcycling', poids_kg: 0 },
-      { poste_id: 1, poids_kg: 5 },
+      { ...CORPS_COMPLET, poids_kg: undefined },
+      { ...CORPS_COMPLET, poids_kg: 0 },
     ]) {
       const res = await request(app).post('/api/etiquettes/generer')
         .set('Authorization', `Bearer ${TOKENS.ADMIN}`).send(corps);
@@ -315,12 +300,12 @@ describe('2. Catégorie sans déclinaison (upcycling)', () => {
     expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
-  it("non-régression : une catégorie ordinaire complète passe toujours (201) et lie son catalogue", async () => {
-    generationAvecCatalogue();
+  it('non-régression : une catégorie ordinaire complète passe (201) et lie son catalogue', async () => {
+    routerGeneration([COMBI_TEXTILES]);
     const res = await request(app).post('/api/etiquettes/generer')
       .set('Authorization', `Bearer ${TOKENS.ADMIN}`).send(CORPS_COMPLET);
     expect(res.status).toBe(201);
     const insert = mockClientQuery.mock.calls.find((c) => /INSERT INTO produits_finis/.test(String(c[0])));
-    expect(insert[1].slice(1, 7)).toEqual([5, 'Pull', 'Textiles', 'Homme', 'Hiver', 'STANDARD']);
+    expect(insert[1].slice(1, 7)).toEqual([5, 'Paréos', 'Textiles', 'Adulte Femme', 'Hiver', 'VAK']);
   });
 });

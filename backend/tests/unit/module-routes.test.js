@@ -55,7 +55,7 @@ describe('Carte routeur → module', () => {
     // Le catalogue est la source de vérité de routes/permissions.js. Une clé
     // inventée ici ne serait jamais cochable : l'accord serait inatteignable.
     const src = fs.readFileSync(path.join(__dirname, '../../src/routes/permissions.js'), 'utf8');
-    const catalogue = new Set([...src.matchAll(/\{\s*key:\s*'([a-z-]+)'/g)].map((m) => m[1]));
+    const catalogue = new Set([...src.matchAll(/\{\s*key:\s*'([a-z_-]+)'/g)].map((m) => m[1]));
     const employees = new Set();
     for (const v of Object.values(MODULE_PAR_ROUTEUR)) {
       if (v === null) continue;
