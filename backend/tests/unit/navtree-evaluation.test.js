@@ -124,7 +124,14 @@ describe('Garde de classe — aucun import lucide ne doit masquer un constructeu
     const fautifs = [];
     for (const racine of racines) {
       for (const fichier of listerFichiers(racine)) {
-        const src = fs.readFileSync(fichier, 'utf8');
+        const srcBrut = fs.readFileSync(fichier, 'utf8');
+        // Un commentaire JSDoc peut CITER l'import fautif en exemple (c'est le
+        // cas ici même, dans ce fichier de garde) : le retirer avant de
+        // chercher, sinon la garde se déclenche sur du texte, pas du code.
+        // Les chaînes de caractères ne sont PAS retirées : un import réel ne
+        // vit jamais dans une chaîne, et les retirer risquerait de couper une
+        // portion de code légitime entre guillemets.
+        const src = srcBrut.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
         const m = src.match(/import\s*\{([\s\S]*?)\}\s*from\s*['"]lucide-react['"]/);
         if (!m) continue;
 

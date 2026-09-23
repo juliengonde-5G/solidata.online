@@ -121,7 +121,10 @@ export const NAV_TREE = [
               { label: 'Inventaire Original', path: '/inventaire-original', icon: Warehouse, roles: ['ADMIN'] },
               { label: 'Stock MP', path: '/stock', icon: Package, roles: ['ADMIN'] },
               { label: 'Produits Finis', path: '/produits-finis', icon: Tag, roles: ['ADMIN'] },
-              { label: 'Sortie cartons', path: '/inventaire/sortie-cartons', icon: ScanLine, roles: ['ADMIN', 'COLLABORATEUR'] },
+              // `id` porté par cette feuille (comme les Étiquettes juste en
+              // dessous, Tri) : l'habilitation `sortie_cartons` lui est propre,
+              // distincte de « Produits Finis » et du reste de l'Inventaire.
+              { id: 'sortie_cartons', label: 'Sortie cartons', path: '/inventaire/sortie-cartons', icon: ScanLine, roles: ['ADMIN', 'COLLABORATEUR', 'OPERATEUR_STOCK'] },
             ],
           },
         ],
@@ -140,7 +143,7 @@ export const NAV_TREE = [
       // `id` porté par une FEUILLE (et non une section) : le filtre récursif
       // honore l'id de n'importe quel nœud, ce qui donne aux étiquettes leur
       // habilitation propre sans détacher l'entrée de la section Tri.
-      { id: 'etiquettes', label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'COLLABORATEUR'] },
+      { id: 'etiquettes', label: 'Étiquettes', path: '/tri/etiquettes', icon: Tag, roles: ['ADMIN', 'COLLABORATEUR', 'OPERATEUR_STOCK'] },
       { label: 'Référentiel tri', path: '/admin/tri', icon: ListChecks, roles: ['ADMIN'] },
     ],
   },

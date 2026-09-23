@@ -167,6 +167,10 @@ function HomeRedirect() {
     // n'existent plus (les MODULES Finance et QHSE, eux, restent — ils sont
     // simplement réservés aux rôles qui subsistent).
     PCM: '/pcm',             // praticien PCM : son unique écran est son accueil
+    // Étiquettes v2 (2.57.0) — OPERATEUR_STOCK n'a que l'étiquetage et la
+    // sortie de cartons : un tableau de bord générique ne lui montrerait que
+    // des écrans fermés.
+    OPERATEUR_STOCK: '/tri/etiquettes',
   }[base];
   if (landing) return <Navigate to={landing} replace />;
   return <Dashboard />;
@@ -261,8 +265,8 @@ function App() {
               <Route path="/tri/configurateur" element={<ProtectedRoute roles={['ADMIN']}><ChaineConfigurateur /></ProtectedRoute>} />
               <Route path="/stock" element={<ProtectedRoute roles={['ADMIN']}><Stock /></ProtectedRoute>} />
               <Route path="/produits-finis" element={<ProtectedRoute roles={['ADMIN']}><ProduitsFinis /></ProtectedRoute>} />
-              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']} module="etiquettes"><EtiquetteGenerer /></ProtectedRoute>} />
-              <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR']}><SortieCartons /></ProtectedRoute>} />
+              <Route path="/tri/etiquettes" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR', 'OPERATEUR_STOCK']} module="etiquettes"><EtiquetteGenerer /></ProtectedRoute>} />
+              <Route path="/inventaire/sortie-cartons" element={<ProtectedRoute roles={['ADMIN', 'COLLABORATEUR', 'OPERATEUR_STOCK']} module="sortie_cartons"><SortieCartons /></ProtectedRoute>} />
               <Route path="/admin/catalogue" element={<ProtectedRoute roles={['ADMIN']}><AdminCatalogue /></ProtectedRoute>} />
               <Route path="/admin/refashion-config" element={<ProtectedRoute roles={['ADMIN']}><AdminRefashionConfig /></ProtectedRoute>} />
               <Route path="/admin/refashion-exports" element={<ProtectedRoute roles={['ADMIN', 'AUTORITE']}><AdminRefashionExports /></ProtectedRoute>} />
