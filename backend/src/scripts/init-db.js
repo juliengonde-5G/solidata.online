@@ -1980,19 +1980,13 @@ async function executerInitialisation() {
       }
     }
 
-    // V2.1 — gammes réduites à EXTRA / STANDARD / VAK / EXPORT (refonte UI)
-    // V2.2 — suppression effective des anciennes gammes (BTQ EXTRA, BTQ STAND, CHIF, Pvak)
-    await client.query(`
-      DELETE FROM ref_dimensions
-      WHERE type = 'gamme' AND valeur NOT IN ('EXTRA','STANDARD','VAK','EXPORT')
-    `);
-    for (const [valeur, ordre] of [['EXTRA', 0], ['STANDARD', 1], ['VAK', 2], ['EXPORT', 3]]) {
-      await client.query(
-        `INSERT INTO ref_dimensions (type, valeur, ordre) VALUES ('gamme', $1, $2)
-         ON CONFLICT (type, valeur) DO UPDATE SET is_active = true, ordre = EXCLUDED.ordre`,
-        [valeur, ordre]
-      );
-    }
+    // V2.1/V2.2 — les gammes étaient NORMALISÉES ici à chaque démarrage
+    // (DELETE de tout ce qui n'était pas EXTRA / STANDARD / VAK / EXPORT).
+    // 2.57.0 : bloc RETIRÉ. Le référentiel client du 23/09/2026 réintroduit BTQ,
+    // CHIF et UP, qu'il aurait effacées à chaque redémarrage. Les gammes sont
+    // désormais posées par migrations/etiquettes-v2.js, qui DÉSACTIVE les
+    // anciennes (STANDARD, EXPORT) au lieu de les supprimer : les cartons qui
+    // les portent restent lisibles.
 
     // 2.53.0 — catégorie d'étiquette « Upcycling » (demande client du 10/09/2026).
     // Elle se passe de genre / saison / gamme / produit : l'opérateur la choisit
@@ -8891,6 +8885,7 @@ async function executerInitialisation() {
     // ── Refonte CIP (PR A, 2026-09) : migrations déléguées à des modules par lot ──
     await require('./migrations/insertion-cadre').run(client);
     await require('./migrations/insertion-fse').run(client);
+    await require('./migrations/etiquettes-v2').run(client);
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');
