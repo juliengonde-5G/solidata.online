@@ -82,7 +82,10 @@ export default function Layout({ children }) {
   //    le bouton est dans la barre supérieure et le panneau à côté de la barre
   //    latérale : un seul propriétaire, donc un seul badge, et une seule
   //    connexion temps réel pour le compteur.
-  const messagerieActive = canAccessModule('messagerie');
+  // OPERATEUR_STOCK : profil limité à l'étiquetage et à la sortie des cartons —
+  // le serveur refuse tout le reste (403 PERIMETRE_OPERATEUR, middleware/auth.js).
+  const perimetreOperateur = (user?.base_role || user?.role) === 'OPERATEUR_STOCK';
+  const messagerieActive = canAccessModule('messagerie') && !perimetreOperateur;
   // L'assistant est une surface d'ACCÈS AUX DONNÉES (stock, planning, heures) :
   // il n'est pas ouvert aux profils dont le périmètre est délibérément borné.
   // Le refus qui fait foi est côté serveur (routes/chat.js,
@@ -139,6 +142,7 @@ export default function Layout({ children }) {
 
   // Charger alertes + compteurs sidebar (best-effort)
   useEffect(() => {
+    if (perimetreOperateur) return;
     api.get('/dashboard/kpis')
       .then((res) => {
         setAlerts(res.data?.alertes || []);
@@ -149,7 +153,7 @@ export default function Layout({ children }) {
         });
       })
       .catch(() => { /* silencieux */ });
-  }, []);
+  }, [perimetreOperateur]);
 
   const handleMobileNav = useCallback(() => {
     if (window.innerWidth < 1024) setMobileOpen(false);

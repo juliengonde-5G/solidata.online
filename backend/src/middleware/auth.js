@@ -129,6 +129,19 @@ async function authenticateServiceKey(req, res, next, rawKey) {
  * aucune lecture base n'est faite pour lui). Une panne de base ne verrouille
  * personne : on dégrade en simple validation JWT (comportement historique).
  */
+// Surfaces ouvertes au profil OPERATEUR_STOCK : sa session, ses habilitations,
+// l'étiquetage (hors administration du catalogue) et la sortie des cartons.
+const PERIMETRE_OPERATEUR = [
+  /^\/api\/auth(\/|$)/,
+  /^\/api\/permissions\/my-modules$/,
+  /^\/api\/etiquettes\/(?!admin(\/|$))/,
+  /^\/api\/sortie-cartons(\/|$)/,
+];
+function dansPerimetreOperateur(url) {
+  const chemin = String(url || '').split('?')[0];
+  return PERIMETRE_OPERATEUR.some((re) => re.test(chemin));
+}
+
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -162,6 +175,21 @@ async function authenticate(req, res, next) {
   // ne puisse pas se faire passer pour un service, ni hériter d'un traitement
   // particulier.
   req.user = { ...decoded, is_service: false };
+
+  // Profil OPERATEUR_STOCK (2.57.0, arbitrage client du 24/09/2026) : « le
+  // profil étiquette, étendu à la page de scan » — et RIEN d'autre. Le filtre
+  // est posé ICI, dans `authenticate`, et non route par route : de nombreux
+  // routeurs n'ont que `authenticate` sur leurs lectures (équipes, CAV,
+  // véhicules, lots de tri…), qu'un COLLABORATEUR lit légitimement. Les fermer
+  // un par un laisserait ouvert le routeur écrit demain ; une liste BLANCHE
+  // tenue en un point couvre aussi celui-là. Rôles personnalisés dupliqués de
+  // ce profil compris (rôle de base).
+  if (resolveBaseRole(decoded.role) === 'OPERATEUR_STOCK' && !dansPerimetreOperateur(req.originalUrl || req.url)) {
+    return res.status(403).json({
+      error: 'Ce profil est limité à l\'étiquetage et à la sortie des cartons',
+      code: 'PERIMETRE_OPERATEUR',
+    });
+  }
 
   // Jeton hérité sans `tv` (transitoire) : aucun contrôle de révocation possible,
   // aucune lecture base. Se résorbe seul en ≤ 8 h (durée de vie de l'access token).
@@ -289,4 +317,4 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { authenticate, authorize, refreshCustomRoles, resolveBaseRole, validatePassword, MIN_PASSWORD_LENGTH };
+module.exports = { authenticate, authorize, refreshCustomRoles, resolveBaseRole, validatePassword, MIN_PASSWORD_LENGTH, dansPerimetreOperateur };

@@ -381,6 +381,8 @@ async function main() {
     // référence rompue (#REF!) : la source des sorties n'est plus dans le
     // classeur. Compté pour être DIT — jamais corrigé en silence.
     formules_rompues: { date_sortie: 0, date_sortie_avec_resultat: 0, inventaire: 0 },
+    sortie_avant_fabrication: 0,
+    exemples_sortie_avant_fab: [],
   };
 
   const candidats = [];
@@ -407,6 +409,14 @@ async function main() {
     recap.par_gamme[gammeKey] = (recap.par_gamme[gammeKey] || 0) + 1;
     if (r.status === 'en_stock') { recap.en_stock++; recap.poids_en_stock_kg += r.poids_kg; }
     else recap.sortis++;
+    // Sortie datée AVANT la fabrication : le classeur du 24/09/2026 en porte
+    // (dates de convention 31/12/2015, 01/01/2020 pour des sorties anciennes
+    // non datées). La date est importée TELLE QUELLE — c'est une sortie — mais
+    // l'écart est nommé : un carton ne sort pas avant d'avoir été fabriqué.
+    if (r.date_sortie && r.date_fabrication && r.date_sortie < r.date_fabrication) {
+      recap.sortie_avant_fabrication++;
+      if (recap.exemples_sortie_avant_fab.length < 5) recap.exemples_sortie_avant_fab.push(r.code);
+    }
   }
 
   const client = await pool.connect();
@@ -490,6 +500,9 @@ async function main() {
   for (const [g, n] of Object.entries(recap.par_gamme)) console.log(`  - ${g} : ${n}`);
   console.log(`Cartons en stock               : ${recap.en_stock} (${recap.poids_en_stock_kg.toFixed(1)} kg)`);
   console.log(`Cartons sortis                 : ${recap.sortis}`);
+  if (recap.sortie_avant_fabrication > 0) {
+    console.log(`  dont sortie datée AVANT la fabrication : ${recap.sortie_avant_fabrication} (importées telles quelles ; ex. ${recap.exemples_sortie_avant_fab.join(', ')})`);
+  }
   console.log(`Écarts de dimensions détectés  : ${recap.nb_ecarts_total} (${recap.ecarts.length} affichés)`);
   for (const e of recap.ecarts) {
     console.log(`  - ${e.code} / ${e.champ} : fichier="${e.valeur_fichier}" ≠ base="${e.valeur_base}"`);
