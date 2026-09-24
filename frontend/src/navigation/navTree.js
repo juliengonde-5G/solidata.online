@@ -30,7 +30,7 @@ import {
   ShoppingBag, Target, Upload, Calendar, Briefcase, Wrench, ShieldCheck,
   Database, Building2, ListChecks, FileText, Beaker, ScanLine, Download,
   TrendingUp, AlertTriangle, Leaf, Zap, Gauge, MessageSquare, MessageCircle, ShoppingCart,
-  GraduationCap, Shirt, Fingerprint, MapPinned, Workflow, FolderOpen,
+  GraduationCap, Shirt, Fingerprint, MapPinned, Workflow, FolderOpen, History as HistoryIcon,
 } from 'lucide-react';
 
 // ══════════════════════════════════════════
@@ -68,6 +68,7 @@ export const NAV_TREE = [
             ],
           },
           { label: 'Collecte en direct', path: '/collections-live', icon: MapPin, roles: ['ADMIN'] },
+          { label: 'Revoir une collecte', path: '/collections-replay', icon: HistoryIcon, roles: ['ADMIN'] },
           { label: 'Incidents', path: '/incidents', icon: AlertTriangle, roles: ['ADMIN'] },
           { label: 'Carte des CAV', path: '/fill-rate', icon: MapIcon, roles: ['ADMIN'] },
           {

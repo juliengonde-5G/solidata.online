@@ -417,6 +417,25 @@ describe('trace GPS', () => {
     expect(r.body.kpis.distance_km).toBeGreaterThan(50);
   });
 
+  test('?gps=rejeu : trace plus fine pour la page « Revoir une collecte », consultation tracée comme telle', async () => {
+    const gps = Array.from({ length: 4000 }, (_, i) => ({
+      latitude: 49.4 + i * 0.0001, longitude: 1.09 + i * 0.0001,
+      speed: 30, recorded_at: new Date(Date.UTC(2026, 7, 20, 6, 0, i)).toISOString(),
+    }));
+    mockDb({ gps });
+    const r = await request(app)
+      .get(`/api/tours/${TOUR_ID}/rapport?gps=rejeu`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(r.status).toBe(200);
+    expect(r.body.gps_track.total_positions).toBe(4000);
+    expect(r.body.gps_track.sampling_step).toBe(2);               // ceil(4000/3000)
+    expect(r.body.gps_track.returned_positions).toBeLessThanOrEqual(3001);
+    expect(r.body.gps_track.positions.at(-1).recorded_at).toBe(gps[3999].recorded_at);
+    const trace = mockQuery.mock.calls.find(([sql]) => /INSERT INTO rgpd_audit_log/.test(String(sql)));
+    expect(trace).toBeDefined();
+    expect(JSON.parse(trace[1][4]).usage).toBe('rejeu');
+  });
+
   test('aucun relevé : distance null avec son motif, jamais 0', async () => {
     mockDb({ gps: [] });
     const r = await get();
