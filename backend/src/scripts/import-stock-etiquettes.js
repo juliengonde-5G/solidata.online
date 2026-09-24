@@ -334,6 +334,12 @@ async function chargerExistants(client, codes) {
   return map;
 }
 
+/** Vrai si un import AUTOMATIQUE (--apply --une-fois) doit être refusé :
+ *  le classeur porte des dates de sortie en formules rompues (#REF!). */
+function refuserImportAutomatique(recap, { apply, uneFois }) {
+  return !!(apply && uneFois && recap?.formules_rompues?.date_sortie > 0);
+}
+
 async function main() {
   const { apply, file, uneFois } = parseArgs(process.argv.slice(2));
   if (!file) {
@@ -433,6 +439,19 @@ async function main() {
       recap.sortie_avant_fabrication++;
       if (recap.exemples_sortie_avant_fab.length < 5) recap.exemples_sortie_avant_fab.push(r.code);
     }
+  }
+
+  // Import AUTOMATIQUE (--une-fois, lancé par deploy.sh) d'un classeur dont
+  // les dates de sortie sont des formules rompues (#REF!) : REFUSÉ. Sans ces
+  // dates, un carton déjà expédié entrerait « en stock » sans que personne ne
+  // l'ait décidé. Le classeur livré (24/09/2026) est en VALEURS ; ce garde-fou
+  // empêche qu'un classeur remplacé par erreur passe en silence au déploiement.
+  // À la main (sans --une-fois), l'opérateur voit l'avertissement et tranche.
+  if (refuserImportAutomatique(recap, { apply, uneFois })) {
+    console.error(`REFUSÉ : ${recap.formules_rompues.date_sortie} date(s) de sortie sont des formules rompues (#REF!) — import automatique annulé, rien n'a été écrit.`);
+    await pool.end();
+    process.exitCode = 2;
+    return;
   }
 
   const client = await pool.connect();
@@ -547,6 +566,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  refuserImportAutomatique,
   resolverValeurCellule,
   estFormuleRompue,
   resolverValeurDate,

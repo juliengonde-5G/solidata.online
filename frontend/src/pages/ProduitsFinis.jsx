@@ -4,8 +4,7 @@ import Layout from '../components/Layout';
 import { DataTable, LoadingSpinner, StatusBadge, Modal, PageHeader } from '../components';
 import api from '../services/api';
 import {
-  appliquerAutomatiques, optionsEtape, nomProduit, corpsGeneration,
-} from '../utils/etiquettes-parcours';
+  appliquerAutomatiques, optionsEtape, nomProduit, corpsGeneration, revenirA } from '../utils/etiquettes-parcours';
 
 const REFERENTIEL_VIDE = { gammes: [], categories: [], genres: [], saisons: [], produits: [], combinaisons: [] };
 
@@ -69,7 +68,10 @@ export default function ProduitsFinis() {
     setShowForm(true);
   };
 
-  const choisir = (champ, valeur) => setChoixManuel((prev) => ({ ...prev, [champ]: valeur }));
+  // Changer une étape efface toutes les étapes SUIVANTES (comme le fil
+  // d'Ariane de l'écran d'étiquetage) : sinon d'anciens choix incompatibles
+  // resteraient « décidés » et le formulaire enverrait une combinaison refusée.
+  const choisir = (champ, valeur) => setChoixManuel((prev) => ({ ...revenirA(prev, {}, champ).choix, [champ]: valeur }));
 
   const createProduct = async (e) => {
     e.preventDefault();

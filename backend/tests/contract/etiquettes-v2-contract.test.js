@@ -291,6 +291,13 @@ describe('3. Voie manuelle POST /api/produits-finis', () => {
   it('reste réservée à l’ADMIN', async () => {
     expect((await post('/api/produits-finis', 'OPERATEUR_STOCK', CORPS)).status).toBe(403);
   });
+
+  it('la liste porte la forme lisible du code (v2 découpé, ancien code tel quel)', async () => {
+    mockQuery.mockImplementation(async () => ({ rows: [{ id: 1, code_barre: '312A02200001F' }, { id: 2, code_barre: 'P10AAH' }] }));
+    const r = await request(app).get('/api/produits-finis').set('Authorization', `Bearer ${TOKENS.ADMIN}`);
+    expect(r.status).toBe(200);
+    expect(r.body.map((x) => x.code_lisible)).toEqual(['3-1-2A-02-2-00001F', 'P10AAH']);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

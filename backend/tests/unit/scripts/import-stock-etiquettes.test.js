@@ -359,3 +359,19 @@ describe('lireLignes', () => {
     expect(lignes[2].id).toBe('P100MN');
   });
 });
+
+describe('refuserImportAutomatique — classeur à dates de sortie rompues', () => {
+  const { refuserImportAutomatique } = require('../../../src/scripts/import-stock-etiquettes');
+  const rompu = { formules_rompues: { date_sortie: 14387 } };
+  const sain = { formules_rompues: { date_sortie: 0 } };
+  test('import automatique (deploy.sh) refusé sur un classeur rompu', () => {
+    expect(refuserImportAutomatique(rompu, { apply: true, uneFois: 'x' })).toBe(true);
+  });
+  test('classeur en valeurs accepté', () => {
+    expect(refuserImportAutomatique(sain, { apply: true, uneFois: 'x' })).toBe(false);
+  });
+  test('à la main (sans --une-fois) ou en simulation : l\'opérateur tranche', () => {
+    expect(refuserImportAutomatique(rompu, { apply: true, uneFois: null })).toBe(false);
+    expect(refuserImportAutomatique(rompu, { apply: false, uneFois: 'x' })).toBe(false);
+  });
+});

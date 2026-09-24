@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 // Générateur partagé avec la voie « étiquette » (item 32) — même code-barres v2
 // généré, même validation de combinaison, created_by + source systématiques.
 const { generateProduitFini, validerCorpsGeneration, repondreErreurGeneration } = require('./etiquettes');
+const { formeLisible } = require('../utils/codification-etiquettes');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -35,7 +36,8 @@ router.get('/', async (req, res) => {
     if (lim) { params.push(parseInt(lim)); query += ` LIMIT $${params.length}`; }
 
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    // Forme lisible du code (« 3-1-2A-02-2-00001F » ; un ancien code reste tel quel).
+    res.json(result.rows.map((r) => ({ ...r, code_lisible: formeLisible(r.code_barre) })));
   } catch (err) {
     console.error('[PRODUITS-FINIS] Erreur :', err);
     res.status(500).json({ error: 'Erreur serveur' });
