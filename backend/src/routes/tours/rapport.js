@@ -67,6 +67,14 @@ function journaliserConsultationRapport(req, tourId, contexte) {
 // Nombre de positions GPS renvoyées au maximum (cf. échantillonnage plus bas).
 const GPS_ECHANTILLON_CIBLE = 300;
 
+// Cible d'échantillonnage pour la page « Revoir une collecte » (`?gps=rejeu`).
+// 300 positions suffisent à dessiner une trace sur un PDF d'une page ; pour
+// REJOUER le déplacement du camion, elles laisseraient des sauts de plusieurs
+// centaines de mètres entre deux images. 3 000 positions (un relevé toutes
+// les ~10 s sur une journée de 8 h) gardent le mouvement lisible sans charger
+// une journée entière de relevés dans le navigateur.
+const GPS_ECHANTILLON_REJEU = 3000;
+
 // Garde-fou de lecture : au-delà, on tronque et on le DIT plutôt que de
 // charger une journée entière de relevés en mémoire.
 const GPS_LECTURE_MAX = 20000;
@@ -282,6 +290,8 @@ router.get('/:id/rapport', authorize('ADMIN'), async (req, res) => {
     }
 
     const { degraded, soft, softAvecRepli } = fabriqueSoft();
+    const usageRejeu = req.query.gps === 'rejeu';
+    const cibleGps = usageRejeu ? GPS_ECHANTILLON_REJEU : GPS_ECHANTILLON_CIBLE;
 
     // ── 1. La tournée. SEULE requête essentielle du rapport : sans elle il
     // n'y a rien à raconter. Un repli `SELECT *` couvre les bases anciennes
@@ -638,8 +648,8 @@ router.get('/:id/rapport', authorize('ADMIN'), async (req, res) => {
     // trajet (les zones denses restent denses proportionnellement) alors qu'un
     // filtrage par distance écraserait les arrêts. Le DERNIER point est
     // toujours conservé, sans quoi la trace s'arrêterait avant le retour.
-    const pas = gpsRows.length > GPS_ECHANTILLON_CIBLE
-      ? Math.ceil(gpsRows.length / GPS_ECHANTILLON_CIBLE)
+    const pas = gpsRows.length > cibleGps
+      ? Math.ceil(gpsRows.length / cibleGps)
       : 1;
     const echantillon = gpsRows
       .filter((_, i) => i % pas === 0 || i === gpsRows.length - 1)
@@ -933,6 +943,8 @@ router.get('/:id/rapport', authorize('ADMIN'), async (req, res) => {
       nb_arrets_gps: (arretsGps.arrets || []).length,
       arrets_source: arretsGps.source || 'indisponible',
       geolocalisation_nominative: contientDonneesLocalisationNominatives,
+      // La même consultation, par l'écran de rejeu plutôt que par le PDF.
+      usage: usageRejeu ? 'rejeu' : 'compte_rendu',
     });
 
     // Best effort, après les blocs métier : une météo indisponible ne doit ni

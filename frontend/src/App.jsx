@@ -23,6 +23,7 @@ const Tours = lazy(() => import('./pages/Tours'));
 const Vehicles = lazy(() => import('./pages/Vehicles'));
 const VehicleMaintenance = lazy(() => import('./pages/VehicleMaintenance'));
 const LiveVehicles = lazy(() => import('./pages/LiveVehicles'));
+const CollecteRejeu = lazy(() => import('./pages/CollecteRejeu'));
 const Incidents = lazy(() => import('./pages/Incidents'));
 const Qhse = lazy(() => import('./pages/Qhse'));
 const Production = lazy(() => import('./pages/Production'));
@@ -252,6 +253,7 @@ function App() {
               <Route path="/vehicles" element={<ProtectedRoute roles={['ADMIN']}><Vehicles /></ProtectedRoute>} />
               <Route path="/vehicle-maintenance" element={<ProtectedRoute roles={['ADMIN']}><VehicleMaintenance /></ProtectedRoute>} />
               <Route path="/collections-live" element={<ProtectedRoute roles={['ADMIN']}><LiveVehicles /></ProtectedRoute>} />
+              <Route path="/collections-replay" element={<ProtectedRoute roles={['ADMIN']}><CollecteRejeu /></ProtectedRoute>} />
               <Route path="/incidents" element={<ProtectedRoute roles={['ADMIN']}><Incidents /></ProtectedRoute>} />
               <Route path="/planning-tournees" element={<ProtectedRoute roles={['ADMIN']}><PlanningTournees /></ProtectedRoute>} />
               <Route path="/dashboard-collecte" element={<ProtectedRoute roles={['ADMIN']}><DashboardCollecte /></ProtectedRoute>} />

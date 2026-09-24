@@ -1426,6 +1426,15 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
           >
             {pdfEnCours ? 'Préparation…' : 'Exporter en PDF'}
           </button>
+          {/* Rejouer la journée sur la carte, comme en direct. */}
+          {tour.status === 'completed' && tour.date && (
+            <Link
+              to={`/collections-replay?date=${new Date(tour.date).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })}&tour=${tour.id}`}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50"
+            >
+              Revoir la collecte
+            </Link>
+          )}
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none p-1 rounded-lg hover:bg-slate-100">&times;</button>
         </div>
       </div>
