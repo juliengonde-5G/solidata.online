@@ -30,6 +30,15 @@ jest.mock('../../src/config/database', () => ({
   query: (...a) => mockQuery(...a),
   connect: (...a) => mockConnect(...a),
 }));
+// Météo : aucun appel réseau réel en test. Le générateur « meteo » interroge
+// Open-Meteo avec un délai de 10 s — exactement le délai d'un test Jest : sur
+// un réseau de CI lent, le test échouait par dépassement sans rien révéler.
+jest.mock('../../src/utils/weather', () => ({
+  ...jest.requireActual('../../src/utils/weather'),
+  fetchOpenMeteoDaily: async () => null,
+  fetchOpenMeteoHourly: async () => null,
+  fetchOpenMeteoDailyRange: async () => null,
+}));
 jest.mock('../../src/middleware/activity-logger', () => ({
   autoLogActivity: () => (req, res, next) => next(),
   logActivity: () => {},
