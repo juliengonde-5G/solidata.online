@@ -47,6 +47,7 @@
  * métier réelles) : --file pointe vers un chemin fourni à l'exécution.
  */
 
+const path = require('path');
 const ExcelJS = require('exceljs');
 const pool = require('../config/database');
 const { normaliserScan, analyserCode } = require('../utils/codification-etiquettes');
@@ -311,11 +312,12 @@ function lireLignes(worksheet, colonnes, rowIndexEntete) {
 // ══════════════════════════════════════════
 
 function parseArgs(argv) {
-  const args = { apply: false, file: null };
+  const args = { apply: false, file: null, uneFois: null };
   for (const a of argv) {
     if (a === '--apply') args.apply = true;
     else if (a === '--dry-run') args.apply = false;
     else if (a.startsWith('--file=')) args.file = a.slice('--file='.length) || null;
+    else if (a.startsWith('--une-fois=')) args.uneFois = a.slice('--une-fois='.length) || null;
   }
   return args;
 }
@@ -333,10 +335,24 @@ async function chargerExistants(client, codes) {
 }
 
 async function main() {
-  const { apply, file } = parseArgs(process.argv.slice(2));
+  const { apply, file, uneFois } = parseArgs(process.argv.slice(2));
   if (!file) {
     console.error('Usage : node src/scripts/import-stock-etiquettes.js --file=<chemin.xlsm|.xlsx> [--apply]');
     process.exit(1);
+  }
+
+  // --une-fois=<clé> (appel par deploy.sh) : le classeur livré avec le dépôt
+  // est une PHOTO du stock à une date. Une fois importée, la réimporter à
+  // chaque déploiement re-sortirait un carton dont on aurait ANNULÉ la sortie
+  // dans SOLIDATA entre-temps : le verrou `settings` l'empêche, posé dans la
+  // même transaction que l'import.
+  if (uneFois && apply) {
+    const deja = await pool.query('SELECT value FROM settings WHERE key = $1', [uneFois]);
+    if (deja.rows.length > 0) {
+      console.log(`Import « ${uneFois} » déjà appliqué (${deja.rows[0].value}) — rien à faire.`);
+      await pool.end();
+      return;
+    }
   }
 
   console.log(`\n=== Import du stock d'étiquettes — ${apply ? 'APPLICATION' : 'SIMULATION (--dry-run)'} ===`);
@@ -463,6 +479,12 @@ async function main() {
       }
     }
 
+    if (apply && uneFois) {
+      await client.query(
+        `INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+        [uneFois, JSON.stringify({ applique_le: new Date().toISOString(), fichier: path.basename(file), crees: recap.crees, mis_a_jour: recap.mis_a_jour })]
+      );
+    }
     if (apply) await client.query('COMMIT');
   } catch (err) {
     if (apply) await client.query('ROLLBACK');
