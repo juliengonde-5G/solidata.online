@@ -256,7 +256,10 @@ describe('assistant : fermé, et fermé des DEUX côtés', () => {
 
   test('l’écran ne montre pas un onglet qui répondrait 403', () => {
     const layout = fs.readFileSync(path.join(__dirname, '../../../frontend/src/components/Layout.jsx'), 'utf8');
-    expect(layout).toContain("const assistantActif = (user?.base_role || user?.role) !== 'COMMUNICATION';");
+    // 2.57.0 : la règle est devenue une liste (OPERATEUR_STOCK s'y ajoute),
+    // COMMUNICATION doit toujours en faire partie.
+    expect(layout).toMatch(/const ROLES_SANS_ASSISTANT = \[[^\]]*'COMMUNICATION'[^\]]*\];/);
+    expect(layout).toContain("const assistantActif = !ROLES_SANS_ASSISTANT.includes(user?.base_role || user?.role);");
     expect(layout).toContain('assistantActif={assistantActif}');
     const dock = fs.readFileSync(path.join(__dirname, '../../../frontend/src/components/messagerie/DockUnifie.jsx'), 'utf8');
     expect(dock).toContain('...(assistantActif');

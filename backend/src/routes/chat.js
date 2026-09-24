@@ -257,7 +257,9 @@ const EXTENDED_TOOL_ROLES = Object.fromEntries(EXTENDED_TOOLS.map((e) => [e.name
 // Rôles auxquels l'assistant n'est pas ouvert (voir `traiterMessageBot`).
 // COMMUNICATION : son périmètre est le tableau de bord, le fil d'actualité et
 // l'écran du poste — le bot servirait stock, planning et heures par-dessus.
-const ROLES_SANS_ASSISTANT = new Set(['COMMUNICATION']);
+// OPERATEUR_STOCK (2.57.0) : étiquetage + sortie de cartons, rien d'autre —
+// même raison, le bot rouvrirait par la conversation ce que l'application lui ferme.
+const ROLES_SANS_ASSISTANT = new Set(['COMMUNICATION', 'OPERATEUR_STOCK']);
 
 // ── LE CHAUFFEUR : une liste blanche, pas un rôle ──────────────────────────
 //

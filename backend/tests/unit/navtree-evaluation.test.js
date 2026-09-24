@@ -108,6 +108,39 @@ describe('Garde de classe — aucun import lucide ne doit masquer un constructeu
     'File', 'Blob', 'Response', 'Request', 'Headers', 'Worker', 'Notification',
   ];
 
+  /**
+   * Retire les commentaires AVANT de chercher l'import fautif — un JSDoc peut
+   * CITER `import { Map } from 'lucide-react'` en exemple (c'est le cas ici
+   * même). Mais un `/*` n'ouvre un commentaire QUE s'il commence une ligne :
+   * `accept="image/*"` (Employees.jsx, AdminCAV.jsx) est une CHAÎNE, et une
+   * suppression gloutonne jusqu'au prochain `* /` avalait 17 000 caractères de
+   * code réel d'Employees.jsx — dont tout `new Map(` qui s'y trouverait. La
+   * garde regardait alors du vide et disait « rien à signaler ».
+   * Les chaînes ne sont pas retirées non plus : un import réel n'y vit jamais.
+   */
+  function retirerCommentaires(src) {
+    return src
+      .replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, '')
+      .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+  }
+
+  test('retirerCommentaires ne prend pas « image/* » pour un commentaire (le code qui suit reste visible)', () => {
+    const src = [
+      "import { Map } from 'lucide-react';",
+      '<input accept="image/*" />',
+      'const idx = new Map();',
+      '/* fin */',
+      '',
+    ].join('\n');
+    const propre = retirerCommentaires(src);
+    expect(propre).toMatch(/new\s+Map\s*\(/);
+    expect(propre).toMatch(/from 'lucide-react'/);
+    // Et un vrai JSDoc citant l'import EST retiré.
+    const doc = "/**\n * import { Map } from 'lucide-react'\n */\nconst x = 1;";
+    expect(retirerCommentaires(doc)).not.toMatch(/lucide-react/);
+    expect(retirerCommentaires(doc)).toMatch(/const x = 1/);
+  });
+
   function listerFichiers(dir, acc = []) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
@@ -124,7 +157,7 @@ describe('Garde de classe — aucun import lucide ne doit masquer un constructeu
     const fautifs = [];
     for (const racine of racines) {
       for (const fichier of listerFichiers(racine)) {
-        const src = fs.readFileSync(fichier, 'utf8');
+        const src = retirerCommentaires(fs.readFileSync(fichier, 'utf8'));
         const m = src.match(/import\s*\{([\s\S]*?)\}\s*from\s*['"]lucide-react['"]/);
         if (!m) continue;
 

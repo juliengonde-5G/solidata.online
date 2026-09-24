@@ -305,6 +305,19 @@ case "${ACTION}" in
         fi
     fi
 
+    # Stock d'étiquettes (2.57.0) : import UNIQUE de la photo du stock livrée
+    # avec le dépôt (classeur « Dashboard 2026 » extrait le 24/09/2026). Verrou
+    # en base : le deuxième déploiement ne réimporte rien. JAMAIS bloquant —
+    # un échec se relance à la main, il ne doit pas annuler une mise à jour saine.
+    if [ -f "backend/src/data/stock-etiquettes-2026-09-24.xlsx" ]; then
+        if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/import-stock-etiquettes.js \
+             --file=src/data/stock-etiquettes-2026-09-24.xlsx --apply --une-fois=etiquettes.import_stock_2026_09_24; then
+            log "Stock d'étiquettes : import vérifié (appliqué une seule fois)."
+        else
+            warn "Stock d'étiquettes : import en échec — relancer : docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/import-stock-etiquettes.js --file=src/data/stock-etiquettes-2026-09-24.xlsx --apply --une-fois=etiquettes.import_stock_2026_09_24"
+        fi
+    fi
+
     # ── Étape 6: Nettoyage ──
     log "Étape 6/7 — Nettoyage images intermédiaires..."
     docker image prune -f
@@ -452,6 +465,19 @@ case "${ACTION}" in
         log "FATAL : init-db.js a échoué. Mise à jour annulée."
         log "Diagnostic : docker compose -f ${COMPOSE_FILE} logs backend"
         exit 1
+    fi
+
+    # Stock d'étiquettes (2.57.0) : import UNIQUE de la photo du stock livrée
+    # avec le dépôt (classeur « Dashboard 2026 » extrait le 24/09/2026). Verrou
+    # en base : le deuxième déploiement ne réimporte rien. JAMAIS bloquant —
+    # un échec se relance à la main, il ne doit pas annuler une mise à jour saine.
+    if [ -f "backend/src/data/stock-etiquettes-2026-09-24.xlsx" ]; then
+        if docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/import-stock-etiquettes.js \
+             --file=src/data/stock-etiquettes-2026-09-24.xlsx --apply --une-fois=etiquettes.import_stock_2026_09_24; then
+            log "Stock d'étiquettes : import vérifié (appliqué une seule fois)."
+        else
+            warn "Stock d'étiquettes : import en échec — relancer : docker compose -f ${COMPOSE_FILE} exec -T backend node src/scripts/import-stock-etiquettes.js --file=src/data/stock-etiquettes-2026-09-24.xlsx --apply --une-fois=etiquettes.import_stock_2026_09_24"
+        fi
     fi
 
     # Health check (basique)

@@ -201,6 +201,7 @@ app.use('/api/tri', require('./routes/tri'));
 app.use('/api/chaine-config', require('./routes/chaine-config'));
 app.use('/api/produits-finis', require('./routes/produits-finis'));
 app.use('/api/etiquettes', require('./routes/etiquettes'));
+app.use('/api/sortie-cartons', require('./routes/sortie-cartons'));
 app.use('/api/expeditions', require('./routes/expeditions'));
 app.use('/api/refashion', require('./routes/refashion'));
 app.use('/api/communes', require('./routes/communes'));

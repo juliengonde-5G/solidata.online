@@ -20,13 +20,26 @@
  * La correspondance se fait sur la valeur NORMALISÉE (casse et accents
  * neutralisés) : « Été », « ETE » et « été » désignent la même saison, et le
  * référentiel est saisi à la main.
+ *
+ * 2.57.0 (Étiquettes v2, 23/09/2026) : les gammes changent de nature. BTQ
+ * remplace STANDARD, EXPORT disparaît de la saisie, UP (Upcycling) et CHIF
+ * (Chiffons) deviennent des gammes IMPRIMÉES à part entière et non plus des
+ * cas particuliers. Les anciennes valeurs (STANDARD, EXPORT, BTQ STAND,
+ * BTQ EXTRA, BTQ FMR, Pvak) restent gérées ICI pour l'affichage de l'HISTORIQUE
+ * (des cartons imprimés avant la bascule continuent d'exister en stock et
+ * doivent rester lisibles) — elles ne sont plus proposées à la saisie
+ * (le référentiel backend ne les sert plus dans `/etiquettes/referentiel`).
+ * Import important : `import { Map } from 'lucide-react'` a provoqué une page
+ * blanche totale en prod (2.56.2, `Map` masque le constructeur du langage) —
+ * on n'importe donc ici que des icônes dont le nom ne recouvre AUCUN
+ * identifiant global (jamais Map/Set/Promise/Symbol… sans alias).
  */
 import {
   ShoppingBag, Shirt, Footprints, SprayCan, BedDouble, WashingMachine,
   ToyBrick, Blinds, Sparkles, Tag,
   Sun, Snowflake, CalendarOff, Leaf, Flower2,
   Gem, Store, PackageSearch, Container,
-  User, Users, Baby,
+  User, Users, Baby, UserX,
 } from 'lucide-react';
 
 /** Casse et accents neutralisés pour COMPARER — jamais pour afficher. */
@@ -82,16 +95,27 @@ export function visuelSaison(valeur) {
 }
 
 // ── Gammes ─────────────────────────────────────────────────────────────────
-// Les quatre gammes portent des noms internes (EXTRA, VAK…) que personne ne
-// devine à la première journée. Leur DÉFINITION métier — dictée par le client
-// le 10/09/2026 — est affichée sous le nom, et l'icône la reprend : le joyau
-// pour le premium, la boutique pour le magasin, la fouille pour la vente au
-// kilo, le conteneur pour l'export en gros volumes.
+// Cinq gammes ACTIVES à la saisie (arbitrages A1/A2 du 23/09/2026), chacune
+// avec sa définition métier — un nom de code (« EXTRA », « VAK »…) ne se
+// comprend qu'après des mois d'atelier, la définition se lit tout de suite.
+// Les entrées suivantes (standard/export/btq stand/btq extra/btq fmr/pvak)
+// sont des valeurs HISTORIQUES : des cartons déjà imprimés les portent encore
+// (stock, réimpression, export ancien format) mais aucune n'est plus proposée
+// au choix — leur définition le dit explicitement (« ancien »).
 const GAMMES = {
   extra: { icon: Gem, color: '#7C3AED', bg: '#EDE9FE', definition: 'Premium' },
-  standard: { icon: Store, color: '#0F766E', bg: '#CCFBF1', definition: 'Magasin' },
-  vak: { icon: PackageSearch, color: '#B45309', bg: '#FEF3C7', definition: 'Fouille' },
-  export: { icon: Container, color: '#1D4ED8', bg: '#DBEAFE', definition: 'Gros volumes' },
+  btq: { icon: Store, color: '#16A34A', bg: '#DCFCE7', definition: 'Boutique' },
+  vak: { icon: PackageSearch, color: '#B45309', bg: '#FEF3C7', definition: 'Vente au kilo' },
+  chif: { icon: SprayCan, color: '#475569', bg: '#E2E8F0', definition: 'Chiffons' },
+  up: { icon: Sparkles, color: '#0F766E', bg: '#CCFBF1', definition: 'Upcycling' },
+
+  // Historique — affichage seul, jamais proposé à la saisie.
+  standard: { icon: Store, color: '#16A34A', bg: '#DCFCE7', definition: 'Boutique (ancien, désormais BTQ)' },
+  export: { icon: Container, color: '#1D4ED8', bg: '#DBEAFE', definition: 'Gros volumes (ancien, retiré)' },
+  'btq stand': { icon: Store, color: '#16A34A', bg: '#DCFCE7', definition: 'Boutique (ancien, désormais BTQ)' },
+  'btq extra': { icon: Gem, color: '#7C3AED', bg: '#EDE9FE', definition: 'Premium (ancien, désormais EXTRA)' },
+  'btq fmr': { icon: Store, color: '#16A34A', bg: '#DCFCE7', definition: 'Boutique (ancien, désormais BTQ)' },
+  pvak: { icon: PackageSearch, color: '#B45309', bg: '#FEF3C7', definition: 'Vente au kilo (ancien)' },
 };
 
 export function visuelGamme(valeur) {
@@ -101,35 +125,55 @@ export function visuelGamme(valeur) {
   return v || VISUEL_NEUTRE;
 }
 
-// ── Genres : trois familles, une ligne chacune ─────────────────────────────
-// Demande client : « une ligne Adulte / Enfants / Layettes ». Le référentiel
-// porte dix valeurs (Adulte Femme, Enfant Fille, Layette Garçon…) que l'écran
-// alignait à plat, sans hiérarchie — l'opérateur balayait dix tuiles pour en
-// trouver une. Le regroupement se fait sur le PRÉFIXE normalisé, donc une
-// onzième valeur (« Adulte Unisexe ») rejoint sa famille toute seule.
+// ── Genres : familles d'âge, une ligne chacune ─────────────────────────────
+// Demande client (référentiel 2026) : Adulte / Enfant (sans tranche d'âge) /
+// Enfant 0-2 ans / Enfant 3-9 ans / Enfant 10 ans et + / Sans genre — dans cet
+// ordre d'AFFICHAGE. Le référentiel porte 14 valeurs (Adulte Homme, Enfant
+// Fille 0-2 ans…) que l'écran alignait à plat avant 2.57.0 ; l'opérateur
+// balayait dix tuiles pour en trouver une.
 //
-// « Sans Genre » et tout libellé hors familles tombent dans une quatrième
-// ligne « Autre », affichée seulement si elle contient quelque chose : une
-// section vide se lit comme une donnée manquante.
+// Le classement se fait par un TEST spécifique à chaque famille (pas un
+// simple préfixe) car « Enfant Fille 0-2 ans » et « Enfant Fille » partagent
+// le même préfixe « enfant » — c'est la présence d'une tranche d'âge dans le
+// libellé qui les distingue, pas seulement le mot « Enfant ». L'ordre des
+// TESTS (dans `FAMILLES_GENRE`) va donc du plus spécifique (tranche d'âge) au
+// plus général, pour qu'« Enfant Fille 0-2 ans » ne tombe jamais dans la
+// famille générique « Enfant ».
+//
+// Toute valeur qui ne correspond à aucun test (un ajout futur au référentiel
+// qu'on n'a pas encore répertorié ici) tombe dans « Autre », affichée
+// seulement si elle contient quelque chose — une ligne vide se lit comme une
+// donnée manquante.
 export const FAMILLES_GENRE = [
-  { id: 'adulte', label: 'Adulte', icon: User, prefixe: 'adulte' },
-  { id: 'enfant', label: 'Enfants', icon: Users, prefixe: 'enfant' },
-  { id: 'layette', label: 'Layettes', icon: Baby, prefixe: 'layette' },
+  { id: 'adulte', label: 'Adulte', icon: User, test: (n) => n.startsWith('adulte') },
+  { id: 'enfant_0_2', label: 'Enfant 0-2 ans', icon: Baby, test: (n) => n.startsWith('enfant') && n.includes('0-2') },
+  { id: 'enfant_3_9', label: 'Enfant 3-9 ans', icon: Baby, test: (n) => n.startsWith('enfant') && n.includes('3-9') },
+  { id: 'enfant_10_plus', label: 'Enfant 10 ans et +', icon: Baby, test: (n) => n.startsWith('enfant') && n.includes('10 ans') },
+  { id: 'enfant', label: 'Enfant', icon: Users, test: (n) => n.startsWith('enfant') },
+  { id: 'sans_genre', label: 'Sans genre', icon: UserX, test: (n) => n === 'sans genre' },
 ];
 
 /**
- * Range les valeurs de genre par famille, dans l'ordre des familles puis dans
- * l'ordre du référentiel (qui porte son propre `ordre`).
+ * Range les valeurs de genre par famille, DANS L'ORDRE D'AFFICHAGE ci-dessus
+ * (indépendant de l'ordre des tests, qui doit lui rester du plus spécifique
+ * au plus général — voir le commentaire de FAMILLES_GENRE). Une valeur qui ne
+ * correspond à AUCUNE famille rejoint « Autre » en dernier.
  * @param {string[]} valeurs
  * @returns {{id:string,label:string,icon:Function,valeurs:string[]}[]} familles NON VIDES
  */
 export function grouperGenres(valeurs) {
+  // Tests dans l'ordre spécifique → général (voir commentaire ci-dessus) ;
+  // affichage dans l'ordre de FAMILLES_GENRE (déjà celui voulu par le client).
+  const ordreTest = ['enfant_0_2', 'enfant_3_9', 'enfant_10_plus', 'sans_genre', 'adulte', 'enfant'];
   const restants = [...(valeurs || [])];
-  const groupes = FAMILLES_GENRE.map((f) => {
-    const pris = restants.filter((v) => normaliser(v).startsWith(f.prefixe));
+  const parFamille = new Map(FAMILLES_GENRE.map((f) => [f.id, []]));
+  for (const idFamille of ordreTest) {
+    const famille = FAMILLES_GENRE.find((f) => f.id === idFamille);
+    const pris = restants.filter((v) => famille.test(normaliser(v)));
     for (const v of pris) restants.splice(restants.indexOf(v), 1);
-    return { ...f, valeurs: pris };
-  });
+    parFamille.set(idFamille, pris);
+  }
+  const groupes = FAMILLES_GENRE.map((f) => ({ ...f, valeurs: parFamille.get(f.id) }));
   if (restants.length > 0) {
     groupes.push({ id: 'autre', label: 'Autre', icon: Tag, valeurs: restants });
   }

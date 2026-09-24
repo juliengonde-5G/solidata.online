@@ -55,9 +55,12 @@ const BUILTIN_ROLES = {
   // Chargé de communication : tableau de bord, fil d'actualité et diffusion des
   // contenus sur l'écran du poste de pointage. Aucune donnée de personnel.
   COMMUNICATION: 'Chargé de communication',
+  // Opérateur des postes d'étiquetage et de sortie de cartons (2.57.0) :
+  // étiquetage + sortie de stock, rien d'autre. Profil partagé par les postes.
+  OPERATEUR_STOCK: 'Opérateur étiquetage & sortie de stock',
 };
 // Rôles pouvant servir de base à un rôle personnalisé (jamais ADMIN → pas d'escalade).
-const BASE_ROLES = ['RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'PCM', 'COMMUNICATION'];
+const BASE_ROLES = ['RH', 'COLLABORATEUR', 'AUTORITE', 'RESP_BTQ', 'DPO', 'PCM', 'COMMUNICATION', 'OPERATEUR_STOCK'];
 
 // Génère une clé de rôle sûre et sans collision avec les rôles intégrés.
 function slugRoleKey(label) {
@@ -95,6 +98,10 @@ const MODULE_CATALOG = [
   // leur portée historique — masquage de la barre latérale — tant qu'on ne les
   // a pas instrumentées une par une.
   { key: 'etiquettes', label: 'Tri › Étiquettes' },
+  // Sortie de cartons (2.57.0) : habilitation propre, appliquée CÔTÉ SERVEUR
+  // (requireModule sur tout routes/sortie-cartons.js). Distincte des étiquettes :
+  // retirer l'une ne coupe pas l'autre.
+  { key: 'sortie_cartons', label: 'Inventaire › Sortie cartons' },
   // Lot 4 : Boutiques + Vente au Kilo regroupés dans la section de 1er niveau
   // « Frip » (Layout.jsx, sous Administration). 'frip' masque les deux sous-
   // branches d'un coup ; 'boutiques'/'vak' restent au catalogue pour restreindre
