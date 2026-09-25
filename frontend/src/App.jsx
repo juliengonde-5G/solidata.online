@@ -78,7 +78,6 @@ const FillRateMap = lazy(() => import('./pages/FillRateMap'));
 const NewsFeed = lazy(() => import('./pages/NewsFeed'));
 const Messagerie = lazy(() => import('./pages/Messagerie'));
 const ExutoiresCommandes = lazy(() => import('./pages/ExutoiresCommandes'));
-const ExutoiresPreparation = lazy(() => import('./pages/ExutoiresPreparation'));
 const ExutoiresGantt = lazy(() => import('./pages/ExutoiresGantt'));
 const ExutoiresControleFacturation = lazy(() => import('./pages/ExutoiresControleFacturation'));
 const ExutoiresCalendrier = lazy(() => import('./pages/ExutoiresCalendrier'));
@@ -276,7 +275,8 @@ function App() {
 
               {/* Logistique */}
               <Route path="/exutoires-commandes" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresCommandes /></ProtectedRoute>} />
-              <Route path="/exutoires-preparation" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresPreparation /></ProtectedRoute>} />
+              {/* 2.59.0 — la préparation se gère dans la fiche de chaque commande. */}
+              <Route path="/exutoires-preparation" element={<Navigate to="/exutoires-commandes" replace />} />
               <Route path="/exutoires-gantt" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresGantt /></ProtectedRoute>} />
               <Route path="/exutoires-controle-facturation" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresControleFacturation /></ProtectedRoute>} />
               <Route path="/exutoires-calendrier" element={<ProtectedRoute roles={['ADMIN']}><ExutoiresCalendrier /></ProtectedRoute>} />

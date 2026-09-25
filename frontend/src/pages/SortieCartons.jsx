@@ -185,7 +185,12 @@ export default function SortieCartons() {
   // client du 25/09/2026) : ses cartons sortent au scan, par le mode libre. Le
   // type 'vak' reste accepté par le serveur pour l'historique, l'écran ne le
   // propose plus.
-  const [mode, setMode] = useState(null);
+  // Lien profond depuis la fiche d'une commande boutique dans le suivi
+  // logistique (`?commande=<id>`) : on arrive directement sur son scan.
+  const commandeDemandeeRef = useRef(
+    Number(new URLSearchParams(window.location.search).get('commande')) || null
+  );
+  const [mode, setMode] = useState(commandeDemandeeRef.current ? 'btq' : null);
   const [camera, setCamera] = useState(false);
   // Avancement de la commande boutique, ligne par ligne (2.58.0).
   const [preparation, setPreparation] = useState(null);
@@ -352,6 +357,16 @@ export default function SortieCartons() {
       setError(e.response?.data?.error || e.message);
     }
   };
+
+  // Commande demandée par le lien : ouverte dès que la liste est chargée
+  // (une seule fois — revenir à la liste ne la rouvre pas).
+  useEffect(() => {
+    const id = commandeDemandeeRef.current;
+    if (!id || mode !== 'btq' || order || orders.length === 0) return;
+    commandeDemandeeRef.current = null;
+    const o = orders.find((x) => Number(x.id) === id);
+    if (o) pickOrder(o, 'btq');
+  }, [mode, order, orders]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enterLibre = () => {
     unlockAudio();

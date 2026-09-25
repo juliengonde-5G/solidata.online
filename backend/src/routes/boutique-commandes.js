@@ -9,6 +9,7 @@ const stateMachine = require('../services/state-machine');
 const {
   chargerCatalogue, validerLignesCartons, etatPreparation,
 } = require('../services/boutique-catalogue');
+const { envoyerMessageSystemeRoles } = require('../services/messagerie');
 const {
   attachBoutiqueScope, enforceBoutiqueParam, enforceBoutiqueForEntity, boutiqueScopeSql,
 } = require('../middleware/boutique-scope');
@@ -67,6 +68,34 @@ async function ecrireLignesCartons(client, commandeId, lignes) {
     if (l.poids_estime_kg !== null) { estime += l.poids_estime_kg; estimeConnu = true; }
   }
   return estimeConnu ? Math.round(estime * 100) / 100 : null;
+}
+
+/**
+ * Prévient l'équipe logistique qu'une commande boutique vient d'arriver
+ * (messagerie interne, conversation système). BEST EFFORT, après la réponse :
+ * une messagerie indisponible ne doit jamais empêcher une boutique de commander.
+ * Le lien ouvre la fiche de la commande dans le suivi logistique.
+ */
+function notifierLogistique(commandeId) {
+  (async () => {
+    const r = await pool.query(`
+      SELECT c.reference, b.nom AS boutique_nom, c.date_livraison_souhaitee,
+             (SELECT COALESCE(SUM(nb_cartons_demande), 0)::int FROM boutique_commande_lignes WHERE commande_id = c.id) AS nb_cartons,
+             (SELECT COUNT(*)::int FROM boutique_commande_lignes WHERE commande_id = c.id) AS nb_lignes
+        FROM boutique_commandes c LEFT JOIN boutiques b ON b.id = c.boutique_id
+       WHERE c.id = $1`, [commandeId]);
+    const c = r.rows[0];
+    if (!c) return;
+    const livraison = c.date_livraison_souhaitee
+      ? `, livraison souhaitée le ${new Date(c.date_livraison_souhaitee).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })}`
+      : '';
+    await envoyerMessageSystemeRoles(['ADMIN'], {
+      texte: `Nouvelle commande boutique ${c.reference} — ${c.boutique_nom || 'boutique'} : `
+        + `${c.nb_cartons} carton(s) sur ${c.nb_lignes} catégorie(s)${livraison}. À préparer par la logistique.`,
+      source: 'commande_boutique',
+      lien: `/exutoires-commandes?commande=btq-${commandeId}`,
+    });
+  })().catch((err) => console.error('[boutique-commandes] notification logistique :', err.message));
 }
 
 async function checkAndTransition(commandeId, targetStatut, userId, userRole, extra = {}) {
@@ -351,7 +380,18 @@ router.post('/',
       commande.poids_total_demande_kg = estime ?? 0;
 
       await logHistory(client, commande.id, null, 'brouillon', req.user.id, 'Création');
+
+      // « Envoyer à la logistique » (2.59.0) : la boutique passe la commande en
+      // un geste — elle est créée puis envoyée dans la MÊME transaction, sans
+      // brouillon intermédiaire à penser à envoyer.
+      const envoyer = req.body.envoyer === true;
+      if (envoyer) {
+        await client.query("UPDATE boutique_commandes SET statut = 'envoyee', updated_at = NOW() WHERE id = $1", [commande.id]);
+        await logHistory(client, commande.id, 'brouillon', 'envoyee', req.user.id, 'Envoyée à la logistique');
+        commande.statut = 'envoyee';
+      }
       await client.query('COMMIT');
+      if (envoyer) notifierLogistique(commande.id);
       res.status(201).json(commande);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -424,6 +464,7 @@ router.patch('/:id/envoyer', authorize('ADMIN', 'RESP_BTQ'), async (req, res) =>
   try {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'envoyee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
+    notifierLogistique(Number(req.params.id));
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });

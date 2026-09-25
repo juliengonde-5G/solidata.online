@@ -1,13 +1,30 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Inbox, Package, Truck, CheckCircle2,
-  ArrowUpRight, Calendar, Building2,
-  Repeat, Pause, Play, Sparkles, AlertTriangle,
+  ArrowUpRight, Calendar, Building2, Store,
+  Repeat, Pause, Play, Sparkles, AlertTriangle, History,
 } from 'lucide-react';
 import Layout from '../components/Layout';
-import { LoadingSpinner, Modal, KanbanBoard, StatusBadge, ErrorState } from '../components';
+import { LoadingSpinner, Modal, KanbanBoard, StatusBadge, ErrorState, useToast } from '../components';
 import useConfirm from '../hooks/useConfirm';
 import api from '../services/api';
+import PreparationExutoire from '../components/logistique/PreparationExutoire';
+import FicheCommandeBoutique from '../components/logistique/FicheCommandeBoutique';
+import {
+  COLONNES, colonneDe, depuisExutoire, depuisBoutique, actionDeplacement,
+  estAncienneTerminee, libelleStatut, STATUTS_PREPARATION,
+} from '../utils/logistique-commandes';
+
+/**
+ * SUIVI DES COMMANDES — UN SEUL tableau pour la logistique (2.59.0).
+ *
+ * Les commandes des exutoires ET celles des boutiques s'y suivent ensemble,
+ * colonne par colonne ; une carte se fait avancer par glisser-déposer (même
+ * principe que le recrutement) et tout le reste se gère dans la fiche de la
+ * commande, selon son statut — préparation et chargement compris (la page
+ * « Préparation » est retirée). Les règles de déplacement vivent dans
+ * utils/logistique-commandes.js.
+ */
 
 // Map complet (incluant les anciens types) — utilisé UNIQUEMENT pour afficher
 // le libellé d'une commande historique. Pour les nouvelles commandes, voir
@@ -74,43 +91,6 @@ function libelleRythme(frequence, dateCommande) {
 
 // Regroupement des 9 statuts de workflow en 4 colonnes kanban
 // (mirror du visuel ticket board Open/Pending/Resolved/Closed).
-const KANBAN_COLUMNS = [
-  {
-    key: 'nouveau',
-    label: 'Nouvelles',
-    icon: Inbox,
-    accent: 'bg-slate-400',
-    statuts: ['en_attente'],
-  },
-  {
-    key: 'en_cours',
-    label: 'En préparation',
-    icon: Package,
-    accent: 'bg-amber-500',
-    statuts: ['confirmee', 'en_preparation', 'chargee'],
-  },
-  {
-    key: 'expedie',
-    label: 'Expédiées',
-    icon: Truck,
-    accent: 'bg-indigo-500',
-    statuts: ['expediee', 'pesee_recue'],
-  },
-  {
-    key: 'termine',
-    label: 'Terminées',
-    icon: CheckCircle2,
-    accent: 'bg-emerald-500',
-    statuts: ['facturee', 'cloturee'],
-  },
-];
-
-// Index inversé : statut → colonne kanban
-const STATUT_TO_COLUMN = KANBAN_COLUMNS.reduce((acc, col) => {
-  col.statuts.forEach((s) => { acc[s] = col.key; });
-  return acc;
-}, {});
-
 const EMPTY_FORM = {
   client_id: '',
   type_produit: [],
@@ -122,32 +102,13 @@ const EMPTY_FORM = {
   notes: '',
 };
 
-// Item 38b + résiduel v1-3 — Les passages confirmée → en_préparation → chargée →
-// expédiée sont retirés des raccourcis directs de la fiche commande : c'est la page
-// « Préparation d'expédition » qui pilote ce cycle (planification transporteur,
-// chargement, pesée interne) et, à l'expédition, décrémente le stock (mouvement de
-// sortie). Avancer le statut depuis la fiche sautait ce chemin et faisait « avancer »
-// la commande sans jamais préparer ni sortir la marchandise. On grise donc ces actions
-// avec une explication (le backend renvoie aussi un 409 sur le passage → expédiée sans
-// préparation liée).
+// Actions de statut directes de la fiche exutoire. Les étapes confirmée →
+// en préparation → chargée → expédiée ne sont PAS ici : elles passent par la
+// section « Préparation & chargement » de la fiche (c'est elle qui planifie le
+// chargement et, à l'expédition, sort la marchandise du stock).
 const STATUS_TRANSITIONS = {
   en_attente: { action: 'Confirmer', next: 'confirmee' },
-  confirmee: {
-    action: 'Préparer',
-    blocked: true,
-    hint: "La préparation se planifie depuis la page « Préparation d'expédition » (transporteur, chargement, pesée interne) — c'est elle qui fait avancer la commande.",
-  },
-  en_preparation: {
-    action: 'Marquer chargée',
-    blocked: true,
-    hint: "Le chargement se suit depuis la page « Préparation d'expédition » — c'est elle qui fait avancer la commande.",
-  },
-  chargee: {
-    action: 'Marquer expédiée',
-    blocked: true,
-    hint: "Pour expédier, passez par la Préparation d'expédition — c'est elle qui décrémente le stock.",
-  },
-  expediee: { action: 'Pesée reçue', next: 'pesee_recue' },
+  expediee: { action: 'Pesée client reçue', next: 'pesee_recue' },
   pesee_recue: { action: 'Facturer', next: 'facturee' },
   facturee: { action: 'Clôturer', next: 'cloturee' },
 };
@@ -171,15 +132,24 @@ export default function ExutoiresCommandes() {
   const [generation, setGeneration] = useState(null);   // aperçu ou bilan de génération
   const [generationErr, setGenerationErr] = useState('');
 
-  // Filters
-  const [filterStatut, setFilterStatut] = useState('');
-  const [filterType, setFilterType] = useState('');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
-  const [filterSearch, setFilterSearch] = useState('');
+  // Suivi unifié : commandes boutiques à côté des commandes exutoires.
+  const [commandesBoutiques, setCommandesBoutiques] = useState([]);
+  const [boutiquesErreur, setBoutiquesErreur] = useState(null);
+  const [ficheBoutique, setFicheBoutique] = useState(null);
+  const [ficheMessage, setFicheMessage] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+  const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  useEffect(() => { loadClients(); }, []);
-  useEffect(() => { loadCommandes(); loadStats(); }, [filterStatut, filterType, filterDateFrom, filterDateTo, filterSearch]);
+  // Filtres
+  const [filterOrigine, setFilterOrigine] = useState(''); // '' | 'exutoire' | 'boutique'
+  const [filterType, setFilterType] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [historiqueComplet, setHistoriqueComplet] = useState(false);
+
+  useEffect(() => { loadClients(); loadCommandes(); loadStats(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadClients = async () => {
     try {
@@ -192,9 +162,6 @@ export default function ExutoiresCommandes() {
     try {
       const res = await api.get('/commandes-exutoires/stats');
       const d = res.data || {};
-      // Le backend renvoie total_tonnage_prevu / total_ca_prevu (en tonnes / €) ;
-      // les cartes KPI lisent tonnage_prevu / ca_previsionnel. On aligne les noms
-      // pour ne plus afficher « — ». actives / en_attente restent dérivés du kanban.
       setStats((prev) => ({
         ...prev,
         ...d,
@@ -204,23 +171,30 @@ export default function ExutoiresCommandes() {
     } catch (err) { console.error(err); }
   };
 
-  const loadCommandes = async () => {
-    try {
-      const params = {};
-      if (filterStatut) params.statut = filterStatut;
-      if (filterType) params.type_produit = filterType;
-      if (filterDateFrom) params.date_from = filterDateFrom;
-      if (filterDateTo) params.date_to = filterDateTo;
-      if (filterSearch) params.search = filterSearch;
-      const res = await api.get('/commandes-exutoires', { params });
-      setCommandes(res.data);
+  // Les deux listes sont chargées ensemble ; l'échec de l'une ne vide pas
+  // l'autre, et il est DIT (un tableau à moitié vide sans explication ferait
+  // croire qu'il n'y a pas de commande).
+  const loadCommandes = useCallback(async () => {
+    const [exu, btq] = await Promise.allSettled([
+      api.get('/commandes-exutoires'),
+      api.get('/boutique-commandes'),
+    ]);
+    if (exu.status === 'fulfilled') {
+      setCommandes(exu.value.data || []);
       setLoadError(null);
-    } catch (err) {
-      console.error(err);
+    } else {
+      console.error(exu.reason);
       setLoadError('Impossible de charger les commandes exutoires. Vérifiez votre connexion puis réessayez.');
     }
+    if (btq.status === 'fulfilled') {
+      setCommandesBoutiques(btq.value.data || []);
+      setBoutiquesErreur(null);
+    } else {
+      console.error(btq.reason);
+      setBoutiquesErreur('Les commandes des boutiques n\'ont pas pu être chargées.');
+    }
     setLoading(false);
-  };
+  }, []);
 
   const getClientName = (clientId) => {
     const c = clients.find(cl => cl.id === clientId);
@@ -251,9 +225,10 @@ export default function ExutoiresCommandes() {
     setShowForm(true);
   };
 
-  const openDetail = async (commande) => {
+  const openDetail = async (commande, message = '') => {
     setActionError('');
     setOccurrences(null);
+    setFicheMessage(message);
     try {
       const res = await api.get(`/commandes-exutoires/${commande.id}`);
       setShowDetail(res.data);
@@ -263,6 +238,97 @@ export default function ExutoiresCommandes() {
       setShowDetail(commande);
     }
   };
+
+  const rechargerDetail = async () => {
+    if (!showDetail) return;
+    try {
+      const res = await api.get(`/commandes-exutoires/${showDetail.id}`);
+      setShowDetail(res.data);
+    } catch (err) { console.error(err); }
+    loadCommandes();
+    loadStats();
+  };
+
+  const openBoutique = async (id, message = '') => {
+    setFicheMessage(message);
+    try {
+      const res = await api.get(`/boutique-commandes/${id}`);
+      setFicheBoutique(res.data);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Commande boutique introuvable');
+    }
+  };
+
+  // Ouvre la fiche d'une carte du tableau (quelle que soit son origine).
+  const ouvrirFiche = (item, message = '') => (item.type === 'boutique'
+    ? openBoutique(item.nativeId, message)
+    : openDetail(item.raw, message));
+
+  // Lien profond `?commande=btq-12` / `?commande=exu-7` (notification d'une
+  // nouvelle commande boutique, occupation de la zone de chargement…).
+  useEffect(() => {
+    const cible = searchParams.get('commande');
+    if (!cible) return;
+    const [type, idTxt] = cible.split('-');
+    const id = Number(idTxt);
+    if (Number.isInteger(id) && id > 0) {
+      if (type === 'btq') openBoutique(id);
+      else if (type === 'exu') openDetail({ id });
+    }
+    const p = new URLSearchParams(searchParams);
+    p.delete('commande');
+    setSearchParams(p, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Action sur une commande boutique depuis sa fiche.
+  const actionBoutique = async (verbe, body, succes, demanderConfirmation = false) => {
+    if (!ficheBoutique) return;
+    if (demanderConfirmation) {
+      const ok = await confirm({
+        title: 'Annuler cette commande ?',
+        message: `La commande ${ficheBoutique.reference} de ${ficheBoutique.boutique_nom || 'la boutique'} sera annulée.`,
+        confirmLabel: 'Annuler la commande',
+        confirmVariant: 'danger',
+      });
+      if (!ok) return;
+    }
+    setActionBusy(true);
+    try {
+      await api.patch(`/boutique-commandes/${ficheBoutique.id}/${verbe}`, body || {});
+      toast.success(succes);
+      setFicheMessage('');
+      const res = await api.get(`/boutique-commandes/${ficheBoutique.id}`);
+      setFicheBoutique(res.data);
+      loadCommandes();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Action refusée');
+    }
+    setActionBusy(false);
+  };
+
+  // ── Glisser-déposer (même mécanique que le kanban du recrutement) ────────
+  const deplacer = async (item, cible) => {
+    const action = actionDeplacement(item, cible);
+    if (action.kind === 'rien') return;
+    if (action.kind === 'refus') { toast.error(action.message); return; }
+    if (action.kind === 'fiche') { ouvrirFiche(item, action.message); return; }
+    try {
+      await api.patch(action.url, action.body || {});
+      toast.success(`${item.reference} — ${action.succes}`);
+      loadCommandes();
+      loadStats();
+    } catch (err) {
+      // Refus du serveur (ex. aucun carton scanné) : on ouvre la fiche avec le
+      // motif, là où l'on peut y remédier.
+      const motif = err.response?.data?.error || 'Déplacement refusé';
+      toast.error(motif);
+      ouvrirFiche(item, motif);
+    }
+  };
+  const onDragStart = (e, id) => { setDraggedId(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); };
+  const onDragEnd = () => { setDraggedId(null); setDragOver(null); };
+  const onDragOverCol = (e, col) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(col); };
+  const onDragLeaveCol = (e, col) => { if (e.currentTarget.contains(e.relatedTarget)) return; if (dragOver === col) setDragOver(null); };
 
   // ── Récurrence ────────────────────────────────────────────────────────────
   const loadOccurrences = async (commandeId) => {
@@ -403,79 +469,117 @@ export default function ExutoiresCommandes() {
   const formatPrice = (v) => v != null ? parseFloat(v).toFixed(2) : '—';
   const formatTonnage = (v) => v != null ? parseFloat(v).toFixed(3) : '—';
 
-  // Regroupement des commandes filtrées par colonne kanban
+  // ── Tableau unifié ────────────────────────────────────────────────────────
+  const toutes = useMemo(() => [
+    ...commandes.map(depuisExutoire),
+    ...commandesBoutiques.filter((c) => c.statut !== 'brouillon').map(depuisBoutique),
+  ], [commandes, commandesBoutiques]);
+
+  const visibles = useMemo(() => {
+    const mots = filterSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return toutes.filter((c) => {
+      if (filterOrigine && c.type !== filterOrigine) return false;
+      if (filterType && (c.type !== 'exutoire' || !c.types_produit.includes(filterType))) return false;
+      if (!historiqueComplet && estAncienneTerminee(c)) return false;
+      if (mots.length) {
+        const texte = `${c.reference || ''} ${c.destinataire || ''}`.toLowerCase();
+        if (!mots.every((m) => texte.includes(m))) return false;
+      }
+      return true;
+    });
+  }, [toutes, filterOrigine, filterType, filterSearch, historiqueComplet]);
+
   const itemsByColumn = useMemo(() => {
-    const out = Object.fromEntries(KANBAN_COLUMNS.map((c) => [c.key, []]));
+    const out = Object.fromEntries(COLONNES.map((c) => [c.key, []]));
     out._annulees = [];
-    for (const cmd of commandes) {
+    for (const cmd of visibles) {
       if (cmd.statut === 'annulee') { out._annulees.push(cmd); continue; }
-      const colKey = STATUT_TO_COLUMN[cmd.statut];
-      if (colKey && out[colKey]) out[colKey].push(cmd);
+      const col = colonneDe(cmd);
+      if (col && out[col]) out[col].push(cmd);
     }
+    // À traiter : la plus ancienne d'abord (c'est elle qui attend le plus).
+    out.a_traiter.sort((x, y) => String(x.date_commande).localeCompare(String(y.date_commande)));
     return out;
-  }, [commandes]);
+  }, [visibles]);
+
+  const onDropCol = (e, col) => {
+    e.preventDefault();
+    setDragOver(null);
+    const id = e.dataTransfer.getData('text/plain');
+    setDraggedId(null);
+    const item = toutes.find((c) => c.id === id);
+    if (item) deplacer(item, col);
+  };
 
   if (loading) return <Layout><LoadingSpinner size="lg" message="Chargement des commandes..." /></Layout>;
 
-  // KPIs en haut du kanban
-  const totalActive = KANBAN_COLUMNS.reduce((acc, c) => acc + (itemsByColumn[c.key]?.length || 0), 0);
+  const actives = COLONNES.filter((c) => c.key !== 'terminee')
+    .reduce((acc, c) => acc + (itemsByColumn[c.key]?.length || 0), 0);
   const kpiList = [
+    { key: 'actives', label: 'Commandes en cours', value: actives, accent: 'slate' },
+    { key: 'a_traiter', label: 'À traiter', value: itemsByColumn.a_traiter.length, accent: 'orange' },
     {
-      key: 'total',
-      label: 'Commandes actives',
-      value: stats.actives || totalActive,
-      accent: 'slate',
-      delta: stats.actives_delta != null ? {
-        direction: stats.actives_delta >= 0 ? 'up' : 'down',
-        value: `${Math.abs(stats.actives_delta)}%`,
-        text: 'vs mois dernier',
-      } : null,
-    },
-    {
-      key: 'tonnage',
-      label: 'Tonnage prévu',
-      value: formatTonnage(stats.tonnage_prevu),
-      unit: 't',
+      key: 'boutiques',
+      label: 'Commandes boutiques en cours',
+      value: toutes.filter((c) => c.type === 'boutique' && ['envoyee', 'ajustee', 'en_preparation'].includes(c.statut)).length,
       accent: 'blue',
     },
-    {
-      key: 'ca',
-      label: 'CA prévisionnel',
-      value: formatPrice(stats.ca_previsionnel),
-      unit: '€',
-      accent: 'green',
-    },
-    {
-      key: 'en_attente',
-      label: 'En attente',
-      value: stats.en_attente || (itemsByColumn.nouveau?.length ?? 0),
-      accent: 'orange',
-    },
+    { key: 'tonnage', label: 'Tonnage prévu (exutoires)', value: formatTonnage(stats.tonnage_prevu), unit: 't', accent: 'green' },
   ];
 
-  const statutFilters = [
-    { key: '', label: 'Toutes', count: totalActive },
-    ...Object.entries(STATUTS).map(([k, v]) => ({
-      key: k,
-      label: v.label,
-      count: commandes.filter((c) => c.statut === k).length,
-    })),
-  ];
-
-  // Colonnes passées à KanbanBoard
-  const boardColumns = KANBAN_COLUMNS.map((c) => ({
+  const boardColumns = COLONNES.map((c) => ({
     key: c.key,
     label: c.label,
     accent: c.accent,
-    onAdd: c.key === 'nouveau' ? () => openCreate() : null,
+    onAdd: c.key === 'a_traiter' ? () => openCreate() : null,
   }));
 
-  // Rendu d'une carte de commande (format ticket board)
-  const renderCommandeCard = (cmd) => {
+  const origines = [
+    { key: '', label: 'Toutes', count: toutes.filter((c) => c.statut !== 'annulee').length },
+    { key: 'exutoire', label: 'Exutoires', count: toutes.filter((c) => c.type === 'exutoire' && c.statut !== 'annulee').length },
+    { key: 'boutique', label: 'Boutiques', count: toutes.filter((c) => c.type === 'boutique' && c.statut !== 'annulee').length },
+  ];
+
+  const renderCommandeCard = (item) => {
+    if (item.type === 'boutique') {
+      const voulu = item.nb_cartons_voulu;
+      return (
+        <div>
+          <div className="flex items-start justify-between gap-2 mb-1.5">
+            <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase">{item.reference}</span>
+            <div className="flex items-center gap-1 text-slate-400">
+              <Calendar className="w-3 h-3" />
+              <span className="text-[10px]">{formatDate(item.date_commande)}</span>
+            </div>
+          </div>
+          <p className="font-medium text-sm text-slate-800 leading-tight line-clamp-2">
+            <Store className="w-3.5 h-3.5 text-pink-500 inline mr-1 -mt-0.5" />
+            {item.destinataire || 'Boutique'}
+          </p>
+          <span className="inline-flex items-center mt-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-pink-100 text-pink-700">
+            Commande boutique
+          </span>
+          {item.date_prevue && (
+            <p className="text-[11px] text-slate-500 mt-1">Livraison souhaitée : {formatDate(item.date_prevue)}</p>
+          )}
+          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-slate-400 uppercase">Cartons</span>
+              <span className="text-xs font-semibold text-slate-700 font-mono">
+                {voulu != null
+                  ? (['en_preparation', 'expediee'].includes(item.statut) ? `${item.nb_cartons_scannes}/${voulu}` : voulu)
+                  : `${Number(item.poids_total_demande_kg || 0).toFixed(0)} kg`}
+              </span>
+            </div>
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{libelleStatut(item)}</span>
+          </div>
+        </div>
+      );
+    }
+    const cmd = item.raw;
     const statusInfo = STATUTS[cmd.statut] || {};
-    const clientName = cmd.client_nom || getClientName(cmd.client_id);
-    const types = Array.isArray(cmd.type_produit) ? cmd.type_produit : (cmd.type_produit ? [cmd.type_produit] : []);
-    const statusColorClass = statusInfo.color || 'bg-slate-100 text-slate-700';
+    const clientName = cmd.raison_sociale || cmd.client_nom || getClientName(cmd.client_id);
+    const types = item.types_produit;
     return (
       <div>
         <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -491,8 +595,6 @@ export default function ExutoiresCommandes() {
           <Building2 className="w-3.5 h-3.5 text-slate-400 inline mr-1 -mt-0.5" />
           {clientName}
         </p>
-        {/* Récurrence : le modèle et ses occurrences ne se lisent pas de la même
-            façon. Le badge dit LEQUEL des deux on regarde. */}
         {estModeleRecurrent(cmd) && (
           <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
             <Repeat className="w-3 h-3" />
@@ -506,15 +608,12 @@ export default function ExutoiresCommandes() {
             Générée automatiquement{cmd.reference_parent ? ` · ${cmd.reference_parent}` : ''}
           </span>
         )}
-        {/* Créneau de chargement non posé : le moteur a refusé (aucun gabarit
-            de préparation, ou créneau occupé) et a laissé la commande en
-            attente. Sans ce badge, elle est indiscernable d'une commande en
-            attente ordinaire — c'est exactement ce qui la faisait passer
-            inaperçue semaine après semaine. */}
+        {/* Occurrence générée dont le créneau n'a pas pu être posé : sans ce
+            badge, elle est indiscernable d'une commande en attente ordinaire. */}
         {cmd.creneau_a_poser === true && (
           <span
             className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800"
-            title="Aucune préparation d'expédition n'est rattachée à cette commande : le créneau de chargement reste à poser à la main."
+            title="Aucune préparation n'est rattachée à cette commande : le créneau de chargement reste à poser dans sa fiche."
           >
             <AlertTriangle className="w-3 h-3" />
             Créneau de chargement à poser
@@ -525,6 +624,12 @@ export default function ExutoiresCommandes() {
             {types.map((t) => TYPES_PRODUIT[t] || t).join(' · ')}
           </p>
         )}
+        {item.statut_preparation && ['en_preparation', 'chargee'].includes(cmd.statut) && (
+          <p className="text-[11px] text-amber-700 mt-1">
+            {STATUTS_PREPARATION[item.statut_preparation] || item.statut_preparation}
+            {item.date_prevue ? ` · départ ${formatDate(item.date_prevue)}` : ''}
+          </p>
+        )}
         <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
           <div className="flex flex-col">
             <span className="text-[10px] text-slate-400 uppercase">Tonnage</span>
@@ -532,7 +637,7 @@ export default function ExutoiresCommandes() {
               {formatTonnage(cmd.tonnage_prevu)}<span className="text-slate-400 font-normal"> t</span>
             </span>
           </div>
-          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusColorClass}`}>
+          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusInfo.color || 'bg-slate-100 text-slate-700'}`}>
             {statusInfo.label || cmd.statut}
           </span>
         </div>
@@ -543,14 +648,15 @@ export default function ExutoiresCommandes() {
   return (
     <Layout>
       {ConfirmDialogElement}
-      {loadError && (
-        <div className="px-6 pt-4">
-          <ErrorState variant="card" title="Commandes indisponibles" message={loadError} onRetry={loadCommandes} />
+      {(loadError || boutiquesErreur) && (
+        <div className="px-6 pt-4 space-y-2">
+          {loadError && <ErrorState variant="card" title="Commandes exutoires indisponibles" message={loadError} onRetry={loadCommandes} />}
+          {boutiquesErreur && <ErrorState variant="card" title="Commandes boutiques indisponibles" message={boutiquesErreur} onRetry={loadCommandes} />}
         </div>
       )}
       <KanbanBoard
-        title="Commandes Logistiques"
-        subtitle="Pipeline des commandes clients → expéditions"
+        title="Commandes"
+        subtitle="Exutoires et boutiques : un seul suivi — glissez une carte pour la faire avancer, cliquez pour ouvrir sa fiche"
         headerActions={
           <div className="flex items-center gap-2">
             <button
@@ -564,7 +670,7 @@ export default function ExutoiresCommandes() {
             </button>
             <button onClick={openCreate} className="btn-primary text-sm flex items-center gap-1.5">
               <ArrowUpRight className="w-4 h-4" />
-              Nouvelle commande
+              Nouvelle commande exutoire
             </button>
           </div>
         }
@@ -572,46 +678,50 @@ export default function ExutoiresCommandes() {
         search={{
           value: filterSearch,
           onChange: setFilterSearch,
-          placeholder: 'Rechercher par client, référence…',
+          placeholder: 'Rechercher par client, boutique, référence…',
         }}
         extraTopBar={
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Statut :</span>
-              {statutFilters.map((s) => (
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Origine :</span>
+              {origines.map((o) => (
                 <button
-                  key={s.key || 'all'}
-                  onClick={() => setFilterStatut(s.key)}
+                  key={o.key || 'toutes'}
+                  onClick={() => setFilterOrigine(o.key)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                    (filterStatut || '') === s.key
+                    filterOrigine === o.key
                       ? 'bg-primary text-white shadow-sm'
                       : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  {s.label}
-                  {s.count != null && <span className="ml-1 opacity-70">({s.count})</span>}
+                  {o.label}<span className="ml-1 opacity-70">({o.count})</span>
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Type :</span>
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Produit :</span>
               <select
                 value={filterType || ''}
                 onChange={(e) => setFilterType(e.target.value)}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
               >
-                <option value="">Tous les types</option>
+                <option value="">Tous</option>
                 {Object.entries(TYPES_PRODUIT_OPTIONS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
               </select>
             </div>
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="checkbox" className="accent-primary" checked={historiqueComplet} onChange={(e) => setHistoriqueComplet(e.target.checked)} />
+              <History className="w-3.5 h-3.5" /> Afficher les commandes terminées depuis plus de 30 jours
+            </label>
           </div>
         }
         columns={boardColumns}
         itemsByColumn={itemsByColumn}
         renderCard={renderCommandeCard}
-        onCardClick={(cmd) => openDetail(cmd)}
+        onCardClick={(item) => ouvrirFiche(item)}
+        dnd={{ onDragStart, onDragEnd, onDragOverCol, onDragLeaveCol, onDropCol, draggedId, dragOverColumn: dragOver }}
         emptyState={
           (itemsByColumn._annulees?.length || 0) > 0 ? (
             <div className="text-xs text-slate-500 text-center">
@@ -863,7 +973,7 @@ export default function ExutoiresCommandes() {
         </Modal>
 
         {/* Detail modal */}
-        <Modal isOpen={!!showDetail} onClose={() => setShowDetail(null)} title={showDetail ? `Commande ${showDetail.reference || `#${showDetail.id}`}` : ''} size="lg">
+        <Modal isOpen={!!showDetail} onClose={() => { setShowDetail(null); setFicheMessage(''); }} title={showDetail ? `Commande ${showDetail.reference || `#${showDetail.id}`} — ${showDetail.raison_sociale || getClientName(showDetail.client_id)}` : ''} size="lg">
           {showDetail && (
             <>
               <div className="flex justify-end -mt-2 mb-4">
@@ -876,7 +986,7 @@ export default function ExutoiresCommandes() {
                 <div className="bg-gray-50 rounded-lg p-3 grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-gray-500">Client :</span>{' '}
-                    <span className="font-medium">{showDetail.client_nom || getClientName(showDetail.client_id)}</span>
+                    <span className="font-medium">{showDetail.raison_sociale || showDetail.client_nom || getClientName(showDetail.client_id)}</span>
                   </div>
                   <div>
                     <span className="text-gray-500">Type :</span>{' '}
@@ -1033,42 +1143,16 @@ export default function ExutoiresCommandes() {
                 </div>
               )}
 
-              {/* Préparation d'expédition (préparations_expedition) — v1-3 : champs réels de l'API */}
-              {showDetail.preparation && (
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-gray-600 mb-2">Préparation d'expédition</h3>
-                  <div className="bg-yellow-50 rounded-lg p-3 grid grid-cols-2 gap-3 text-sm">
-                    {showDetail.preparation.transporteur && (
-                      <div>
-                        <span className="text-gray-500">Transporteur :</span>{' '}
-                        <span className="font-medium">{showDetail.preparation.transporteur}</span>
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-gray-500">Date d'expédition :</span>{' '}
-                      <span className="font-medium">{formatDate(showDetail.preparation.date_expedition)}</span>
-                    </div>
-                    {showDetail.preparation.pesee_interne != null && (
-                      <div>
-                        <span className="text-gray-500">Pesée interne :</span>{' '}
-                        <span className="font-medium">{formatTonnage(showDetail.preparation.pesee_interne)} t</span>
-                      </div>
-                    )}
-                    {showDetail.preparation.statut_preparation && (
-                      <div>
-                        <span className="text-gray-500">Statut préparation :</span>{' '}
-                        <span className="font-medium">{({ planifiee: 'Planifiée', remorque_livree: 'Remorque livrée', en_chargement: 'En chargement', prete: 'Prête', expediee: 'Expédiée' }[showDetail.preparation.statut_preparation]) || showDetail.preparation.statut_preparation}</span>
-                      </div>
-                    )}
-                    {showDetail.preparation.notes_preparation && (
-                      <div className="col-span-2">
-                        <span className="text-gray-500">Notes :</span>{' '}
-                        <span className="font-medium">{showDetail.preparation.notes_preparation}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* Préparation & chargement — gérés ICI (la page « Préparation » est retirée). */}
+              {showDetail.statut !== 'annulee' || showDetail.preparation ? (
+                <PreparationExutoire
+                  key={showDetail.id}
+                  commande={showDetail}
+                  onChange={rechargerDetail}
+                  message={ficheMessage}
+                  confirm={confirm}
+                />
+              ) : null}
 
               {/* Contrôle pesée client (controles_pesee) — v1-3 : clé controle_pesee + champs réels */}
               {showDetail.controle_pesee && (
@@ -1146,35 +1230,19 @@ export default function ExutoiresCommandes() {
                   {actionError}
                 </div>
               )}
-              {STATUS_TRANSITIONS[showDetail.statut]?.blocked && (
-                <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
-                  {STATUS_TRANSITIONS[showDetail.statut].hint}
-                </div>
-              )}
               <div className="flex gap-2 mt-4">
                 <button onClick={() => setShowDetail(null)} className="flex-1 btn-ghost">
                   Fermer
                 </button>
                 {STATUS_TRANSITIONS[showDetail.statut] && (
-                  STATUS_TRANSITIONS[showDetail.statut].blocked ? (
-                    <button
-                      type="button"
-                      disabled
-                      title={STATUS_TRANSITIONS[showDetail.statut].hint}
-                      className="flex-1 bg-slate-100 text-slate-400 rounded-lg px-4 py-2 text-sm font-medium cursor-not-allowed"
-                    >
-                      {STATUS_TRANSITIONS[showDetail.statut].action}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleStatusChange(showDetail, STATUS_TRANSITIONS[showDetail.statut].next)}
-                      className="flex-1 btn-primary text-sm"
-                    >
-                      {STATUS_TRANSITIONS[showDetail.statut].action}
-                    </button>
-                  )
+                  <button
+                    onClick={() => handleStatusChange(showDetail, STATUS_TRANSITIONS[showDetail.statut].next)}
+                    className="flex-1 btn-primary text-sm"
+                  >
+                    {STATUS_TRANSITIONS[showDetail.statut].action}
+                  </button>
                 )}
-                {!['cloturee', 'annulee'].includes(showDetail.statut) && (
+                {['en_attente', 'confirmee', 'en_preparation', 'chargee'].includes(showDetail.statut) && (
                   <button
                     onClick={() => handleCancel(showDetail)}
                     className="border border-red-300 text-red-600 rounded-lg px-4 py-2 text-sm font-medium hover:bg-red-50"
@@ -1184,6 +1252,24 @@ export default function ExutoiresCommandes() {
                 )}
               </div>
             </>
+          )}
+        </Modal>
+
+        {/* Fiche d'une commande boutique */}
+        <Modal
+          isOpen={!!ficheBoutique}
+          onClose={() => { setFicheBoutique(null); setFicheMessage(''); }}
+          title={ficheBoutique ? `Commande ${ficheBoutique.reference} — ${ficheBoutique.boutique_nom || 'boutique'}` : ''}
+          size="lg"
+        >
+          {ficheBoutique && (
+            <FicheCommandeBoutique
+              key={`${ficheBoutique.id}-${ficheBoutique.statut}`}
+              commande={ficheBoutique}
+              onAction={actionBoutique}
+              busy={actionBusy}
+              message={ficheMessage}
+            />
           )}
         </Modal>
       </div>
