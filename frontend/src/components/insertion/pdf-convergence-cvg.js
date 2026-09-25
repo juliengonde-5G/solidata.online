@@ -132,7 +132,7 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
     + LIGNES_EFFECTIFS.map(([cle, lib, opt = {}]) =>
       `<tr><td>${esc(lib)}</td><td class="num">${v(fmtNb(valeurSimple(P.effectifs, cle, opt.alias)))}</td></tr>`).join('')
     + '</tbody></table>'
-    + '<table class="cvg"><thead><tr><th class="bandeau" colspan="3">Les publics accompagnés dans CVG</th></tr>'
+    + '<table class="cvg longue"><thead><tr><th class="bandeau" colspan="3">Les publics accompagnés dans CVG</th></tr>'
     + '<tr class="sous"><th>Personnes salariées dans l\'année</th><th class="num">Nombre</th><th class="num">% / total CVG</th></tr></thead><tbody>'
     + lignesSimples(P.publics, LIGNES_PUBLICS, base).map(trSimple).join('')
     + intertitre("Type d'habitat à l'entrée du chantier");
@@ -209,7 +209,9 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
 
   // ── Méthode ──────────────────────────────────────────────────────────────
   const phrases = phrasesMethode(P.methode);
-  body += '<div class="page brk"><div class="section-title">Méthode</div>'
+  // La méthode suit le dernier tableau : une page pour quatre lignes se lisait
+  // comme une page blanche. Elle ne se coupe pas pour autant (page-break-inside).
+  body += '<div class="page" style="page-break-inside: avoid; margin-top: 14px"><div class="section-title">Méthode</div>'
     + (phrases.length ? `<ol class="methode">${phrases.map((p) => `<li>${esc(p)}</li>`).join('')}</ol>`
       : '<p class="nul">Aucune règle de méthode transmise par le serveur.</p>')
     + '</div>';
@@ -240,7 +242,14 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
     + '.nul { color: #94a3b8; font-style: italic; }'
     + '.note { font-size: 8.5px; color: #6b7280; margin: 1px 0 6px; font-style: italic; }'
     + '.brk { page-break-before: always; }'
+    // Un tableau court ne se coupe jamais ; le tableau des publics (35 lignes)
+    // DOIT pouvoir se couper, sinon il est repoussé entier sur la page suivante
+    // et la première page reste aux trois quarts vide (constaté au rendu Chromium
+    // du 25/09/2026) — ses lignes, elles, restent insécables et l'en-tête se
+    // répète en haut de la page suivante (thead = table-header-group).
     + 'table.cvg { page-break-inside: avoid; }'
+    + 'table.cvg.longue { page-break-inside: auto; } table.cvg.longue tr { page-break-inside: avoid; }'
+    + 'table.cvg thead { display: table-header-group; }'
     + 'ol.methode { margin-left: 18px; } ol.methode li { margin: 3px 0; }'
     + '</style>';
 
