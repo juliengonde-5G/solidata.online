@@ -187,6 +187,8 @@ export default function SortieCartons() {
   // propose plus.
   const [mode, setMode] = useState(null);
   const [camera, setCamera] = useState(false);
+  // Avancement de la commande boutique, ligne par ligne (2.58.0).
+  const [preparation, setPreparation] = useState(null);
   const [orders, setOrders] = useState([]);
   const [order, setOrder] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -237,12 +239,22 @@ export default function SortieCartons() {
       // resultat: 'ok'
       beepSuccess();
       setScanned((prev) => [{ ...data.carton, scanned_at: new Date() }, ...prev]);
+      if (data.preparation) setPreparation(data.preparation);
+      // Commande boutique : un carton hors des catégories commandées, ou
+      // au-delà de la quantité demandée, SORT quand même (il est parti) mais
+      // l'écran le dit, avec le double bip d'alerte en plus du bip de réussite.
+      let avertissement = null;
+      if (data.hors_commande) avertissement = 'Hors commande : cette catégorie n\'a pas été commandée';
+      else if (data.au_dela) avertissement = `Au-delà de la demande (${data.ligne.scannes}/${data.ligne.voulu})`;
+      if (avertissement) setTimeout(() => beepAlreadyOut(), 180);
       afficherFlash({
         kind: 'ok',
         code,
         carton: data.carton,
         formatLibelle: null,
         message: null,
+        ligne: data.ligne || null,
+        avertissement,
       });
       setError(null);
     } catch (e) {
@@ -335,6 +347,7 @@ export default function SortieCartons() {
     try {
       const { data } = await api.get(`/sortie-cartons/session/${type}/${o.id}`);
       setScanned((data.items || []).map((it) => ({ ...it, scanned_at: it.date_sortie ? new Date(it.date_sortie) : new Date() })));
+      setPreparation(data.preparation || null);
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     }
@@ -356,6 +369,7 @@ export default function SortieCartons() {
     setSessionId(null);
     setError(null);
     setCamera(false);
+    setPreparation(null);
   };
 
   const annuler = async (item) => {
@@ -375,6 +389,11 @@ export default function SortieCartons() {
       if (motif) payload.motif = motif;
       await api.post('/sortie-cartons/annuler', payload);
       setScanned((prev) => prev.filter((s) => s.code_barre !== item.code_barre));
+      if (mode === 'btq' && order) {
+        api.get(`/sortie-cartons/session/btq/${order.id}`)
+          .then(({ data }) => setPreparation(data.preparation || null))
+          .catch(() => {});
+      }
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     }
@@ -455,6 +474,9 @@ export default function SortieCartons() {
               >
                 <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">{o.reference}</div>
                 <div className="text-xl font-bold text-slate-800 mb-3">{o.label}</div>
+                {o.nb_cartons_voulu ? (
+                  <div className="text-sm text-slate-600 mb-2">Préparés : <b>{o.nb_cartons_scannes}</b> / {o.nb_cartons_voulu} cartons</div>
+                ) : null}
                 <span className="inline-block px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
                   {(o.statut || '').replace('_', ' ')}
                 </span>
@@ -510,6 +532,14 @@ export default function SortieCartons() {
                   )}
                   <div className="text-2xl font-bold">{flash.carton?.produit}</div>
                   <div className="text-xl">{flash.carton?.poids_kg} kg • {flash.carton?.gamme}</div>
+                  {flash.ligne && !flash.avertissement && (
+                    <div className="text-lg mt-2 font-semibold">Ligne : {flash.ligne.scannes} / {flash.ligne.voulu}</div>
+                  )}
+                  {flash.avertissement && (
+                    <div className="mt-3 px-4 py-2 rounded-xl bg-amber-400 text-slate-900 text-lg font-bold flex items-center gap-2">
+                      <AlertTriangle className="w-6 h-6" /> {flash.avertissement}
+                    </div>
+                  )}
                 </div>
               )}
               {flash?.kind === 'error' && (
@@ -572,7 +602,44 @@ export default function SortieCartons() {
             </div>
           </div>
 
-          <div className="bg-white rounded-3xl shadow-lg p-4 flex flex-col">
+          <div className="flex flex-col gap-4">
+          {mode === 'btq' && preparation?.lignes?.some((l) => l.en_cartons) && (
+            <div className="bg-white rounded-3xl shadow-lg p-4">
+              <div className="px-2 py-2 mb-2 border-b flex items-center justify-between">
+                <h3 className="font-bold text-slate-700">À préparer</h3>
+                <span className="text-sm font-bold text-slate-600">
+                  {preparation.lignes.reduce((s, l) => s + Math.min(l.scannes, l.voulu ?? 0), 0)} / {preparation.total_voulu}
+                </span>
+              </div>
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {preparation.lignes.filter((l) => l.en_cartons).map((l) => {
+                  const fini = l.scannes >= l.voulu;
+                  const pct = l.voulu > 0 ? Math.min(100, Math.round((l.scannes / l.voulu) * 100)) : 100;
+                  return (
+                    <div key={l.ligne_id} className={`p-2 rounded-xl border ${l.depasse ? 'border-amber-300 bg-amber-50' : fini ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
+                      <div className="flex items-center gap-2">
+                        <GammeBadge gamme={l.gamme} />
+                        <div className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate" title={l.libelle}>{l.libelle.replace(/^\S+ · /, '')}</div>
+                        <div className={`text-sm font-extrabold tabular-nums ${l.depasse ? 'text-amber-700' : fini ? 'text-emerald-700' : 'text-slate-700'}`}>
+                          {l.scannes}/{l.voulu}
+                        </div>
+                      </div>
+                      <div className="h-1.5 bg-slate-200 rounded-full mt-1.5 overflow-hidden">
+                        <div className={`h-full ${l.depasse ? 'bg-amber-500' : fini ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {preparation.hors_commande?.length > 0 && (
+                <div className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-lg p-2 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {preparation.hors_commande.length} carton{preparation.hors_commande.length > 1 ? 's' : ''} hors commande
+                </div>
+              )}
+            </div>
+          )}
+          <div className="bg-white rounded-3xl shadow-lg p-4 flex flex-col flex-1">
             <div className="px-2 py-2 mb-2 border-b flex items-center justify-between">
               <h3 className="font-bold text-slate-700">Cartons sortis de la session</h3>
               <span className="text-xs text-slate-400">{scanned.length}</span>
@@ -598,6 +665,7 @@ export default function SortieCartons() {
                 </div>
               ))}
             </div>
+          </div>
           </div>
         </div>
 

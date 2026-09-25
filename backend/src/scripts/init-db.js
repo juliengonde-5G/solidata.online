@@ -8886,6 +8886,7 @@ async function executerInitialisation() {
     await require('./migrations/insertion-cadre').run(client);
     await require('./migrations/insertion-fse').run(client);
     await require('./migrations/etiquettes-v2').run(client);
+    await require('./migrations/boutique-commandes-cartons').run(client);
 
     console.log('\n[INIT-DB] ══════════════════════════════════════');
     console.log('[INIT-DB] Base de données initialisée avec succès !');

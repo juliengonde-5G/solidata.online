@@ -326,10 +326,12 @@ describe('3. GET /journal et /session', () => {
     expect(ok.status).toBe(200);
   });
 
-  it('GET /session/:type/:id → { items, count, total_kg }', async () => {
+  it('GET /session/:type/:id → { items, count, total_kg, preparation }', async () => {
     const res = await request(app).get('/api/sortie-cartons/session/btq/10').set('Authorization', `Bearer ${TOKENS.ADMIN}`);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ items: [], count: 0, total_kg: 0 });
+    expect(res.body).toMatchObject({ items: [], count: 0, total_kg: 0 });
+    // Commande boutique (2.58.0) : l'avancement par ligne accompagne la session.
+    expect(res.body.preparation).toMatchObject({ lignes: [], hors_commande: [], total_voulu: 0, total_scannes: 0 });
   });
 });
 
