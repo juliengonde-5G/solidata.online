@@ -407,6 +407,7 @@ un projet.
 | **B — Cadre RSA et temps d'accompagnement** | Deux entretiens dédiés (point avec le référent, conciliation) · **Fiche pour le référent** en liste blanche, tracée en deux temps · Relevé d'assiduité et motifs légitimes d'absence · Compteur d'activité hebdomadaire (15-20 h, jamais présenté au salarié comme un seuil) · Registre d'actualisation France Travail · **Volume d'heures d'accompagnement** et **feuille de temps mensuelle par intervenant et par projet**, validée puis contre-signée | **Livré** |
 | **C — Espace de la conseillère réorganisé** | Écran des échéances hebdomadaires, qui distingue les obligations réglementaires (reportables 48 h) de l'organisation courante du suivi · Liste des parcours avec recherche et filtres · Fiche en quatre onglets · Diagnostic resserré · Écran de l'encadrant technique accessible par lien direct, sans compte · **Documents pour le salarié** : « Mon parcours en une page » en français simple, récapitulatif partageable, rappels de rendez-vous | **Livré** |
 | **D — Reporting et documentation** | **Dénominateur des taux de sortie corrigé** (toutes les sorties de la période, avec une ligne « sortie non documentée », les deux méthodes imprimées côte à côte pour 2026) · Chiffre ASP en premier dans la synthèse, base **1 820 h** seule dans les documents de conventionnement · Typologie par critère d'éligibilité · **Freins levés** par axe entrée → dernière évaluation · Débouché des immersions, orientations DORA, aides mobilisées · **Documentation à jour** (ce document, la matrice « qui voit quoi », le déroulé de démonstration, la liste des pièces hors logiciel) | **Livré le 14 septembre 2026** (v. 2.55.0), après revue de sécurité et vérification sur base réelle — voir « Ce que vous recevrez » ci-dessus ; ce qui reste à arbitrer est au § 12 |
+| **E — Suivi Convergence (programme CVG)** | Un document **distinct**, dans la nomenclature propre du réseau Convergence France (habitat, orienteurs, catégories de sortie) — hors périmètre de votre service, mentionné au § « Ce que vous recevrez » (g) pour l'exhaustivité | **Livré le 25 septembre 2026** (v. 2.60.0) ; ce qui reste à arbitrer, ci-dessous |
 
 **Déjà en production** : le dossier individuel complet ; le verrouillage des entretiens à la clôture
 et leur historique ; la journalisation des consultations sensibles ; le chiffrement des textes de
@@ -469,6 +470,26 @@ mais nous ne prétendons pas qu'ils le reproduisent déjà.
    ligne « sortie non documentée ». Les deux méthodes seront imprimées côte à côte en 2026, pour que
    la rupture de série soit annoncée et non découverte.
 
+### Ce que le chantier E laisse ouvert (arbitrages Convergence)
+
+Le document transmis au réseau Convergence France (§ « Ce que vous recevrez » (g)) n'est pas de votre
+ressort, mais quatre points le concernant restent à trancher par la direction et notre délégué à la
+protection des données — nous les disons ici par souci de cohérence avec la doctrine de transparence de
+ce document :
+
+1. **Le document ne respecte pas de seuil de confidentialité** (contrairement à la synthèse de dialogue
+   de gestion qui vous est destinée, § « Ce que vous recevrez » (e)) : le format imposé par le réseau
+   porte lui-même des effectifs de 1 et 2. À confirmer par notre délégué à la protection des données ; à
+   défaut, nous appliquerions le même plancher de cinq personnes que notre synthèse.
+2. **Deux catégories de sortie sont déduites par approximation**, annoncée dans le document et à valider
+   par nos conseillères : une sortie sans bilan classé, ou classée « sans suite », est comptée « sans
+   nouvelles » — la catégorie reste saisissable à tout moment.
+3. **Le frein numérique n'a pas d'équivalent** dans le référentiel du réseau : il n'est jamais transmis,
+   ce que le document dit en méthode.
+4. **La Partie 2 du document nomme nos permanents** (fonction, quotité de temps consacrée à
+   l'accompagnement) : l'entrée correspondante est posée à notre registre des traitements, base légale
+   « intérêt légitime / convention — à confirmer par notre délégué à la protection des données ».
+
 ---
 
 ## Ce que vous recevrez
@@ -485,6 +506,7 @@ interprétation de notre part.
 | **(d) Tableau des freins enrichi** (XLSX/CSV, nominatif, ne sort de la structure que sous la forme agrégée) | Annuelle, et à la demande en contrôle sur place | ADMIN, RH | **Livré** (chantier D, 14 septembre 2026) : les 23 colonnes historiques intactes en tête, puis les colonnes que vous demandez — BRSA, catégorie France Travail, critères d'éligibilité, Pass IAE, référent unique, projet cofinancé, prescripteur, semaines sous 15 h, et pour chaque axe de frein la valeur d'entrée et son évolution — 45 colonnes ; en-tête de traçabilité commenté en CSV ; chaque génération journalisée |
 | **(e) Synthèse de dialogue de gestion** (PDF + CSV, strictement non nominatif, agrégats seuls) | Annuelle, transmise 15 jours avant la séance ; version trimestrielle allégée pour les publics à l'entrée et la conformité | ADMIN, RH, MANAGER (lecture agrégée seule) | **Livré** (chantier D, 14 septembre 2026) : neuf blocs dans un ordre fixe, aperçu, génération enregistrée (instantané daté, conservé six ans), CSV, historique rejouable ; k-anonymat structurel sur le document entier ; refus motivé d'un périmètre sans fin de parcours |
 | **(f) Fiche d'alimentation du référent externe** (PDF, nominatif, ne sort vers un tiers qu'à sa demande) | À chaque point d'étape (au moins trimestriel) et à toute demande du référent | ADMIN, RH | **Livré** (chantier B) — **nous ne vous l'enverrons jamais directement : elle appartient au référent**, conformément à votre demande |
+| **(g) Outil de dialogue de gestion Convergence** (programme CVG — PDF + CSV, par période) | En principe deux fois par an | ADMIN, RH | **Livré le 25 septembre 2026** (chantier E, v. 2.60.0) — **mentionné ici pour l'exhaustivité, il ne vous est pas destiné** : c'est un document distinct, dans sa propre nomenclature, transmis au réseau **Convergence France** et non à votre service |
 
 **Ce que chacun porte, sans exception** : un en-tête de traçabilité (date et heure de génération,
 compte qui l'a produit, périmètre en toutes lettres, nombre de lignes, version de l'outil), la mention

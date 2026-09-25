@@ -1,6 +1,6 @@
 # Matrice « qui voit quoi » — module Insertion
 
-**Une page. Version 2.55.0 — 14 septembre 2026.**
+**Une page. Version 2.55.0, complétée pour le lot Convergence (CVG) le 25 septembre 2026 (v. 2.60.0).**
 
 > Ce que le tableau montre : ce qui apparaît **réellement à l'écran** de chaque profil. Une case
 > **absente** (∅) ne veut pas dire « masquée » ou « grisée » : le serveur **retire la donnée avant de
@@ -31,6 +31,7 @@
 | **Catégorie France Travail** | ✓ | ✓ | ∅ | — | — | — | — | 📄 (droit d'accès) |
 | **Référent unique** (type, nom, contact) | ✓ | ✓ | ✓ *(seul champ social visible de l'encadrant — il doit savoir à qui parler)* | — | — | — | — | ✓ (nommé sur « Mon parcours en une page ») |
 | Onglet **Diagnostic** (socle + approfondissements, hors FSE+ pour MANAGER) | ✓ | ✓ | ✓ *(rubrique FSE+ retirée)* | — | — | — | — | 📄 (droit d'accès) |
+| **Champs Convergence du diagnostic** (habitat, parcours de rue, pension d'invalidité, médecin traitant — 2.60.0) | ✓ | ✓ | — *(module fermé à MANAGER — voir note ①)* | — | — | — | — | 📄 (droit d'accès) |
 | **Détail santé** (commentaire, causes du frein — art. 9) | ✓ (déchiffré) | ✓ (déchiffré) | ∅ | — | — | — | — | ✓ (ses propres données — droit d'accès, jamais sur les documents qui circulent) |
 | **Détail judiciaire** (frein, causes — art. 10) | ✓ (déchiffré) | ✓ (déchiffré) | ∅ | — | — | — | — | ✓ (idem, ses propres données uniquement) |
 | **Commentaire budget** | ✓ | ✓ | ∅ | — | — | — | — | 📄 (droit d'accès) |
@@ -50,6 +51,11 @@
 | Export **(f) Fiche d'alimentation du référent externe** | ✓ | ✓ | — | — | — | — | — | 📄 (remis, exemplaire systématique) |
 | **Rappels de rendez-vous** (consentement et contenu du message) | ✓ | ✓ | — | — | — | — | — | ✓ (reçoit le SMS/e-mail, jamais le type d'entretien) |
 | **Formulaire de renouvellement** (assiduité/motivation/autonomie/participation, avis, durée) | — *(voie normale : onglet Suivi)* | — *(idem)* | ✓ (soi, salarié dont il est référent) | — | — | — | ✓ *(les 9 champs listés au § 5.3, rien d'autre — pas même `employee_id`)* | — |
+| Onglet **Convergence (CVG)** (aperçu, génération, historique, comparaison, complétude, CSV — 2.60.0) | ✓ | ✓ | — *(note ①)* | — | — | — | — | — *(document distinct, jamais remis)* |
+| **Situation de sortie Convergence** (bilan de sortie : catégorie, habitat, RQTH/AAH/pension/médecin traitant à la sortie, accompagnement post-sortie — 2.60.0) | ✓ | ✓ | — *(note ①)* | — | — | — | — | 📄 (droit d'accès, sur demande) |
+| **Registre des moyens humains** (Partie 2 Convergence — permanents, fonction, quotités ETP — 2.60.0) | ✓ | ✓ | — *(note ①)* | — | — | — | — | — *(ne la concerne pas — données des permanents de l'accompagnement)* |
+| **Instantanés Convergence enregistrés** (snapshots datés, rejouables — 2.60.0) | ✓ | ✓ | — *(note ①)* | — | — | — | — | — |
+| Obligation **« Situation de sortie Convergence à saisir »** (Mes échéances, 30 j après la fin de parcours — 2.60.0) | ✓ | ✓ | — *(note ①)* | — | — | — | — | — |
 
 ## Trois lignes qu'un contrôleur retient
 
@@ -68,10 +74,26 @@
    son propre dossier. C'est le choix assumé de cette version (voir
    `PIECES_HORS_LOGICIEL_INSERTION.md` pour ce qui, autour de ce choix, reste à faire par la direction).
 
+**① Note sur la colonne MANAGER (encadrant technique), ajoutée le 25/09/2026.** Le rôle MANAGER a été
+retiré de l'application le 10/09/2026 (`backend/src/routes/insertion/masking.js`) : le module Insertion
+tout entier lui est désormais fermé, y compris ce que ce tableau décrivait en ✓ ou en ∅ sur les lignes
+antérieures à cette date (`router.use(authenticate, requireMfa, authorize('ADMIN', 'RH'))`,
+`backend/src/routes/insertion/index.js`, couvre le routeur Convergence comme tous les autres). Les
+lignes ajoutées le 25/09/2026 en tiennent compte et notent — *(note ①)* — un refus **avant toute lecture
+en base**, comme pour COMMUNICATION/AUTORITE/DPO. Les lignes antérieures à cette note, qui montrent encore
+la colonne MANAGER comme accessible, n'ont pas été rejouées contre le code à cette date : une prochaine
+révision de ce tableau devra le faire.
+
 ---
 
 *Document établi le 14 septembre 2026, lot 8 de la PR D « Reporting autorité et présentation »
 (`rapports/cip-refonte-2026-09-12/25-contrats-techniques-PR-D.md`). Chaque case a été vérifiée dans le
 code — gardes `authorize()`, `router.use()` de tête de routeur, et fonctions de projection
 (`backend/src/routes/insertion/masking.js`, `cadre.js`, `echeances-cip.js`) — au 14 septembre 2026 ;
-une évolution ultérieure du code doit se relire contre ce tableau, pas l'inverse.*
+une évolution ultérieure du code doit se relire contre ce tableau, pas l'inverse. **Complété le
+25 septembre 2026 (chantier E « Suivi Convergence (programme CVG) », v. 2.60.0)** : six nouvelles lignes
+(champs Convergence du diagnostic, onglet Convergence, situation de sortie Convergence, registre des
+moyens humains, instantanés Convergence, obligation de saisie de la sortie), chacune vérifiée dans le
+code (`backend/src/routes/insertion/convergence.js`, `services/convergence-cvg.js`,
+`services/echeances-cip.js`) et une note ① sur le rôle MANAGER, retiré de l'application depuis le
+10/09/2026 ; aucune ligne antérieure au 14 septembre 2026 n'a été rejouée contre le code à cette date.*

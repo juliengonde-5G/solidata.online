@@ -8,6 +8,8 @@
 >
 > **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », v. 2.55.0) :** quatre nouveaux repères (cas 29 à 32) sur ce que le dialogue de gestion avec l'autorité de tutelle regarde de plus près — la synthèse annuelle, le débouché d'une immersion, les orientations DORA et les aides mobilisées, et la nouvelle façon de compter les sorties. Les quatre écrans sont **en service** ; chaque cas dit où cliquer.
 >
+> **Complété le 25/09/2026 (chantier E « Suivi Convergence (programme CVG) », v. 2.60.0) :** trois nouveaux repères (cas 33 à 35) sur le document que le réseau **Convergence France** attend chaque semestre — un document **distinct** de la synthèse de dialogue de gestion (cas 29), avec sa propre nomenclature (habitat, orienteurs, situations de sortie). Rien ne se saisit dans un écran à part : l'habitat et le parcours de rue s'ajoutent au diagnostic, la situation à la sortie au bilan de sortie, l'onglet **« Convergence (CVG) »** de Pilotage & indicateurs ne fait que composer, comparer et transmettre ce qui est déjà dans le dossier.
+>
 > Ce guide décrit le module Insertion tel qu'il fonctionne après les trois livraisons de l'extension (PR 1 : entretiens historisés, 9 freins, diagnostic stepper, objectifs et actions ; PR 2 : PMSMP, satisfaction de sortie, renouvellements et écran encadrant, bilan de prolongation Pass IAE, exports et tableau de bord conventionnels, frise en couloirs ; PR 3 / lot 8 : **espace encadrant technique** — grilles de compétences métier, portefeuille de compétences, style d'apprentissage, entretien de période d'essai, check-list d'embauche). Ces capacités de l'espace encadrant technique sont désormais **livrées** et couvertes par ce guide. Le volet RSE de la structure (démarche de labellisation RSEi) est lui aussi **livré**, dans un module distinct — « Pilotage RSE » — qui n'est pas l'objet de ce guide (§ 19). Les copies d'écran seront ajoutées après la première recette avec la CIP.
 
 - **Public** : conseillère/conseiller en insertion professionnelle (CIP) de Solidarité Textiles ; certains passages concernent les encadrants techniques (ETI) et la direction.
@@ -50,6 +52,9 @@
 30. [Le débouché d'une immersion (PMSMP)](#30-le-débouché-dune-immersion-pmsmp)
 31. [Orienter vers DORA et noter une aide mobilisée](#31-orienter-vers-dora-et-noter-une-aide-mobilisée)
 32. [Sorties : la ligne non documentée](#32-sorties--la-ligne-non-documentée)
+33. [Le reporting Convergence (programme CVG)](#33-le-reporting-convergence-programme-cvg)
+34. [La situation à la sortie (Convergence)](#34-la-situation-à-la-sortie-convergence)
+35. [Ce qui se saisit à l'entrée pour Convergence](#35-ce-qui-se-saisit-à-lentrée-pour-convergence)
 
 ---
 
@@ -471,6 +476,8 @@ Un lien encadrant est valable **60 jours**. Passé ce délai, ou si l'entretien 
 | **CIP** | Conseiller·ère en Insertion Professionnelle — vous. |
 | **Compteur d'activité hebdomadaire (15-20 h)** | Fourchette d'activité attendue d'un bénéficiaire du RSA — temps de travail CDDI **et** heures d'accompagnement confondus (le travail compte). Suivi semaine par semaine dans le Dossier administratif ; le mot « seuil » n'apparaît jamais sur cet écran (cas 23). |
 | **Conciliation (entretien de)** | Type d'entretien du cadre RSA, ouvert par la réforme : recueille les motifs légitimes d'un manquement avant toute sanction (cas 21). |
+| **Convergence France (programme CVG)** | Le réseau auquel la structure transmet, en principe deux fois par an dans le cadre du programme **CVG**, un document de dialogue de gestion à part — public accompagné, moyens humains, situations de sortie, dans une nomenclature propre au réseau (cas 33 à 35). À ne pas confondre avec la synthèse de dialogue de gestion transmise à l'autorité de tutelle (cas 29) : ce sont deux documents distincts, pour deux interlocuteurs distincts. |
+| **CVG** | Sigle du programme de Convergence France — voir « Convergence France (programme CVG) » ci-dessus. |
 | **Criticité** | Niveau d'urgence d'une action CIP (haute / moyenne / basse) ; une action critique en retard déclenche une alerte. |
 | **Diagnostic d'accueil** | Premier entretien approfondi du parcours (trame 12 rubriques), à réaliser dans les 30 jours suivant l'entrée. |
 | **Échéances du parcours** | Les rendez-vous obligatoires posés automatiquement (diagnostic, renouvellements, bilan de sortie) — appelés « jalons » dans les documents techniques. |
@@ -480,13 +487,14 @@ Un lien encadrant est valable **60 jours**. Passé ce délai, ou si l'entretien 
 | **File active** | La liste, à gauche de l'espace CIP : les salariés **en parcours**, plus ceux **sortis depuis moins de sept mois** (c'est après la sortie que la donnée FSE+ et le relevé à six mois sont dus) — jamais les permanents. Le filtre « Mes salariés » la restreint à ceux dont vous êtes référente (cas 25). |
 | **Obligation** | Échéance **réglementaire ou contractuelle** du bloc « Mes échéances » (Pass IAE, cumul CDDI, diagnostic, sortie FSE+, référent unique, catégorie G, sous 15 h…) : elle ne se coche jamais « vu », elle se **reporte 48 heures** au plus, avec un motif à partir du deuxième report (cas 1). |
 | **Frein** | Difficulté périphérique à l'emploi, évaluée de **1 (pas de difficulté)** à **5 (bloquant)**, ou « non évalué ». Le chiffre monte avec la difficulté : c'est le sens de l'échelle affichée à l'écran (1 vert → 5 rouge). Neuf axes : mobilité, santé, finances, famille, linguistique, administratif, numérique, logement, judiciaire. |
+| **Habitat (référentiel Convergence)** | Cinq types d'habitat, distincts du statut de logement habituel, saisis au diagnostic (rubrique Logement) et repris à la sortie : logement **autonome**, logement **semi-durable** (résidence sociale, foyer de jeunes travailleurs, logement accompagné), **hébergement collectif**, **hébergement précaire** (chez un tiers, à l'hôtel, en squat), ou **rue**. « Hébergé·e chez un tiers » ne se range dans aucune des trois cases sans être précisé — l'outil ne devine pas laquelle (cas 35). |
 | **Intervenant (temps d'accompagnement)** | Une personne qui a réellement mené un entretien, saisi un temps, ou occupe un poste affecté à un projet cofinancé dans l'année — pas un rôle en soi (cas 24). |
 | **Jalon** | Terme technique pour une échéance du parcours (voir ci-dessus). |
 | **Lien encadrant (lien ETI)** | Adresse publique, valable **60 jours**, qui ouvre le formulaire de renouvellement pour l'encadrant technique **sans compte SOLIDATA** (cas 26). Le régénérer révoque immédiatement le précédent. |
 | **MDFSE+** | *Ma Démarche FSE+* — la plateforme sur laquelle se déposent les dossiers du cofinancement européen. Elle fait foi ; SOLIDATA prépare les pièces et contrôle les délais, il ne la remplace pas. |
 | **Mon parcours en une page** | Document remis à la personne accompagnée, en français simple : ses engagements, ceux de la structure, ses heures de la semaine (sans aucun objectif ni seuil), son prochain rendez-vous, son référent, les documents déjà remis (cas 27). |
 | **Mon Récap** | Récapitulatif du parcours que la personne peut partager à un tiers de son choix (un futur employeur, par exemple) : contrats, grandes étapes datées, objectifs — sans aucune donnée de santé, de justice, de situation sociale, ni aucun texte libre (cas 27). |
-| **Orienteur** | Organisme qui a envoyé la personne vers la structure (Département-CMS, France Travail, mission locale, Cap emploi, CCAS…). À ne pas confondre avec le **prescripteur habilité** (qui valide l'éligibilité IAE) ni avec le **référent unique** (qui tient le parcours dans la durée). |
+| **Orienteur** | Organisme qui a envoyé la personne vers la structure. Liste à **12 valeurs** depuis le 25/09/2026 (nomenclature Convergence — France Travail, mission locale, Cap emploi, PLIE/PMIE, structure d'hébergement, maraude…), les anciennes saisies (« Département — CMS », « CCAS », « Autre ») restant lisibles (cas 35). À ne pas confondre avec le **prescripteur habilité** (qui valide l'éligibilité IAE) ni avec le **référent unique** (qui tient le parcours dans la durée). |
 | **Pass IAE** | Agrément individuel délivré via la plateforme des emplois de l'inclusion, valable 24 mois, prolongeable par un prescripteur habilité sur présentation d'un bilan du parcours. |
 | **Période d'essai (entretien de)** | Point formalisé à environ un mois : décision « confirmée / à revoir / rompue ». Auto-créé à la liaison recrutement (cas 6). |
 | **Pièce signée** | Document dont la structure est **seule dépositaire** et qui se dépose au dossier administratif : exemplaire signé d'un entretien, convention PMSMP, accusé de remise, autre pièce. **Jamais un justificatif d'éligibilité** (il reste sur les Emplois de l'inclusion, l'outil n'en garde que la référence), jamais une pièce de santé. |
@@ -866,4 +874,133 @@ se lise pas comme une erreur mais comme le changement de règle qu'il est.
 
 ---
 
-*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », lot 8)** : quatre nouveaux cas (29 à 32 — la synthèse de dialogue de gestion, le débouché d'une immersion, les orientations DORA et aides mobilisées, la nouvelle ligne « sortie non documentée »), sept captures d'écran ajoutées (cas 1, 22, 24, 26, 27), aucun cas existant modifié. **Repassé le même jour** après la livraison de l'écran (lot 6) et ses correctifs de revue : les cas 29 à 32 avaient d'abord été écrits « en cours de livraison », ils décrivent désormais les écrans en service, chemins de clic vérifiés dans le code.*
+## 33. Le reporting Convergence (programme CVG)
+
+**Objectif** : produire, en principe deux fois par an, le document que le réseau **Convergence France**
+demande dans son propre format — le public accompagné, les moyens humains de l'accompagnement, puis les
+salariés sortis, en emploi ou hors emploi. **Ce n'est pas la synthèse de dialogue de gestion du cas 29** :
+c'est un autre document, avec sa propre nomenclature (un habitat en 5 types, 12 orienteurs, 8 catégories
+de sortie), destiné à un autre interlocuteur.
+
+**Ce que ce document contient** : **Partie 1 — le public** (effectifs, sexe, tranches d'âge, niveaux de
+formation, minima sociaux, type d'habitat à l'entrée, personnes ayant connu un parcours de rue,
+difficultés à l'entrée, orienteur) ; **Partie 2 — les moyens humains** (les permanents qui accompagnent et
+encadrent, en ETP) ; puis les **salariés sortis sur la période**, en deux tableaux jumeaux — ceux qui
+accèdent à un emploi ou une formation, ceux qui n'y accèdent pas — chacun avec l'évolution des
+difficultés, du logement et de la santé entre l'entrée et la sortie, et l'accompagnement post-sortie.
+Une information non saisie s'affiche « — » et compte comme **non renseignée** — jamais devinée.
+
+**Pas à pas** : menu **RH et Insertion → Pilotage & indicateurs** → onglet **« Convergence (CVG) »** →
+choisir la période (un **semestre Convergence** proposé par défaut — 1ᵉʳ avril → 30 septembre, ou
+1ᵉʳ octobre → 31 mars —, une année civile, ou des dates libres) → **« Aperçu »** pour composer le document
+sans rien enregistrer (la consultation est tout de même inscrite au journal) → **« Imprimer l'aperçu »**
+pour un PDF de travail → **« Générer et enregistrer (PDF) »** pour figer un instantané daté, rejouable à
+l'identique plus tard → **« CSV »** pour la version tableur. En bas de l'onglet, **« Instantanés
+enregistrés »** liste les générations passées et rejoue n'importe laquelle telle qu'elle a été transmise
+— pas telle que le dossier se lit aujourd'hui.
+
+**Trois autres vues, sous les mêmes boutons** :
+- **« Comparer deux périodes »** : deux instantanés déjà enregistrés, ou deux périodes libres composées à
+  la volée — un tableau des écarts (en nombre et en points de pourcentage) suivi d'une **lecture rédigée**
+  qui constate une hausse, une baisse ou une stabilité, jamais sa cause.
+- **« À compléter »** : la liste des personnes de la période à qui il manque une information Convergence
+  (habitat non précisé, orienteur non renseigné, freins jamais évalués, situation de sortie non saisie…),
+  chacune cliquable pour ouvrir directement sa fiche. Cette liste est **nominative** et reste dans l'outil
+  — elle n'apparaît jamais dans le document transmis.
+- **« Moyens humains »** : le registre de la Partie 2, décrit juste après.
+
+> **Points de vigilance**
+> - Cet onglet est **réservé aux profils ADMIN et RH**, sans exception — à la différence de la synthèse
+>   de dialogue de gestion (cas 29), aucun encadrant technique n'y a accès, même en lecture agrégée : le
+>   document porte des catégories de santé (RQTH, AAH, pension d'invalidité, médecin traitant).
+> - Ce document **n'applique pas** le seuil de k-anonymat (5 personnes minimum) de la synthèse de
+>   dialogue de gestion : le format du réseau porte lui-même des effectifs de 1 et 2. C'est un point que
+>   la direction et le délégué à la protection des données doivent encore trancher.
+> - Une période sans aucun salarié accueilli ni sorti est **refusée**, comme tous les documents du
+>   module : jamais un fichier vide qui se lirait « rien à signaler ».
+
+**Le registre des moyens humains** (Partie 2) : onglet **« Moyens humains »** de la même page — « Ajouter
+une ressource », interne (un permanent de la structure, avec sa quotité totale et sa ventilation
+accompagnement/encadrement) ou mutualisée (une personne mise à disposition par un autre employeur, avec
+sa quotité affectée au chantier). Ce registre n'a **aucune source automatique** dans l'outil : c'est vous,
+ou la direction, qui le tenez à jour au fil des affectations.
+
+---
+
+## 34. La situation à la sortie (Convergence)
+
+**Objectif** : dire, à la sortie, ce que Convergence demande en plus du bilan habituel — sa propre
+catégorie de sortie, l'habitat, quatre questions de santé, et l'accompagnement post-sortie.
+
+**Où** : fiche du salarié → bilan de sortie (onglet **Suivi**) → bloc **« Situation à la sortie
+(Convergence) »**, juste sous le bloc « Sortie FSE+ ». Ce bloc a son **propre bouton** (« Enregistrer la
+situation de sortie »), distinct de la clôture du bilan : le bilan se **verrouille** à la clôture, cette
+situation reste **modifiable après**, dans les 30 jours qui suivent.
+
+**Ce que vous renseignez** : une **catégorie** de sortie (en emploi ou formation — emploi, suite de
+parcours en insertion, formation ; ou sans emploi — retraite, sans solution, sans nouvelles, sortie
+neutre, sortie autre reconnue comme positive, avec alors la précision « dont parcours de soin ») ;
+l'**habitat à la sortie** (les 5 types du cas 35) ; quatre questions de santé — RQTH, AAH, pension
+d'invalidité, médecin traitant déclaré — et « la couverture santé s'est améliorée pendant le parcours » ;
+et « a bénéficié d'un accompagnement après la sortie ». Les questions oui/non ont **trois états** : Oui,
+Non, et **pas encore renseigné** — une case vide ne compte jamais pour un « non ».
+
+**La proposition** : tant que rien n'est saisi, un encart teal affiche ce que le dossier permet de
+**proposer** — la catégorie déduite du type de sortie du bilan, l'habitat repris du diagnostic, la RQTH
+ou l'AAH connues à l'entrée — **avec, pour chacune, sa provenance en toutes lettres**. Un bouton
+**« Reprendre la proposition »** copie ces valeurs dans le formulaire ; rien n'est jamais écrit à votre
+place, et rien n'est enregistré tant que vous n'avez pas cliqué « Enregistrer ».
+
+> **Points de vigilance**
+> - Réservé **ADMIN / RH** — un encadrant technique ne voit ni ne saisit ce bloc.
+> - Si rien n'est saisi **30 jours après la fin du parcours**, l'obligation **« Situation de sortie
+>   Convergence à saisir »** apparaît en rouge dans « Mes échéances » (cas 1). Comme les autres
+>   obligations de ce bloc, elle se **reporte 48 heures** au plus mais ne se coche jamais « traitée » sans
+>   être saisie.
+> - « Dont sortie en parcours de soin » ne s'affiche que si vous avez choisi « Sortie autre reconnue
+>   comme positive » : ce n'est pas une catégorie à part, c'est une précision de celle-ci.
+
+---
+
+## 35. Ce qui se saisit à l'entrée pour Convergence
+
+**Objectif** : savoir où renseigner, dès le diagnostic d'accueil, les quatre informations qu'il ne savait
+pas dire avant ce lot — et où l'orienteur s'est étoffé.
+
+**Rubrique Logement du diagnostic** : un champ **« Type d'habitat (référentiel Convergence) »**, distinct
+du statut de logement habituel — logement autonome, **logement semi-durable** (résidence sociale, foyer
+de jeunes travailleurs, logement accompagné), **hébergement collectif**, **hébergement précaire** (chez un
+tiers, à l'hôtel, en squat), ou rue. Quand le statut de logement classique le permet sans ambiguïté
+(locataire ou propriétaire → autonome ; sans logement stable → rue), une proposition apparaît en dessous
+du champ : un clic pour la confirmer, elle n'est **jamais** retenue toute seule. **« Hébergé·e chez un
+tiers » ne propose rien** : ce statut peut aussi bien être un hébergement collectif, précaire ou
+semi-durable, l'outil ne le devine pas — c'est à préciser avec la personne. Juste en dessous, la case
+**« A connu un parcours de rue »** (même si la personne est logée aujourd'hui) — **ce champ fait partie
+du socle** attendu à J+30, au même titre que le reste de la rubrique Logement.
+
+**Rubrique Santé du diagnostic** : deux cases oui/non supplémentaires, **« Pension d'invalidité »** et
+**« Médecin traitant déclaré »**. Ce sont des approfondissements, pas des champs du socle J+30.
+
+**Rubrique Projet professionnel du diagnostic** : le niveau de formation distingue désormais les niveaux
+**6, 7 et 8** (avant ce lot, tout ce qui dépassait le niveau 5 tombait dans une case unique « 6 et plus »).
+Sur une fiche déjà remplie avec l'ancienne valeur, elle reste affichée et lisible — un message invite à
+préciser le niveau exact si vous le connaissez, mais rien n'oblige à le faire.
+
+**Dossier administratif → Orienteur** : la liste passe à **12 valeurs**, celles du formulaire Convergence
+(France Travail, mission locale, Cap emploi, PLIE/PMIE, autre acteur local du service public de l'emploi,
+structure d'hébergement, maraude/accueil de jour/veille sociale, Premières Heures en Chantier, autre
+SIAE, services sociaux du Département, autre acteur local d'accompagnement, candidature spontanée). Les
+trois anciennes valeurs (« Département — CMS », « CCAS », « Autre ») restent visibles sur les fiches déjà
+saisies avec cette mention ; les deux premières sont automatiquement comptées, dans le document
+Convergence, comme « Services sociaux du Département » et « Autre acteur local d'accompagnement » — mais
+« Autre » ne dit **pas lequel** des nouveaux acteurs il s'agissait : à préciser si vous le pouvez.
+
+> **Points de vigilance**
+> - Seul le **type d'habitat** fait partie du socle du diagnostic (à tenir à J+30) ; parcours de rue,
+>   pension d'invalidité et médecin traitant sont des approfondissements, jamais bloquants.
+> - Une fiche à qui il manque l'une de ces informations apparaît dans l'onglet **« À compléter »** du
+>   reporting Convergence (cas 33) — c'est là, et non dans le document lui-même, que vous la retrouverez.
+
+---
+
+*Guide établi le 22/07/2026 sur les plans validés, finalisé le 23/07/2026 après les trois livraisons de l'extension Insertion (PR 1 v2.10.0, PR 2 v2.11.0, PR 3 / lot 8 v2.12.0 — espace encadrant technique). **Révisé le 13/09/2026** : l'échelle des freins y était donnée **à l'envers** (« 1 très bloquant → 5 résolu ») alors que l'application applique l'inverse — corrigée au glossaire, au cas 2 et à la FAQ ; le volet RSE n'est plus présenté comme une mission à venir (§ 19). Les copies d'écran seront ajoutées lors de la première recette avec la CIP. **Complété le 13/09/2026** à la livraison de la PR A « Conformité immédiate » : nouveau cas 20 (dossier administratif et FSE+) renvoyant au guide dédié [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md), cas 1 (nouvelles alertes) et cas 13 (suivi post-sortie porté à **+6 mois**, bloc Sortie FSE+, saisie sans bilan) mis à jour, 8 entrées ajoutées au lexique. **Complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » : quatre nouveaux cas (21 à 24) et de nouvelles entrées au lexique — pas à pas complet dans [GUIDE_CIP_CONFORMITE_FSE.md](GUIDE_CIP_CONFORMITE_FSE.md) § 9 et § 10. **Complété le même jour (13/09/2026), à la livraison de la PR C « Section CIP et documents du salarié », v. 2.54.0** : cas 1 réécrit (écran « Mes échéances », obligations reportables 48 h distinctes de l'organisation du suivi acquittable 7 jours), quatre nouveaux cas (25 à 28 — la fiche en quatre onglets, le lien encadrant sans compte, les deux documents pour la personne, les rappels de rendez-vous), cas 5/7/11/12/20/21 mis à jour pour la nouvelle disposition des onglets, 6 entrées ajoutées au lexique. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », lot 8)** : quatre nouveaux cas (29 à 32 — la synthèse de dialogue de gestion, le débouché d'une immersion, les orientations DORA et aides mobilisées, la nouvelle ligne « sortie non documentée »), sept captures d'écran ajoutées (cas 1, 22, 24, 26, 27), aucun cas existant modifié. **Repassé le même jour** après la livraison de l'écran (lot 6) et ses correctifs de revue : les cas 29 à 32 avaient d'abord été écrits « en cours de livraison », ils décrivent désormais les écrans en service, chemins de clic vérifiés dans le code. **Complété le 25/09/2026 (chantier E « Suivi Convergence (programme CVG) », v. 2.60.0)** : trois nouveaux cas (33 à 35 — le reporting Convergence, la situation à la sortie, ce qui se saisit à l'entrée), quatre entrées ajoutées ou mises à jour au lexique (Convergence France, CVG, Habitat référentiel Convergence, Orienteur). Chemins de clic vérifiés dans le code (`ConvergenceCvgPanel.jsx`, `SituationSortieCvg.jsx`, `DiagnosticForm.jsx`, `DossierAdministratif.jsx`) ; aucun cas antérieur modifié.*

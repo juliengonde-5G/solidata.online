@@ -406,3 +406,34 @@ ADMIN). Le plancher de k-anonymat, lui, n'est pas un réglage (voir la ligne cor
 Réutilisés par ce chantier, déjà en place depuis des lots antérieurs : `insertion.cible_etp_conventionnes`,
 les cibles de sorties (`PUT /cibles`), `effectifs.convention_<année>`, `insertion.cer_heures_min` (15),
 `insertion.post_sortie_mois`.
+
+### Suivi Convergence (programme CVG) — PR E (2.60.0, 25 septembre 2026)
+
+Chantier `rapports/cip-refonte-2026-09-12/` (contrat `30-convergence-cvg-cartographie.md` § 2.2). Ce
+document est **distinct** de la synthèse de dialogue de gestion (PR D ci-dessus) : il s'adresse au réseau
+**Convergence France**, dans sa propre nomenclature (habitat, orienteurs, catégories de sortie), et
+n'applique **pas** le seuil de k-anonymat de la synthèse — le format du réseau porte lui-même des
+effectifs de 1 et 2 (arbitrage direction/DPO ouvert, voir `PRESENTATION_AUTORITE_INSERTION.md` § 12).
+Défauts en code dans `backend/src/utils/insertion-settings.js`, éditables dans `settings`
+(`PUT /api/settings/:key`, ADMIN) — non exposés dans l'écran « Réglages insertion ».
+
+| Clé `settings` | Défaut | Usage |
+|-----------------|--------|-------|
+| `insertion.cvg_frein_seuil` | `3` | Niveau de frein (échelle 1-5 du diagnostic) à partir duquel une « difficulté à l'entrée » est comptée dans le document Convergence (Partie 1 et évolution des freins des tableaux de sortie). |
+| `insertion.cvg_sortie_delai_jours` | `30` | Délai après la fin de parcours au-delà duquel la situation de sortie Convergence non saisie devient l'obligation rouge « Situation de sortie Convergence à saisir » de « Mes échéances » — reportable 48 h comme les autres obligations, jamais acquittable sans être saisie. |
+| `insertion.cvg_sans_bilan_est_sans_nouvelles` | `true` | Un salarié parti **sans bilan de sortie** rédigé est compté « sans nouvelles » dans le document (approximation annoncée en méthode sur le document lui-même) ; à `false`, il reste « non catégorisé ». La catégorie reste saisissable dans les deux cas — c'est la valeur proposée par défaut, jamais une valeur imposée. |
+
+**Rétention des instantanés enregistrés** : chaque génération du document Convergence (bouton « Générer
+et enregistrer ») est un **snapshot** qui réutilise la **même table** que la synthèse de dialogue de
+gestion (`insertion_dialogues_gestion`, colonne `type = 'cvg'`) — donc la **même purge**, la 11ᵉ du
+registre `PURGES_RGPD` (`rgpd.dialogues_gestion_retention_jours`, défaut `2190` jours, six ans — voir
+§ « Purges de rétention RGPD » ci-dessus). Ce n'est pas une 12ᵉ purge : un seul job, une seule règle,
+pour les deux familles de documents rangées dans cette table — `GET /insertion/dialogue-gestion/historique`
+filtre sur `type = 'dialogue'` pour que les deux ne se mélangent jamais à l'écran.
+
+**Aucune migration ni paramétrage requis au déploiement** — les trois réglages ci-dessus ont leur défaut
+en code ; le registre art. 30 « Reporting Convergence (programme CVG) » est posé une seule fois par la
+migration `migrations/insertion-convergence.js`, appelée par `init-db.js`. Comme pour tout document portant
+un en-tête de traçabilité (§ 2.9 ci-dessus), penser à poser `APP_VERSION=2.60.0` dans le `.env` serveur au
+déploiement de ce lot — sinon l'en-tête du document Convergence porte la version de `package.json`, pas
+celle du lot réellement livré.
