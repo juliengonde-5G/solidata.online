@@ -124,13 +124,19 @@ const FT_CATEGORIES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
  * liste est rangée sous « non renseigné » : on ne recopie pas dans une pièce de
  * conventionnement un texte que personne n'a validé.
  */
-const NIVEAUX_FORMATION = ['infra3', 'niv3', 'niv4', 'niv5', 'niv6plus'];
+// 2.58.0 (Convergence) — les niveaux 6, 7 et 8 sont désormais saisis détaillés ;
+// `niv6plus` reste la valeur des fiches antérieures. Sans eux, un niveau 7 saisi
+// aujourd'hui tomberait ici en « non renseigné ».
+const NIVEAUX_FORMATION = ['infra3', 'niv3', 'niv4', 'niv5', 'niv6', 'niv7', 'niv8', 'niv6plus'];
 const NIVEAU_FORMATION_LABELS = {
   infra3: 'Infra niveau 3 (sans diplôme)',
   niv3: 'Niveau 3 (CAP/BEP)',
   niv4: 'Niveau 4 (Bac)',
   niv5: 'Niveau 5 (Bac+2)',
-  niv6plus: 'Niveau 6 et plus (Bac+3 et au-delà)',
+  niv6: 'Niveau 6 (Bac+3/4)',
+  niv7: 'Niveau 7 (Bac+5)',
+  niv8: 'Niveau 8 (doctorat)',
+  niv6plus: 'Niveau 6 et plus (Bac+3 et au-delà — niveau non détaillé)',
   non_renseigne: 'Non renseigné',
 };
 
@@ -1034,7 +1040,14 @@ async function bloc5Immersions(soft, db, p) {
  * Le chargement vit donc ici, et les appelants l'APPELLENT au lieu de le
  * recopier — une précondition ne se transmet pas par commentaire.
  */
-async function chargerSorties(soft, db, p, anneeDoubleMethode) {
+/**
+ * Les deux lectures qui alimentent le moteur des sorties : les fins de parcours
+ * de la période et les bilans de sortie classés. Extraites pour que le
+ * reporting Convergence (2.58.0) compte ses sortants avec EXACTEMENT les mêmes
+ * requêtes — une seconde copie de ce SQL, c'est deux dénominateurs un jour.
+ * `null` = source illisible (jamais confondu avec « aucune ligne »).
+ */
+async function chargerFinsEtBilans(soft, p) {
   const fins = await soft('fins_parcours', `
     SELECT e.id AS employee_id, COALESCE(e.parcours_num, 1) AS parcours_num
     FROM employees e
@@ -1049,6 +1062,11 @@ async function chargerSorties(soft, db, p, anneeDoubleMethode) {
       AND im.sortie_classification IS NOT NULL
       AND COALESCE(im.completed_date, im.updated_at::date) BETWEEN $1::date AND $2::date
     ORDER BY COALESCE(im.completed_date, im.updated_at::date), im.id`, [p.debut, p.fin]);
+  return { fins, bilans };
+}
+
+async function chargerSorties(soft, db, p, anneeDoubleMethode) {
+  const { fins, bilans } = await chargerFinsEtBilans(soft, p);
 
   // Sorties déclarées à l'ASP sur la période — le rapprochement que l'autorité
   // demande. Aucune ligne importée → `null`, jamais 0.
@@ -1662,6 +1680,9 @@ module.exports = {
   composerDialogueGestion,
   composerBlocsInternes,
   chargerSorties,
+  chargerFinsEtBilans,
+  projeterSortieType,
+  lireConvention,
   faireSoft,
   aplatirEnLignes,
   appliquerKAnonymat,

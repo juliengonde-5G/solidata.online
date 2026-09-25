@@ -73,6 +73,10 @@ const TYPES_OBLIGATIONS = [
   { type: 'suivi_6_mois', social: false, onglet: 'dossier', champ: 'situation_6mois' },
   { type: 'referent_unique', social: false, onglet: 'dossier', champ: 'referent_unique' },
   { type: 'sous_15h', social: true, agregee: true, onglet: 'situation', champ: null },
+  // 2.58.0 — situation de sortie Convergence (programme CVG) non saisie 30 j
+  // après la fin du parcours. SOCIALE : elle porte des données de santé à la
+  // sortie (RQTH, AAH, pension, médecin traitant) — ADMIN/RH strict.
+  { type: 'sortie_cvg', social: true, onglet: 'suivi', champ: 'sortie_cvg' },
 ];
 const TYPES_OBLIGATIONS_CLES = TYPES_OBLIGATIONS.map((t) => t.type);
 const META_PAR_TYPE = new Map(TYPES_OBLIGATIONS.map((t) => [t.type, t]));
@@ -237,13 +241,14 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
   const autorises = new Set(typesPourRole(baseRole));
   const adminRh = autorises.has('sortie_fse_a_saisir');
 
-  const [moisTermines, delaiDiag, moisPass, j1, j2, joursG] = await Promise.all([
+  const [moisTermines, delaiDiag, moisPass, j1, j2, joursG, delaiCvg] = await Promise.all([
     readInsertionSetting('insertion.file_active_terminees_mois'),
     readInsertionSetting('insertion.delai_diagnostic_jours'),
     readInsertionSetting('insertion.alerte_pass_iae_mois'),
     readInsertionSetting('insertion.alerte_sortie_fse_j1'),
     readInsertionSetting('insertion.alerte_sortie_fse_j2'),
     readInsertionSetting('insertion.categorie_g_alerte_jours'),
+    readInsertionSetting('insertion.cvg_sortie_delai_jours'),
   ]);
 
   // Même borne que la file active (M-07) : les familles d'obligations qui
@@ -280,7 +285,7 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
   if (ids.length === 0) return { parEmploye, agregees, salaries: cohorte, sources };
 
   // ── Sources complémentaires, chacune en UNE requête pour toute la cohorte ──
-  const [diags, contrats, suivis, fse, participants] = await Promise.all([
+  const [diags, contrats, suivis, fse, participants, sortiesCvg] = await Promise.all([
     soft('diagnostics', `
       SELECT d.employee_id, COALESCE(d.parcours_num, 1) AS parcours_num,
              ${sqlSocleComplet('d')} AS socle_complet,
@@ -306,6 +311,10 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
         FROM insertion_projet_participants pp
         JOIN insertion_projets pr ON pr.id = pp.projet_id AND pr.type = 'asi'
        WHERE pp.employee_id = ANY($1::int[])`, [ids]) : Promise.resolve([]),
+    adminRh && autorises.has('sortie_cvg') ? soft('sorties_cvg', `
+      SELECT employee_id, parcours_num
+        FROM insertion_sortie_cvg
+       WHERE employee_id = ANY($1::int[])`, [ids]) : Promise.resolve([]),
   ]);
 
   const diagParEmp = new Map();
@@ -319,6 +328,7 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
   const suiviParEmp = new Map((suivis || []).map((s) => [Number(s.employee_id), s]));
   const fseParEmp = new Map((fse || []).map((s) => [Number(s.employee_id), s]));
   const asiParEmp = new Map((participants || []).map((p) => [Number(p.employee_id), p]));
+  const cvgSaisies = new Set((sortiesCvg || []).map((s) => `${Number(s.employee_id)}#${Number(s.parcours_num) || 1}`));
 
   const jour = aujourdhuiParis();
   // CORRECTIF m-07 — `Number(x) > 0 ? x : défaut` fait retomber sur le défaut
@@ -337,6 +347,7 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
   const seuilDiag = seuil(delaiDiag, 30);
   const seuilPass = seuil(moisPass, 7);
   const seuilG = seuil(joursG, 30);
+  const seuilCvg = seuil(delaiCvg, 30);
 
   const pousser = (empId, l) => { if (parEmploye.has(empId)) parEmploye.get(empId).push(l); };
 
@@ -492,6 +503,24 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
             libelle: 'Situation à +6 mois non relevée', echeance: ech, jours: ecartJours(ech, jour),
           }));
         }
+      }
+    }
+
+    // (h bis) Situation de sortie Convergence non saisie (2.58.0). ROUGE : le
+    //     formulaire du réseau se remplit au fil de l'eau, jamais en campagne —
+    //     une sortie qui reste sans situation un mois après ne se documentera
+    //     plus. Reportable 48 h, jamais acquittable. Source illisible (`null`)
+    //     → la famille n'est PAS calculée : sinon chaque sortant serait réclamé.
+    if (autorises.has('sortie_cvg') && sortiesCvg != null
+        && e.insertion_status === 'termine' && e.insertion_end_date) {
+      const finParcours = isoDate(e.insertion_end_date);
+      const jours = finParcours ? ecartJours(finParcours, jour) : null;
+      if (jours != null && jours > seuilCvg && !cvgSaisies.has(`${id}#${Number(e.parcours_num) || 1}`)) {
+        pousser(id, ligne({
+          type: 'sortie_cvg', niveau: 'rouge', employeeId: id, nom,
+          libelle: `Situation de sortie Convergence à saisir — parcours terminé depuis ${jours} jour(s)`,
+          echeance: decalerJours(finParcours, seuilCvg), jours,
+        }));
       }
     }
 

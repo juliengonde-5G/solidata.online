@@ -157,6 +157,13 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_DIALOGUE_GESTION_CONSULTATION: 'Consultation d’une synthèse de dialogue de gestion déjà générée',
   EXPORT_DIALOGUE_GESTION: 'Export CSV de la synthèse de dialogue de gestion',
   EXPORT_INSERTION_FREINS_ENRICHI: 'Export du tableau des freins enrichi (cadre 2026)',
+  // Reporting Convergence (programme CVG) — 2.58.0
+  INSERTION_CVG_APERCU: 'Aperçu du reporting Convergence (programme CVG), sans enregistrement',
+  INSERTION_CVG_GENERATION: 'Génération enregistrée du reporting Convergence (programme CVG)',
+  INSERTION_CVG_CONSULTATION: 'Consultation d’un instantané Convergence déjà généré',
+  INSERTION_CVG_COMPARAISON: 'Comparaison de deux périodes du reporting Convergence',
+  EXPORT_CVG: 'Export CSV du reporting Convergence (programme CVG)',
+  INSERTION_SORTIE_CVG_ECRITURE: 'Saisie de la situation de sortie Convergence d’un salarié',
   // Message de vérification du contact, envoyé AU MOMENT du recueil pour que la
   // conseillère puisse demander « vous l’avez reçu ? » tant que la personne est
   // devant elle (correctif M-05 de la revue de sécurité PR C).

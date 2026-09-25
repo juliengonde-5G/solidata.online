@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
-import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil, FileText, BarChart3 } from 'lucide-react';
+import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil, FileText, BarChart3, Network } from 'lucide-react';
 import DialogueGestionPanel from '../components/insertion/DialogueGestionPanel';
+import ConvergenceCvgPanel from '../components/insertion/ConvergenceCvgPanel';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { getInsertionParametres, PARAMETRES_DEFAUTS } from '../components/insertion/parametres';
@@ -985,6 +986,9 @@ export default function AuditInsertion() {
           {[
             ['pilotage', 'Pilotage & indicateurs', BarChart3],
             ['dialogue', 'Dialogue de gestion', FileText],
+            // Convergence (CVG) : agrégats portant BRSA, RQTH, AAH, freins
+            // santé/judiciaire et la Partie 2 nominative — ADMIN/RH strict.
+            ...(canIa ? [['cvg', 'Convergence (CVG)', Network]] : []),
           ].map(([cle, label, Icon]) => (
             <button key={cle} type="button" role="tab" aria-selected={onglet === cle}
               onClick={() => setOnglet(cle)}
@@ -997,6 +1001,10 @@ export default function AuditInsertion() {
 
         {onglet === 'dialogue' && (
           <DialogueGestionPanel year={year} canGenerer={canIa} />
+        )}
+
+        {onglet === 'cvg' && canIa && (
+          <ConvergenceCvgPanel canGenerer={canIa} />
         )}
 
         {error && onglet === 'pilotage' && <div className="mb-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-3">Impossible de charger l'audit : {error}</div>}

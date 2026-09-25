@@ -7,6 +7,7 @@ const router = express.Router();
 const pool = require('../../config/database');
 const { authorize, resolveBaseRole } = require('../../middleware/auth');
 const { relevantDeLaCip, hasParcours } = require('../../utils/contrat-insertion');
+const { HABITAT_TYPES, NIVEAUX_FORMATION_SOLIDATA } = require('../../utils/convergence-cvg-referentiels');
 const { body, param, query } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const CryptoJS = require('crypto-js');
@@ -491,7 +492,13 @@ const DIAG_ENUM_FIELDS = {
   permis_b_statut: ['oui', 'non', 'code_en_cours', 'conduite_en_cours'],
   situation_familiale: ['marie', 'celibataire', 'en_couple', 'divorce', 'veuf'],
   statut_saisie: ['en_cours', 'complet'],
-  niveau_formation: null,   // nomenclature contrôlée applicativement côté front (infra3…niv6plus)
+  // 2.58.0 (Convergence) — liste FERMÉE : niveaux 6, 7 et 8 détaillés (le
+  // formulaire CVG les ventile) ; `niv6plus` reste accepté pour les fiches déjà
+  // saisies (compté « 6 et plus — niveau non détaillé »). Une valeur libre
+  // devenait jusqu'ici un intitulé de ligne des documents transmis.
+  niveau_formation: NIVEAUX_FORMATION_SOLIDATA,
+  // 2.58.0 — type d'habitat dans la nomenclature Convergence (5 valeurs).
+  habitat_type: HABITAT_TYPES,
   mutuelle_statut: null,
   pret_a_se_former: null,
   cecrl_niveau: null,
@@ -507,6 +514,8 @@ const DIAG_BOOL_FIELDS = [
   // transmet JAMAIS : elle est recalculée ici depuis les réponses (une
   // complétude déclarée par l'écran serait une complétude invérifiable).
   'fse_entree_complet',
+  // 2.58.0 — Convergence : parcours de rue, pension d'invalidité, médecin traitant.
+  'parcours_rue', 'pension_invalidite', 'medecin_traitant',
 ];
 const DIAG_DATE_FIELDS = ['piece_identite_validite', 'rqth_fin'];
 const DIAG_NUM_FIELDS = ['autre_employeur_heures', 'nb_enfants'];

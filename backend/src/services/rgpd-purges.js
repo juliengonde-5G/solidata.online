@@ -1039,7 +1039,7 @@ const PURGES_RGPD = [
   {
     cle: 'dialogues_gestion',
     libelle: 'Synthèses de dialogue de gestion enregistrées',
-    description: "Supprime les synthèses de dialogue de gestion générées et figées en snapshot au-delà du délai. Le document est strictement AGRÉGÉ et non nominatif (k-anonymat appliqué à tout le document avant enregistrement), mais c'est une pièce de conventionnement : elle se conserve longtemps — six ans, durée des pièces justificatives d'un cofinancement européen — et pas indéfiniment. DELETE : un snapshot amputé ne prouverait plus ce qui a été transmis.",
+    description: "Supprime les synthèses de dialogue de gestion générées et figées en snapshot au-delà du délai — ainsi que les instantanés du reporting Convergence (programme CVG), rangés dans la même table. La synthèse est strictement AGRÉGÉE et non nominative (k-anonymat appliqué à tout le document avant enregistrement) ; l'instantané Convergence est agrégé sans seuil de k-anonymat et nomme les permanents de l'accompagnement (Partie 2). Ce sont des pièces de conventionnement : elles se conservent longtemps — six ans, durée des pièces justificatives d'un cofinancement européen — et pas indéfiniment. DELETE : un snapshot amputé ne prouverait plus ce qui a été transmis.",
     fn: purgeDialoguesGestion,
     actionAuto: 'AUTO_PURGE_DIALOGUES_GESTION',
     actionManuelle: 'PURGE_DIALOGUES_GESTION',

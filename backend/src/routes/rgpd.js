@@ -355,6 +355,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             source: retentionDialogues.source === 'code' ? 'code' : 'rgpd.dialogues_gestion_retention_jours',
             reference: 'backend/src/services/rgpd-purges.js (purgeDialoguesGestion), backend/src/services/dialogue-gestion.js (appliquerKAnonymat)',
           },
+          {
+            titre: 'Instantanés du reporting Convergence (programme CVG)',
+            description: "Le document transmis au réseau Convergence est figé en instantané au moment de sa génération, dans la même table et sous la même purge que les synthèses de dialogue de gestion. Contrairement à celles-ci, il n'applique PAS le seuil de confidentialité de cinq personnes (le format du réseau porte des effectifs de 1 et 2 — arbitrage à confirmer par le DPO) et sa Partie 2 nomme les permanents de l'accompagnement : il est réservé aux rôles ADMIN et RH et chaque aperçu, génération, consultation, comparaison et export est journalisé. La situation de sortie saisie par salarié (catégorie, habitat et santé à la sortie) est supprimée à l'anonymisation du dossier.",
+            valeur: `${retentionDialogues.valeur} jours`,
+            source: retentionDialogues.source === 'code' ? 'code' : 'rgpd.dialogues_gestion_retention_jours',
+            reference: 'backend/src/services/rgpd-purges.js (purgeDialoguesGestion), backend/src/services/convergence-cvg.js, backend/src/services/anonymization.js',
+          },
         ],
       },
       {

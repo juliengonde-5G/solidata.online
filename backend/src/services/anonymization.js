@@ -230,6 +230,10 @@ async function anonymizeEmployee(client, id) {
     'metiers_souhaites', 'projet_formation', 'emploi_vise', 'emploi_vise_rome',
     'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
     'mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante',
+    // 2.58.0 (Convergence) — deux réponses de SANTÉ (art. 9), traitées comme la
+    // RQTH. `habitat_type` / `parcours_rue` sont conservés, catégoriels comme
+    // `logement_statut` (typologies non nominatives des tableaux de bord).
+    'pension_invalidite', 'medecin_traitant',
     'piece_identite_validite', 'questionnaire_detail',
     // Lot 8 (2026-07 PR3) — co-construction : SWOT / besoins / COA + portefeuille
     // de compétences + réponses du style d'apprentissage (verbatims / JSONB
@@ -342,6 +346,17 @@ async function anonymizeEmployee(client, id) {
   // contact personnel de la personne.
   if (await tableExists(client, 'insertion_rappels_rdv')) {
     await client.query('DELETE FROM insertion_rappels_rdv WHERE employee_id = $1', [id]);
+  }
+
+  // ── 2.58.0 — situation de sortie Convergence (programme CVG) ────────────
+  //
+  // Purge INTÉGRALE : la ligne porte la situation de SANTÉ à la sortie (RQTH,
+  // AAH, pension d'invalidité, médecin traitant) d'une personne identifiée. Les
+  // documents Convergence déjà transmis n'en dépendent pas — ils vivent en
+  // instantané AGRÉGÉ dans `insertion_dialogues_gestion`, où aucune ligne ne
+  // désigne personne.
+  if (await tableExists(client, 'insertion_sortie_cvg')) {
+    await client.query('DELETE FROM insertion_sortie_cvg WHERE employee_id = $1', [id]);
   }
 
   // REPORTS D'ÉCHÉANCE (table du lot 5, purgée ici parce qu'un seul fichier est

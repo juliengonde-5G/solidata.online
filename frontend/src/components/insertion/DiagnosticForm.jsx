@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../../services/api';
 import {
-  visibleFreins, canSeeField, FREIN_LEVEL_COLORS, JUDICIAIRE_LEGAL_NOTICE,
+  visibleFreins, canSeeField, FREIN_LEVEL_COLORS, JUDICIAIRE_LEGAL_NOTICE, CVG_HABITAT_KEYS, CVG_HABITAT_LABELS,
 } from './freins';
 import { exportDiagnosticPDF } from './pdf-insertion';
 import PortefeuilleCompetences from './PortefeuilleCompetences';
@@ -222,8 +222,8 @@ const SOCLE = [
     blocs: ['cadre', 'droits'],
     fields: ['piece_identite_validite', 'allocataire_caf', 'ressources', 'commentaire_droits'],
   },
-  { id: 'logement', label: 'Logement', blocs: ['logement'], fields: ['logement_statut', 'logement_satisfaction', 'commentaire_logement'] },
-  { id: 'sante', label: 'Santé', blocs: ['sante'], fields: ['mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante', 'commentaire_sante'], sensible: true },
+  { id: 'logement', label: 'Logement', blocs: ['logement'], fields: ['logement_statut', 'habitat_type', 'parcours_rue', 'logement_satisfaction', 'commentaire_logement'] },
+  { id: 'sante', label: 'Santé', blocs: ['sante'], fields: ['mutuelle_statut', 'rqth', 'rqth_fin', 'pension_invalidite', 'medecin_traitant', 'contre_indications', 'suivi_sante', 'commentaire_sante'], sensible: true },
   { id: 'mobilite', label: 'Mobilité', blocs: ['mobilite'], fields: ['permis_b_statut', 'vehicule', 'moyen_transport', 'commentaire_mobilite'] },
   {
     id: 'pro',
@@ -252,6 +252,13 @@ const APPROFONDISSEMENTS = [
 ];
 
 const STEPS = [...SOCLE, ...APPROFONDISSEMENTS];
+
+// Correspondances UNIVOQUES statut du logement → type d'habitat Convergence
+// (contrat 30 § 1.1). « Hébergé·e » n'y figure pas : il peut être collectif,
+// précaire ou semi-durable — c'est à la CIP de le dire.
+const HABITAT_DEPUIS_STATUT = {
+  locataire_social: 'autonome', locataire_prive: 'autonome', proprietaire: 'autonome', sans_abri: 'rue',
+};
 const EST_SOCLE = new Set(SOCLE.map((s) => s.id));
 
 const isFilled = (v) => v != null && v !== '' && !(Array.isArray(v) && v.length === 0)
@@ -553,6 +560,25 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                 <ChoicePicker value={draft.logement_statut} onChange={(v) => setField('logement_statut', v)}
                   options={[['locataire_social', 'Locataire (social)'], ['locataire_prive', 'Locataire (privé)'], ['proprietaire', 'Propriétaire'], ['heberge', 'Hébergé·e chez un tiers'], ['sans_abri', 'Sans logement stable']]} />
               </FieldRow>
+              {/* Référentiel Convergence (programme CVG) — le statut ci-dessus ne
+                  distingue ni l'hébergement collectif, ni le précaire, ni le
+                  semi-durable : le type d'habitat se choisit à part. Quand le
+                  statut le dit sans ambiguïté, on PROPOSE la valeur ; on ne
+                  l'écrit jamais à la place de la CIP. */}
+              <FieldRow label="Type d'habitat (référentiel Convergence)"
+                hint="Logement semi-durable : résidence sociale, foyer de jeunes travailleurs, logement accompagné. Hébergement précaire : chez un tiers, à l'hôtel, en squat.">
+                <ChoicePicker value={draft.habitat_type} onChange={(v) => setField('habitat_type', v)}
+                  options={CVG_HABITAT_KEYS.map((k) => [k, CVG_HABITAT_LABELS[k]])} />
+                {!draft.habitat_type && HABITAT_DEPUIS_STATUT[draft.logement_statut] && (
+                  <button type="button" onClick={() => setField('habitat_type', HABITAT_DEPUIS_STATUT[draft.logement_statut])}
+                    className="mt-1.5 text-xs text-teal-700 underline hover:text-teal-900">
+                    Proposé d'après le statut du logement : « {CVG_HABITAT_LABELS[HABITAT_DEPUIS_STATUT[draft.logement_statut]]} » — cliquer pour confirmer
+                  </button>
+                )}
+              </FieldRow>
+              <FieldRow label="A connu un parcours de rue" hint="Même si la personne est logée aujourd'hui.">
+                <BoolPicker value={draft.parcours_rue} onChange={(v) => setField('parcours_rue', v)} />
+              </FieldRow>
               <FieldRow label="La personne se sent-elle bien dans son logement ?">
                 <BoolPicker value={draft.logement_satisfaction} onChange={(v) => setField('logement_satisfaction', v)} />
               </FieldRow>
@@ -654,6 +680,12 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
                     <input type="date" value={draft.rqth_fin ? String(draft.rqth_fin).slice(0, 10) : ''} onChange={(e) => setField('rqth_fin', e.target.value || null)} className="input-modern py-1" />
                   </FieldRow>
                 )}
+                <FieldRow label="Pension d'invalidité">
+                  <BoolPicker value={draft.pension_invalidite} onChange={(v) => setField('pension_invalidite', v)} />
+                </FieldRow>
+                <FieldRow label="Médecin traitant déclaré">
+                  <BoolPicker value={draft.medecin_traitant} onChange={(v) => setField('medecin_traitant', v)} />
+                </FieldRow>
                 <FieldRow label="Contre-indications au poste">
                   <BoolPicker value={draft.contre_indications} onChange={(v) => setField('contre_indications', v)} />
                 </FieldRow>
@@ -738,7 +770,13 @@ export default function DiagnosticForm({ employeeId, employee = {}, diagnostic, 
             <div className="space-y-3">
               <FieldRow label="Niveau de formation atteint">
                 <ChoicePicker value={draft.niveau_formation} onChange={(v) => setField('niveau_formation', v)}
-                  options={[['infra3', 'Infra niveau 3 (sans diplôme)'], ['niv3', 'Niveau 3 (CAP/BEP)'], ['niv4', 'Niveau 4 (Bac)'], ['niv5', 'Niveau 5 (Bac+2)'], ['niv6plus', 'Niveau 6 et + (Bac+3…)']]} />
+                  options={[['infra3', 'Infra niveau 3 (sans diplôme)'], ['niv3', 'Niveau 3 (CAP/BEP)'], ['niv4', 'Niveau 4 (Bac)'], ['niv5', 'Niveau 5 (Bac+2)'], ['niv6', 'Niveau 6 (Bac+3/4)'], ['niv7', 'Niveau 7 (Bac+5)'], ['niv8', 'Niveau 8 (doctorat)'],
+                    // Ancienne valeur, qui confondait les niveaux 6, 7 et 8 : conservée
+                    // pour ne pas vider un dossier déjà rempli — à préciser si possible.
+                    ...(draft.niveau_formation === 'niv6plus' ? [['niv6plus', '6 et plus (ancienne saisie)']] : [])]} />
+                {draft.niveau_formation === 'niv6plus' && (
+                  <p className="text-[11px] text-amber-700 mt-1">Ancienne saisie : précisez le niveau 6, 7 ou 8 si vous le connaissez.</p>
+                )}
               </FieldRow>
               <div className="grid grid-cols-2 gap-3">
                 <FieldRow label="Métiers souhaités">

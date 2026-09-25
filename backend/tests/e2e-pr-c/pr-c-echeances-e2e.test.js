@@ -59,7 +59,7 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
     piece_identite_validite: '2030-01-01', allocataire_caf: true, ressources: ['salaire'],
     logement_statut: 'locataire_social', mutuelle_statut: 'cmu', rqth: false, contre_indications: false,
     suivi_sante: false, permis_b_statut: 'oui', moyen_transport: ['bus'],
-    niveau_formation: 'CAP', metiers_souhaites: 'Tri', cecrl_niveau: 'B1',
+    niveau_formation: 'CAP', metiers_souhaites: 'Tri', cecrl_niveau: 'B1', habitat_type: 'autonome',
     attentes_parcours: 'Trouver un emploi', difficultes_exprimees: 'Aucune',
   };
   const c = { employee_id: employeeId, parcours_num: 1, ...base, ...extra };

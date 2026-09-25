@@ -145,6 +145,17 @@ const INSERTION_SETTING_DEFAULTS = {
   // Base unique des documents de conventionnement (repli si l'annexe financière
   // `effectifs.convention_<annee>` ne porte pas d'heures annuelles par ETP).
   'insertion.heures_annuelles_etp': 1820,
+  // ── 2.58.0 — reporting Convergence (programme CVG) ──
+  // Niveau de frein (échelle 1-5) à partir duquel une « difficulté à
+  // l'entrée » est comptée dans le formulaire Convergence.
+  'insertion.cvg_frein_seuil': 3,
+  // Délai après la fin de parcours au-delà duquel la situation de sortie
+  // Convergence non saisie devient une OBLIGATION rouge de « Mes échéances ».
+  'insertion.cvg_sortie_delai_jours': 30,
+  // Un salarié parti SANS bilan de sortie est compté « sans nouvelles » dans le
+  // formulaire (approximation annoncée en méthode, arbitrage 2 du contrat 30) ;
+  // à `false`, il reste « non catégorisé ».
+  'insertion.cvg_sans_bilan_est_sans_nouvelles': true,
   // « Mon Récap » est fait pour CIRCULER (la personne peut le remettre à un
   // employeur). Deux libellés y disaient plus que ce que la personne croit
   // partager : « Entretien de conciliation (protection des droits) » — la

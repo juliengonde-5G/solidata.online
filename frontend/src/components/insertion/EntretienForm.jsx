@@ -9,6 +9,7 @@ import RadarFreins from './RadarFreins';
 import ActionsPanel from './ActionsPanel';
 import ObjectifsPanel from './ObjectifsPanel';
 import { SatisfactionModal } from './SatisfactionForm';
+import SituationSortieCvg from './SituationSortieCvg';
 import { exportEntretienPDF } from './pdf-insertion';
 import { getInsertionParametres, PARAMETRES_DEFAUTS, plusMois } from './parametres';
 import {
@@ -1138,6 +1139,10 @@ export default function EntretienForm({
                 </div>
               </div>
 
+              {/* Lot 2.58.0 — situation de sortie Convergence : enregistrement
+                  PROPRE (table insertion_sortie_cvg), resté ouvert après la
+                  clôture du bilan. */}
+              <SituationSortieCvg employeeId={employeeId} parcoursNum={milestone.parcours_num ?? null} canEdit={adminRh} />
               {/* Questionnaire de satisfaction de sortie (EXG-09) — rempli AVEC le
                   salarié pendant le bilan ; consultable même une fois verrouillé. */}
               <div className="border-t border-purple-200 pt-2 flex items-center justify-between gap-2 flex-wrap">

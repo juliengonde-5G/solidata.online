@@ -51,7 +51,10 @@ const ID = [param('employeeId').isInt().withMessage('Identifiant de salarié inv
 // Elles sont DOUBLÉES par des CHECK en base (migration insertion-cadre.js) :
 // la validation applicative donne un message français exploitable (400), la
 // contrainte garantit qu'aucune autre voie d'écriture ne puisse les contourner.
-const ORIENTEUR_TYPES = ['departement_cms', 'france_travail', 'mission_locale', 'cap_emploi', 'ccas', 'autre'];
+// 2.58.0 (Convergence) — les 12 orienteurs du réseau + les 3 anciennes valeurs
+// (`departement_cms`, `ccas`, `autre`), conservées pour les fiches déjà saisies.
+// Source unique : `utils/convergence-cvg-referentiels.js` (même liste que le CHECK).
+const ORIENTEUR_TYPES = require('../../utils/convergence-cvg-referentiels').ORIENTEURS_ACCEPTES;
 const REFERENT_TYPES = ['structure', 'france_travail', 'cms', 'autre', 'non_determine'];
 const FT_CATEGORIES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 const ELIGIBILITE_SOURCES = ['auto_prescription', 'prescripteur_habilite', 'inconnu'];
