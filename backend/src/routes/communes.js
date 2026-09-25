@@ -394,7 +394,7 @@ router.patch('/cav/:cavId', authorize('ADMIN'), async (req, res) => {
       if (exists.rowCount === 0) return res.status(400).json({ error: 'code_insee inconnu' });
     }
     const r = await pool.query(
-      `UPDATE cav SET code_insee_commune = $1 WHERE id = $2 RETURNING id, name, commune, code_insee_commune`,
+      `UPDATE cav SET code_insee_commune = $1, updated_at = NOW() WHERE id = $2 RETURNING id, name, commune, code_insee_commune, updated_at`,
       [code_insee || null, req.params.cavId]
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'CAV introuvable' });

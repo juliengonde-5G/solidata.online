@@ -243,16 +243,19 @@ function memoKey(tourId, depart, pointIds) {
  * Renvoie toujours un objet : `source = 'indisponible'` si le routeur n'a pas
  * répondu — la carte retombe alors sur le trait droit EN LE SIGNALANT.
  */
-async function calculerTrace(points, depart, tronque = false) {
+async function calculerTrace(points, depart, tronque = false, { retourCentre = true } = {}) {
   const commun = {
     nb_points: points.length,
     depart: depart ? 'position_vehicule' : 'centre_tri',
     tronque,
   };
+  // `retourCentre: false` : le dernier point EST la destination (étape du
+  // programme en cours — retour au centre, arrêt technique) ; on n'y ajoute
+  // pas un second passage au centre de tri.
   const waypoints = [
     depart || { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
     ...points.map((p) => ({ lat: parseFloat(p.latitude), lng: parseFloat(p.longitude) })),
-    { lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG },
+    ...(retourCentre ? [{ lat: CENTRE_TRI_LAT, lng: CENTRE_TRI_LNG }] : []),
   ];
   const trace = await osrmRouteGeometry(waypoints);
   if (!trace) {
@@ -418,7 +421,21 @@ async function itineraireChauffeur(tourId, depuis = {}) {
       ORDER BY tap.position`,
     [tourId]
   );
-  const points = [...cavRes.rows, ...assoRes.rows].sort((a, b) => a.position - b.position);
+  let points = [...cavRes.rows, ...assoRes.rows].sort((a, b) => a.position - b.position);
+
+  // Étape en cours du programme : un arrêt en attente placé AVANT le prochain
+  // point de collecte (retour au centre déclaré, pause, arrêt technique) EST la
+  // destination du moment — même règle que la carte du chauffeur
+  // (`arretCourant` dans mobile/src/pages/TourMap.jsx). Sans elle, après
+  // « camion plein », le tracé continuait vers les bornes restantes alors que
+  // le camion roulait vers le centre.
+  const arretCourant = await arretEnCoursPourTrace(tourId, points);
+  let destination = 'points';
+  if (arretCourant) {
+    points = [arretCourant];
+    destination = arretCourant.est_retour_centre ? 'centre_tri' : 'arret';
+  }
+
   if (points.length === 0) {
     return {
       tour_id: tourId, geometry: null, distance_restante_km: null,
@@ -450,15 +467,42 @@ async function itineraireChauffeur(tourId, depuis = {}) {
   const cle = memoKey(tourId, depart, retenus.map((p) => p.point_id));
   const memo = traceMemo.get(cle);
   if (memo && Date.now() - memo.at < TRACE_TTL_MS) {
-    return { ...memo.valeur, tour_id: tourId };
+    return { ...memo.valeur, tour_id: tourId, destination };
   }
 
-  const valeur = await calculerTrace(retenus, depart, points.length > retenus.length);
+  const valeur = await calculerTrace(
+    retenus, depart, points.length > retenus.length,
+    { retourCentre: !arretCourant },
+  );
   if (valeur.source === 'routier') {
     if (traceMemo.size > 200) traceMemo.clear();
     traceMemo.set(cle, { at: Date.now(), valeur });
   }
-  return { ...valeur, tour_id: tourId };
+  return { ...valeur, tour_id: tourId, destination };
+}
+
+// Arrêt en attente qui précède le prochain point de collecte, avec ses
+// coordonnées (centre de tri en repli pour un retour au centre). `null` s'il
+// n'y en a pas, ou si les arrêts sont illisibles (base non migrée : le tracé
+// garde alors son comportement historique).
+async function arretEnCoursPourTrace(tourId, pointsRestants) {
+  let arrets = [];
+  try {
+    const { arretsPourMobile } = require('./arrets');
+    arrets = await arretsPourMobile(tourId);
+  } catch (_) { return null; }
+  const prochaine = pointsRestants.length > 0 ? Number(pointsRestants[0].position) : Infinity;
+  const courant = arrets
+    .filter((a) => a.status === 'pending' && Number(a.position) <= prochaine)
+    .sort((a, b) => Number(a.position) - Number(b.position))[0];
+  if (!courant || courant.latitude == null || courant.longitude == null) return null;
+  return {
+    point_id: `arret-${courant.id}`,
+    position: courant.position,
+    latitude: courant.latitude,
+    longitude: courant.longitude,
+    est_retour_centre: Boolean(courant.est_retour_centre),
+  };
 }
 
 // GET /api/tours/:id/itineraire-public

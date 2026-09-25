@@ -146,6 +146,7 @@ export default function Tours() {
   const [employees, setEmployees] = useState([]);
   const [selectedTour, setSelectedTour] = useState(null);
   const [statusUpdating, setStatusUpdating] = useState({}); // { [tourId]: true } pendant le PUT statut
+  const [actionError, setActionError] = useState('');
 
   // Lien profond `/tours?tour=<id>` (depuis la notification « bordereau
   // déchèterie à valider ») : ouvre directement la fiche de la tournée visée.
@@ -435,6 +436,29 @@ export default function Tours() {
     }
   };
 
+  // Suppression d'une tournée programmée non démarrée. Le serveur refuse (409)
+  // dès qu'elle a démarré ou porte une collecte/pesée : on affiche son motif.
+  const deleteTour = async (t) => {
+    if (statusUpdating[t.id]) return;
+    const libelle = `#${t.id}${t.date ? ` du ${new Date(t.date).toLocaleDateString('fr-FR')}` : ''}`;
+    if (!window.confirm(`Supprimer la tournée ${libelle} ?\n\nElle disparaîtra du planning. Cette action est définitive.`)) return;
+    setActionError('');
+    setStatusUpdating(prev => ({ ...prev, [t.id]: true }));
+    try {
+      await api.delete(`/tours/${t.id}`);
+      if (selectedTour?.id === t.id) setSelectedTour(null);
+      await loadTours();
+    } catch (err) {
+      setActionError(err.response?.data?.error || 'Suppression impossible');
+    } finally {
+      setStatusUpdating(prev => {
+        const next = { ...prev };
+        delete next[t.id];
+        return next;
+      });
+    }
+  };
+
   const loadTourDetail = async (id) => {
     try {
       // Détail de base + résumé enrichi (points, incidents, GPS, poids…)
@@ -513,6 +537,9 @@ export default function Tours() {
           {t.status === 'planned' && (
             <button onClick={() => updateStatus(t.id, 'in_progress')} disabled={!!statusUpdating[t.id]} className="text-orange-500 text-xs font-semibold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">{statusUpdating[t.id] ? '…' : 'Démarrer'}</button>
           )}
+          {t.status === 'planned' && (
+            <button onClick={() => deleteTour(t)} disabled={!!statusUpdating[t.id]} className="text-red-600 text-xs font-semibold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">Supprimer</button>
+          )}
           {t.status === 'in_progress' && (
             <button onClick={() => updateStatus(t.id, 'completed')} disabled={!!statusUpdating[t.id]} className="text-emerald-600 text-xs font-semibold hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline">{statusUpdating[t.id] ? '…' : 'Terminer'}</button>
           )}
@@ -542,6 +569,13 @@ export default function Tours() {
         {deepLinkNotice && (
           <div className="mb-4 px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-xs text-slate-500">
             {deepLinkNotice}
+          </div>
+        )}
+
+        {actionError && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-start justify-between gap-3">
+            <span>{actionError}</span>
+            <button onClick={() => setActionError('')} className="text-red-500 hover:text-red-700 text-xs font-semibold">Fermer</button>
           </div>
         )}
 
@@ -631,6 +665,9 @@ export default function Tours() {
                 <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
                   {t.status === 'planned' && (
                     <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'in_progress'); }} disabled={!!statusUpdating[t.id]} className="flex-1 text-center py-2 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{statusUpdating[t.id] ? '…' : 'Démarrer'}</button>
+                  )}
+                  {t.status === 'planned' && (
+                    <button onClick={(e) => { e.stopPropagation(); deleteTour(t); }} disabled={!!statusUpdating[t.id]} className="flex-1 text-center py-2 rounded-lg bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Supprimer</button>
                   )}
                   {t.status === 'in_progress' && (
                     <button onClick={(e) => { e.stopPropagation(); updateStatus(t.id, 'completed'); }} disabled={!!statusUpdating[t.id]} className="flex-1 text-center py-2 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{statusUpdating[t.id] ? '…' : 'Terminer'}</button>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar, Truck, User, AlertTriangle, X, Users, Car,
-  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus, Clock,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, UserPlus, Clock, Trash2,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader, Modal } from '../components';
@@ -336,6 +336,26 @@ export default function PlanningTournees() {
     doAssign(tour.id, { [field]: null });
   }, [doAssign]);
 
+  // Suppression d'une tournée programmée non démarrée (erreur de jour, de
+  // véhicule, doublon). Le serveur refuse dès qu'elle a démarré ou porte une
+  // collecte/pesée, et c'est son motif qui s'affiche.
+  const [deletingId, setDeletingId] = useState(null);
+  const deleteTour = async (tour) => {
+    if (deletingId) return;
+    if (!window.confirm(`Supprimer la tournée #${tour.id} ?\n\nElle disparaîtra du planning. Cette action est définitive.`)) return;
+    setDeletingId(tour.id);
+    try {
+      await api.delete(`/tours/${tour.id}`);
+      showToast('Tournée supprimée', 'success');
+      await load();
+      // Un rendez-vous rattaché redevient « à planifier » : on relit la liste.
+      loadDemandes();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Suppression impossible', 'error');
+    }
+    setDeletingId(null);
+  };
+
   if (loading && !data) return <Layout><LoadingSpinner size="lg" message="Chargement du planning…" /></Layout>;
 
   const tours = data?.tours || [];
@@ -583,6 +603,18 @@ export default function PlanningTournees() {
                       {tour.status}
                     </span>
                   </div>
+                  {tour.status === 'planned' && !tour.started_at && (
+                    <button
+                      type="button"
+                      onClick={() => deleteTour(tour)}
+                      disabled={deletingId === tour.id}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50"
+                      title="Supprimer cette tournée programmée (non démarrée)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {deletingId === tour.id ? 'Suppression…' : 'Supprimer'}
+                    </button>
+                  )}
                   <span className="text-[11px] text-slate-400">
                     {tour.nb_cav} point{tour.nb_cav > 1 ? 's' : ''}
                     {tour.estimated_duration_min ? ` · ${tour.estimated_duration_min} min prévu` : ''}

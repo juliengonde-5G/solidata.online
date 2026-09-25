@@ -143,7 +143,41 @@ export const CIBLE_DEVICE_LABELS = { pi5: 'Raspberry Pi 5', pi3: 'Raspberry Pi 3
 export const EVENEMENT_HISTORIQUE_LABELS = {
   attribution: 'Attribution', perte: 'Déclaré perdu', vol: 'Déclaré volé',
   restitution: 'Restitution', desactivation: 'Désactivation', reactivation: 'Réactivation',
+  reference: 'Référence de la carte',
 };
+
+// Référence propriétaire d'une carte (ex. « SOLIDATA A1 ») — la référence
+// inscrite sur le support. Même normalisation que le serveur
+// (utils/badge-reference.js) pour que l'aperçu dise ce qui sera enregistré.
+export const normaliserReferenceCarte = (v) => String(v || '').trim().replace(/\s+/g, ' ').toUpperCase();
+
+export function ChampReferenceCarte({ value, onChange, dejaConnue = null, autoFocus = false }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1">Référence de la carte</label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="input-modern py-2 text-sm w-full font-mono uppercase"
+        placeholder="ex. SOLIDATA A1"
+        maxLength={40}
+        autoFocus={autoFocus}
+        required={!dejaConnue}
+      />
+      <p className="text-xs text-slate-400 mt-1">
+        {dejaConnue
+          ? <>Carte déjà référencée <strong className="font-mono text-slate-600">{dejaConnue}</strong> — laissez tel quel pour la conserver.</>
+          : <>La référence inscrite sur la carte : elle permet de savoir quelle carte porte chaque salarié sans lire d'empreinte.</>}
+      </p>
+    </div>
+  );
+}
+
+export function ReferenceCarte({ reference }) {
+  return reference
+    ? <span className="font-mono text-xs font-semibold text-slate-700 whitespace-nowrap">{reference}</span>
+    : <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">À renseigner</span>;
+}
 
 // Motifs de correction — liste FERMÉE (NOTE_RH §5.1). « autre » exige un détail.
 export const MOTIFS_CORRECTION = [

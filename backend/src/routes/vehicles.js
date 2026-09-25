@@ -352,7 +352,10 @@ router.patch('/:id/restore', authorize('ADMIN'), async (req, res) => {
 const MOBILE_BASE_URL = process.env.MOBILE_BASE_URL || 'https://m.solidata.online';
 const buildVehicleUrl = (token) => `${MOBILE_BASE_URL}/v/${token}`;
 
-// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante (ADMIN + MANAGER lecture)
+// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante
+// Lecture : ADMIN, et tout profil à qui le module « operations » est ACCORDÉ
+// (authorize consulte la matrice) — c'est l'encadrant qui paramètre le
+// téléphone du chauffeur au dépôt.
 router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
@@ -376,10 +379,12 @@ router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
 
 // POST /api/vehicles/:id/regenerate-token — Régénérer l'URL (révoque l'ancienne)
 //
-// Réservé ADMIN (action de révocation, plus sensible que la simple lecture
-// de l'URL courante). À déclencher quand : changement de chauffeur titulaire,
+// Même habilitation que la lecture (action de révocation). À déclencher quand : changement de chauffeur titulaire,
 // téléphone perdu/volé, ou suspicion de compromission. L'ancien raccourci
 // devient immédiatement invalide → tap-renvoi 401 côté chauffeur.
+// Ouvert à ADMIN et à tout profil à qui l'écran Véhicules est ACCORDÉ (module
+// « operations », via authorize) : c'est l'encadrant qui reparamètre le
+// téléphone au dépôt après une perte ou un changement de chauffeur.
 router.post('/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(

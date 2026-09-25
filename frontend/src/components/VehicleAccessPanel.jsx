@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { KeyRound, Copy, RefreshCw, Check, AlertTriangle, Smartphone } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { modulesDuChemin } from '../navigation/navTree';
 
 /**
  * Panel d'accès véhicule (« 1 URL = 1 véhicule »).
@@ -12,7 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
  * (CLAUDE.md §7) est explicitement fait « en personne » par le MANAGER
  * au dépôt — un MANAGER ouvrant /vehicles (rôle pourtant admis sur la
  * page, cf App.jsx) ne voyait donc rien du tout, sans aucune erreur.
- * Lecture ouverte à ADMIN + MANAGER (aligné sur le backend, y compris
+ * (Historique) Lecture ouverte à ADMIN + MANAGER (aligné sur le backend, y compris
  * un rôle personnalisé dont le `base_role` résout vers MANAGER — cf.
  * ProtectedRoute dans App.jsx pour le même pattern). La régénération
  * (révocation immédiate de l'ancien raccourci) reste réservée ADMIN.
@@ -20,22 +21,27 @@ import { useAuth } from '../contexts/AuthContext';
  * Fonctions :
  *   - Affiche l'URL d'accès courante (à copier sur le téléphone du chauffeur).
  *   - Bouton Copier (clipboard API + feedback visuel).
- *   - Bouton Régénérer (ADMIN seul — révoque l'ancienne URL, confirme avant).
+ *   - Bouton Régénérer (mêmes personnes que la lecture — révoque l'ancienne URL, confirme avant).
  *   - Mode d'emploi manager pour le pairing physique au dépôt (D3).
  */
 export default function VehicleAccessPanel({ vehicleId, registration, name }) {
-  const { user } = useAuth();
+  const { user, isModuleGranted } = useAuth();
   const [accessInfo, setAccessInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
-  // Lecture ET régénération : ADMIN. Le rôle MANAGER, qui avait la lecture
-  // depuis la 2.9.0 (le pairing se fait au dépôt), a été retiré le 10/09/2026 —
-  // le backend authorize('ADMIN') le refuse désormais, la garde suit ici.
+  // Lecture : ADMIN, et tout profil à qui l'écran Véhicules est ouvert par un
+  // accord de module dans /admin/permissions (2.56.0). Le backend applique la
+  // même règle (authorize consulte l'accord du module « operations ») : sans
+  // cette lecture, l'encadrant qui paramètre le téléphone au dépôt ouvrait la
+  // fiche et n'y trouvait pas le bloc, sans aucune explication.
+  // Régénération : même habilitation que la lecture — l'encadrant qui
+  // paramètre le téléphone doit pouvoir le reparamètrer après une perte.
   const isAdmin = user?.role === 'ADMIN' || user?.base_role === 'ADMIN';
-  const canView = isAdmin;
+  const canView = isAdmin || modulesDuChemin('/vehicles').some(isModuleGranted);
+  const canRegenerate = canView;
 
   useEffect(() => {
     if (!vehicleId || !canView) {
@@ -147,7 +153,7 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
             </div>
           </div>
 
-          {isAdmin ? (
+          {canRegenerate && (
             <button
               type="button"
               onClick={regenerate}
@@ -158,10 +164,6 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
               <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} strokeWidth={1.8} />
               {regenerating ? 'Régénération…' : "Régénérer l'URL (révoque l'ancien raccourci)"}
             </button>
-          ) : (
-            <p className="text-xs text-slate-400 px-3">
-              La régénération de l'URL (en cas de perte du téléphone ou de changement de chauffeur) est réservée à un administrateur.
-            </p>
           )}
         </>
       ) : null}

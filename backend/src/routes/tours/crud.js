@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { authorize } = require('../../middleware/auth');
+const { logActivity } = require('../../middleware/activity-logger');
 const { body } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const { predictFillRate, getSeasonalFactors, setSeasonalFactors, getDayOfWeekFactors, setDayOfWeekFactors, getHolidays, setHolidays, getSchoolVacations, setSchoolVacations, getScoringConfig, setScoringConfig, reloadPersistedConfig, ensureConfigLoaded } = require('./predictions');
@@ -1295,6 +1296,118 @@ router.delete('/routes/:id', authorize('ADMIN'), async (req, res) => {
   } catch (err) {
     console.error('[TOURS] Erreur suppression route :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/tours/:id — Supprimer une tournée PROGRAMMÉE qui n'a pas démarré.
+//
+// Une tournée planifiée par erreur (mauvais jour, mauvais véhicule, doublon)
+// ne pouvait qu'être annulée : elle restait au planning et dans l'historique.
+// On la supprime donc — mais SEULEMENT tant qu'elle n'a rien produit :
+//   • statut « planned » et aucun démarrage enregistré (started_at NULL) ;
+//   • aucun point collecté, sauté ou déclaré (bornes comme associations) ;
+//   • aucune pesée, aucun bordereau de déchèterie (pièce signée par un tiers,
+//     que la cascade emporterait).
+// Au-delà, la tournée porte des faits : elle se clôture ou s'annule, elle ne
+// s'efface pas (409 motivé).
+//
+// Ce qui aurait pu s'y accrocher avant le départ (vérification du matin,
+// incident signalé depuis le téléphone) est CONSERVÉ et détaché (tour_id NULL),
+// comme le fait le script de purge : ces lignes ont une valeur propre.
+const TOUR_DETACH_AVANT_SUPPRESSION = [
+  'incidents',
+  'vehicle_checklists',
+  'tour_end_of_day_declarations',
+  'stock_movements',
+  'stock_original_movements',
+];
+
+router.delete('/:id', authorize('ADMIN'), async (req, res) => {
+  const tourId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(tourId) || tourId <= 0) {
+    return res.status(400).json({ error: 'Identifiant de tournée invalide' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const t = await client.query(
+      'SELECT id, status, started_at, date, vehicle_id FROM tours WHERE id = $1 FOR UPDATE',
+      [tourId]
+    );
+    if (t.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Tournée introuvable' });
+    }
+    const tour = t.rows[0];
+    if (tour.status !== 'planned' || tour.started_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Seule une tournée programmée et non démarrée peut être supprimée. '
+          + 'Une tournée démarrée se termine ou s\'annule.',
+        code: 'TOURNEE_DEMARREE',
+      });
+    }
+    // Chaque compteur est lu séparément : une table absente d'une base ancienne
+    // (association, bordereaux) ne doit pas empêcher la suppression.
+    const compter = async (sql) => {
+      try {
+        await client.query('SAVEPOINT compter');
+        const r = await client.query(sql, [tourId]);
+        await client.query('RELEASE SAVEPOINT compter');
+        return r.rows[0]?.n || 0;
+      } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT compter');
+        if (err.code === '42P01' || err.code === '42703') return 0;
+        throw err;
+      }
+    };
+    const activite =
+      (await compter("SELECT COUNT(*)::int AS n FROM tour_cav WHERE tour_id = $1 AND (status <> 'pending' OR collected_at IS NOT NULL)"))
+      + (await compter("SELECT COUNT(*)::int AS n FROM tour_association_point WHERE tour_id = $1 AND (status <> 'pending' OR collected_at IS NOT NULL OR arrived_at IS NOT NULL)"))
+      + (await compter('SELECT COUNT(*)::int AS n FROM tour_weights WHERE tour_id = $1'))
+      + (await compter('SELECT COUNT(*)::int AS n FROM tour_decheterie_bordereaux WHERE tour_id = $1'));
+    if (activite > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Cette tournée porte déjà des collectes ou des pesées : elle ne peut pas être supprimée.',
+        code: 'TOURNEE_AVEC_ACTIVITE',
+      });
+    }
+    for (const table of TOUR_DETACH_AVANT_SUPPRESSION) {
+      try {
+        await client.query('SAVEPOINT detacher');
+        await client.query(`UPDATE ${table} SET tour_id = NULL WHERE tour_id = $1`, [tourId]);
+        await client.query('RELEASE SAVEPOINT detacher');
+      } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT detacher');
+        if (err.code !== '42P01' && err.code !== '42703') throw err;
+      }
+    }
+    await client.query('DELETE FROM tours WHERE id = $1', [tourId]);
+    await client.query('COMMIT');
+
+    logActivity({
+      userId: req.user && req.user.id != null ? req.user.id : null,
+      username: req.user && req.user.username,
+      action: 'delete',
+      entityType: 'tour',
+      entityId: tourId,
+      details: { date: tour.date, vehicle_id: tour.vehicle_id, statut: tour.status },
+      ip: req.ip,
+    });
+    res.json({ message: 'Tournée supprimée', id: tourId });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* connexion déjà rompue */ }
+    if (err.code === '23503') {
+      return res.status(409).json({
+        error: 'Des données sont encore rattachées à cette tournée : suppression impossible.',
+        code: 'TOURNEE_REFERENCEE',
+      });
+    }
+    console.error('[TOURS] Erreur suppression tournée :', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
   }
 });
 

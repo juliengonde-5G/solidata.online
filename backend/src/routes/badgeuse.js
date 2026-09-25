@@ -37,6 +37,7 @@ const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth
 const { query: q, param, body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
+const { normaliserReferenceBadge } = require('../utils/badge-reference');
 const { mediaFilter } = require('../utils/upload-filters');
 const engine = require('../services/badgeuse-engine');
 const media = require('../services/badgeuse-social');
@@ -478,9 +479,10 @@ router.get('/badges', READ, [
       `SELECT b.id, b.employee_id, b.uid_hmac, b.statut, b.attribue_le, b.restitue_le,
               b.commentaire, b.created_at, e.first_name, e.last_name, e.malibou_id,
               COALESCE(e.badgeuse_optin_festif, false) AS badgeuse_optin_festif,
-              e.badgeuse_optin_festif_le
+              e.badgeuse_optin_festif_le, s.reference
        FROM badgeuse_badges b
        JOIN employees e ON e.id = b.employee_id
+       LEFT JOIN badgeuse_supports s ON s.uid_hmac = b.uid_hmac
        ${where}
        ORDER BY UPPER(e.last_name), UPPER(e.first_name), b.id DESC`,
       vals
@@ -493,6 +495,9 @@ router.get('/badges', READ, [
       // uid_hmac est un pseudonyme, jamais l'UID : son affichage tronqué sert
       // au rapprochement visuel à l'appairage, sans jamais permettre un clone.
       uid_hmac: x.uid_hmac,
+      // Référence propriétaire de la CARTE (ex. SOLIDATA A1) : null = pas
+      // encore renseignée, jamais une référence inventée.
+      reference: x.reference || null,
       statut: x.statut,
       attribue_le: x.attribue_le,
       restitue_le: x.restitue_le,
@@ -514,12 +519,24 @@ router.post('/badges', WRITE, [
   body('uid_hmac').matches(/^[0-9a-fA-F]{64}$/).withMessage('uid_hmac : 64 caractères hexadécimaux attendus (jamais un UID en clair)'),
   body('commentaire').optional({ nullable: true }).isString().isLength({ max: 300 }),
 ], validate, async (req, res) => {
+  const lu = normaliserReferenceBadge(req.body.reference);
+  if (!lu.ok) return res.status(400).json({ error: lu.erreur, code: 'REFERENCE_INVALIDE' });
   const client = await pool.connect();
   try {
     const employeeId = parseInt(req.body.employee_id, 10);
     const uidHmac = String(req.body.uid_hmac).toLowerCase();
 
     await client.query('BEGIN');
+
+    // Référence propriétaire de la carte. Une carte DÉJÀ référencée (restituée
+    // puis réattribuée) garde la sienne sans qu'on la ressaisisse ; une carte
+    // neuve n'entre pas sans elle — c'est ce qui permet ensuite de dire quelle
+    // carte porte quelle personne sans lire d'empreinte.
+    const referenceCarte = await poserReferenceCarte(client, uidHmac, lu.reference, req.user.id);
+    if (referenceCarte.erreur) {
+      await client.query('ROLLBACK');
+      return res.status(referenceCarte.status).json({ error: referenceCarte.erreur, code: referenceCarte.code });
+    }
 
     // Deux unicites distinctes, deux messages distincts — le 409 fourre-tout
     // d'origine laissait la RH deviner lequel des deux etats bloquait.
@@ -553,7 +570,7 @@ router.post('/badges', WRITE, [
     await client.query(
       `INSERT INTO badgeuse_badge_historique (badge_id, evenement, details, auteur_id)
        VALUES ($1, 'attribution', $2, $3)`,
-      [ins.rows[0].id, JSON.stringify({ employee_id: employeeId }), req.user.id]
+      [ins.rows[0].id, JSON.stringify({ employee_id: employeeId, reference: referenceCarte.reference }), req.user.id]
     );
 
     // Rattachement des orphelins de CE badge, dans la MEME transaction : la RH
@@ -587,9 +604,12 @@ router.post('/badges', WRITE, [
     }
 
     await client.query('COMMIT');
-    res.status(201).json({ ...ins.rows[0], orphelins_rattaches: ratt.rows.length });
+    res.status(201).json({ ...ins.rows[0], reference: referenceCarte.reference, orphelins_rattaches: ratt.rows.length });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    if (err.code === '23505' && err.constraint === 'idx_badgeuse_supports_reference_unique') {
+      return res.status(409).json({ error: "Cette référence est déjà celle d'une autre carte", code: 'REFERENCE_DEJA_UTILISEE' });
+    }
     if (err.code === '23505') {
       return res.status(409).json({ error: 'Ce badge est déjà enregistré, ou ce salarié a déjà un badge actif' });
     }
@@ -655,6 +675,95 @@ router.patch('/badges/:id', WRITE, [
       return res.status(409).json({ error: 'Ce salarié a déjà un badge actif — restituez-le d\'abord' });
     }
     console.error('[BADGEUSE] Erreur mise à jour badge :', err.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * Pose (ou confirme) la référence propriétaire d'une carte, dans la transaction
+ * de l'appelant. `reference` null = « garder celle de la carte » ; refus si la
+ * carte n'en a aucune, ou si la référence désigne déjà une AUTRE carte.
+ * Renvoie { reference, avant } ou { erreur, status, code }.
+ */
+async function poserReferenceCarte(client, uidHmac, reference, userId) {
+  const actuelle = await client.query(
+    'SELECT reference FROM badgeuse_supports WHERE uid_hmac = $1 FOR UPDATE', [uidHmac]
+  );
+  const avant = actuelle.rows[0]?.reference || null;
+  if (!reference) {
+    if (avant) return { reference: avant, avant };
+    return {
+      erreur: 'La référence de la carte est requise (ex. SOLIDATA A1) — elle est inscrite sur la carte',
+      status: 400, code: 'REFERENCE_REQUISE',
+    };
+  }
+  if (avant === reference) return { reference, avant };
+  const prise = await client.query(
+    `SELECT s.uid_hmac,
+            (SELECT UPPER(e.last_name) || ' ' || e.first_name
+               FROM badgeuse_badges b JOIN employees e ON e.id = b.employee_id
+              WHERE b.uid_hmac = s.uid_hmac AND b.statut = 'actif' LIMIT 1) AS porteur
+       FROM badgeuse_supports s
+      WHERE UPPER(s.reference) = UPPER($1) AND s.uid_hmac <> $2`,
+    [reference, uidHmac]
+  );
+  if (prise.rows.length > 0) {
+    const porteur = prise.rows[0].porteur;
+    return {
+      erreur: `La référence ${reference} est déjà celle d'une autre carte`
+        + (porteur ? ` (portée par ${porteur})` : ''),
+      status: 409, code: 'REFERENCE_DEJA_UTILISEE',
+    };
+  }
+  await client.query(
+    `INSERT INTO badgeuse_supports (uid_hmac, reference, cree_par)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (uid_hmac) DO UPDATE SET reference = EXCLUDED.reference, updated_at = NOW()`,
+    [uidHmac, reference, userId]
+  );
+  return { reference, avant };
+}
+
+// PATCH /badges/:id/reference — renseigner ou corriger la référence de la carte
+// (ex. les cartes attribuées avant que la référence n'existe). Porte sur la
+// CARTE : toutes les périodes de détention de la même empreinte l'affichent.
+router.patch('/badges/:id/reference', WRITE, [param('id').isInt()], validate, async (req, res) => {
+  const lu = normaliserReferenceBadge(req.body?.reference);
+  if (!lu.ok) return res.status(400).json({ error: lu.erreur, code: 'REFERENCE_INVALIDE' });
+  if (!lu.reference) {
+    return res.status(400).json({ error: 'La référence de la carte est requise (ex. SOLIDATA A1)', code: 'REFERENCE_REQUISE' });
+  }
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    await client.query('BEGIN');
+    const badge = await client.query('SELECT id, uid_hmac FROM badgeuse_badges WHERE id = $1', [id]);
+    if (badge.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Badge introuvable' });
+    }
+    const pose = await poserReferenceCarte(client, badge.rows[0].uid_hmac, lu.reference, req.user.id);
+    if (pose.erreur) {
+      await client.query('ROLLBACK');
+      return res.status(pose.status).json({ error: pose.erreur, code: pose.code });
+    }
+    if (pose.avant !== pose.reference) {
+      await client.query(
+        `INSERT INTO badgeuse_badge_historique (badge_id, evenement, details, auteur_id)
+         VALUES ($1, 'reference', $2, $3)`,
+        [id, JSON.stringify({ avant: pose.avant, apres: pose.reference }), req.user.id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ id, uid_hmac: badge.rows[0].uid_hmac, reference: pose.reference });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* déjà hors transaction */ }
+    if (err.code === '23505') {
+      return res.status(409).json({ error: "Cette référence est déjà celle d'une autre carte", code: 'REFERENCE_DEJA_UTILISEE' });
+    }
+    console.error('[BADGEUSE] Erreur référence badge :', err.message);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
     client.release();
@@ -791,10 +900,12 @@ router.get('/orphelins', READ, async (req, res) => {
     const r = await pool.query(
       `SELECT p.id, p.uuid, p.uid_hmac, p.horodatage_utc, p.horodatage_local, p.sens,
               p.orphelin_raison, p.recu_le, p.employee_id,
-              e.first_name, e.last_name, e.malibou_id, d.code AS device_code
+              e.first_name, e.last_name, e.malibou_id, d.code AS device_code,
+              s.reference
        FROM badgeuse_pointages p
        LEFT JOIN employees e ON e.id = p.employee_id
        LEFT JOIN badgeuse_devices d ON d.id = p.device_id
+       LEFT JOIN badgeuse_supports s ON s.uid_hmac = p.uid_hmac
        WHERE p.statut = 'orphelin'
        ORDER BY p.horodatage_utc DESC LIMIT 500`
     );
@@ -802,6 +913,9 @@ router.get('/orphelins', READ, async (req, res) => {
       id: Number(x.id),
       uuid: x.uuid,
       uid_hmac: x.uid_hmac,
+      // Carte déjà référencée (restituée, puis re-présentée) : la RH la
+      // reconnaît à sa référence plutôt qu'à son empreinte.
+      reference: x.reference || null,
       horodatage_utc: x.horodatage_utc,
       horodatage_local: x.horodatage_local,
       sens: x.sens,

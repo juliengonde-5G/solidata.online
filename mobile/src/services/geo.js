@@ -37,3 +37,19 @@ export function getCurrentPosition(options = {}) {
     );
   });
 }
+
+/**
+ * Lien de guidage Google Maps vers une destination, ou `null` si elle n'a pas
+ * de coordonnées exploitables. (0, 0) est une valeur par défaut et non une
+ * position : on ne lance jamais un guidage vers le golfe de Guinée.
+ */
+export function lienGuidage(destination) {
+  if (!destination) return null;
+  const { latitude, longitude } = destination;
+  if (latitude == null || longitude == null || latitude === '' || longitude === '') return null;
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}

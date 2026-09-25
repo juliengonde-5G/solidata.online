@@ -7661,6 +7661,41 @@ async function executerInitialisation() {
     `);
     await client.query('CREATE INDEX IF NOT EXISTS idx_badgeuse_badge_historique_badge ON badgeuse_badge_historique(badge_id);');
 
+    // (d bis) Référence PROPRIÉTAIRE des cartes (ex. « SOLIDATA A1 »), celle
+    //     imprimée ou étiquetée sur le support. Elle appartient à la CARTE
+    //     PHYSIQUE, identifiée par son empreinte — pas à la ligne d'attribution :
+    //     une carte restituée puis réattribuée garde sa référence, et
+    //     badgeuse_badges porte une ligne par période de détention. Une
+    //     référence désigne une seule carte (unicité insensible à la casse).
+    //     Aucun seed : une référence ne se devine pas, elle se lit sur la carte.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badgeuse_supports (
+        uid_hmac VARCHAR(64) PRIMARY KEY,
+        reference VARCHAR(40) NOT NULL,
+        cree_par INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_badgeuse_supports_reference_unique
+      ON badgeuse_supports (UPPER(reference));
+    `);
+    // L'historique d'un badge trace aussi la pose ou la correction de la
+    // référence : CHECK reconstruit (idempotent, son nom est généré).
+    await client.query(`
+      DO $$ DECLARE c RECORD; BEGIN
+        FOR c IN SELECT conname FROM pg_constraint
+                 WHERE conrelid = 'badgeuse_badge_historique'::regclass AND contype = 'c'
+                   AND pg_get_constraintdef(oid) LIKE '%evenement%'
+        LOOP
+          EXECUTE format('ALTER TABLE badgeuse_badge_historique DROP CONSTRAINT %I', c.conname);
+        END LOOP;
+        ALTER TABLE badgeuse_badge_historique ADD CONSTRAINT badgeuse_badge_historique_evenement_check
+          CHECK (evenement IN ('attribution', 'perte', 'vol', 'restitution', 'desactivation', 'reactivation', 'reference'));
+      END $$;
+    `);
+
     // (e) Pointages bruts — JAMAIS modifiés, JAMAIS supprimés.
     //     employee_id NULL = orphelin non rattaché (badge inconnu / hors plage).
     //     device_id NULL = saisie manuelle serveur.

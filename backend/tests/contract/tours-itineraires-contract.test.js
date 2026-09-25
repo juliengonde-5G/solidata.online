@@ -177,3 +177,51 @@ describe('GET /api/tours/:id/itineraire-public (carte chauffeur)', () => {
     expect(r.status).toBe(401);
   });
 });
+
+// ─── Retour au centre déclaré : le centre devient LA destination ──────────
+// Après « camion plein » ou « fin de tournée », l'étape courante du chauffeur
+// est le retour au centre (même règle que `arretCourant` du mobile). Le tracé
+// doit y mener directement, et non continuer vers les bornes restantes.
+describe('GET /api/tours/:id/itineraire-public — étape « retour au centre »', () => {
+  const avecArret = (arret, { sansPoints = false } = {}) => (sql) => {
+    if (/FROM tour_arret_technique ta/.test(sql)) return Promise.resolve({ rows: [arret] });
+    if (sansPoints && /FROM tour_cav tc/.test(sql)) return Promise.resolve({ rows: [] });
+    return Promise.resolve(routeSql(sql));
+  };
+  const VIDAGE = {
+    id: 5, position: 1, status: 'pending', motif: 'vidage', name: 'Centre de tri',
+    latitude: '49.4231', longitude: '1.0993',
+  };
+
+  test('vidage déclaré devant le prochain point : tracé direct vers le centre', async () => {
+    mockQuery.mockImplementation(avecArret(VIDAGE));
+    const r = await request(app)
+      .get('/api/tours/42/itineraire-public?lat=49.4700&lng=1.1500')
+      .set('Authorization', `Bearer ${driverToken}`);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ destination: 'centre_tri', nb_points: 1, source: 'routier' });
+    const waypoints = mockGeometry.mock.calls[0][0];
+    // départ (GPS du téléphone) → centre de tri, sans détour par les bornes
+    expect(waypoints).toHaveLength(2);
+    expect(waypoints[1]).toEqual({ lat: 49.4231, lng: 1.0993 });
+  });
+
+  test('toutes les bornes faites, fin de tournée déclarée : le tracé mène au centre', async () => {
+    mockQuery.mockImplementation(avecArret(
+      { ...VIDAGE, id: 6, position: 3, motif: 'fin_tournee' }, { sansPoints: true }));
+    const r = await request(app)
+      .get('/api/tours/42/itineraire-public')
+      .set('Authorization', `Bearer ${driverToken}`);
+    expect(r.body).toMatchObject({ destination: 'centre_tri', source: 'routier' });
+    expect(mockGeometry).toHaveBeenCalledTimes(1);
+  });
+
+  test('retour prévu PLUS LOIN dans la journée : les bornes restent la destination', async () => {
+    mockQuery.mockImplementation(avecArret({ ...VIDAGE, position: 9, motif: 'fin_tournee' }));
+    const r = await request(app)
+      .get('/api/tours/42/itineraire-public')
+      .set('Authorization', `Bearer ${driverToken}`);
+    expect(r.body).toMatchObject({ destination: 'points', nb_points: 2 });
+    expect(mockGeometry.mock.calls[0][0]).toHaveLength(4);
+  });
+});

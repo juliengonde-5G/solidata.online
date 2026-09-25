@@ -531,11 +531,11 @@ router.delete('/:id/photo', authorize('ADMIN'), async (req, res) => {
 
     // Les 3 colonnes reviennent à NULL : le point redevient « sans photo » donc
     // à photographier au prochain passage du chauffeur.
-    await pool.query(
-      'UPDATE cav SET photo_path = NULL, photo_taken_at = NULL, photo_source = NULL, updated_at = NOW() WHERE id = $1',
+    const maj = await pool.query(
+      'UPDATE cav SET photo_path = NULL, photo_taken_at = NULL, photo_source = NULL, updated_at = NOW() WHERE id = $1 RETURNING updated_at',
       [req.params.id]
     );
-    res.json({ message: 'Photo supprimée' });
+    res.json({ message: 'Photo supprimée', updated_at: maj.rows[0]?.updated_at || null });
   } catch (err) {
     console.error('[CAV] Erreur suppression photo :', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1821,6 +1821,7 @@ router.patch('/:id/sensor-calibration', authorize('ADMIN'), [
     if (sensor_reporting_interval_min !== undefined) { fields.push(`sensor_reporting_interval_min = $${i++}`); values.push(sensor_reporting_interval_min); }
     if (sensor_install_date !== undefined) { fields.push(`sensor_install_date = $${i++}`); values.push(sensor_install_date); }
     if (fields.length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
+    fields.push('updated_at = NOW()');
     values.push(req.params.id);
     const result = await pool.query(
       `UPDATE cav SET ${fields.join(', ')} WHERE id = $${i}

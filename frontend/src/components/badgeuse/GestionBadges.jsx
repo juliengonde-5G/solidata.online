@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
-import { IdCard, Plus, ChevronDown, AlertTriangle, Undo2, Ban, History, Cake } from 'lucide-react';
+import { IdCard, Plus, ChevronDown, AlertTriangle, Undo2, Ban, History, Cake, Pencil, Search } from 'lucide-react';
 import api from '../../services/api';
 import { LoadingSpinner, ErrorState, EmptyState, Modal, ConfirmDialog, useToast } from '../../components';
 import { compareByName, formatEmployeeName } from '../../utils/names';
 import {
   apiErr, fmtDateTimeParis, employeeName,
   STATUT_BADGE_LABELS, EVENEMENT_HISTORIQUE_LABELS, StatutBadgeChip,
+  ChampReferenceCarte, ReferenceCarte, normaliserReferenceCarte,
 } from './badgeuseShared';
 
 // Opt-in festif (ADR-0004 §4) — champ confirmé côté GET /badgeuse/badges
@@ -26,21 +27,31 @@ function OptinFestifBadge({ actif, le }) {
 const uidTronque = (uid) => (uid ? `${String(uid).slice(0, 12)}…` : '—');
 
 // ── Modale « + Attribuer un badge » ──────────────────────────────────────────
-function AttribuerModal({ open, onClose, employees, onDone }) {
+function AttribuerModal({ open, onClose, employees, badges, onDone }) {
   const toast = useToast();
-  const [form, setForm] = useState({ employee_id: '', uid_hmac: '', commentaire: '' });
+  const [form, setForm] = useState({ employee_id: '', uid_hmac: '', reference: '', commentaire: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => { if (open) { setForm({ employee_id: '', uid_hmac: '', commentaire: '' }); setError(null); } }, [open]);
+  useEffect(() => { if (open) { setForm({ employee_id: '', uid_hmac: '', reference: '', commentaire: '' }); setError(null); } }, [open]);
+
+  // Une carte déjà référencée (restituée puis réattribuée) garde sa référence :
+  // on la retrouve par son empreinte pour ne pas la faire ressaisir.
+  const uidSaisi = form.uid_hmac.trim().toLowerCase();
+  const referenceConnue = (badges || []).find((b) => b.uid_hmac === uidSaisi && b.reference)?.reference || null;
 
   const submit = async (e) => {
     e.preventDefault();
     if (!form.employee_id) { setError('Le salarié est requis.'); return; }
     if (!form.uid_hmac.trim()) { setError("L'empreinte du badge (uid_hmac) est requise."); return; }
+    const reference = normaliserReferenceCarte(form.reference);
+    if (!reference && !referenceConnue) { setError('La référence de la carte est requise (ex. SOLIDATA A1).'); return; }
     setSaving(true); setError(null);
     try {
-      await api.post('/badgeuse/badges', { employee_id: parseInt(form.employee_id, 10), uid_hmac: form.uid_hmac.trim(), commentaire: form.commentaire.trim() || null });
+      await api.post('/badgeuse/badges', {
+        employee_id: parseInt(form.employee_id, 10), uid_hmac: form.uid_hmac.trim(),
+        reference: reference || null, commentaire: form.commentaire.trim() || null,
+      });
       toast.success('Badge attribué.');
       onDone();
     } catch (err) { setError(apiErr(err, "Attribution du badge impossible.")); setSaving(false); }
@@ -71,6 +82,7 @@ function AttribuerModal({ open, onClose, employees, onDone }) {
             L'identifiant du badge n'est jamais stocké en clair.
           </p>
         </div>
+        <ChampReferenceCarte value={form.reference} onChange={(v) => setForm({ ...form, reference: v })} dejaConnue={referenceConnue} />
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Commentaire</label>
           <input value={form.commentaire} onChange={(e) => setForm({ ...form, commentaire: e.target.value })} className="input-modern py-2 text-sm w-full" placeholder="optionnel" maxLength={300} />
@@ -79,6 +91,53 @@ function AttribuerModal({ open, onClose, employees, onDone }) {
     </Modal>
   );
 }
+
+// ── Modale « Référence de la carte » (renseigner / corriger) ─────────────────
+function ReferenceModal({ badge, onClose, onDone }) {
+  const toast = useToast();
+  const [valeur, setValeur] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => { if (badge) { setValeur(badge.reference || ''); setError(null); setSaving(false); } }, [badge]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const reference = normaliserReferenceCarte(valeur);
+    if (!reference) { setError('La référence de la carte est requise (ex. SOLIDATA A1).'); return; }
+    setSaving(true); setError(null);
+    try {
+      await api.patch(`/badgeuse/badges/${badge.id}/reference`, { reference });
+      toast.success('Référence de la carte enregistrée.');
+      onDone();
+    } catch (err) { setError(apiErr(err, 'Enregistrement impossible.')); setSaving(false); }
+  };
+
+  return (
+    <Modal isOpen={!!badge} onClose={onClose} title="Référence de la carte" size="sm"
+      footer={<>
+        <button type="button" onClick={onClose} className="btn-secondary text-sm" disabled={saving}>Annuler</button>
+        <button type="submit" form="reference-carte-form" disabled={saving} className="btn-primary text-sm disabled:opacity-50">{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+      </>}>
+      <form id="reference-carte-form" onSubmit={submit} className="space-y-3">
+        {error && <div role="alert" className="text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{error}</div>}
+        <p className="text-sm text-slate-600">
+          Carte d'empreinte <span className="font-mono text-xs" title={badge?.uid_hmac}>{uidTronque(badge?.uid_hmac)}</span>
+          {badge ? <>, portée par <strong>{employeeName(badge)}</strong></> : null}.
+          La référence suit la carte : elle reste la même si la carte est réattribuée.
+        </p>
+        <ChampReferenceCarte value={valeur} onChange={setValeur} autoFocus />
+      </form>
+    </Modal>
+  );
+}
+
+const detailHistorique = (ev) => {
+  if (ev.evenement === 'reference' && ev.details) {
+    return ev.details.avant ? `${ev.details.avant} → ${ev.details.apres}` : ev.details.apres;
+  }
+  if (ev.evenement === 'attribution' && ev.details?.reference) return ev.details.reference;
+  return null;
+};
 
 function HistoriqueBadge({ badgeId }) {
   const [items, setItems] = useState(null);
@@ -100,8 +159,11 @@ function HistoriqueBadge({ badgeId }) {
     <ul className="text-sm divide-y divide-slate-100">
       {items.map((ev, i) => (
         <li key={ev.id || i} className="py-1.5 flex items-center justify-between gap-3">
-          <span className="text-slate-700">{EVENEMENT_HISTORIQUE_LABELS[ev.evenement] || ev.evenement}</span>
-          <span className="text-slate-400 text-xs">{ev.auteur_nom || (ev.auteur_id != null ? `Utilisateur #${ev.auteur_id}` : '')}</span>
+          <span className="text-slate-700">
+            {EVENEMENT_HISTORIQUE_LABELS[ev.evenement] || ev.evenement}
+            {detailHistorique(ev) && <span className="ml-2 font-mono text-xs text-slate-500">{detailHistorique(ev)}</span>}
+          </span>
+          <span className="text-slate-400 text-xs">{ev.auteur || ev.auteur_nom || (ev.auteur_id != null ? `Utilisateur #${ev.auteur_id}` : '')}</span>
           <span className="text-slate-500 text-xs whitespace-nowrap">{fmtDateTimeParis(ev.created_at)}</span>
         </li>
       ))}
@@ -118,6 +180,8 @@ export default function GestionBadges({ canWrite }) {
   const [error, setError] = useState(null);
   const [openHist, setOpenHist] = useState(null); // badge id
   const [attribuerOpen, setAttribuerOpen] = useState(false);
+  const [referenceBadge, setReferenceBadge] = useState(null); // badge dont on édite la référence
+  const [recherche, setRecherche] = useState('');
   const [confirm, setConfirm] = useState(null); // { badge, statut, label }
   const [acting, setActing] = useState(false);
   const [confirmOptin, setConfirmOptin] = useState(null); // { badge, actif }
@@ -173,6 +237,13 @@ export default function GestionBadges({ canWrite }) {
   if (loading) return <LoadingSpinner size="lg" message="Chargement des badges…" />;
   if (error) return <ErrorState variant="card" title="Badges indisponibles" message={error} onRetry={load} />;
 
+  // Recherche par salarié OU par référence de carte (« retrouver la carte A12 »).
+  const terme = normaliserReferenceCarte(recherche);
+  const badgesAffiches = terme
+    ? badges.filter((b) => (b.reference || '').includes(terme) || employeeName(b).toUpperCase().includes(terme))
+    : badges;
+  const sansReference = badges.filter((b) => !b.reference).length;
+
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-xl border p-4">
@@ -185,6 +256,21 @@ export default function GestionBadges({ canWrite }) {
           )}
         </div>
 
+        {badges.length > 0 && (
+          <div className="flex items-center gap-3 flex-wrap mb-3">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input value={recherche} onChange={(e) => setRecherche(e.target.value)}
+                className="input-modern py-1.5 pl-8 text-sm w-64" placeholder="Salarié ou référence (ex. A12)" aria-label="Rechercher un badge" />
+            </div>
+            {sansReference > 0 && (
+              <span className="text-xs text-amber-700">
+                {sansReference} carte{sansReference > 1 ? 's' : ''} sans référence — à renseigner avec le crayon.
+              </span>
+            )}
+          </div>
+        )}
+
         {badges.length === 0 ? (
           <EmptyState icon={IdCard} title="Aucun badge" description="Attribuez un premier badge à un salarié." />
         ) : (
@@ -193,6 +279,7 @@ export default function GestionBadges({ canWrite }) {
               <thead className="text-xs uppercase text-slate-500 border-b border-slate-200">
                 <tr>
                   <th className="text-left py-2 px-2">Salarié</th>
+                  <th className="text-left py-2 px-2">Référence carte</th>
                   <th className="text-left py-2 px-2">Empreinte (uid_hmac)</th>
                   <th className="text-center py-2 px-2">Statut</th>
                   <th className="text-left py-2 px-2">Attribué le</th>
@@ -201,10 +288,21 @@ export default function GestionBadges({ canWrite }) {
                 </tr>
               </thead>
               <tbody>
-                {badges.map((b) => (
+                {badgesAffiches.map((b) => (
                   <Fragment key={b.id}>
                     <tr className="border-b border-slate-50">
                       <td className="py-2 px-2 font-medium text-slate-700">{employeeName(b)}</td>
+                      <td className="py-2 px-2">
+                        <div className="inline-flex items-center gap-1.5">
+                          <ReferenceCarte reference={b.reference} />
+                          {canWrite && (
+                            <button onClick={() => setReferenceBadge(b)} className="text-slate-400 hover:text-teal-700 p-1"
+                              title={b.reference ? 'Corriger la référence' : 'Renseigner la référence'} aria-label="Référence de la carte">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-2 px-2 font-mono text-xs text-slate-500" title={b.uid_hmac}>{uidTronque(b.uid_hmac)}</td>
                       <td className="py-2 px-2 text-center"><StatutBadgeChip statut={b.statut} /></td>
                       <td className="py-2 px-2 whitespace-nowrap text-slate-500">{fmtDateTimeParis(b.attribue_le)}</td>
@@ -246,7 +344,7 @@ export default function GestionBadges({ canWrite }) {
                     </tr>
                     {openHist === b.id && (
                       <tr className="border-b border-slate-50 bg-slate-50/60">
-                        <td colSpan={canWrite ? 6 : 5} className="px-4 py-2">
+                        <td colSpan={canWrite ? 7 : 6} className="px-4 py-2">
                           <HistoriqueBadge badgeId={b.id} />
                         </td>
                       </tr>
@@ -259,8 +357,11 @@ export default function GestionBadges({ canWrite }) {
         )}
       </div>
 
-      <AttribuerModal open={attribuerOpen} employees={employees} onClose={() => setAttribuerOpen(false)}
+      <AttribuerModal open={attribuerOpen} employees={employees} badges={badges} onClose={() => setAttribuerOpen(false)}
         onDone={() => { setAttribuerOpen(false); load(); }} />
+
+      <ReferenceModal badge={referenceBadge} onClose={() => setReferenceBadge(null)}
+        onDone={() => { setReferenceBadge(null); load(); }} />
 
       <ConfirmDialog isOpen={!!confirm} onCancel={() => setConfirm(null)} onConfirm={doChangeStatut}
         title="Confirmer l'action" message={confirm?.message || ''} confirmLabel="Confirmer" confirmVariant="danger" loading={acting} />
