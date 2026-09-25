@@ -11,17 +11,27 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   // Modules refusés au rôle du user (habilitations). Vide = tout autorisé.
   const [deniedModules, setDeniedModules] = useState([]);
+  // Modules ACCORDÉS au rôle (2.56.0) : ils s'AJOUTENT à ce que son rôle ouvre.
+  // Vide = rien d'accordé, c'est-à-dire le comportement historique.
+  const [grantedModules, setGrantedModules] = useState([]);
 
   // Charge les modules refusés pour le rôle courant (fail-open : en cas
   // d'erreur on n'interdit rien, la navigation n'est jamais bloquée).
   const loadModulePermissions = useCallback(async (u) => {
-    if (!u) { setDeniedModules([]); return; }
-    if (u.role === 'ADMIN') { setDeniedModules([]); return; }
+    if (!u) { setDeniedModules([]); setGrantedModules([]); return; }
+    // L'ADMIN n'est jamais restreint et n'a besoin d'aucun accord.
+    if (u.role === 'ADMIN') { setDeniedModules([]); setGrantedModules([]); return; }
     try {
       const res = await api.get('/permissions/my-modules');
       setDeniedModules(Array.isArray(res.data?.denied) ? res.data.denied : []);
+      setGrantedModules(Array.isArray(res.data?.granted) ? res.data.granted : []);
     } catch {
+      // Dégradation ASYMÉTRIQUE, alignée sur le serveur : on n'interdit rien
+      // (la navigation n'est jamais bloquée par un incident) et on n'accorde
+      // rien (un accord ne se présume pas). L'utilisateur retrouve exactement
+      // les droits de son rôle.
       setDeniedModules([]);
+      setGrantedModules([]);
     }
   }, []);
 
@@ -115,8 +125,20 @@ export function AuthProvider({ children }) {
     [user?.role, deniedModules]
   );
 
+  // Le module a-t-il été ACCORDÉ à ce rôle dans `/admin/permissions` ? Sert au
+  // menu (Layout.jsx) et à la route (ProtectedRoute) — les deux doivent lire la
+  // même chose, sinon un accord afficherait un lien menant à une redirection.
+  //
+  // L'ADMIN rend `false` : il n'a aucun accord et n'en a pas besoin (il passe
+  // par son rôle). Le faire répondre `true` laisserait croire, à la lecture,
+  // que ses accès viennent de la matrice — ils n'en viennent jamais.
+  const isModuleGranted = useCallback(
+    (key) => user?.role !== 'ADMIN' && grantedModules.includes(key),
+    [user?.role, grantedModules]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, updatePassword, verifyMfa, refreshUser, deniedModules, canAccessModule }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, updatePassword, verifyMfa, refreshUser, deniedModules, canAccessModule, grantedModules, isModuleGranted }}>
       {user && user.must_change_password ? (
         <ForcePasswordChange />
       ) : user && user.mfa_enrollment_required ? (

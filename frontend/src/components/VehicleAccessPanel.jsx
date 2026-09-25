@@ -31,11 +31,11 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
-  // Lecture : ADMIN + MANAGER (le backend authorize('ADMIN','MANAGER')
-  // résout aussi les rôles personnalisés via base_role — même garde ici).
-  const isAdmin = user?.role === 'ADMIN';
-  const isManager = user?.role === 'MANAGER' || user?.base_role === 'MANAGER';
-  const canView = isAdmin || isManager;
+  // Lecture ET régénération : ADMIN. Le rôle MANAGER, qui avait la lecture
+  // depuis la 2.9.0 (le pairing se fait au dépôt), a été retiré le 10/09/2026 —
+  // le backend authorize('ADMIN') le refuse désormais, la garde suit ici.
+  const isAdmin = user?.role === 'ADMIN' || user?.base_role === 'ADMIN';
+  const canView = isAdmin;
 
   useEffect(() => {
     if (!vehicleId || !canView) {

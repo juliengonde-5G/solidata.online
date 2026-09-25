@@ -11,7 +11,7 @@
  *     n'est donc réécrite ici : la recopier, c'est se donner deux définitions du
  *     périmètre qui finiront par diverger.
  *
- *   • `routerBackOffice` — `authenticate` + `authorize('ADMIN','MANAGER')`.
+ *   • `routerBackOffice` — `authenticate` + `authorize('ADMIN')`.
  *     Monté juste APRÈS `router.use(authenticate)` et AVANT tout routeur à
  *     paramètre, sans quoi « /bordereaux/... » serait lu comme la tournée
  *     n° « bordereaux ».
@@ -229,7 +229,7 @@ routerChauffeur.post('/:id/cav/:cavId/bordereau-decheterie-public', async (req, 
     //    notification. Aucune de ces trois écritures n'est bloquante.
     const detail = `bordereau ${cree.bordereau.numero} à valider (${poids.valeur} kg indicatifs)`;
     const corps = `Tournée #${tourId} — ${decheterieLibelle} : ${detail}`;
-    sendPushToRoles(['ADMIN', 'MANAGER'], {
+    sendPushToRoles(['ADMIN'], {
       title: 'Collecte en déchèterie',
       body: corps,
       tag: `bordereau-${cree.bordereau.id}`,
@@ -345,7 +345,7 @@ async function creerBordereau(args) {
  * (aucun test de ce lot ne l'aurait vu) et la régression aurait porté sur tout
  * le module Collecte.
  */
-const gestionnaire = authorize('ADMIN', 'MANAGER');
+const gestionnaire = authorize('ADMIN');
 
 /**
  * GET /api/tours/bordereaux/referentiel-decheteries

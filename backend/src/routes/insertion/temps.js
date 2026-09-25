@@ -2,10 +2,14 @@
  * PR B lot 4 — Temps d'accompagnement : feuille de temps mensuelle par
  * intervenant et par projet (export (c) de l'autorité, 09 § 2 (c)).
  * Monté par ./index.js sur `/api/insertion/temps`, AVANT routes.js ; hérite de
- * `authenticate + requireMfa + authorize('ADMIN','RH','MANAGER')`.
+ * `authenticate + requireMfa + authorize` restreint à ADMIN/RH (le module
+ * insertion entier depuis la fusion de main, 25/09/2026).
  *
  * QUI VOIT QUOI. ADMIN et RH voient tout (ils instruisent et contre-signent) ;
- * un MANAGER ne voit et ne signe QUE SA PROPRE feuille. Le refus est posé
+ * tout autre rôle ne verrait et ne signerait QUE SA PROPRE feuille. Le rôle
+ * MANAGER visé par la PR B a été retiré de l'application le 10/09/2026 : cette
+ * branche est donc INATTEIGNABLE aujourd'hui (le routeur parent refuse en 403
+ * avant elle) — garde morte conservée, jamais retirée. Le refus est posé
  * AVANT toute lecture en base : un refus rendu après la requête serait un
  * refus d'AFFICHAGE, pas un refus d'accès — la donnée aurait déjà quitté la
  * base, et rien ne garantirait qu'elle ne fuite pas par un message d'erreur ou
@@ -85,8 +89,9 @@ async function journaliser(db, { userId, action, entityId, details }) {
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * ADMIN/RH : tout. MANAGER (et tout rôle personnalisé dont la base est
- * MANAGER) : uniquement sa propre feuille, comparaison NUMÉRIQUE — `'7'` issu
+ * ADMIN/RH : tout. Tout autre rôle (le MANAGER de la PR B — retiré sur main
+ * le 10/09/2026, garde inatteignable depuis la fusion du 25/09/2026) :
+ * uniquement sa propre feuille, comparaison NUMÉRIQUE — `'7'` issu
  * de l'URL et `7` du jeton doivent se reconnaître, et une comparaison de
  * chaînes laisserait passer `'07'`.
  */
@@ -145,7 +150,7 @@ router.get('/intervenants', authorize('ADMIN', 'RH'), [
         LEFT JOIN insertion_projet_postes pp ON pp.user_id = u.id
         LEFT JOIN insertion_projets p ON p.id = pp.projet_id
        WHERE u.is_active = true
-         AND u.role IN ('ADMIN', 'RH', 'MANAGER')
+         AND u.role IN ('ADMIN', 'RH')
          AND (
            pp.id IS NOT NULL
            OR EXISTS (SELECT 1 FROM insertion_milestones m

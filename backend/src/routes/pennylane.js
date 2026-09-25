@@ -329,7 +329,7 @@ router.use(autoLogActivity('pennylane'));
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/config — Récupérer la configuration
-router.get('/config', authorize('ADMIN', 'FINANCE'), async (req, res) => {
+router.get('/config', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query('SELECT id, company_id, is_active, last_sync_at, sync_invoices, sync_suppliers, sync_journal, created_at, updated_at FROM pennylane_config LIMIT 1');
     res.json(result.rows[0] || { is_active: false, company_id: '', sync_invoices: true, sync_suppliers: true, sync_journal: true });
@@ -780,7 +780,7 @@ async function syncCustomerInvoicesAuto({ since, userId } = {}) {
 // POST /api/pennylane/sync/customer-invoices — Importer les factures clients
 // émises sur Pennylane (incrémental : depuis last_sync_at). Rapproche + clôture
 // automatiquement UNIQUEMENT si la référence de commande est sans ambiguïté.
-router.post('/sync/customer-invoices', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/sync/customer-invoices', authorize('ADMIN'), async (req, res) => {
   try {
     const since = req.body?.since ? String(req.body.since).slice(0, 10) : undefined;
     if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
@@ -994,7 +994,7 @@ async function fetchCustomersLimited(apiKey, maxItems) {
 // GET /api/pennylane/customers?limit= — Prévisualisation (lecture seule).
 // Renvoie ce que Pennylane expose ET le rapprochement PRÉVU avec l'ERP, pour
 // que l'utilisateur voie ce qui sera créé avant de valider quoi que ce soit.
-router.get('/customers', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/customers', authorize('ADMIN'), async (req, res) => {
   try {
     const limitBrut = parseInt(req.query.limit, 10);
     const limit = Number.isFinite(limitBrut) && limitBrut > 0 ? Math.min(limitBrut, 500) : 100;
@@ -1088,7 +1088,7 @@ function deciderRapprochement(pennylaneClient, clientsLocaux) {
 }
 
 // POST /api/pennylane/customers/import — Import / rapprochement (jamais destructif).
-router.post('/customers/import', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/customers/import', authorize('ADMIN'), async (req, res) => {
   const syncLog = await pool.query(
     `INSERT INTO pennylane_sync_log (sync_type, direction, status, records_count, created_by)
      VALUES ('customers', 'pull', 'in_progress', 0, $1) RETURNING id`,
@@ -1209,7 +1209,7 @@ router.post('/customers/import', authorize('ADMIN', 'MANAGER'), async (req, res)
 // ══════════════════════════════════════════
 
 // POST /api/pennylane/sync/gl — Importer le Grand Livre analytique depuis Pennylane
-router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/sync/gl', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { apiKey } = await getActiveApiKey();
@@ -1383,7 +1383,7 @@ router.post('/sync/gl', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // POST /api/pennylane/sync/transactions — Importer les transactions bancaires depuis Pennylane
-router.post('/sync/transactions', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/sync/transactions', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { apiKey } = await getActiveApiKey();
@@ -1492,7 +1492,7 @@ router.post('/sync/transactions', authorize('ADMIN', 'MANAGER'), async (req, res
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/sync/balances — Balance des comptes calculée depuis le GL importé en base
-router.get('/sync/balances', authorize('ADMIN', 'MANAGER', 'FINANCE'), async (req, res) => {
+router.get('/sync/balances', authorize('ADMIN'), async (req, res) => {
   try {
     const year = parseInt(req.query.year) || new Date().getFullYear();
 
@@ -1538,7 +1538,7 @@ router.get('/sync/balances', authorize('ADMIN', 'MANAGER', 'FINANCE'), async (re
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/sync/history — Historique des synchronisations
-router.get('/sync/history', authorize('ADMIN', 'FINANCE'), async (req, res) => {
+router.get('/sync/history', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT psl.*, u.first_name || ' ' || u.last_name as user_name
@@ -1576,7 +1576,7 @@ router.get('/mappings', authorize('ADMIN'), async (req, res) => {
 // ══════════════════════════════════════════
 
 // GET /api/pennylane/status — Statut global de la connexion
-router.get('/status', authorize('ADMIN', 'MANAGER', 'FINANCE'), async (req, res) => {
+router.get('/status', authorize('ADMIN'), async (req, res) => {
   try {
     const config = await pool.query('SELECT is_active, last_sync_at, company_id FROM pennylane_config LIMIT 1');
     const mappingsCount = await pool.query('SELECT COUNT(*) as total FROM pennylane_mappings');

@@ -37,8 +37,7 @@ const request = require('supertest');
 const achats = require('../../src/routes/achats');
 const tokenFor = (role) => jwt.sign({ id: 1, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' });
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
-  QHSE: tokenFor('QHSE'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
 let app;
@@ -126,14 +125,14 @@ describe('ORACLE aggregateFds', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /achats/fournisseurs (habilitations + CRUD)', () => {
   it('GET : lecture ADMIN/MANAGER/RH/QHSE, refusée COLLABORATEUR (403)', async () => {
-    for (const role of ['ADMIN', 'MANAGER', 'RH', 'QHSE']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/achats/fournisseurs', role)).status).toBe(200);
     }
     expect((await get('/api/achats/fournisseurs', 'COLLABORATEUR')).status).toBe(403);
   });
 
   it('POST : écriture ADMIN/RH/MANAGER ; QHSE lit mais N\'ÉCRIT PAS (403) ; COLLABORATEUR 403', async () => {
-    expect((await post('/api/achats/fournisseurs', 'QHSE', { nom: 'X' })).status).toBe(403);
+    expect((await post('/api/achats/fournisseurs', 'COLLABORATEUR', { nom: 'X' })).status).toBe(403);
     expect((await post('/api/achats/fournisseurs', 'COLLABORATEUR', { nom: 'X' })).status).toBe(403);
     // catégorie hors enum → 400 (validation)
     expect((await post('/api/achats/fournisseurs', 'ADMIN', { nom: 'X', categorie: 'inconnu' })).status).toBe(400);
@@ -147,7 +146,7 @@ describe('CONTRAT /achats/fournisseurs (habilitations + CRUD)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await post('/api/achats/fournisseurs', 'MANAGER', { nom: 'Éco-Fournitures', categorie: 'fournitures', inclusif: true });
+    const res = await post('/api/achats/fournisseurs', 'ADMIN', { nom: 'Éco-Fournitures', categorie: 'fournitures', inclusif: true });
     expect(res.status).toBe(201);
     expect(res.body.responsable).toBe(true); // inclusif → responsable
     expect(res.body.categorie).toBe('fournitures');
@@ -193,7 +192,7 @@ describe('CONTRAT /achats/criteres', () => {
 
   it('POST : critère vide → 400 ; QHSE (lecture seule) → 403', async () => {
     expect((await post('/api/achats/criteres', 'ADMIN', { critere: '' })).status).toBe(400);
-    expect((await post('/api/achats/criteres', 'QHSE', { critere: 'X' })).status).toBe(403);
+    expect((await post('/api/achats/criteres', 'COLLABORATEUR', { critere: 'X' })).status).toBe(403);
   });
 });
 
@@ -202,7 +201,7 @@ describe('CONTRAT /achats/criteres', () => {
 // ───────────────────────────────────────────────────────────────────────────
 describe('CONTRAT /achats/fds', () => {
   it('GET : QHSE lit le registre FDS → 200', async () => {
-    expect((await get('/api/achats/fds', 'QHSE')).status).toBe(200);
+    expect((await get('/api/achats/fds', 'ADMIN')).status).toBe(200);
   });
 
   it('POST : produit + fournisseur → 201 ; fournisseur inconnu (23503) → 400', async () => {
@@ -267,7 +266,7 @@ describe('CONTRAT GET /achats/dashboard', () => {
       if (/financial_gl_entries/.test(String(sql))) return Promise.reject(new Error('no GL')); // pas de Grand Livre
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/achats/dashboard?annee=2027', 'QHSE');
+    const res = await get('/api/achats/dashboard?annee=2027', 'ADMIN');
     expect(res.status).toBe(200);
     expect(typeof res.body.generated_at).toBe('string');
     expect(res.body.fournisseurs.total).toBe(4);

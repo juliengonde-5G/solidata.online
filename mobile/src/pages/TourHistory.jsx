@@ -5,6 +5,7 @@ import OfflineActionBadge from '../components/OfflineActionBadge';
 import { getAllItems, STORES } from '../services/db';
 import { syncAll, syncEvents } from '../services/sync';
 import { authedFetch } from '../services/authedFetch';
+import { libelleRemplissage } from '../services/remplissage';
 
 /**
  * Historique des actions de la tournée courante.
@@ -171,7 +172,10 @@ function buildItems({
         key: `scav-${cav.cav_id || cav.id}`,
         kind: 'collect',
         label: cav.nom || cav.cav_name || `CAV ${cav.cav_id || cav.id}`,
-        sub: [cav.commune, cav.fill_level != null ? `${cav.fill_level}/4` : null].filter(Boolean).join(' · '),
+        // Le remplissage se lit du POURCENTAGE quand il est là : l'échelle 0-4
+        // plafonne à « plein » et affichait donc « 4/4 » à une borne que le
+        // chauffeur venait de déclarer EN DÉBORDEMENT (constat du 10/09/2026).
+        sub: [cav.commune, libelleRemplissage(cav.fill_level, cav.fill_percent)].filter(Boolean).join(' · '),
         when: cav.collected_at || cav.updated_at || null,
         status: 'sent',
       });
@@ -213,7 +217,7 @@ function buildItems({
       kind: 'collect',
       label: `CAV ${c.cavId}`,
       sub: [
-        c.fillLevel != null ? `${c.fillLevel}/4` : null,
+        libelleRemplissage(c.fillLevel, c.fillPercent),
         c.anomaly || null,
       ].filter(Boolean).join(' · '),
       when: c.createdAt,

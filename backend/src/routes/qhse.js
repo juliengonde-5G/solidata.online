@@ -141,7 +141,7 @@ async function syncEmployeeCertBooleans(db, employeeId) {
 // Toutes les routes QHSE : authentifié + rôle habilité (lecture ET écriture ;
 // le rôle QHSE gère son propre module — ce n'est pas un rôle en lecture seule).
 router.use(authenticate);
-router.use(authorize('ADMIN', 'MANAGER', 'QHSE'));
+router.use(authorize('ADMIN'));
 
 // ══════════════════════════════════════════
 // Liste des salariés (minimale, non-PII) pour peupler les sélecteurs des

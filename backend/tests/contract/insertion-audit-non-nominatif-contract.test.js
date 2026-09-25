@@ -15,7 +15,10 @@
 //
 // L'intégration versait pourtant l'objet COMPLET dans `gatherAuditKpis`, que
 // deux surfaces plus larges servent :
-//   · `GET /api/insertion/audit`            → ADMIN / RH / **MANAGER** ;
+//   · `GET /api/insertion/audit`            → ADMIN / RH / **MANAGER** (rôle
+//     retiré sur main le 10/09/2026 — fusion du 25/09/2026 : il est désormais
+//     refusé en 403 ; les tests « MANAGER » prouvent ce refus, et la
+//     projection par rôle, conservée en garde morte, est éprouvée en unitaire) ;
 //   · `GET /api/exports/insertion-synthese` → `res.json({ mention, ...k })`,
 //     sous la bannière « Document agrégé non nominatif — comité de pilotage ».
 //
@@ -124,19 +127,15 @@ describe('B-02 (PR D) — statuts sociaux réservés à ADMIN/RH', () => {
     return Promise.resolve({ rows: [] });
   });
 
-  test('GET /insertion/audit — un MANAGER ne reçoit ni BRSA, ni catégorie FT, ni RQTH', async () => {
+  test('GET /insertion/audit — un MANAGER (rôle retiré) est refusé en 403 : ni BRSA, ni catégorie FT, ni RQTH', async () => {
     brancherPublics();
     const res = await get('/api/insertion/audit?year=2026', 'MANAGER');
-    expect(res.status).toBe(200);
-    const { projection_role: _note, ...donnees } = res.body;
-    const brut = JSON.stringify(donnees);
+    expect(res.status).toBe(403);
+    const brut = JSON.stringify(res.body);
     expect('publics_entree' in res.body).toBe(false);
     expect(brut).not.toMatch(/"brsa"/);
     expect(brut).not.toMatch(/RQTH/);
-    expect(brut).not.toMatch(/ft_categorie|par_categorie_ft|par_referent_unique/);
-    // Clé RETIRÉE, jamais nullifiée : « non habilité » ne se lit pas comme « non lu ».
-    expect('rqth' in res.body.typologies).toBe(false);
-    expect('ressources' in res.body.typologies).toBe(false);
+    expect(res.body.typologies).toBeUndefined();
     // Le refus est posé AVANT la lecture : la requête des critères ne part pas.
     const sqls = mockQuery.mock.calls.map(([x]) => String(x));
     expect(sqls.some((x) => /FROM employee_eligibilite/.test(x))).toBe(false);
@@ -153,22 +152,37 @@ describe('B-02 (PR D) — statuts sociaux réservés à ADMIN/RH', () => {
     expect(res.body.typologies.rqth).toBe(1);
   });
 
-  test('GET /exports/insertion-synthese (JSON) — même frontière sur la route voisine', async () => {
+  test('GET /exports/insertion-synthese (JSON) — même frontière sur la route voisine (403 au MANAGER)', async () => {
     brancherPublics();
     const res = await get('/api/exports/insertion-synthese?year=2026&format=json', 'MANAGER');
-    expect(res.status).toBe(200);
-    const { projection_role: _note, ...donnees } = res.body;
-    const brut = JSON.stringify(donnees);
+    expect(res.status).toBe(403);
+    const brut = JSON.stringify(res.body);
     expect(brut).not.toMatch(/"brsa"/);
     expect(brut).not.toMatch(/RQTH/);
     expect('publics_entree' in res.body).toBe(false);
-    expect(res.body.projection_role.applique).toBe(true);
+    const sqls = mockQuery.mock.calls.map(([x]) => String(x));
+    expect(sqls.some((x) => /FROM employee_eligibilite/.test(x))).toBe(false);
   });
 
-  test('la projection est ANNONCÉE, pas silencieuse', async () => {
-    brancherPublics();
-    const res = await get('/api/insertion/audit?year=2026', 'MANAGER');
-    expect(res.body.projection_role.note).toMatch(/ADMIN \/ RH/);
+  // La projection par rôle n'est plus atteignable par HTTP (seuls ADMIN/RH
+  // franchissent le routeur), mais elle reste la garde de secours si un rôle
+  // non ADMIN/RH revenait un jour sur ces surfaces : on l'éprouve donc
+  // directement, pour qu'elle ne pourrisse pas en silence.
+  test('garde morte — la projection d’un rôle non ADMIN/RH retire les statuts ET l’annonce', () => {
+    const { projeterAuditPourRole } = require('../../src/routes/insertion/routes');
+    const k = {
+      publics_entree: { brsa: { n: 1 } },
+      typologies: { rqth: 1, ressources: { RSA: 1 }, tranches_age: { '40-49': 1 } },
+    };
+    for (const role of ['MANAGER', 'COLLABORATEUR', 'AUTORITE']) {
+      const out = projeterAuditPourRole(k, role);
+      expect('publics_entree' in out).toBe(false);
+      expect('rqth' in out.typologies).toBe(false);
+      expect('ressources' in out.typologies).toBe(false);
+      expect(out.typologies.tranches_age).toBeTruthy();
+      expect(out.projection_role.note).toMatch(/ADMIN \/ RH/);
+    }
+    expect(projeterAuditPourRole(k, 'RH')).toBe(k);
   });
 });
 
@@ -189,8 +203,11 @@ describe('B-02 — les indicateurs d’audit ne transportent aucune ventilation 
     });
   });
 
-  test('GET /insertion/audit — aucun patronyme dans la réponse servie au MANAGER', async () => {
-    const res = await get('/api/insertion/audit?year=2026', 'MANAGER');
+  test('GET /insertion/audit — aucun patronyme dans la réponse servie à la RH', async () => {
+    // (Servie au MANAGER jusqu'au retrait du rôle sur main le 10/09/2026 ; il
+    // est désormais refusé en 403 — la projection à la source reste éprouvée
+    // sur le rôle le plus bas qui atteint encore la route.)
+    const res = await get('/api/insertion/audit?year=2026', 'RH');
     expect(res.status).toBe(200);
     const brut = JSON.stringify(res.body);
     expect(brut).not.toMatch(/"par_salarie"/);
@@ -206,7 +223,7 @@ describe('B-02 — les indicateurs d’audit ne transportent aucune ventilation 
   });
 
   test('GET /exports/insertion-synthese (JSON) — le document qui s’annonce non nominatif l’est', async () => {
-    const res = await get('/api/exports/insertion-synthese?year=2026&format=json', 'MANAGER');
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=json', 'RH');
     expect(res.status).toBe(200);
     expect(res.body.mention).toMatch(/non nominatif/i);
     const brut = JSON.stringify(res.body);
@@ -230,15 +247,21 @@ describe('B-02 — les indicateurs d’audit ne transportent aucune ventilation 
       }
       return Promise.resolve({ rows: [] });
     });
-    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'RH');
     expect(res.status).toBe(200);
     expect(String(res.text)).not.toMatch(PATRONYMES);
     expect(String(res.text)).not.toMatch(/par_salarie|par_intervenant/);
   });
 
   test('GET /exports/insertion-synthese (CSV) — période vide → 409, jamais un fichier vide', async () => {
-    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'RH');
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('EXPORT_VIDE');
+  });
+
+  test('GET /exports/insertion-synthese (CSV) — un MANAGER (rôle retiré) est refusé en 403, aucun fichier', async () => {
+    const res = await get('/api/exports/insertion-synthese?year=2026&format=csv', 'MANAGER');
+    expect(res.status).toBe(403);
+    expect(res.headers['content-type']).not.toMatch(/text\/csv/);
   });
 });

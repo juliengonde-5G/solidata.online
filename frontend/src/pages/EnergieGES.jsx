@@ -14,7 +14,7 @@ import AdminCompteurs from '../components/energie/AdminCompteurs';
 export default function EnergieGES() {
   const { user } = useAuth();
   const base = user?.base_role || user?.role;
-  const canWrite = ['ADMIN', 'RH', 'MANAGER'].includes(base);           // sites/compteurs/relevés/pleins
+  const canWrite = ['ADMIN', 'RH'].includes(base);           // sites/compteurs/relevés/pleins
   const canWriteFacteurs = ['ADMIN', 'RH'].includes(base);              // facteurs d'émission
 
   const [annee, setAnnee] = useState(new Date().getFullYear());

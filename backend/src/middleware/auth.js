@@ -1,5 +1,10 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
+// 2.56.0 — accords de module (matrice `/admin/permissions`). Requis ici et non
+// dans chaque routeur : `authorize()` est le seul point par lequel un accord
+// peut ouvrir une porte, donc le seul endroit où le brancher.
+const { modulesAccordables } = require('../utils/module-routes');
+const { aAccordSurModule } = require('./module-access');
 const { verifierCle, toucherCle, METHODES_LECTURE } = require('./api-key');
 const { logActivity } = require('./activity-logger');
 
@@ -124,6 +129,19 @@ async function authenticateServiceKey(req, res, next, rawKey) {
  * aucune lecture base n'est faite pour lui). Une panne de base ne verrouille
  * personne : on dégrade en simple validation JWT (comportement historique).
  */
+// Surfaces ouvertes au profil OPERATEUR_STOCK : sa session, ses habilitations,
+// l'étiquetage (hors administration du catalogue) et la sortie des cartons.
+const PERIMETRE_OPERATEUR = [
+  /^\/api\/auth(\/|$)/,
+  /^\/api\/permissions\/my-modules$/,
+  /^\/api\/etiquettes\/(?!admin(\/|$))/,
+  /^\/api\/sortie-cartons(\/|$)/,
+];
+function dansPerimetreOperateur(url) {
+  const chemin = String(url || '').split('?')[0];
+  return PERIMETRE_OPERATEUR.some((re) => re.test(chemin));
+}
+
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -157,6 +175,21 @@ async function authenticate(req, res, next) {
   // ne puisse pas se faire passer pour un service, ni hériter d'un traitement
   // particulier.
   req.user = { ...decoded, is_service: false };
+
+  // Profil OPERATEUR_STOCK (2.57.0, arbitrage client du 24/09/2026) : « le
+  // profil étiquette, étendu à la page de scan » — et RIEN d'autre. Le filtre
+  // est posé ICI, dans `authenticate`, et non route par route : de nombreux
+  // routeurs n'ont que `authenticate` sur leurs lectures (équipes, CAV,
+  // véhicules, lots de tri…), qu'un COLLABORATEUR lit légitimement. Les fermer
+  // un par un laisserait ouvert le routeur écrit demain ; une liste BLANCHE
+  // tenue en un point couvre aussi celui-là. Rôles personnalisés dupliqués de
+  // ce profil compris (rôle de base).
+  if (resolveBaseRole(decoded.role) === 'OPERATEUR_STOCK' && !dansPerimetreOperateur(req.originalUrl || req.url)) {
+    return res.status(403).json({
+      error: 'Ce profil est limité à l\'étiquetage et à la sortie des cartons',
+      code: 'PERIMETRE_OPERATEUR',
+    });
+  }
 
   // Jeton hérité sans `tv` (transitoire) : aucun contrôle de révocation possible,
   // aucune lecture base. Se résorbe seul en ≤ 8 h (durée de vie de l'access token).
@@ -220,9 +253,40 @@ function resolveBaseRole(role) {
 
 /**
  * Middleware d'autorisation par rôles
- * Usage : authorize('ADMIN', 'MANAGER')
- * Un rôle personnalisé passe s'il l'est explicitement OU si son rôle de base
- * figure dans la liste (les rôles intégrés se résolvent vers eux-mêmes).
+ * Usage : authorize('ADMIN')
+ *
+ * Un rôle passe de TROIS façons, dans cet ordre :
+ *
+ *   1. il est nommé explicitement dans la liste ;
+ *   2. son RÔLE DE BASE y est nommé (un rôle personnalisé hérite de son modèle,
+ *      les rôles intégrés se résolvant vers eux-mêmes) ;
+ *   3. 2.56.0 — LE MODULE DONT RELÈVE LA ROUTE LUI A ÉTÉ ACCORDÉ dans la
+ *      matrice `/admin/permissions`.
+ *
+ * POURQUOI LE POINT 3 EXISTE. Le retrait des profils MANAGER/QHSE/FINANCE
+ * (2.52.0) a resserré sur le seul ADMIN les listes qui les nommaient. Plus aucun
+ * profil assignable ne pouvait donc recevoir la collecte, le tri, l'analyse ou
+ * la frip : il fallait donner ADMIN, c'est-à-dire aussi les comptes
+ * utilisateurs, la base de données et le registre RGPD. La matrice devient la
+ * façon de rendre ces périmètres — et elle ne peut le faire que si la porte
+ * s'ouvre VRAIMENT : masquer la barre latérale seule aurait affiché des liens
+ * répondant 403.
+ *
+ * TROIS BORNES, POUR QUE « ACCORDER » NE VEUILLE PAS DIRE « TOUT OUVRIR » :
+ *
+ *   • L'administration du logiciel n'est JAMAIS accordable (utils/module-routes
+ *     MODULES_NON_ACCORDABLES) : une case à cocher ne doit pas fabriquer un
+ *     administrateur en silence.
+ *   • Une route hors carte n'est ouverte par aucun accord (authentification,
+ *     webhooks signés, API partenaire, poste badgeuse, la matrice elle-même).
+ *   • Un accord ne touche PAS aux projections de données par rôle : un profil
+ *     à qui l'on accorde « RH et Insertion » franchit la porte, mais continue
+ *     de recevoir la projection de son rôle — le salaire, la RQTH et les détails
+ *     de santé restent masqués à qui n'est pas ADMIN/RH. L'accord ouvre un
+ *     périmètre d'écrans, il ne relève pas une garde de confidentialité.
+ *
+ * Le chemin rapide reste SYNCHRONE : un rôle nommé dans la liste sort avant
+ * toute lecture de la matrice — l'écrasante majorité des requêtes ne paie rien.
  */
 function authorize(...roles) {
   return (req, res, next) => {
@@ -233,8 +297,24 @@ function authorize(...roles) {
     if (roles.includes(role) || roles.includes(resolveBaseRole(role))) {
       return next();
     }
-    return res.status(403).json({ error: 'Accès non autorisé pour ce rôle' });
+    // Point 3 — accord de module. Asynchrone, donc emprunté seulement quand le
+    // contrôle de rôle a déjà échoué. L'ADMIN passe au point 1 : il n'arrive
+    // jamais ici, et la matrice ne le concerne pas (anti-lockout).
+    const modules = modulesAccordables(req.originalUrl || req.url || '');
+    if (modules.length === 0) {
+      return res.status(403).json({ error: 'Accès non autorisé pour ce rôle' });
+    }
+    Promise.resolve(aAccordSurModule(role, modules))
+      .then((accorde) => {
+        if (accorde) return next();
+        return res.status(403).json({ error: 'Accès non autorisé pour ce rôle' });
+      })
+      .catch(() => {
+        // `aAccordSurModule` avale déjà ses erreurs ; ce filet garantit qu'aucune
+        // requête ne reste sans réponse si cela changeait un jour.
+        return res.status(403).json({ error: 'Accès non autorisé pour ce rôle' });
+      });
   };
 }
 
-module.exports = { authenticate, authorize, refreshCustomRoles, resolveBaseRole, validatePassword, MIN_PASSWORD_LENGTH };
+module.exports = { authenticate, authorize, refreshCustomRoles, resolveBaseRole, validatePassword, MIN_PASSWORD_LENGTH, dansPerimetreOperateur };

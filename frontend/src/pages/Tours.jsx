@@ -1299,7 +1299,7 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
   const [bordereauxOuverts, setBordereauxOuverts] = useState(
     () => String(searchParams.get('tour')) === String(tour.id)
   );
-  const peutValiderBordereau = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const peutValiderBordereau = ['ADMIN'].includes(user?.base_role || user?.role);
 
   // Le panneau n'est pas démonté d'une tournée à l'autre : sans cette remise à
   // zéro, la fiche de la tournée suivante afficherait le rapport de la
@@ -1426,6 +1426,15 @@ function TourDetailPanel({ tour, onClose, onRefresh }) {
           >
             {pdfEnCours ? 'Préparation…' : 'Exporter en PDF'}
           </button>
+          {/* Rejouer la journée sur la carte, comme en direct. */}
+          {tour.status === 'completed' && tour.date && (
+            <Link
+              to={`/collections-replay?date=${new Date(tour.date).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })}&tour=${tour.id}`}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50"
+            >
+              Revoir la collecte
+            </Link>
+          )}
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none p-1 rounded-lg hover:bg-slate-100">&times;</button>
         </div>
       </div>

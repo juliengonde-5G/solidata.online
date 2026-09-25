@@ -102,7 +102,10 @@ describe('Paliers de remplissage', () => {
   // ── GARDE ANTI-DÉRIVE ────────────────────────────────────────────────────
   test('la table du serveur correspond à celle du mobile', () => {
     const src = fs.readFileSync(
-      path.join(__dirname, '../../../mobile/src/pages/FillLevel.jsx'), 'utf8'
+      // La table du mobile a été SORTIE de l'écran de saisie (10/09/2026) : elle
+      // sert aussi à restituer l'historique de la journée, elle vit donc dans un
+      // service. La garde suit — c'est le même contrat entre les deux tables.
+      path.join(__dirname, '../../../mobile/src/services/remplissage.js'), 'utf8'
     );
     const bloc = /const FILL_LEVELS = \[([\s\S]*?)\];/.exec(src);
     expect(bloc).not.toBeNull();

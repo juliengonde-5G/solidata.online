@@ -3,7 +3,9 @@
 // ───────────────────────────────────────────────────────────────────────────
 // Verrouille ce que l'autorité contrôlera sur l'export (c) (09 § 2 (c)) et ce
 // que le contrat 15 § 10 exige comme preuve :
-//   - MANAGER refusé sur la feuille d'un autre **AVANT toute requête en base** ;
+//   - MANAGER refusé **AVANT toute requête en base** (depuis le retrait du rôle
+//     sur main le 10/09/2026, fusion du 25/09/2026 : sur toutes les routes, sa
+//     propre feuille comprise — c'est le routeur parent ADMIN/RH qui refuse) ;
 //   - feuille FIGÉE après validation (plus aucune saisie, plus de suppression) ;
 //   - auto-validation refusée (409 AUTO_VALIDATION : deux signatures =
 //     deux personnes) ;
@@ -43,6 +45,11 @@ const tokenFor = (role, id, prenom = 'Claire', nom = 'MARTIN') => jwt.sign(
 const TOKENS = {
   ADMIN: tokenFor('ADMIN', 1, 'Awa', 'DIOP'),
   RH: tokenFor('RH', 2, 'Claire', 'MARTIN'),
+  // L'intervenant (id 7) est désormais une CIP au profil RH : le rôle MANAGER,
+  // qui portait l'« encadrant intervenant » de la PR B, a été retiré de
+  // l'application sur main (10/09/2026). Les jetons MANAGER restent pour
+  // PROUVER LE REFUS (doctrine de main : ce qui est observable, c'est le 403).
+  INTERVENANT: tokenFor('RH', 7, 'Sofia', 'RENARD'),
   MANAGER: tokenFor('MANAGER', 7, 'Sofia', 'RENARD'),
   MANAGER_AUTRE: tokenFor('MANAGER', 8, 'Luc', 'BERTIN'),
 };
@@ -109,7 +116,7 @@ function brancher({
     if (/FROM users WHERE id = ANY/.test(s)) return Promise.resolve({ rows: [{ id: 7, first_name: 'Sofia', last_name: 'Renard' }] });
     if (/first_name, last_name FROM users WHERE id/.test(s)) return Promise.resolve({ rows: [{ first_name: 'Sofia', last_name: 'Renard' }] });
     if (/FROM settings/.test(s)) return Promise.resolve({ rows: [] });
-    if (/FROM users u/.test(s)) return Promise.resolve({ rows: [{ user_id: 7, first_name: 'Sofia', last_name: 'Renard', role: 'MANAGER', postes: [] }] });
+    if (/FROM users u/.test(s)) return Promise.resolve({ rows: [{ user_id: 7, first_name: 'Sofia', last_name: 'Renard', role: 'RH', postes: [] }] });
     return Promise.resolve({ rows: [] });
   });
 }
@@ -130,18 +137,28 @@ describe('PÉRIMÈTRE — le refus est posé AVANT toute lecture en base', () =>
     await get('/api/insertion/temps/7/2026/9', 'ADMIN');
   });
 
+  // Rôle MANAGER retiré sur main (10/09/2026) : le refus vient désormais du
+  // routeur parent (ADMIN/RH), AVANT la garde de propriétaire — qui reste en
+  // place, inatteignable. Ce qui est prouvé : 403 et zéro requête.
   it('MANAGER sur la feuille d’un AUTRE : 403, et AUCUNE requête n’est partie', async () => {
     mockQuery.mockReset();
     mockQuery.mockResolvedValue({ rows: [] });
     const res = await get('/api/insertion/temps/7/2026/9', 'MANAGER_AUTRE');
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('FEUILLE_HORS_PERIMETRE');
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it('MANAGER sur SA feuille : autorisé', async () => {
+  it('MANAGER sur SA propre feuille : refusé aussi (403, rôle retiré), aucune requête métier', async () => {
     brancher();
     const res = await get('/api/insertion/temps/7/2026/9', 'MANAGER');
+    expect(res.status).toBe(403);
+    expect(res.body.user_id).toBeUndefined();
+    expect(requetesMetier()).toHaveLength(0);
+  });
+
+  it('l’intervenant (profil RH) sur SA feuille : autorisé', async () => {
+    brancher();
+    const res = await get('/api/insertion/temps/7/2026/9', 'INTERVENANT');
     expect(res.status).toBe(200);
     expect(res.body.user_id).toBe(7);
   });
@@ -254,13 +271,13 @@ describe('Saisies — la feuille figée ne bouge plus', () => {
   it('ajout accepté tant que la feuille est au brouillon', async () => {
     brancher();
     mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [] })); // feuille absente
-    const res = await post(url, 'MANAGER', { date: '2026-09-17', activite: 'reunion_projet', duree_minutes: 60 });
+    const res = await post(url, 'INTERVENANT', { date: '2026-09-17', activite: 'reunion_projet', duree_minutes: 60 });
     expect([201, 200]).toContain(res.status);
   });
 
   it('409 FEUILLE_FIGEE dès que la feuille est validée par l’intervenant', async () => {
     brancher({ feuille: { id: 99, user_id: 7, annee: 2026, mois: 9, statut: 'validee_intervenant' } });
-    const res = await post(url, 'MANAGER', { date: '2026-09-17', activite: 'autre', duree_minutes: 30 });
+    const res = await post(url, 'INTERVENANT', { date: '2026-09-17', activite: 'autre', duree_minutes: 30 });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('FEUILLE_FIGEE');
     expect(mockQuery.mock.calls.some(([t]) => /INSERT INTO insertion_temps_saisies/.test(String(t)))).toBe(false);
@@ -268,29 +285,29 @@ describe('Saisies — la feuille figée ne bouge plus', () => {
 
   it('400 DATE_HORS_MOIS : une saisie d’octobre ne se range pas dans la feuille de septembre', async () => {
     brancher();
-    const res = await post(url, 'MANAGER', { date: '2026-10-02', activite: 'autre', duree_minutes: 30 });
+    const res = await post(url, 'INTERVENANT', { date: '2026-10-02', activite: 'autre', duree_minutes: 30 });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('DATE_HORS_MOIS');
   });
 
   it('400 sur une durée hors bornes (1 à 600 minutes)', async () => {
     brancher();
-    const trop = await post(url, 'MANAGER', { date: '2026-09-17', activite: 'autre', duree_minutes: 601 });
-    const zero = await post(url, 'MANAGER', { date: '2026-09-17', activite: 'autre', duree_minutes: 0 });
+    const trop = await post(url, 'INTERVENANT', { date: '2026-09-17', activite: 'autre', duree_minutes: 601 });
+    const zero = await post(url, 'INTERVENANT', { date: '2026-09-17', activite: 'autre', duree_minutes: 0 });
     expect(trop.status).toBe(400);
     expect(zero.status).toBe(400);
   });
 
   it('400 sur une activité hors liste fermée', async () => {
     brancher();
-    const res = await post(url, 'MANAGER', { date: '2026-09-17', activite: 'entretien', duree_minutes: 30 });
+    const res = await post(url, 'INTERVENANT', { date: '2026-09-17', activite: 'entretien', duree_minutes: 30 });
     expect(res.status).toBe(400);
   });
 
   it('suppression refusée en 409 quand la feuille du mois est figée', async () => {
     brancher({ feuille: { id: 99, user_id: 7, annee: 2026, mois: 9, statut: 'validee_rh' } });
     mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [SAISIES[0]] })); // lecture de la saisie
-    const res = await del('/api/insertion/temps/saisies/31', 'MANAGER');
+    const res = await del('/api/insertion/temps/saisies/31', 'INTERVENANT');
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('FEUILLE_FIGEE');
     expect(mockQuery.mock.calls.some(([t]) => /DELETE FROM insertion_temps_saisies/.test(String(t)))).toBe(false);
@@ -301,16 +318,22 @@ describe('Saisies — la feuille figée ne bouge plus', () => {
   // couple 404/403 permettait à un MANAGER de découvrir quels identifiants
   // existent chez ses collègues. Aucune donnée n'était rendue — c'est bien
   // l'existence, et elle seule, qui fuyait.
-  it('suppression de la saisie d’un AUTRE intervenant : 404 INDISCERNABLE d’une saisie inexistante', async () => {
+  //
+  // Depuis le retrait du rôle MANAGER (main, 10/09/2026), la branche 404 n'est
+  // plus atteignable : tout rôle autre qu'ADMIN/RH est refusé en 403 par le
+  // routeur parent, AVANT la lecture de la saisie. L'indiscernabilité tient
+  // donc toujours — plus fort : aucune requête métier ne part.
+  it('suppression par un MANAGER (rôle retiré) : 403 INDISCERNABLE, que la saisie existe ou non', async () => {
     brancher();
     mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [{ ...SAISIES[0], user_id: 42 }] }));
     const autre = await del('/api/insertion/temps/saisies/31', 'MANAGER');
+    expect(requetesMetier()).toHaveLength(0);
 
     brancher();
     mockQuery.mockImplementationOnce(() => Promise.resolve({ rows: [] }));
     const inexistante = await del('/api/insertion/temps/saisies/31', 'MANAGER');
 
-    expect(autre.status).toBe(404);
+    expect(autre.status).toBe(403);
     expect({ statut: autre.status, corps: autre.body }).toEqual({ statut: inexistante.status, corps: inexistante.body });
     // Et la suppression n'a évidemment pas eu lieu.
     expect(mockQuery.mock.calls.some(([t]) => /DELETE FROM insertion_temps_saisies/.test(String(t)))).toBe(false);
@@ -330,7 +353,7 @@ describe('Validation — forward-only, deux signatures = deux personnes', () => 
 
   it('brouillon → validee_intervenant : la feuille est FIGÉE (snapshot écrit)', async () => {
     brancher();
-    const res = await post(url, 'MANAGER');
+    const res = await post(url, 'INTERVENANT');
     expect(res.status).toBe(200);
     expect(res.body.statut).toBe('validee_intervenant');
     const insert = mockQuery.mock.calls.find(([t]) => /INSERT INTO insertion_feuilles_temps/.test(String(t)));
@@ -346,7 +369,7 @@ describe('Validation — forward-only, deux signatures = deux personnes', () => 
 
   it('la validation est journalisée (INSERTION_FEUILLE_TEMPS_VALIDATION)', async () => {
     brancher();
-    await post(url, 'MANAGER');
+    await post(url, 'INTERVENANT');
     const journal = mockQuery.mock.calls.find(([t]) => /INSERT INTO rgpd_audit_log/.test(String(t)));
     expect(journal).toBeDefined();
     expect(journal[1][1]).toBe('INSERTION_FEUILLE_TEMPS_VALIDATION');
@@ -356,14 +379,14 @@ describe('Validation — forward-only, deux signatures = deux personnes', () => 
 
   it('409 FEUILLE_VIDE : on ne signe pas un mois sans aucune ligne', async () => {
     brancher({ milestones: [], actions: [], saisies: [] });
-    const res = await post(url, 'MANAGER');
+    const res = await post(url, 'INTERVENANT');
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('FEUILLE_VIDE');
   });
 
   it('une anomalie de cohérence n’empêche PAS la signature (aucun 409 « non conforme »)', async () => {
     brancher({ leaves: [{ type_category: 'sick', start_date: '2026-09-04', end_date: '2026-09-04' }] });
-    const res = await post(url, 'MANAGER');
+    const res = await post(url, 'INTERVENANT');
     expect(res.status).toBe(200);
     const insert = mockQuery.mock.calls.find(([t]) => /INSERT INTO insertion_feuilles_temps/.test(String(t)));
     const coherence = JSON.parse(insert[1][5]);
@@ -420,8 +443,10 @@ describe('Validation — forward-only, deux signatures = deux personnes', () => 
       },
     });
     const res = await post('/api/insertion/temps/7/2026/9/valider', 'MANAGER');
+    // Rôle retiré (main, 10/09/2026) : refusé par le routeur parent, avant même
+    // la garde VALIDATION_RH_RESERVEE (conservée, inatteignable).
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe('VALIDATION_RH_RESERVEE');
+    expect(mockQuery.mock.calls.some(([t]) => /UPDATE insertion_feuilles_temps/.test(String(t)))).toBe(false);
   });
 
   it('409 TRANSITION_INVALIDE : on ne « dé-signe » pas, on rouvre', async () => {
@@ -559,10 +584,12 @@ describe('Export (c) — CSV de la feuille de temps', () => {
     expect(JSON.parse(journal[1][4])).toMatchObject({ format: 'csv', intervenant_id: 7, annee: 2026, mois: 9, lignes: 3 });
   });
 
-  it('un MANAGER exporte la sienne, jamais celle d’un autre', async () => {
+  it('l’intervenant (profil RH) exporte sa feuille ; un MANAGER (rôle retiré) n’exporte ni la sienne ni celle d’un autre', async () => {
     brancher();
+    const intervenant = await get(url, 'INTERVENANT');
+    expect(intervenant.status).toBe(200);
     const mienne = await get(url, 'MANAGER');
-    expect(mienne.status).toBe(200);
+    expect(mienne.status).toBe(403);
     const autre = await get(url, 'MANAGER_AUTRE');
     expect(autre.status).toBe(403);
   });

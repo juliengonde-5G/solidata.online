@@ -6,7 +6,7 @@ const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('stock'));
 
 // GET /api/stock — Mouvements de stock
@@ -106,7 +106,7 @@ router.post('/', [
 // ══════════════════════════════════════════
 
 // POST /api/stock/movements/:id/cancel — Annuler un mouvement (contre-écriture)
-router.post('/movements/:id/cancel', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/movements/:id/cancel', authorize('ADMIN'), async (req, res) => {
   const motif = (req.body?.motif || '').trim();
   if (!motif) {
     return res.status(400).json({ error: 'Un motif d\'annulation est obligatoire' });
@@ -244,7 +244,7 @@ router.get('/inventories', async (req, res) => {
 });
 
 // POST /api/stock/inventories — Créer un nouvel inventaire
-router.post('/inventories', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/inventories', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { type, notes } = req.body;
@@ -321,7 +321,7 @@ router.get('/inventories/:id', async (req, res) => {
 });
 
 // PUT /api/stock/inventories/:id/items — Saisir les quantités physiques
-router.put('/inventories/:id/items', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/inventories/:id/items', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { items } = req.body; // [{id, stock_physique_kg, notes}]

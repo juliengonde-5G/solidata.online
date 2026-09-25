@@ -37,7 +37,7 @@ beforeEach(() => {
       return Promise.resolve({ rows: [{ scopes: ['service:read'], service_role: 'ADMIN' }] });
     }
     if (/UPDATE api_keys SET/i.test(sql)) {
-      return Promise.resolve({ rows: [{ id: 9, name: 'Smoke', key_prefix: 'abcdef012345', scopes: ['service:read'], service_role: 'MANAGER', active: true, expires_at: null, last_used_at: null }] });
+      return Promise.resolve({ rows: [{ id: 9, name: 'Smoke', key_prefix: 'abcdef012345', scopes: ['service:read'], service_role: 'RH', active: true, expires_at: null, last_used_at: null }] });
     }
     return Promise.resolve({ rows: [] });
   });
@@ -105,9 +105,9 @@ describe('modification d’une clé de service', () => {
 
   test('changer le seul rôle d’une clé de service reste possible', async () => {
     const r = await request(app).put('/api/admin/api-keys/9').set('Authorization', admin())
-      .send({ service_role: 'MANAGER' });
+      .send({ service_role: 'RH' });
     expect(r.status).toBe(200);
-    expect(r.body.service_role).toBe('MANAGER');
+    expect(r.body.service_role).toBe('RH');
   });
 
   test('désactiver une clé ne demande aucune validation de rôle', async () => {

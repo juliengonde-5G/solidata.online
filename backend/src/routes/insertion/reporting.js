@@ -20,14 +20,18 @@
  *     15 janvier ? » n'a de réponse que si on l'a écrite, le dossier ayant
  *     changé depuis.
  *
- * ═══ POURQUOI LE MANAGER PEUT LIRE ════════════════════════════════════════
+ * ═══ QUI LIT, QUI ENREGISTRE ══════════════════════════════════════════════
  *
- * Le contrat ouvre la synthèse à ADMIN/RH/MANAGER, et c'est tenable ici — et
- * ici SEULEMENT — parce qu'**aucune projection nominative n'existe dans ce
+ * Le contrat de la PR D ouvrait la LECTURE de la synthèse à ADMIN/RH/MANAGER,
+ * ce qui était tenable parce qu'**aucune projection nominative n'existe dans ce
  * document** : pas de liste de personnes à retirer selon le rôle, pas de champ
  * à masquer. La composition elle-même est une liste blanche d'agrégats
- * (`services/dialogue-gestion.js`). L'ENREGISTREMENT, lui, reste ADMIN/RH : il
+ * (`services/dialogue-gestion.js`). L'ENREGISTREMENT reste ADMIN/RH : il
  * produit une pièce datée qui engage la structure vis-à-vis de son financeur.
+ * Le rôle MANAGER a été retiré de l'application sur main le 10/09/2026
+ * (fusion du 25/09/2026) : le routeur parent n'admet plus qu'ADMIN/RH, et la
+ * lecture est donc de fait ADMIN/RH elle aussi. La projection « rôle seul »
+ * de l'historique pour un non-ADMIN/RH est conservée comme garde morte.
  *
  * ═══ LE PDF EST COMPOSÉ CÔTÉ CLIENT, DEPUIS LE `contenu` ══════════════════
  * Le serveur ne rend jamais de PDF ici. Le navigateur compose le document à
@@ -83,7 +87,7 @@ const detailsTrace = (annee, trimestre, extra = {}) => ({
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GET /dialogue-gestion — aperçu (ADMIN/RH/MANAGER), JSON ou CSV
+// GET /dialogue-gestion — aperçu (ADMIN/RH — MANAGER retiré le 10/09/2026), JSON ou CSV
 // ═══════════════════════════════════════════════════════════════════════════
 router.get('/dialogue-gestion', [
   ...VALIDATEURS_PERIODE,

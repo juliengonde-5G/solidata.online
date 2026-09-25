@@ -5,7 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const { monthBounds } = require('../utils/month-range');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('expedition'));
 
 // GET /api/expeditions

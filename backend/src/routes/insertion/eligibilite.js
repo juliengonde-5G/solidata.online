@@ -2,8 +2,10 @@
  * Référentiel ADMINISTRABLE des critères d'éligibilité IAE
  * (`/api/insertion/eligibilite-criteres`).
  *
- * Monté par ./index.js — hérite de `authenticate + requireMfa +
- * authorize('ADMIN','RH','MANAGER')`. La LECTURE reste ouverte aux trois rôles :
+ * Monté par ./index.js — hérite de `authenticate + requireMfa + authorize('ADMIN','RH')`. (La PR A visait
+ * ADMIN/RH/MANAGER ; MANAGER a été retiré de l'application en 2.52.0 — la
+ * porte du module s'est donc resserrée sur ADMIN/RH.)
+ * La LECTURE reste ouverte à ces rôles :
  * les libellés sont un référentiel public de l'outil, ils ne disent rien d'une
  * personne. L'ÉCRITURE est réservée à l'ADMIN — ajouter ou renommer un critère
  * change la signification de toutes les lignes déjà saisies et de la colonne

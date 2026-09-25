@@ -21,8 +21,9 @@
 //      réponse est `{ ok: true }`, jamais la ligne.
 //   5. VALIDATION HORODATÉE `mode: 'jeton'` — on doit pouvoir dire par quelle
 //      porte un avis est entré sur une pièce qui fonde un renouvellement.
-//   6. GÉNÉRATION — 400 hors renouvellement, 409 verrouillé, 403 pour un
-//      MANAGER qui n'est pas l'encadrant référent, journal bloquant.
+//   6. GÉNÉRATION — 400 hors renouvellement, 409 verrouillé, 403 pour tout
+//      MANAGER (rôle retiré sur main le 10/09/2026 — encadrant référent
+//      compris), journal bloquant.
 // ═══════════════════════════════════════════════════════════════════════════
 const jwt = require('jsonwebtoken');
 
@@ -424,6 +425,12 @@ describe('POST /api/insertion/renouvellements/:id/lien-eti', () => {
     expect(mockQuery.mock.calls.some(([s]) => String(s).includes('SET eti_token = $1'))).toBe(false);
   });
 
+  // Rôle MANAGER retiré sur main (10/09/2026, fusion du 25/09/2026) : la
+  // garde « encadrant référent » (`managerOwnsEmployee`) reste en place mais
+  // n'est plus atteignable — le routeur parent refuse tout MANAGER en 403
+  // AVANT de lire l'entretien. Conséquence fonctionnelle : un encadrant
+  // technique ne produit plus lui-même le lien ETI ; c'est la CIP (ADMIN/RH)
+  // qui le génère et le lui transmet.
   test('un MANAGER qui n’est pas l’encadrant référent → 403, sans poser de jeton', async () => {
     branche({
       'FROM insertion_milestones WHERE id': [{ id: 42, employee_id: 5, milestone_type: 'renouvellement', locked_at: null }],
@@ -431,15 +438,18 @@ describe('POST /api/insertion/renouvellements/:id/lien-eti', () => {
     });
     const r = await gen('MANAGER');
     expect(r.status).toBe(403);
-    expect(r.body.code).toBe('renouvellement_non_autorise');
     expect(mockQuery.mock.calls.some(([s]) => String(s).includes('SET eti_token = $1'))).toBe(false);
+    expect(mockQuery.mock.calls.some(([s]) => String(s).includes('FROM insertion_milestones WHERE id'))).toBe(false);
   });
 
-  test('un MANAGER encadrant référent PEUT produire le lien', async () => {
+  test('un MANAGER encadrant référent est refusé AUSSI (403, rôle retiré) — aucun jeton posé', async () => {
     branche({
       'FROM insertion_milestones WHERE id': [{ id: 42, employee_id: 5, milestone_type: 'renouvellement', locked_at: null }],
       'LEFT JOIN employees mgr': [{ cip_referent_user_id: null, manager_user_id: 7 }],
     });
-    expect((await gen('MANAGER')).status).toBe(201);
+    const r = await gen('MANAGER');
+    expect(r.status).toBe(403);
+    expect(r.body.lien).toBeUndefined();
+    expect(mockQuery.mock.calls.some(([s]) => String(s).includes('SET eti_token = $1'))).toBe(false);
   });
 });

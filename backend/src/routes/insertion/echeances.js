@@ -13,7 +13,9 @@
  * 500, jamais un bloc vide qui se lirait « rien à faire ».
  *
  * ═══ HABILITATIONS ════════════════════════════════════════════════════════
- * Le routeur parent impose ADMIN/RH/MANAGER. Les familles d'obligations
+ * Le routeur parent impose ADMIN/RH (MANAGER retiré de l'application sur main
+ * le 10/09/2026 — fusion du 25/09/2026 : ce qui suit sur le MANAGER est une
+ * garde morte, conservée). Les familles d'obligations
  * adossées à un statut social (sortie FSE+, questionnaire d'entrée, catégorie
  * France Travail, heures relevées) ne sont pas CALCULÉES pour un MANAGER : les
  * requêtes ne partent pas. Le REPORT, lui, est resserré ADMIN/RH dès la

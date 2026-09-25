@@ -53,7 +53,9 @@ const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
+  // Rôle RETIRÉ le 10/09/2026 : il ne doit plus rien ouvrir nulle part.
+  RETIRE: tokenFor('MANAGER'),
   COLLABORATEUR: tokenFor('COLLABORATEUR'), COMMUNICATION: tokenFor('COMMUNICATION'),
 };
 
@@ -180,8 +182,8 @@ describe('reste du module : rien, et refusé avant toute lecture en base', () =>
     expect(requetesMetier()).toEqual([]);
   });
 
-  test('MANAGER et RH conservent leur accès (non-régression)', async () => {
-    for (const role of ['MANAGER', 'RH']) {
+  test('ADMIN et RH conservent leur accès (non-régression)', async () => {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await appel('get', '/api/badgeuse/pointages', role)).status).not.toBe(403);
       expect((await appel('get', '/api/badgeuse/parametres', role)).status).not.toBe(403);
       expect((await appel('get', '/api/badgeuse/devices', role)).status).not.toBe(403);
@@ -205,9 +207,9 @@ describe('fil d’actualité : il publie', () => {
   test('la lecture reste ouverte à tous, l’écriture reste fermée aux autres', async () => {
     expect((await appel('get', '/api/news', 'COLLABORATEUR')).status).not.toBe(403);
     expect((await appel('post', '/api/news', 'COLLABORATEUR', ARTICLE)).status).toBe(403);
-    // MANAGER n'a jamais eu l'écriture du fil : l'ouverture au chargé de
-    // communication ne doit pas l'avoir élargie au passage.
-    expect((await appel('post', '/api/news', 'MANAGER', ARTICLE)).status).toBe(403);
+    // Un rôle RETIRÉ n'écrit rien non plus : l'ouverture au chargé de
+    // communication ne doit avoir élargi personne au passage.
+    expect((await appel('post', '/api/news', 'RETIRE', ARTICLE)).status).toBe(403);
   });
 });
 
@@ -245,7 +247,7 @@ describe('assistant : fermé, et fermé des DEUX côtés', () => {
     // Sans clé Anthropic dans les tests, le traitement échoue PLUS LOIN
     // (IA_NON_CONFIGUREE) : c'est précisément la preuve que le contrôle de
     // périmètre les a laissés passer.
-    for (const role of ['ADMIN', 'MANAGER', 'RH', 'COLLABORATEUR']) {
+    for (const role of ['ADMIN', 'RH', 'COLLABORATEUR']) {
       await expect(traiterMessageBot({
         userId: 1, role, message: 'Bonjour', sessionId: 's1',
       })).rejects.not.toMatchObject({ code: 'ASSISTANT_HORS_PERIMETRE' });
@@ -254,7 +256,10 @@ describe('assistant : fermé, et fermé des DEUX côtés', () => {
 
   test('l’écran ne montre pas un onglet qui répondrait 403', () => {
     const layout = fs.readFileSync(path.join(__dirname, '../../../frontend/src/components/Layout.jsx'), 'utf8');
-    expect(layout).toContain("const assistantActif = (user?.base_role || user?.role) !== 'COMMUNICATION';");
+    // 2.57.0 : la règle est devenue une liste (OPERATEUR_STOCK s'y ajoute),
+    // COMMUNICATION doit toujours en faire partie.
+    expect(layout).toMatch(/const ROLES_SANS_ASSISTANT = \[[^\]]*'COMMUNICATION'[^\]]*\];/);
+    expect(layout).toContain("const assistantActif = !ROLES_SANS_ASSISTANT.includes(user?.base_role || user?.role);");
     expect(layout).toContain('assistantActif={assistantActif}');
     const dock = fs.readFileSync(path.join(__dirname, '../../../frontend/src/components/messagerie/DockUnifie.jsx'), 'utf8');
     expect(dock).toContain('...(assistantActif');
@@ -278,13 +283,16 @@ describe('les écrans suivent le périmètre du serveur', () => {
 
   test('la route /badgeuse accepte le rôle', () => {
     expect(lire('App.jsx')).toContain(
-      `<Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'MANAGER', 'COMMUNICATION']}>`
+      `<Route path="/badgeuse" element={<ProtectedRoute roles={['ADMIN', 'RH', 'COMMUNICATION']}>`
     );
   });
 
   test('la barre latérale lui montre Temps & Présence', () => {
-    expect(lire('components/Layout.jsx')).toContain(
-      "path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'MANAGER', 'COMMUNICATION']"
+    // L'arbre de navigation a quitté Layout.jsx pour navigation/navTree.js en
+    // 2.56.0 (ProtectedRoute doit le lire sans tirer tout le Layout dans le
+    // bundle d'entrée). Cette garde suit la donnée, pas le fichier historique.
+    expect(lire('navigation/navTree.js')).toContain(
+      "path: '/badgeuse', icon: Fingerprint, roles: ['ADMIN', 'RH', 'COMMUNICATION']"
     );
   });
 

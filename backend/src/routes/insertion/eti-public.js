@@ -22,7 +22,8 @@
  * les freins, pas le statut social, pas le référent, pas les dates de parcours,
  * pas même `employee_id` — un identifiant rendu ici deviendrait la clé d'un
  * autre écran. La réponse du PUT est `{ ok: true }` et jamais la ligne : un
- * MANAGER connecté reçoit `maskInsertionRow`, un anonyme ne reçoit rien.
+ * MANAGER connecté recevait `maskInsertionRow` (rôle retiré sur main le
+ * 10/09/2026), un anonyme ne reçoit rien.
  *
  * ═══ TROIS ÉTATS, TROIS CODES ═════════════════════════════════════════════
  *   - jeton malformé ou inconnu → **404 uniforme**. Distinguer les deux

@@ -8,8 +8,8 @@
 // Ce que ces tests tiennent :
 //   1. FORME — un seul appel rend les cinq blocs du contrat § 5.1, avec la
 //      forme d'échéance figée (id, type, niveau, cible, nb_reports).
-//   2. HABILITATION — un MANAGER ne reçoit ni le bloc RSA ni les obligations
-//      sociales, et un report lui est refusé en 403 **AVANT toute requête** :
+//   2. HABILITATION — un MANAGER (rôle retiré sur main le 10/09/2026) est
+//      refusé en 403 sur l'écran, et un report lui est refusé en 403 **AVANT toute requête** :
 //      `pool.query` n'est pas appelé une seule fois.
 //   3. REPORT — motif facultatif au 1er, OBLIGATOIRE au 2e (409 MOTIF_REQUIS),
 //      type inconnu → 400, ligne agrégée → 400, salarié inconnu → 404.
@@ -182,10 +182,16 @@ describe('GET /api/insertion/echeances — forme de réponse (§ 5.1)', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('périmètre par rôle', () => {
-  test('un MANAGER ne reçoit PAS le bloc « rendez-vous réguliers » (ADMIN/RH strict)', async () => {
+  // Rôle MANAGER retiré sur main (10/09/2026, fusion du 25/09/2026). Le
+  // moteur garde sa projection « sans bloc RSA ni obligations sociales » pour
+  // tout rôle non ADMIN/RH (garde morte) ; ce qui est OBSERVABLE est le refus
+  // 403 du routeur parent, AVANT la moindre requête sur la cohorte.
+  test('un MANAGER (rôle retiré) est refusé en 403 — ni bloc RSA, ni cohorte lue', async () => {
     const r = await get('/api/insertion/echeances', 'MANAGER');
-    expect(r.status).toBe(200);
-    expect(r.body.rendez_vous_reguliers).toBeNull();
+    expect(r.status).toBe(403);
+    expect(r.body.rendez_vous_reguliers).toBeUndefined();
+    const cohorte = mockQuery.mock.calls.find(([t]) => String(t).replace(/\s+/g, ' ').includes('FROM employees e WHERE'));
+    expect(cohorte).toBeUndefined();
   });
 
   test('un ADMIN le reçoit', async () => {
@@ -194,12 +200,10 @@ describe('périmètre par rôle', () => {
     expect(r.body.rendez_vous_reguliers).toHaveProperty('actualisations_ft_du_mois');
   });
 
-  test('aucune obligation SOCIALE n’est rendue à un MANAGER', async () => {
+  test('aucune obligation n’est rendue à un MANAGER (403, pas de liste)', async () => {
     const r = await get('/api/insertion/echeances', 'MANAGER');
-    const types = r.body.obligations.map((o) => o.type);
-    for (const t of ['sortie_fse_a_saisir', 'fse_entree_manquant', 'categorie_g', 'sous_15h']) {
-      expect(types).not.toContain(t);
-    }
+    expect(r.status).toBe(403);
+    expect(r.body.obligations).toBeUndefined();
   });
 
   test('`?mine=1` restreint la cohorte au CIP référent', async () => {

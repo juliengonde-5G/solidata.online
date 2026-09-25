@@ -31,7 +31,8 @@
  *      états (`honoree` NULL = rien de constaté), jamais une déduction.
  *
  * ═══ HABILITATIONS ════════════════════════════════════════════════════════
- * Le routeur parent impose ADMIN/RH/MANAGER ; ce routeur resserre à ADMIN/RH
+ * Le routeur parent impose ADMIN/RH (MANAGER retiré sur main le 10/09/2026 —
+ * fusion du 25/09/2026) ; ce routeur resserre à ADMIN/RH
  * dès sa première ligne, AVANT tout validateur et donc avant toute lecture en
  * base. Un refus posé après la requête serait un refus d'affichage, pas un
  * refus d'accès (doctrine 2.51.0). Statuts sociaux, référent unique et

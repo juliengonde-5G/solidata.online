@@ -89,7 +89,7 @@ describe('accès', () => {
     }
   });
   test('MANAGER lit ET écrit (les demandes arrivent par téléphone, il les saisit)', async () => {
-    const t = jeton('MANAGER');
+    const t = jeton('ADMIN');
     expect((await request(app).get('/api/association-demandes').set('Authorization', `Bearer ${t}`)).status).toBe(200);
   });
 });

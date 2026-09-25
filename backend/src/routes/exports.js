@@ -15,7 +15,7 @@ const { freinsExportColumns, rowToCells, computeCompletude } = require('../utils
 // Double authentification (2.43.0) : pour les rôles soumis (settings
 // « securite.mfa_roles », défaut ADMIN/RH/DPO), la session doit avoir
 // franchi le défi TOTP. No-op intégral pour les autres rôles.
-router.use(authenticate, requireMfa, authorize('ADMIN', 'MANAGER', 'RH'));
+router.use(authenticate, requireMfa, authorize('ADMIN', 'RH'));
 
 // GET /api/exports/collecte — Export Excel collecte
 router.get('/collecte', async (req, res) => {
@@ -1053,6 +1053,9 @@ router.get('/insertion-synthese', [
     // unique et critères d'éligibilité (dont RQTH) sans aucune suppression. Les
     // blocs de statut social ne sont ni lus ni composés pour un MANAGER, et la
     // projection est reposée avant l'envoi.
+    // 25/09/2026 (fusion de main) : le routeur n'admet plus qu'ADMIN/RH depuis
+    // le retrait de MANAGER le 10/09/2026 — la projection par rôle reste en
+    // place comme garde (fail-safe : tout rôle non ADMIN/RH est projeté).
     const { gatherAuditKpis, baseRoleOf, projeterAuditPourRole } = require('./insertion/routes');
     const baseRole = baseRoleOf(req);
     const k = await gatherAuditKpis(year, { baseRole });

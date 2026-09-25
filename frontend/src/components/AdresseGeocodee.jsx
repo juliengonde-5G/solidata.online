@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { MapPin, Search, Loader2 } from 'lucide-react';
 import api from '../services/api';
+import CoordonneesGps from './CoordonneesGps';
 
 /**
  * Saisie d'un lieu : on tape une adresse, on choisit une proposition, les
@@ -130,6 +131,18 @@ export default function AdresseGeocodee({
           />
         </div>
       </div>
+
+      {/* Rappel des coordonnées DÉCIMALES, telles qu'on les recopie dans un GPS
+          de camion. Les deux champs ci-dessus sont des zones de saisie : ils
+          affichent ce qu'on y tape (« 49.4231 » ou « 49,42310000000001 » selon
+          la source), pas une valeur normalisée. */}
+      <CoordonneesGps
+        latitude={latitude}
+        longitude={longitude}
+        libelle="Coordonnées décimales"
+        absent="Coordonnées décimales : à renseigner"
+        className="block"
+      />
     </div>
   );
 }

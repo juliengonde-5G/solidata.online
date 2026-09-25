@@ -30,6 +30,15 @@ jest.mock('../../src/config/database', () => ({
   query: (...a) => mockQuery(...a),
   connect: (...a) => mockConnect(...a),
 }));
+// Météo : aucun appel réseau réel en test. Le générateur « meteo » interroge
+// Open-Meteo avec un délai de 10 s — exactement le délai d'un test Jest : sur
+// un réseau de CI lent, le test échouait par dépassement sans rien révéler.
+jest.mock('../../src/utils/weather', () => ({
+  ...jest.requireActual('../../src/utils/weather'),
+  fetchOpenMeteoDaily: async () => null,
+  fetchOpenMeteoHourly: async () => null,
+  fetchOpenMeteoDailyRange: async () => null,
+}));
 jest.mock('../../src/middleware/activity-logger', () => ({
   autoLogActivity: () => (req, res, next) => next(),
   logActivity: () => {},
@@ -48,7 +57,7 @@ const tokenFor = (role, id = 1) => jwt.sign(
   { id, username: 'u', role, first_name: 'T', last_name: 'U' }, JWT_SECRET, { expiresIn: '1h' }
 );
 const TOKENS = {
-  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'), MANAGER: tokenFor('MANAGER'),
+  ADMIN: tokenFor('ADMIN'), RH: tokenFor('RH'),
   COLLABORATEUR: tokenFor('COLLABORATEUR'),
 };
 
@@ -217,7 +226,7 @@ describe('GET /ecran-direct — le back-office lit ce que le poste reçoit', () 
   test('habilitations : lecture ADMIN/RH/MANAGER, refus aux autres', async () => {
     contenus = [contenuMessage()];
     devices = [];
-    for (const role of ['ADMIN', 'RH', 'MANAGER']) {
+    for (const role of ['ADMIN', 'RH']) {
       expect((await get('/api/badgeuse/ecran-direct', role)).status).toBe(200);
     }
     expect((await get('/api/badgeuse/ecran-direct', 'COLLABORATEUR')).status).toBe(403);

@@ -7,6 +7,10 @@ const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
 const stateMachine = require('../services/state-machine');
 const {
+  chargerCatalogue, validerLignesCartons, etatPreparation,
+} = require('../services/boutique-catalogue');
+const { envoyerMessageSystemeRoles } = require('../services/messagerie');
+const {
   attachBoutiqueScope, enforceBoutiqueParam, enforceBoutiqueForEntity, boutiqueScopeSql,
 } = require('../middleware/boutique-scope');
 
@@ -43,6 +47,55 @@ async function logHistory(client, commandeId, ancien, nouveau, userId, commentai
      VALUES ($1, $2, $3, $4, $5)`,
     [commandeId, ancien, nouveau, commentaire, userId]
   );
+}
+
+/**
+ * Écrit les lignes d'une commande en cartons (déjà validées par
+ * validerLignesCartons). Renvoie le poids total ESTIMÉ (null si aucune ligne
+ * n'a de poids moyen connu : jamais un zéro qui passerait pour une pesée).
+ */
+async function ecrireLignesCartons(client, commandeId, lignes) {
+  let estime = 0;
+  let estimeConnu = false;
+  for (const l of lignes) {
+    await client.query(`
+      INSERT INTO boutique_commande_lignes
+        (commande_id, categorie, gamme, categorie_eco_org, produit, genre, saison,
+         nb_cartons_demande, poids_estime_kg, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `, [commandeId, l.categorie, l.gamme, l.categorie_eco_org, l.produit, l.genre, l.saison,
+      l.nb_cartons, l.poids_estime_kg, l.notes]);
+    if (l.poids_estime_kg !== null) { estime += l.poids_estime_kg; estimeConnu = true; }
+  }
+  return estimeConnu ? Math.round(estime * 100) / 100 : null;
+}
+
+/**
+ * Prévient l'équipe logistique qu'une commande boutique vient d'arriver
+ * (messagerie interne, conversation système). BEST EFFORT, après la réponse :
+ * une messagerie indisponible ne doit jamais empêcher une boutique de commander.
+ * Le lien ouvre la fiche de la commande dans le suivi logistique.
+ */
+function notifierLogistique(commandeId) {
+  (async () => {
+    const r = await pool.query(`
+      SELECT c.reference, b.nom AS boutique_nom, c.date_livraison_souhaitee,
+             (SELECT COALESCE(SUM(nb_cartons_demande), 0)::int FROM boutique_commande_lignes WHERE commande_id = c.id) AS nb_cartons,
+             (SELECT COUNT(*)::int FROM boutique_commande_lignes WHERE commande_id = c.id) AS nb_lignes
+        FROM boutique_commandes c LEFT JOIN boutiques b ON b.id = c.boutique_id
+       WHERE c.id = $1`, [commandeId]);
+    const c = r.rows[0];
+    if (!c) return;
+    const livraison = c.date_livraison_souhaitee
+      ? `, livraison souhaitée le ${new Date(c.date_livraison_souhaitee).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })}`
+      : '';
+    await envoyerMessageSystemeRoles(['ADMIN'], {
+      texte: `Nouvelle commande boutique ${c.reference} — ${c.boutique_nom || 'boutique'} : `
+        + `${c.nb_cartons} carton(s) sur ${c.nb_lignes} catégorie(s)${livraison}. À préparer par la logistique.`,
+      source: 'commande_boutique',
+      lien: `/exutoires-commandes?commande=btq-${commandeId}`,
+    });
+  })().catch((err) => console.error('[boutique-commandes] notification logistique :', err.message));
 }
 
 async function checkAndTransition(commandeId, targetStatut, userId, userRole, extra = {}) {
@@ -90,6 +143,38 @@ async function checkAndTransition(commandeId, targetStatut, userId, userRole, ex
     // Si expédition : créer un mouvement de stock sortie
     if (targetStatut === 'expediee') {
       const btq = await client.query('SELECT nom FROM boutiques WHERE id = $1', [commande.boutique_id]);
+      const enCartons = await client.query(
+        'SELECT 1 FROM boutique_commande_lignes WHERE commande_id = $1 AND nb_cartons_demande IS NOT NULL LIMIT 1',
+        [commandeId]
+      );
+      // Commande en CARTONS (2.58.0) : ce qui part est ce qui a été SCANNÉ —
+      // pas ce qui était demandé. Le poids expédié est la somme des cartons
+      // réellement sortis pour cette commande.
+      if (enCartons.rowCount > 0) {
+        const prep = await etatPreparation(client, commandeId);
+        if (prep.total_scannes === 0) {
+          throw new Error('Aucun carton scanné pour cette commande : scannez les cartons en « Sortie cartons » avant d\'expédier');
+        }
+        for (const l of prep.lignes) {
+          if (!l.en_cartons) continue;
+          await client.query(
+            'UPDATE boutique_commande_lignes SET nb_cartons_expedies = $1, poids_expedie_kg = $2 WHERE id = $3',
+            [l.scannes, l.scannes_kg, l.ligne_id]
+          );
+        }
+        if (prep.total_kg > 0) {
+          await client.query(`
+            INSERT INTO stock_movements (type, date, poids_kg, destination, notes, created_by)
+            VALUES ('sortie', NOW()::date, $1, $2, $3, $4)
+          `, [
+            prep.total_kg,
+            `Boutique ${btq.rows[0]?.nom || ''}`,
+            `Commande ${commande.reference} — ${prep.total_scannes} carton(s)`
+              + (prep.hors_commande.length ? `, dont ${prep.hors_commande.length} hors commande` : ''),
+            userId,
+          ]);
+        }
+      } else {
       const lignes = await client.query(
         'SELECT COALESCE(poids_ajuste_kg, poids_demande_kg) AS poids FROM boutique_commande_lignes WHERE commande_id = $1',
         [commandeId]
@@ -111,6 +196,7 @@ async function checkAndTransition(commandeId, targetStatut, userId, userRole, ex
           SET poids_expedie_kg = COALESCE(poids_ajuste_kg, poids_demande_kg)
           WHERE commande_id = $1
         `, [commandeId]);
+      }
       }
     }
 
@@ -148,7 +234,11 @@ router.get('/', async (req, res) => {
              b.nom AS boutique_nom,
              u.first_name || ' ' || u.last_name AS created_by_name,
              ua.first_name || ' ' || ua.last_name AS ajuste_par_name,
-             (SELECT COUNT(*) FROM boutique_commande_lignes WHERE commande_id = c.id)::INT AS nb_lignes
+             (SELECT COUNT(*) FROM boutique_commande_lignes WHERE commande_id = c.id)::INT AS nb_lignes,
+             (SELECT SUM(nb_cartons_demande) FROM boutique_commande_lignes WHERE commande_id = c.id)::INT AS nb_cartons_demande,
+             (SELECT SUM(COALESCE(nb_cartons_ajuste, nb_cartons_demande)) FROM boutique_commande_lignes WHERE commande_id = c.id)::INT AS nb_cartons_voulu,
+             (SELECT COUNT(*) FROM produits_finis pf
+               WHERE pf.sortie_commande_type = 'btq' AND pf.sortie_commande_id = c.id)::INT AS nb_cartons_scannes
       FROM boutique_commandes c
       LEFT JOIN boutiques b ON c.boutique_id = b.id
       LEFT JOIN users u ON c.created_by = u.id
@@ -199,6 +289,22 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/boutique-commandes/catalogue — catégories commandables + stock
+// (?exclude_commande_id=… : la commande en cours de modification ne se réserve
+// pas elle-même ses propres cartons).
+router.get('/catalogue', authorize('ADMIN', 'RESP_BTQ'), async (req, res) => {
+  try {
+    const exclu = Number(req.query.exclude_commande_id);
+    const items = await chargerCatalogue(pool, {
+      excludeCommandeId: Number.isInteger(exclu) && exclu > 0 ? exclu : null,
+    });
+    res.json({ items });
+  } catch (err) {
+    console.error('[boutique-commandes] GET /catalogue:', err);
+    res.status(500).json({ error: 'Erreur chargement du catalogue' });
+  }
+});
+
 // GET /api/boutique-commandes/:id — détail avec lignes et historique
 router.get('/:id', async (req, res) => {
   try {
@@ -226,10 +332,12 @@ router.get('/:id', async (req, res) => {
       WHERE h.commande_id = $1 ORDER BY h.created_at
     `, [req.params.id]);
 
+    const preparation = await etatPreparation(pool, req.params.id);
     res.json({
       ...commande.rows[0],
       lignes: lignes.rows,
       historique: historique.rows,
+      preparation,
     });
   } catch (err) {
     console.error('[boutique-commandes] GET /:id:', err);
@@ -239,40 +347,51 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/boutique-commandes — créer (RESP_BTQ, MANAGER, ADMIN)
 router.post('/',
-  authorize('ADMIN', 'MANAGER', 'RESP_BTQ'),
+  authorize('ADMIN', 'RESP_BTQ'),
   [
     body('boutique_id').isInt(),
     body('date_commande').isISO8601(),
-    body('lignes').isArray({ min: 1 }).withMessage('Au moins une ligne requise'),
+    body('lignes').isArray({ min: 1 }).withMessage('Choisissez au moins une catégorie'),
   ],
   validate,
   async (req, res) => {
     // Cloisonnement : un RESP_BTQ ne crée une commande que pour son périmètre.
     if (!enforceBoutiqueParam(req, res, req.body.boutique_id)) return;
+    // Le serveur valide chaque ligne contre le catalogue : une catégorie
+    // inventée ou une quantité illisible ne sont jamais enregistrées.
+    const verif = validerLignesCartons(req.body.lignes, await chargerCatalogue(pool));
+    if (verif.erreur) return res.status(400).json({ error: verif.erreur, code: verif.code });
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const { boutique_id, date_commande, date_livraison_souhaitee, notes, lignes } = req.body;
+      const { boutique_id, date_commande, date_livraison_souhaitee, notes } = req.body;
       const reference = await generateReference();
-      const poidsTotal = lignes.reduce((s, l) => s + Number(l.poids_demande_kg || 0), 0);
 
       const cmdRes = await client.query(`
         INSERT INTO boutique_commandes
           (reference, boutique_id, date_commande, date_livraison_souhaitee, statut, notes, poids_total_demande_kg, created_by)
-        VALUES ($1, $2, $3, $4, 'brouillon', $5, $6, $7)
+        VALUES ($1, $2, $3, $4, 'brouillon', $5, 0, $6)
         RETURNING *
-      `, [reference, boutique_id, date_commande, date_livraison_souhaitee || null, notes || null, poidsTotal, req.user.id]);
+      `, [reference, boutique_id, date_commande, date_livraison_souhaitee || null, notes || null, req.user.id]);
       const commande = cmdRes.rows[0];
 
-      for (const l of lignes) {
-        await client.query(`
-          INSERT INTO boutique_commande_lignes (commande_id, categorie, poids_demande_kg, notes)
-          VALUES ($1, $2, $3, $4)
-        `, [commande.id, l.categorie, l.poids_demande_kg, l.notes || null]);
-      }
+      const estime = await ecrireLignesCartons(client, commande.id, verif.lignes);
+      await client.query('UPDATE boutique_commandes SET poids_total_demande_kg = $1 WHERE id = $2', [estime ?? 0, commande.id]);
+      commande.poids_total_demande_kg = estime ?? 0;
 
       await logHistory(client, commande.id, null, 'brouillon', req.user.id, 'Création');
+
+      // « Envoyer à la logistique » (2.59.0) : la boutique passe la commande en
+      // un geste — elle est créée puis envoyée dans la MÊME transaction, sans
+      // brouillon intermédiaire à penser à envoyer.
+      const envoyer = req.body.envoyer === true;
+      if (envoyer) {
+        await client.query("UPDATE boutique_commandes SET statut = 'envoyee', updated_at = NOW() WHERE id = $1", [commande.id]);
+        await logHistory(client, commande.id, 'brouillon', 'envoyee', req.user.id, 'Envoyée à la logistique');
+        commande.statut = 'envoyee';
+      }
       await client.query('COMMIT');
+      if (envoyer) notifierLogistique(commande.id);
       res.status(201).json(commande);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -286,33 +405,37 @@ router.post('/',
 
 // PUT /api/boutique-commandes/:id — mise à jour (seulement en brouillon)
 router.put('/:id',
-  authorize('ADMIN', 'MANAGER', 'RESP_BTQ'),
+  authorize('ADMIN', 'RESP_BTQ'),
   async (req, res) => {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const current = await client.query('SELECT * FROM boutique_commandes WHERE id = $1', [req.params.id]);
-      if (current.rows.length === 0) return res.status(404).json({ error: 'Introuvable' });
+      const current = await client.query('SELECT * FROM boutique_commandes WHERE id = $1 FOR UPDATE', [req.params.id]);
+      // ROLLBACK avant chaque refus : sans lui, la connexion retournait au pool
+      // au milieu d'une transaction ouverte.
+      if (current.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Introuvable' });
+      }
       if (current.rows[0].statut !== 'brouillon') {
+        await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Seules les commandes en brouillon peuvent être modifiées' });
       }
 
       const { date_livraison_souhaitee, notes, lignes } = req.body;
 
       if (lignes) {
-        await client.query('DELETE FROM boutique_commande_lignes WHERE commande_id = $1', [req.params.id]);
-        let poidsTotal = 0;
-        for (const l of lignes) {
-          await client.query(`
-            INSERT INTO boutique_commande_lignes (commande_id, categorie, poids_demande_kg, notes)
-            VALUES ($1, $2, $3, $4)
-          `, [req.params.id, l.categorie, l.poids_demande_kg, l.notes || null]);
-          poidsTotal += Number(l.poids_demande_kg || 0);
+        const verif = validerLignesCartons(lignes, await chargerCatalogue(client, { excludeCommandeId: Number(req.params.id) }));
+        if (verif.erreur) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: verif.erreur, code: verif.code });
         }
+        await client.query('DELETE FROM boutique_commande_lignes WHERE commande_id = $1', [req.params.id]);
+        const estime = await ecrireLignesCartons(client, req.params.id, verif.lignes);
         await client.query(
           'UPDATE boutique_commandes SET poids_total_demande_kg = $1 WHERE id = $2',
-          [poidsTotal, req.params.id]
+          [estime ?? 0, req.params.id]
         );
       }
 
@@ -337,16 +460,17 @@ router.put('/:id',
 );
 
 // PATCH /api/boutique-commandes/:id/envoyer (RESP_BTQ, MANAGER, ADMIN)
-router.patch('/:id/envoyer', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
+router.patch('/:id/envoyer', authorize('ADMIN', 'RESP_BTQ'), async (req, res) => {
   try {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'envoyee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
+    notifierLogistique(Number(req.params.id));
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // PATCH /api/boutique-commandes/:id/ajuster (MANAGER, ADMIN) — ajuste les poids
-router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/ajuster', authorize('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -354,17 +478,32 @@ router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => 
 
     if (Array.isArray(ajustements)) {
       let totalAjuste = 0;
+      let auPoids = false;
       for (const a of ajustements) {
+        // Ligne en cartons (2.58.0) : l'atelier ajuste un NOMBRE de cartons
+        // (0 = ne sera pas servie). Ligne historique au poids : inchangé.
+        if (a.nb_cartons_ajuste !== undefined && a.nb_cartons_ajuste !== null) {
+          const n = Number(a.nb_cartons_ajuste);
+          if (!Number.isInteger(n) || n < 0) throw new Error('Nombre de cartons ajusté invalide');
+          await client.query(
+            'UPDATE boutique_commande_lignes SET nb_cartons_ajuste = $1 WHERE id = $2 AND commande_id = $3 AND nb_cartons_demande IS NOT NULL',
+            [n, a.ligne_id, req.params.id]
+          );
+          continue;
+        }
+        auPoids = true;
         await client.query(
           'UPDATE boutique_commande_lignes SET poids_ajuste_kg = $1 WHERE id = $2 AND commande_id = $3',
           [a.poids_ajuste_kg, a.ligne_id, req.params.id]
         );
         totalAjuste += Number(a.poids_ajuste_kg || 0);
       }
-      await client.query(
-        'UPDATE boutique_commandes SET poids_total_ajuste_kg = $1 WHERE id = $2',
-        [totalAjuste, req.params.id]
-      );
+      if (auPoids) {
+        await client.query(
+          'UPDATE boutique_commandes SET poids_total_ajuste_kg = $1 WHERE id = $2',
+          [totalAjuste, req.params.id]
+        );
+      }
     }
 
     await client.query('COMMIT');
@@ -378,21 +517,21 @@ router.patch('/:id/ajuster', authorize('ADMIN', 'MANAGER'), async (req, res) => 
   }
 });
 
-router.patch('/:id/preparer', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/preparer', authorize('ADMIN'), async (req, res) => {
   try {
     await checkAndTransition(req.params.id, 'en_preparation', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.patch('/:id/expedier', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.patch('/:id/expedier', authorize('ADMIN'), async (req, res) => {
   try {
     await checkAndTransition(req.params.id, 'expediee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });
     res.json({ success: true });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.patch('/:id/annuler', authorize('ADMIN', 'MANAGER', 'RESP_BTQ'), async (req, res) => {
+router.patch('/:id/annuler', authorize('ADMIN', 'RESP_BTQ'), async (req, res) => {
   try {
     if (!(await enforceBoutiqueForEntity(req, res, 'boutique_commandes', req.params.id))) return;
     await checkAndTransition(req.params.id, 'annulee', req.user.id, req.user.role, { commentaire: req.body?.commentaire });

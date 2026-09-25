@@ -1,7 +1,14 @@
 // Vague 2 — ouverture de l'application aux parties prenantes (lot « acces-roles »).
-// Vérifie la MATRICE D'ACCÈS des nouveaux rôles intégrés (DPO / FINANCE / QHSE)
-// et de l'auditeur AUTORITE : lecture ouverte là où c'est prévu, écriture
-// toujours refusée aux rôles de consultation. Auth réelle (JWT), DB mockée.
+// Vérifie la MATRICE D'ACCÈS du rôle DPO et de l'auditeur AUTORITE : lecture
+// ouverte là où c'est prévu, écriture toujours refusée aux rôles de
+// consultation. Auth réelle (JWT), DB mockée.
+//
+// MISE À JOUR DU 10/09/2026 — les rôles MANAGER, QHSE et FINANCE ont été
+// RETIRÉS de l'application (demande client). Les tests qui prouvaient leur
+// lecture prouvent désormais l'inverse : un jeton portant l'un d'eux n'ouvre
+// plus rien. C'est la garantie qui compte maintenant, et elle vaut d'être
+// tenue par un test — un rôle retiré du code mais toléré par une garde oubliée
+// serait exactement le défaut qu'on croit avoir corrigé.
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-in-production';
@@ -52,9 +59,9 @@ describe('Refashion — auditeur AUTORITE en lecture seule', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
   });
-  it('QHSE lit le catalogue des exports (GET) → 200', async () => {
+  it('QHSE (rôle RETIRÉ) n\'ouvre plus le catalogue des exports → 403', async () => {
     const res = await get('/api/refashion/exports', 'QHSE');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
   it('AUTORITE ne peut PAS écrire une DPAV (POST) → 403', async () => {
     const res = await post('/api/refashion/dpav', 'AUTORITE', { annee: 2026, trimestre: 1 });
@@ -75,10 +82,14 @@ describe('Refashion — auditeur AUTORITE en lecture seule', () => {
 });
 
 // ── ITEM 54 — FINANCE : lecture seule sur le domaine finance ────────────────────
-describe('Finance — rôle FINANCE en lecture seule', () => {
-  it('FINANCE lit les exercices (GET) → 200', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+describe('Finance — le rôle FINANCE a été retiré', () => {
+  it('FINANCE (rôle RETIRÉ) ne lit plus les exercices → 403', async () => {
     const res = await get('/api/finance/exercises', 'FINANCE');
+    expect(res.status).toBe(403);
+  });
+  it('ADMIN lit les exercices (GET) → 200', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    const res = await get('/api/finance/exercises', 'ADMIN');
     expect(res.status).toBe(200);
   });
   it('FINANCE ne peut PAS modifier un budget (PUT) → 403', async () => {
@@ -95,13 +106,17 @@ describe('Finance — rôle FINANCE en lecture seule', () => {
   });
 });
 
-describe('Pennylane — FINANCE lecture, pas de sync', () => {
-  it('FINANCE lit le statut (GET) → 200', async () => {
+describe('Pennylane — le rôle FINANCE a été retiré', () => {
+  it('FINANCE (rôle RETIRÉ) ne lit plus le statut → 403', async () => {
+    const res = await get('/api/pennylane/status', 'FINANCE');
+    expect(res.status).toBe(403);
+  });
+  it('ADMIN lit le statut (GET) → 200', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [{ is_active: true, last_sync_at: null, company_id: 'C1' }] }) // config
       .mockResolvedValueOnce({ rows: [{ total: '0' }] }) // mappings count
       .mockResolvedValueOnce({ rows: [] }); // last sync log
-    const res = await get('/api/pennylane/status', 'FINANCE');
+    const res = await get('/api/pennylane/status', 'ADMIN');
     expect(res.status).toBe(200);
   });
   it('FINANCE ne peut PAS déclencher un sync GL (POST) → 403', async () => {
@@ -133,12 +148,16 @@ describe('RGPD — rôle DPO', () => {
 });
 
 // ── ITEM 54 — QHSE : lecture + résolution des incidents ─────────────────────────
-describe('Incidents — rôle QHSE', () => {
-  it('QHSE lit les statistiques d\'incidents (GET) → 200', async () => {
+describe('Incidents — le rôle QHSE a été retiré', () => {
+  it('QHSE (rôle RETIRÉ) ne lit plus les statistiques → 403', async () => {
+    const res = await get('/api/incidents/stats', 'QHSE');
+    expect(res.status).toBe(403);
+  });
+  it('ADMIN lit les statistiques d\'incidents (GET) → 200', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] }) // GROUP BY status
       .mockResolvedValueOnce({ rows: [{ resolus: 0, delai_moyen_jours: null }] }); // délai moyen
-    const res = await get('/api/incidents/stats', 'QHSE');
+    const res = await get('/api/incidents/stats', 'ADMIN');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('delai_moyen_jours');
   });

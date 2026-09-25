@@ -104,7 +104,7 @@ const JOUR = engine.parisDateStr(new Date());
     await pool.query("DELETE FROM rgpd_audit_log WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'jest_e2e_%')");
     await pool.query("DELETE FROM users WHERE username LIKE 'jest_e2e_%'");
 
-    for (const role of ['ADMIN', 'RH', 'MANAGER']) {
+    for (const role of ['ADMIN', 'RH']) {
       const u = await pool.query(
         `INSERT INTO users (username, email, password_hash, role, first_name, last_name, is_active)
          VALUES ($1, $2, 'x', $3, 'Jest', $3, true) RETURNING id`,

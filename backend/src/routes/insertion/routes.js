@@ -6,6 +6,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../../config/database');
 const { authorize, resolveBaseRole } = require('../../middleware/auth');
+const { relevantDeLaCip, hasParcours } = require('../../utils/contrat-insertion');
 const { body, param, query } = require('express-validator');
 const { validate } = require('../../middleware/validate');
 const CryptoJS = require('crypto-js');
@@ -255,6 +256,8 @@ router.get('/', async (req, res) => {
     // plus loin — tous les parcours, sans borne d'ancienneté, sans garde de
     // rôle (le front ne l'utilise pas ; un appel HTTP direct suffisait).
     // Le périmètre du MANAGER redevient ce qu'il était : `en_parcours` seul.
+    // (25/09/2026 : rôle retiré sur main le 10/09/2026 — branche inatteignable,
+    // le routeur parent refuse tout rôle autre qu'ADMIN/RH.)
     const perimetre = sqlPerimetreFileActive({
       alias: 'e',
       moisTermines: adminRh ? moisTermines : 0,
@@ -267,10 +270,23 @@ router.get('/', async (req, res) => {
       filtreMine = ` AND e.cip_referent_user_id = $${params.length}`;
     }
 
-    const result = await pool.query(`
+    // ── DEUX RÈGLES DE PÉRIMÈTRE, SUPERPOSÉES (fusion de main, 25/09/2026) ──
+    // La PR C a fait de cette liste la FILE ACTIVE (`sqlPerimetreFileActive` :
+    // parcours en cours + terminés récents, permanents exclus par le statut
+    // d'insertion) ; main (2.54.0) la bornait par `relevantDeLaCip`
+    // (utils/contrat-insertion.js), la règle établie contre les états ASP
+    // réels et partagée avec le module Effectifs ETP. Les deux coexistent : la
+    // file active reste LA requête, et la garde par contrat est appliquée par-
+    // dessus, EN JAVASCRIPT, pour que la règle reste à un seul endroit.
+    //
+    // `cddi_derogation_motif` sert cette garde (CDI « Inclusion » acté par
+    // dérogation). Posée par une migration récente : sur une base qui ne l'a
+    // pas, on rejoue SANS elle plutôt que de renvoyer un 500.
+    const selectListe = (avecDerogation) => `
       SELECT e.id, e.first_name, e.last_name, e.is_active,
         t.name as team_name, e.position, e.contract_type, e.contract_start, e.contract_end,
         e.insertion_status, e.insertion_start_date, e.insertion_end_date,
+        ${avecDerogation ? 'e.cddi_derogation_motif' : 'NULL::varchar AS cddi_derogation_motif'},
         COALESCE(e.parcours_num, 1) AS parcours_num,
         e.cip_referent_user_id,
         NULLIF(TRIM(CONCAT(UPPER(u.last_name), ' ', u.first_name)), '') AS cip_referent_nom,
@@ -307,7 +323,49 @@ router.get('/', async (req, res) => {
       ) der ON true
       WHERE ${perimetre}${filtreMine}
       ORDER BY UPPER(e.last_name), UPPER(e.first_name)
-    `, params);
+    `;
+    let result;
+    try {
+      result = await pool.query(selectListe(true), params);
+    } catch (err) {
+      if (err.code !== '42703') throw err;
+      console.warn('[INSERTION] colonne cddi_derogation_motif absente — liste servie sans elle');
+      result = await pool.query(selectListe(false), params);
+    }
+
+    // Garde par contrat (`relevantDeLaCip`). Toute ligne portant un parcours
+    // (statut ≠ 'none') passe d'office : les contrats ne sont donc LUS que
+    // s'il reste une ligne à trancher, et leur lecture DÉGRADE — table absente
+    // ou illisible → repli sur le type et le poste portés par la fiche. Une
+    // requête en échec ne doit pas vider l'espace CIP : un écran vide se lit
+    // « plus personne en insertion ».
+    let contratsParEmploye = new Map();
+    if (result.rows.some((e) => !hasParcours(e))) {
+      try {
+        const ctr = await pool.query(
+          'SELECT employee_id, contract_type, position_title FROM employee_contracts WHERE employee_id = ANY($1::int[])',
+          [result.rows.filter((e) => !hasParcours(e)).map((e) => Number(e.id))]
+        );
+        for (const c of ctr.rows) {
+          if (!contratsParEmploye.has(c.employee_id)) contratsParEmploye.set(c.employee_id, []);
+          contratsParEmploye.get(c.employee_id).push(c);
+        }
+      } catch (err) {
+        console.warn(`[INSERTION] contrats non lus (${err.code || '?'}) : ${err.message} — repli sur la fiche`);
+        contratsParEmploye = null;
+      }
+    }
+    let ecartes = 0;
+    const lignesRetenues = result.rows.filter((e) => {
+      const contrats = contratsParEmploye ? (contratsParEmploye.get(e.id) || []) : [];
+      // Repli : aucun contrat historisé (ou lecture en échec) → la fiche fait foi.
+      const source = contrats.length > 0
+        ? contrats
+        : [{ contract_type: e.contract_type, position_title: e.position }];
+      const garde = relevantDeLaCip(e, source);
+      if (!garde) ecartes += 1;
+      return garde;
+    });
 
     // Pastille de risque — chargée une seule fois pour toute la cohorte, et
     // dégradée en silence si elle échoue (une liste sans pastille reste une
@@ -315,7 +373,7 @@ router.get('/', async (req, res) => {
     const risques = await niveauxRisqueCohorte({ db: pool, baseRole, userId: req.user && req.user.id, mine, tous });
 
     const now = new Date();
-    const employees = result.rows.map(e => {
+    const employees = lignesRetenues.map(e => {
       let urgency = null;
       if (e.contract_end_date) {
         const days = Math.round((new Date(e.contract_end_date) - now) / 86400000);
@@ -354,10 +412,11 @@ router.get('/', async (req, res) => {
         risque: risques.get(Number(e.id)) || null,
       };
       delete ligne.prochain_rdv_jour; delete ligne.prochain_rdv_heure; delete ligne.prochain_rdv_type;
+      delete ligne.cddi_derogation_motif; // sert la garde, pas l'écran
       return ligne;
     });
 
-    console.log(`[INSERTION] GET / → ${employees.length} parcours (${tous ? 'tous' : 'file active'})`);
+    console.log(`[INSERTION] GET / → ${employees.length} parcours (${tous ? 'tous' : 'file active'}, ${ecartes} hors périmètre contrat écartés)`);
     res.json(employees);
   } catch (err) {
     console.error('[INSERTION] Erreur liste :', err.message, err.detail || '');
@@ -3173,9 +3232,12 @@ router.post('/renouvellements/:milestoneId/lien-eti', [
         code: 'TYPE_INVALIDE',
       });
     }
-    // Même garde d'appartenance que l'écriture du formulaire : un MANAGER ne
+    // Même garde d'appartenance que l'écriture du formulaire : un encadrant ne
     // fabrique un lien que pour un salarié dont il est l'encadrant référent.
-    if (baseRoleOf(req) === 'MANAGER' && !(await managerOwnsEmployee(pool, ms.employee_id, req.user.id))) {
+    // 25/09/2026 (fusion de main) : le rôle MANAGER visé ici a été retiré le
+    // 10/09/2026 et le routeur parent n'admet plus qu'ADMIN/RH — garde
+    // INATTEIGNABLE, conservée et élargie à tout rôle non ADMIN/RH (fail-closed).
+    if (!['ADMIN', 'RH'].includes(baseRoleOf(req)) && !(await managerOwnsEmployee(pool, ms.employee_id, req.user.id))) {
       return res.status(403).json({
         error: "Accès refusé : vous n'êtes pas l'encadrant référent de ce salarié.",
         code: 'renouvellement_non_autorise',
@@ -4548,7 +4610,7 @@ router.get('/competences/:employeeId', [
 
 // POST /api/insertion/competences — créer une évaluation + ses scores
 // (ADMIN/RH/MANAGER — l'ETI est un évaluateur légitime). Transactionnel.
-router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.post('/competences', authorize('ADMIN', 'RH'), [
   body('employee_id').isInt().withMessage('ID employé requis'),
   body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),
   body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide (brouillon/valide)'),
@@ -4598,7 +4660,7 @@ router.post('/competences', authorize('ADMIN', 'RH', 'MANAGER'), [
 
 // PUT /api/insertion/competences/:id — modifier l'évaluation (statut,
 // validations…) et REMPLACER ses scores si `scores` est fourni (ADMIN/RH/MANAGER).
-router.put('/competences/:id', authorize('ADMIN', 'RH', 'MANAGER'), [
+router.put('/competences/:id', authorize('ADMIN', 'RH'), [
   param('id').isInt().withMessage('ID invalide'),
   body('statut').optional({ nullable: true }).isIn(['brouillon', 'valide']).withMessage('statut invalide'),
   body('filiere').optional({ nullable: true }).isIn(COMPETENCE_FILIERES).withMessage('filiere invalide'),

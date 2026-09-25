@@ -41,8 +41,11 @@ const request = require('supertest');
 
 let app;
 const adminToken = jwt.sign({ id: 1, username: 'admin', role: 'ADMIN', first_name: 'A', last_name: 'D' }, JWT_SECRET, { expiresIn: '1h' });
-const managerToken = jwt.sign({ id: 2, username: 'manager', role: 'MANAGER', first_name: 'M', last_name: 'G' }, JWT_SECRET, { expiresIn: '1h' });
-const financeToken = jwt.sign({ id: 3, username: 'finance', role: 'FINANCE', first_name: 'F', last_name: 'N' }, JWT_SECRET, { expiresIn: '1h' });
+// Les rôles MANAGER et FINANCE ont été RETIRÉS le 10/09/2026 : le module
+// Finance est réservé à l'ADMIN. On garde donc deux témoins — un rôle qui
+// existe encore mais n'a rien à faire ici, et un rôle qui n'existe plus.
+const autreRoleToken = jwt.sign({ id: 2, username: 'rh', role: 'RH', first_name: 'R', last_name: 'H' }, JWT_SECRET, { expiresIn: '1h' });
+const roleRetireToken = jwt.sign({ id: 3, username: 'ancien', role: 'FINANCE', first_name: 'F', last_name: 'N' }, JWT_SECRET, { expiresIn: '1h' });
 
 beforeAll(() => {
   app = express();
@@ -284,13 +287,13 @@ describe('CONTRAT PUT /finance/gl/:year/solde-initial (ADMIN uniquement)', () =>
     expect(res.status).toBe(400);
   });
 
-  it('MANAGER → 403 (authorize ADMIN au niveau route)', async () => {
-    const res = await putAs(managerToken)('/api/finance/gl/2026/solde-initial', { montant: '100' });
+  it('un autre rôle (RH) → 403 (authorize ADMIN au niveau route)', async () => {
+    const res = await putAs(autreRoleToken)('/api/finance/gl/2026/solde-initial', { montant: '100' });
     expect(res.status).toBe(403);
   });
 
-  it('FINANCE (lecture seule) → 403 (garde par méthode du routeur)', async () => {
-    const res = await putAs(financeToken)('/api/finance/gl/2026/solde-initial', { montant: '100' });
+  it('un rôle RETIRÉ (FINANCE) → 403 : il n’ouvre plus rien', async () => {
+    const res = await putAs(roleRetireToken)('/api/finance/gl/2026/solde-initial', { montant: '100' });
     expect(res.status).toBe(403);
   });
 });

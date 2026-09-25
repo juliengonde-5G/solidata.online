@@ -79,7 +79,7 @@ router.post('/unsubscribe',
 
 // POST /api/push/test — Envoyer une notification test (ADMIN / MANAGER)
 router.post('/test',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const results = await sendPushToUser(req.user.id, {

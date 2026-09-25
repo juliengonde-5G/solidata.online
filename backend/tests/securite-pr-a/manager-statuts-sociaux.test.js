@@ -14,6 +14,21 @@
 //         postérieure au masquage de la ligne de diagnostic ;
 //   C-03  le TEXTE de l'alerte « référent non déterminé », qui énonçait le
 //         statut en toutes lettres sur l'écran d'un salarié.
+//
+// RÉCONCILIÉS LE 15/09, après la fusion de la PR A et du retrait des profils
+// MANAGER/QHSE/FINANCE (2.52.0). Le sujet de ces tests — un rôle qui ATTEINT le
+// module insertion sans être ADMIN/RH — N'EXISTE PLUS : `routes/insertion/
+// index.js` impose `authorize('ADMIN','RH')`, et le MANAGER est refusé AVANT
+// tout handler. Les scénarios et les jeux de données sont conservés tels quels ;
+// l'attente devient le refus à la porte, qui est la forme FORTE de la même
+// garantie : là où la PR A prouvait « il entre mais ne voit pas », on prouve
+// désormais « il n'entre pas, et rien n'est même lu ».
+//
+// CES TESTS RESTENT LE FILET de la surface : si quelqu'un rouvrait un jour ces
+// routes à un autre rôle — par un `authorize` élargi ou par un accord de module
+// (2.56.0) — sans avoir d'abord inversé les masquages en « masquer SAUF
+// ADMIN/RH », ils échoueraient. C'est exactement la raison pour laquelle le
+// module `rh` est aujourd'hui NON ACCORDABLE (utils/module-routes.js).
 // ═══════════════════════════════════════════════════════════════════════════
 const jwt = require('jsonwebtoken');
 
@@ -82,22 +97,15 @@ describe('C-01 — critères d\'éligibilité servis au MANAGER', () => {
     });
   });
 
-  test('CORRIGÉ — le MANAGER ne reçoit ni « Bénéficiaire du RSA », ni « RQTH », ni « Sortant de détention »', async () => {
+  test('un rôle hors ADMIN/RH est refusé À LA PORTE — aucun critère ne sort', async () => {
     const res = await get('/api/insertion/cadre/5', 'MANAGER');
-    expect(res.status).toBe(200);
-    // La protection annoncée :
-    expect(Object.keys(res.body)).not.toContain('statuts');
-    // …et la porte d'à côté, désormais fermée : plus AUCUNE liste de critères.
-    expect(res.body.eligibilite.criteres).toBeUndefined();
+    // 403 et non 200 : le module ne s'ouvre plus qu'à ADMIN/RH (2.52.0).
+    expect(res.status).toBe(403);
     const brut = JSON.stringify(res.body);
     for (const interdit of ['brsa', 'rqth', 'sortant_detention',
       'Bénéficiaire du RSA', 'Reconnaissance RQTH', 'Sortant de détention']) {
       expect(brut).not.toContain(interdit);
     }
-    // Ce qu'il conserve : la PREUVE que l'éligibilité a été vérifiée.
-    expect(res.body.eligibilite.verifiee_le).toBeDefined();
-    // M-06 — le critère art. 10 ne compte pas : 3 en base, 2 annoncés.
-    expect(res.body.eligibilite.nb_criteres).toBe(2);
   });
 
   test('CORRIGÉ — cette lecture reste non journalisée : elle ne sert plus rien de sensible', async () => {
@@ -106,13 +114,14 @@ describe('C-01 — critères d\'éligibilité servis au MANAGER', () => {
     expect(journaux).toHaveLength(0);
   });
 
-  test('CORRIGÉ — les statuts et les pièces ne sont même pas LUS pour un MANAGER (m-10)', async () => {
+  test('m-10 — rien n’est LU en base : le refus précède toute requête', async () => {
     await get('/api/insertion/cadre/5', 'MANAGER');
     const sqls = mockQuery.mock.calls.map(([s]) => String(s));
+    // Plus fort que le masquage d'origine : la donnée ne traverse même pas le
+    // serveur, puisqu'aucune lecture métier n'est émise.
     expect(sqls.some((q) => /FROM insertion_pieces/.test(q))).toBe(false);
-    const emp = sqls.find((q) => /LEFT JOIN prescripteur_orgas/.test(q));
-    expect(emp).not.toContain('e.brsa');
-    expect(emp).not.toContain('e.france_travail_id');
+    expect(sqls.some((q) => /LEFT JOIN prescripteur_orgas/.test(q))).toBe(false);
+    expect(sqls.some((q) => /FROM employee_eligibilite/.test(q))).toBe(false);
   });
 });
 
@@ -144,16 +153,12 @@ describe('C-02 — suggestions FSE+ dérivées de BRSA servies au MANAGER', () =
     });
   });
 
-  test('CORRIGÉ — ni « bénéficiaire du RSA » ni l\'identifiant France Travail n\'atteignent le MANAGER', async () => {
+  test('ni « bénéficiaire du RSA » ni l\'identifiant France Travail ne sortent', async () => {
     const res = await get('/api/insertion/diagnostic/5', 'MANAGER');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     const brut = JSON.stringify(res.body);
-    // Le masquage fait son travail sur les champs qu'il connaît :
     expect(Object.keys(res.body)).not.toContain('frein_judiciaire');
     expect(Object.keys(res.body)).not.toContain('frein_sante_detail');
-    // …et le moteur de suggestions n'est plus ALIMENTÉ : rien de dérivé ne fuit.
-    expect(res.body.suggestions_fse).toEqual({});
-    expect(res.body.fse_completude).toBeNull();
     expect(brut).not.toContain('bénéficiaire du RSA');
     expect(brut).not.toContain('France Travail');
   });
@@ -209,17 +214,15 @@ describe('C-04 — l\'alerte « référent non déterminé » énonce le statut 
     });
   });
 
-  test('CORRIGÉ — le MANAGER ne reçoit plus l\'alerte, et le statut n\'est pas lu pour lui', async () => {
+  test('l\'alerte n\'est pas servie, et le statut n\'est pas lu du tout', async () => {
     const res = await get('/api/insertion/alertes/5', 'MANAGER');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     const textes = JSON.stringify(res.body);
     expect(textes).not.toContain('bénéficiaire du RSA');
     expect(textes).not.toContain('referent_non_determine');
-    // Refus AVANT lecture : la colonne n'est pas sélectionnée.
+    // Refus AVANT toute lecture : la requête n'est pas même émise.
     const emp = mockQuery.mock.calls.map(([s]) => String(s)).find((q) => /FROM employees e WHERE e\.id = \$1/.test(q));
-    expect(emp).toBeDefined();
-    expect(emp).toContain('NULL::boolean AS brsa');
-    expect(emp).not.toMatch(/\be\.brsa\b/);
+    expect(emp).toBeUndefined();
   });
 
   test('CORRIGÉ — ADMIN/RH reçoivent l\'alerte, mais son texte ne NOMME plus le statut', async () => {

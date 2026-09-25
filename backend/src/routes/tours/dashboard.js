@@ -172,7 +172,7 @@ router.get('/dashboard/summary', async (req, res) => {
 // le dispatch automatique J-1 (Niveau 3.1) — utile pour les tests ou
 // quand le scheduler n'est pas actif.
 router.post('/dashboard/dispatch-next-day',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   async (req, res) => {
     try {
       const result = await generateNextDayDispatchProposals();

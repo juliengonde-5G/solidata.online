@@ -26,7 +26,9 @@
  *     (correctif de sécurité du 13/09, constat C-01). Il reçoit la date de
  *     vérification, la source et un nombre de critères.
  *
- * Habilitations : le routeur parent impose ADMIN/RH/MANAGER. Toute ÉCRITURE est
+ * Habilitations : le routeur parent impose ADMIN/RH (MANAGER retiré sur main le
+ * 10/09/2026 — fusion du 25/09/2026 : la projection MANAGER ci-dessus est une
+ * garde morte, conservée). Toute ÉCRITURE est
  * restreinte ici à ADMIN/RH. Toute lecture ADMIN/RH est journalisée au registre
  * RGPD ; la trace dit QUI a ouvert le dossier de QUI, jamais ce qu'il contient.
  */

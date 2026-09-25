@@ -6,8 +6,10 @@
 // est écrit.
 //
 // Ce que ces tests tiennent :
-//   1. HABILITATION — le MANAGER LIT (le document ne porte aucune projection
-//      nominative), mais n'ENREGISTRE pas : la génération produit une pièce
+//   1. HABILITATION — le MANAGER lisait (le document ne porte aucune projection
+//      nominative) ; son rôle a été RETIRÉ sur main le 10/09/2026 (fusion du
+//      25/09/2026) : il est désormais refusé en 403 en lecture aussi, et
+//      n'ENREGISTRE pas : la génération produit une pièce
 //      datée qui engage la structure vis-à-vis de son financeur. Le refus tombe
 //      AVANT toute requête : `pool.query` n'est pas appelé une seule fois.
 //   2. EXPORT VIDE — 409 `EXPORT_VIDE` motivé, jamais un fichier vide, et
@@ -137,10 +139,15 @@ describe('1. habilitations', () => {
     }
   });
 
-  it('le MANAGER LIT la synthèse : aucune projection nominative n’existe dans ce document', async () => {
+  // Rôle MANAGER retiré (main, 10/09/2026) : la lecture que le contrat de la
+  // PR D lui ouvrait n'est plus atteignable — le routeur parent refuse en 403
+  // AVANT toute composition.
+  it('le MANAGER (rôle retiré) ne lit plus la synthèse : 403, aucune composition', async () => {
+    mockQuery.mockClear();
     const res = await get('/api/insertion/reporting/dialogue-gestion?annee=2026', 'MANAGER');
-    expect(res.status).toBe(200);
-    expect(res.body.blocs['2_publics_entree']).toBeTruthy();
+    expect(res.status).toBe(403);
+    expect(res.body.blocs).toBeUndefined();
+    expect(mockQuery.mock.calls.some(([t]) => /INSERT INTO rgpd_audit_log/.test(String(t)))).toBe(false);
   });
 
   it('le MANAGER n’ENREGISTRE pas — refus AVANT toute requête', async () => {
@@ -187,8 +194,11 @@ describe('2. aperçu (GET) — journal BLOQUANT (m-05), document non nominatif',
   });
 
   it('aucune clé nominative dans la réponse, quel que soit le rôle', async () => {
-    for (const role of ['ADMIN', 'MANAGER']) {
+    // (MANAGER retiré de la boucle : un 403 ne porte aucune clé, l'y laisser
+    // ferait passer le test au vert sans rien démontrer.)
+    for (const role of ['ADMIN', 'RH']) {
       const res = await get('/api/insertion/reporting/dialogue-gestion?annee=2026', role);
+      expect(res.status).toBe(200);
       const brut = JSON.stringify(res.body);
       for (const cle of CLES_INTERDITES) expect(brut).not.toMatch(new RegExp(`"${cle}"`));
       expect(brut).not.toMatch(/PREVOST|Sandrine|DURAND|Amel|MARTIN/);
@@ -401,10 +411,10 @@ describe('7. historique et rejeu d’un snapshot', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/MARTIN/);
   });
 
-  it('CORRECTIF m-07 — au MANAGER, l’historique ne rend que le RÔLE du générateur', async () => {
-    // Le document lui-même ne porte que le rôle (« l'autorité veut savoir à
-    // quel titre il a été produit, pas recevoir un répertoire du personnel ») :
-    // son historique n'a pas de raison d'en dire plus que la pièce qu'il retrace.
+  // CORRECTIF m-07 — au MANAGER, l'historique ne rendait que le RÔLE du
+  // générateur. Rôle retiré (main, 10/09/2026) : la projection reste dans la
+  // route (garde morte), ce qui est observable est le refus.
+  it('CORRECTIF m-07 — le MANAGER (rôle retiré) n’obtient plus l’historique : 403, aucun nom', async () => {
     branche({
       historique: [{
         id: 12, annee: 2026, trimestre: null, genere_le: '2026-01-15T09:00:00Z',
@@ -412,9 +422,8 @@ describe('7. historique et rejeu d’un snapshot', () => {
       }],
     });
     const res = await get('/api/insertion/reporting/dialogue-gestion/historique', 'MANAGER');
-    expect(res.status).toBe(200);
-    expect('genere_par' in res.body[0]).toBe(false);
-    expect(res.body[0].genere_par_role).toBe('RH');
+    expect(res.status).toBe(403);
+    expect(Array.isArray(res.body)).toBe(false);
     expect(JSON.stringify(res.body)).not.toMatch(/Claire/);
   });
 

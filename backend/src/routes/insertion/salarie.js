@@ -23,7 +23,8 @@
  *     côté et absent de l'autre serait pire que pas de consentement du tout.
  *
  * ═══ HABILITATIONS — ADMIN/RH STRICT ══════════════════════════════════════
- * Le routeur parent impose ADMIN/RH/MANAGER ; celui-ci resserre dès sa première
+ * Le routeur parent impose ADMIN/RH (MANAGER retiré sur main le 10/09/2026 —
+ * fusion du 25/09/2026) ; celui-ci resserre dès sa première
  * ligne, AVANT tout validateur et donc avant toute lecture en base. Ce n'est pas
  * de la prudence de principe : « Mon parcours » porte le référent unique (donc
  * l'orientation sociale de la personne) et ses heures hebdomadaires, le

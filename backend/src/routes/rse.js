@@ -58,8 +58,8 @@ router.use(autoLogActivity('rse'));
 // l'écriture inclut donc MANAGER. Ce module ne manipule QUE des agrégats non
 // nominatifs (aucune donnée de parcours) ; la visibilité fine (REF_RSE oui,
 // autres MANAGER non) se règle dans la matrice /admin/permissions (module 'rse').
-const READ = authorize('ADMIN', 'MANAGER', 'RH');
-const WRITE = authorize('ADMIN', 'RH', 'MANAGER');
+const READ = authorize('ADMIN', 'RH');
+const WRITE = authorize('ADMIN', 'RH');
 
 const STATUTS_ACTION = ['a_faire', 'en_cours', 'realise', 'abandonne'];
 const PRIORITES = ['haute', 'moyenne', 'basse'];

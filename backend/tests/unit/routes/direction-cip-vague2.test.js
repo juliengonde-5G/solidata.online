@@ -236,11 +236,16 @@ describe('60d — toolsForRole (RGPD tool-gating)', () => {
     expect(n).not.toContain('resume_finance');
     expect(n).not.toContain('ventes_synthese');
   });
-  it('FINANCE : finance oui, insertion/ventes non', () => {
+  // Le rôle FINANCE a été RETIRÉ le 10/09/2026 : ses outils sont revenus à
+  // l'ADMIN, et le jeton qui le porte encore n'ouvre plus aucun outil réservé.
+  it('FINANCE (rôle RETIRÉ) : plus aucun outil réservé', () => {
     const n = names('FINANCE');
-    expect(n).toContain('resume_finance');
+    expect(n).not.toContain('resume_finance');
     expect(n).not.toContain('kpis_insertion');
     expect(n).not.toContain('ventes_synthese');
+  });
+  it('ADMIN : la synthèse financière lui revient', () => {
+    expect(names('ADMIN')).toContain('resume_finance');
   });
   it('RESP_BTQ : ventes oui, finance/insertion non', () => {
     const n = names('RESP_BTQ');
@@ -258,7 +263,7 @@ describe('60d — toolsForRole (RGPD tool-gating)', () => {
   it('la table de rôles couvre les 3 outils étendus historiques', () => {
     expect(Object.keys(EXTENDED_TOOL_ROLES)).toEqual(
       expect.arrayContaining(['kpis_insertion', 'resume_finance', 'ventes_synthese']));
-    expect(EXTENDED_TOOL_ROLES.resume_finance).toContain('FINANCE');
+    expect(EXTENDED_TOOL_ROLES.resume_finance).toContain('ADMIN');
     expect(EXTENDED_TOOL_ROLES.kpis_insertion).toContain('RH');
     expect(EXTENDED_TOOL_ROLES.ventes_synthese).toContain('RESP_BTQ');
   });

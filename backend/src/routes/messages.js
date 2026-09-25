@@ -61,7 +61,7 @@ const CONTACTS_MAX = 20;
 // DPO y figurent par défaut parce que ces deux rôles peuvent être tenus par un
 // prestataire extérieur (cabinet comptable, DPO externalisé) ; la Direction
 // peut les en retirer sans toucher au code.
-const ROLES_RESTREINTS_DEFAUT = ['AUTORITE', 'FINANCE', 'DPO'];
+const ROLES_RESTREINTS_DEFAUT = ['AUTORITE', 'DPO'];
 const RESTREINTS_TTL_MS = 60000;
 let restreintsCache = { valeur: null, expire: 0 };
 
@@ -443,7 +443,7 @@ router.post('/conversations', async (req, res) => {
           code: 'DESTINATAIRE_COMPTE_PARTAGE',
         });
       }
-      if (restreint && !['ADMIN', 'MANAGER'].includes(u.rows[0].base_role)) {
+      if (restreint && !['ADMIN'].includes(u.rows[0].base_role)) {
         // ANTI-ÉNUMÉRATION (correctif 27/08) — depuis un jeton VÉHICULE, ce
         // refus était distinct du 404 « identifiant inconnu » : un porteur du
         // lien chauffeur (la crédential la plus exposée du parc — raccourci
@@ -902,7 +902,7 @@ router.get('/contacts', async (req, res) => {
         WHERE u.is_active = true
           AND u.username <> 'chauffeur'
           AND ($1::int IS NULL OR u.id <> $1)
-          AND ($3::boolean = false OR COALESCE(cr.base_role, u.role) IN ('ADMIN', 'MANAGER'))
+          AND ($3::boolean = false OR COALESCE(cr.base_role, u.role) = 'ADMIN')
           AND ($2::text = '' OR ${SQL_REPLI("COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '') || ' ' || u.username")} LIKE '%' || $2::text || '%')
         ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.username
         LIMIT $4`,

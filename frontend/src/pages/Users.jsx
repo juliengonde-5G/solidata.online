@@ -4,7 +4,12 @@ import Layout from '../components/Layout';
 import { DataTable, StatusBadge, LoadingSpinner, Modal, PageHeader } from '../components';
 import api from '../services/api';
 
-const ROLE_LABELS = { ADMIN: 'Administrateur', MANAGER: 'Manager', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique', DPO: 'DPO (protection des données)', FINANCE: 'Finance (consultation)', QHSE: 'QHSE' };
+const ROLE_LABELS = { ADMIN: 'Administrateur', RH: 'Ressources Humaines', COLLABORATEUR: 'Collaborateur', AUTORITE: 'Autorité', RESP_BTQ: 'Responsable Boutique', DPO: 'DPO (protection des données)', PCM: 'Praticien PCM', COMMUNICATION: 'Chargé de communication' };
+
+// Rôles RETIRÉS le 10/09/2026 (demande client). Un compte peut encore les
+// porter : le serveur ne les reconnaît plus, ce compte n'a donc AUCUN accès.
+// On ne le réaffecte pas d'office — on le NOMME, pour qu'un ADMIN tranche.
+const ROLES_RETIRES = { MANAGER: 'Manager', QHSE: 'QHSE', FINANCE: 'Finance (consultation)' };
 
 const BUILTIN_ROLE_OPTIONS = Object.entries(ROLE_LABELS).map(([key, label]) => ({ key, label, builtin: true }));
 
@@ -15,7 +20,8 @@ export default function Users() {
   const [form, setForm] = useState({ username: '', email: '', password: '', role: 'COLLABORATEUR', first_name: '', last_name: '' });
   // Rôles assignables : intégrés + personnalisés (créés dans « Habilitations »).
   const [roleOptions, setRoleOptions] = useState(BUILTIN_ROLE_OPTIONS);
-  const roleLabel = (key) => roleOptions.find((r) => r.key === key)?.label || ROLE_LABELS[key] || key;
+  const roleLabel = (key) => roleOptions.find((r) => r.key === key)?.label || ROLE_LABELS[key] || ROLES_RETIRES[key] || key;
+  const roleRetire = (key) => Object.prototype.hasOwnProperty.call(ROLES_RETIRES, key);
 
   // Édition
   const [editUser, setEditUser] = useState(null);
@@ -134,7 +140,11 @@ export default function Users() {
       ),
     },
     { key: 'email', label: 'Email', sortable: true, render: (u) => u.email || '—' },
-    { key: 'role', label: 'Rôle', sortable: true, render: (u) => <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">{roleLabel(u.role)}</span> },
+    { key: 'role', label: 'Rôle', sortable: true, render: (u) => (
+      roleRetire(u.role)
+        ? <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800 font-medium" title="Ce profil d'habilitation a été supprimé : ce compte n'a plus aucun accès tant qu'un nouveau rôle ne lui est pas attribué.">{roleLabel(u.role)} — rôle supprimé, à réaffecter</span>
+        : <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-medium">{roleLabel(u.role)}</span>
+    ) },
     { key: 'is_active', label: 'Statut', sortable: true, render: (u) => <StatusBadge status={u.is_active ? 'active' : 'inactive'} size="sm" /> },
     {
       key: 'mfa',

@@ -1,0 +1,1923 @@
+{
+ "_source": "Catégories produits.xlsx (client, 23/09/2026) — normalisé : X -> Sans Genre/Sans Saison, libellés d'âge uniformisés (C3), Vestes Homme VAK -> Textiles (C1). Codes hexadécimaux FIGÉS : ne jamais réattribuer un code déjà utilisé.",
+ "gammes": [
+  {
+   "valeur": "EXTRA",
+   "code": 1,
+   "definition": "Premium"
+  },
+  {
+   "valeur": "BTQ",
+   "code": 2,
+   "definition": "Boutique"
+  },
+  {
+   "valeur": "VAK",
+   "code": 3,
+   "definition": "Vente au kilo"
+  },
+  {
+   "valeur": "CHIF",
+   "code": 4,
+   "definition": "Chiffons"
+  },
+  {
+   "valeur": "UP",
+   "code": 5,
+   "definition": "Upcycling"
+  }
+ ],
+ "categories": [
+  {
+   "valeur": "Textiles",
+   "code": 1
+  },
+  {
+   "valeur": "Chaussures",
+   "code": 2
+  },
+  {
+   "valeur": "Maroquinerie",
+   "code": 3
+  },
+  {
+   "valeur": "Chiffons",
+   "code": 4
+  },
+  {
+   "valeur": "Couettes et coussins",
+   "code": 5
+  },
+  {
+   "valeur": "Linge",
+   "code": 6
+  },
+  {
+   "valeur": "Jouets",
+   "code": 7
+  },
+  {
+   "valeur": "Rideaux",
+   "code": 8
+  },
+  {
+   "valeur": "Upcycling",
+   "code": 9
+  }
+ ],
+ "genres": [
+  {
+   "valeur": "Sans Genre",
+   "code": 0
+  },
+  {
+   "valeur": "Adulte Homme",
+   "code": 1
+  },
+  {
+   "valeur": "Adulte Femme",
+   "code": 2
+  },
+  {
+   "valeur": "Adulte Mixte",
+   "code": 3
+  },
+  {
+   "valeur": "Enfant Garçon",
+   "code": 4
+  },
+  {
+   "valeur": "Enfant Fille",
+   "code": 5
+  },
+  {
+   "valeur": "Enfant Mixte",
+   "code": 6
+  },
+  {
+   "valeur": "Enfant Garçon 0-2 ans",
+   "code": 7
+  },
+  {
+   "valeur": "Enfant Fille 0-2 ans",
+   "code": 8
+  },
+  {
+   "valeur": "Enfant Mixte 0-2 ans",
+   "code": 9
+  },
+  {
+   "valeur": "Enfant Garçon 3-9 ans",
+   "code": 10
+  },
+  {
+   "valeur": "Enfant Fille 3-9 ans",
+   "code": 11
+  },
+  {
+   "valeur": "Enfant Garçon 10 ans et +",
+   "code": 12
+  },
+  {
+   "valeur": "Enfant Fille 10 ans et +",
+   "code": 13
+  }
+ ],
+ "saisons": [
+  {
+   "valeur": "Sans Saison",
+   "code": 0
+  },
+  {
+   "valeur": "Été",
+   "code": 1
+  },
+  {
+   "valeur": "Hiver",
+   "code": 2
+  }
+ ],
+ "produits": [
+  {
+   "nom": "Baskets",
+   "code": 1
+  },
+  {
+   "nom": "Bleus de travail",
+   "code": 2
+  },
+  {
+   "nom": "Blouses et tabliers",
+   "code": 3
+  },
+  {
+   "nom": "Bobs, casquettes et chapeaux",
+   "code": 4
+  },
+  {
+   "nom": "Body, sous-vêtements et débardeurs",
+   "code": 5
+  },
+  {
+   "nom": "Bottes / Bottines",
+   "code": 6
+  },
+  {
+   "nom": "Bottes caoutchouc",
+   "code": 7
+  },
+  {
+   "nom": "Caracos / Débardeurs",
+   "code": 8
+  },
+  {
+   "nom": "Cartables",
+   "code": 9
+  },
+  {
+   "nom": "Chaussons",
+   "code": 10
+  },
+  {
+   "nom": "Chaussures",
+   "code": 11
+  },
+  {
+   "nom": "Chaussures de sécurité",
+   "code": 12
+  },
+  {
+   "nom": "Chaussures de neige",
+   "code": 13
+  },
+  {
+   "nom": "Chemises manches courtes",
+   "code": 14
+  },
+  {
+   "nom": "Chemises manches longues",
+   "code": 15
+  },
+  {
+   "nom": "Chemisiers manches courtes",
+   "code": 16
+  },
+  {
+   "nom": "Chemisiers manches longues",
+   "code": 17
+  },
+  {
+   "nom": "Chiffons blancs",
+   "code": 18
+  },
+  {
+   "nom": "Chiffons couleurs",
+   "code": 19
+  },
+  {
+   "nom": "Chiffons éponges",
+   "code": 20
+  },
+  {
+   "nom": "Collants, chaussettes",
+   "code": 21
+  },
+  {
+   "nom": "Combi / Salopettes",
+   "code": 22
+  },
+  {
+   "nom": "Coussins et couvertures",
+   "code": 23
+  },
+  {
+   "nom": "Cravates",
+   "code": 24
+  },
+  {
+   "nom": "Déguisements",
+   "code": 25
+  },
+  {
+   "nom": "Dentelle",
+   "code": 26
+  },
+  {
+   "nom": "Djellabas / Wax / Vêtements traditionnels",
+   "code": 27
+  },
+  {
+   "nom": "Draps, taies, housses de couette",
+   "code": 28
+  },
+  {
+   "nom": "EXTRA Bas",
+   "code": 29
+  },
+  {
+   "nom": "EXTRA Haut",
+   "code": 30
+  },
+  {
+   "nom": "Fêtes et cérémonies",
+   "code": 31
+  },
+  {
+   "nom": "Foulards",
+   "code": 32
+  },
+  {
+   "nom": "Fourrure",
+   "code": 33
+  },
+  {
+   "nom": "Gants, bonnets, écharpes",
+   "code": 34
+  },
+  {
+   "nom": "Gigoteuses, turbulettes",
+   "code": 35
+  },
+  {
+   "nom": "Gilets",
+   "code": 36
+  },
+  {
+   "nom": "Grandes tailles",
+   "code": 37
+  },
+  {
+   "nom": "Grosses pièces",
+   "code": 38
+  },
+  {
+   "nom": "Imperméables",
+   "code": 39
+  },
+  {
+   "nom": "Imprimés animaliers",
+   "code": 40
+  },
+  {
+   "nom": "Jeans",
+   "code": 41
+  },
+  {
+   "nom": "Jupes",
+   "code": 42
+  },
+  {
+   "nom": "Jupes courtes",
+   "code": 43
+  },
+  {
+   "nom": "Jupes longues",
+   "code": 44
+  },
+  {
+   "nom": "Layette Fille",
+   "code": 45
+  },
+  {
+   "nom": "Layette Garcon",
+   "code": 46
+  },
+  {
+   "nom": "Leggings",
+   "code": 47
+  },
+  {
+   "nom": "Linge de maison",
+   "code": 48
+  },
+  {
+   "nom": "Maillots de bain",
+   "code": 49
+  },
+  {
+   "nom": "Maroquinerie / Accessoires",
+   "code": 50
+  },
+  {
+   "nom": "Maroquinerie / Accessoires / Sac à main",
+   "code": 51
+  },
+  {
+   "nom": "Pantalons",
+   "code": 52
+  },
+  {
+   "nom": "Paréos",
+   "code": 53
+  },
+  {
+   "nom": "Peluches",
+   "code": 54
+  },
+  {
+   "nom": "Polaires",
+   "code": 55
+  },
+  {
+   "nom": "Polos manches courtes",
+   "code": 56
+  },
+  {
+   "nom": "Polos manches longues",
+   "code": 57
+  },
+  {
+   "nom": "Pulls - Sous pulls",
+   "code": 58
+  },
+  {
+   "nom": "Rideaux",
+   "code": 59
+  },
+  {
+   "nom": "Robes",
+   "code": 60
+  },
+  {
+   "nom": "Robes de mariée",
+   "code": 61
+  },
+  {
+   "nom": "Sacs à main",
+   "code": 62
+  },
+  {
+   "nom": "Sacs à dos",
+   "code": 63
+  },
+  {
+   "nom": "Shorts, bermudas, combi-short",
+   "code": 64
+  },
+  {
+   "nom": "Sorties de bain",
+   "code": 65
+  },
+  {
+   "nom": "Sous-vêtements",
+   "code": 66
+  },
+  {
+   "nom": "Sport",
+   "code": 67
+  },
+  {
+   "nom": "Sweats",
+   "code": 68
+  },
+  {
+   "nom": "Tee-shirts",
+   "code": 69
+  },
+  {
+   "nom": "Tissus",
+   "code": 70
+  },
+  {
+   "nom": "Upcycling",
+   "code": 71
+  },
+  {
+   "nom": "Vestes",
+   "code": 72
+  },
+  {
+   "nom": "Vestes Cuir",
+   "code": 73
+  },
+  {
+   "nom": "Vestes en jeans",
+   "code": 74
+  },
+  {
+   "nom": "Vêtements blancs",
+   "code": 75
+  },
+  {
+   "nom": "Vêtements cuir et daim",
+   "code": 76
+  },
+  {
+   "nom": "Vêtements de grossesse",
+   "code": 77
+  },
+  {
+   "nom": "Vêtements de Noël",
+   "code": 78
+  },
+  {
+   "nom": "Vêtements de nuit",
+   "code": 79
+  },
+  {
+   "nom": "Vêtements de pluie",
+   "code": 80
+  },
+  {
+   "nom": "Vêtements de ski",
+   "code": 81
+  },
+  {
+   "nom": "Vêtements Filles",
+   "code": 82
+  },
+  {
+   "nom": "Vêtements fleuris",
+   "code": 83
+  },
+  {
+   "nom": "Vêtements FMR",
+   "code": 84
+  },
+  {
+   "nom": "Vêtements Garçons",
+   "code": 85
+  },
+  {
+   "nom": "Vêtements pois",
+   "code": 86
+  },
+  {
+   "nom": "Vêtements velours",
+   "code": 87
+  },
+  {
+   "nom": "Vintage",
+   "code": 88
+  }
+ ],
+ "lignes": [
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Baskets",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Bleus de travail",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Blouses et tabliers",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Bobs, casquettes et chapeaux",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Body, sous-vêtements et débardeurs",
+   "genres": [
+    "Enfant Mixte 0-2 ans"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ",
+    "EXTRA"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Bottes / Bottines",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme",
+    "Enfant Garçon",
+    "Enfant Fille"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Bottes caoutchouc",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Caracos / Débardeurs",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Maroquinerie",
+   "produit": "Cartables",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Chaussons",
+   "genres": [
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ",
+    "EXTRA"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Chaussures",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme",
+    "Enfant Garçon",
+    "Enfant Fille"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Chaussures de sécurité",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Chaussures",
+   "produit": "Chaussures de neige",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Chemises manches courtes",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Chemises manches longues",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Chemisiers manches courtes",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Chemisiers manches longues",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "CHIF"
+   ],
+   "categorie": "Chiffons",
+   "produit": "Chiffons blancs",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "CHIF"
+   ],
+   "categorie": "Chiffons",
+   "produit": "Chiffons couleurs",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "CHIF"
+   ],
+   "categorie": "Chiffons",
+   "produit": "Chiffons éponges",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Collants, chaussettes",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Combi / Salopettes",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Couettes et coussins",
+   "produit": "Coussins et couvertures",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Cravates",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Déguisements",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Dentelle",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Djellabas / Wax / Vêtements traditionnels",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Linge",
+   "produit": "Draps, taies, housses de couette",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "EXTRA"
+   ],
+   "categorie": "Textiles",
+   "produit": "EXTRA Bas",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "EXTRA"
+   ],
+   "categorie": "Textiles",
+   "produit": "EXTRA Haut",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Fêtes et cérémonies",
+   "genres": [
+    "Adulte Femme",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Foulards",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Fourrure",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Gants, bonnets, écharpes",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Gigoteuses, turbulettes",
+   "genres": [
+    "Enfant Mixte 0-2 ans"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Gilets",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Grandes tailles",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Grandes tailles",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Grosses pièces",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Grosses pièces",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Imperméables",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Imprimés animaliers",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Jeans",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Jupes",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Jupes courtes",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Jupes longues",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Layette Fille",
+   "genres": [
+    "Enfant Fille 0-2 ans"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Layette Garcon",
+   "genres": [
+    "Enfant Garçon 0-2 ans"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Leggings",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Linge",
+   "produit": "Linge de maison",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Maillots de bain",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Maillots de bain",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Maroquinerie",
+   "produit": "Maroquinerie / Accessoires",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Maroquinerie",
+   "produit": "Maroquinerie / Accessoires / Sac à main",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Pantalons",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Paréos",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Jouets",
+   "produit": "Peluches",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Polaires",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Polos manches courtes",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Polos manches longues",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Pulls - Sous pulls",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Pulls - Sous pulls",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Pulls - Sous pulls",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Rideaux",
+   "produit": "Rideaux",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Robes",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Robes de mariée",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Maroquinerie",
+   "produit": "Sacs à main",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Maroquinerie",
+   "produit": "Sacs à dos",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Shorts, bermudas, combi-short",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Sorties de bain",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Sous-vêtements",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Sport",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Sport",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Sweats",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Sweats",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Tee-shirts",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Tissus",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "UP"
+   ],
+   "categorie": "Upcycling",
+   "produit": "Upcycling",
+   "genres": [
+    "Sans Genre"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vestes",
+   "genres": [
+    "Adulte Homme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ],
+   "corrections": [
+    "categorie absente -> Textiles (arbitrage C1)"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vestes",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vestes",
+   "genres": [
+    "Adulte Homme",
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vestes Cuir",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vestes en jeans",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements blancs",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements cuir et daim",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de grossesse",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de Noël",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de nuit",
+   "genres": [
+    "Adulte Femme",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de nuit",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de pluie",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de pluie",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements de ski",
+   "genres": [
+    "Adulte Mixte",
+    "Enfant Mixte"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements Filles",
+   "genres": [
+    "Enfant Fille 3-9 ans"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements Filles",
+   "genres": [
+    "Enfant Fille 10 ans et +"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements fleuris",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Été"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements FMR",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements Garçons",
+   "genres": [
+    "Enfant Garçon 3-9 ans"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "VAK",
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements Garçons",
+   "genres": [
+    "Enfant Garçon 10 ans et +"
+   ],
+   "saisons": [
+    "Été",
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements pois",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vêtements velours",
+   "genres": [
+    "Adulte Femme"
+   ],
+   "saisons": [
+    "Hiver"
+   ]
+  },
+  {
+   "gammes": [
+    "BTQ"
+   ],
+   "categorie": "Textiles",
+   "produit": "Vintage",
+   "genres": [
+    "Adulte Mixte"
+   ],
+   "saisons": [
+    "Sans Saison"
+   ]
+  }
+ ],
+ "correspondances_historiques": {
+  "gamme": {
+   "BTQ STAND": "BTQ",
+   "STANDARD": "BTQ",
+   "BTQ EXTRA": "EXTRA",
+   "BTQ FMR": "BTQ"
+  },
+  "genre": {
+   "Layette": "Enfant Mixte 0-2 ans",
+   "Layette Fille": "Enfant Fille 0-2 ans",
+   "Layette Garçon": "Enfant Garçon 0-2 ans"
+  },
+  "categorie": {}
+ }
+}

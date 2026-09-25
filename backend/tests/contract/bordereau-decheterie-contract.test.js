@@ -72,8 +72,8 @@ const driverToken = jwt.sign(
 const adminToken = jwt.sign(
   { id: 1, username: 'admin', role: 'ADMIN', first_name: 'Alice', last_name: 'Dupont' },
   JWT_SECRET, { expiresIn: '1h' });
-const managerToken = jwt.sign(
-  { id: 2, username: 'manager', role: 'MANAGER' }, JWT_SECRET, { expiresIn: '1h' });
+const gestionnaireToken = jwt.sign(
+  { id: 2, username: 'manager', role: 'ADMIN' }, JWT_SECRET, { expiresIn: '1h' });
 const collabToken = jwt.sign(
   { id: 3, username: 'collab', role: 'COLLABORATEUR' }, JWT_SECRET, { expiresIn: '1h' });
 
@@ -314,7 +314,7 @@ describe('POST bordereau-decheterie-public — dépôt nominal', () => {
     expect(res.status).toBe(201);
 
     expect(mockPush).toHaveBeenCalledTimes(1);
-    expect(mockPush.mock.calls[0][0]).toEqual(['ADMIN', 'MANAGER']);
+    expect(mockPush.mock.calls[0][0]).toEqual(['ADMIN']);
     expect(mockPush.mock.calls[0][1]).toMatchObject({
       title: 'Collecte en déchèterie', tag: 'bordereau-12',
       data: { url: '/tours?tour=90', tourId: 90 },
@@ -322,7 +322,7 @@ describe('POST bordereau-decheterie-public — dépôt nominal', () => {
     expect(mockPush.mock.calls[0][1].body).toMatch(/BD-2026-0007/);
 
     expect(mockMessagerie).toHaveBeenCalledTimes(1);
-    expect(mockMessagerie.mock.calls[0][0]).toEqual(['ADMIN', 'MANAGER']);
+    expect(mockMessagerie.mock.calls[0][0]).toEqual(['ADMIN']);
     expect(mockMessagerie.mock.calls[0][1]).toMatchObject({
       source: 'bordereau_decheterie', lien: '/tours?tour=90',
     });
@@ -395,7 +395,7 @@ describe('Back-office — référentiel, listes, PDF, validation', () => {
   it('GET /tours/bordereaux/referentiel-decheteries : les 7 cases dans l’ordre', async () => {
     mockQuery.mockResolvedValue({ rows: [] });
     const res = await request(app).get('/api/tours/bordereaux/referentiel-decheteries')
-      .set('Authorization', `Bearer ${managerToken}`);
+      .set('Authorization', `Bearer ${gestionnaireToken}`);
     expect(res.status).toBe(200);
     expect(res.body.decheteries.map((d) => d.libelle)).toEqual([
       'Cléon', 'Boos', 'Caudebec-lès-Elbeuf', 'Déville-lès-Rouen',
@@ -522,7 +522,7 @@ describe('Back-office — référentiel, listes, PDF, validation', () => {
       .mockResolvedValueOnce({ rows: [{ ...LIGNE_A_VALIDER, statut: 'valide', valide_le: '2026-09-05' }] })
       .mockResolvedValue({ rows: [] });
     const res = await request(app).post('/api/tours/bordereaux/12/valider')
-      .set('Authorization', `Bearer ${managerToken}`).send({});
+      .set('Authorization', `Bearer ${gestionnaireToken}`).send({});
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('BORDEREAU_DEJA_VALIDE');
     // Rien n'a été réécrit.
@@ -550,7 +550,7 @@ describe('Back-office — référentiel, listes, PDF, validation', () => {
       }],
     });
     const res = await request(app).get('/api/cav/7/bordereaux')
-      .set('Authorization', `Bearer ${managerToken}`);
+      .set('Authorization', `Bearer ${gestionnaireToken}`);
     expect(res.status).toBe(200);
     const b = res.body.bordereaux[0];
     expect(b).toMatchObject({

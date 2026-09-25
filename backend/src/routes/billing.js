@@ -8,7 +8,7 @@ const { autoLogActivity } = require('../middleware/activity-logger');
 const billingService = require('../services/BillingService');
 const invoiceRepo = require('../repositories/InvoiceRepository');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 router.use(autoLogActivity('billing'));
 
 // GET /api/billing/invoices (+ alias /api/billing)

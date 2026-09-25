@@ -1,15 +1,46 @@
 import { useEffect, useRef } from 'react';
+import { visuelGamme } from '../utils/etiquettes-visuels';
+import {
+  referenceCourte, dateEtiquette, heureEtiquette, couleurSaison, taillePoliceProduit,
+} from '../utils/etiquette-champs';
 
-const GAMME_COLORS = {
-  'BTQ STAND': '#16a34a',
-  'BTQ EXTRA': '#7c3aed',
-  'VAK': '#2563eb',
-  'CHIF': '#64748b',
-  'Pvak': '#0891b2',
-  'A': '#16a34a',
-  'B': '#7c3aed',
-  'C': '#64748b',
-};
+/**
+ * Étiquette carton — A4 PAYSAGE, modèle 2.59.0 (croquis client du 25/09/2026).
+ *
+ *   ┌──────────────────────────────────────────┬───────────────┐
+ *   │ PRODUIT (catégorie éco-organisme)        │ GAMME         │ ← contour à la couleur de la gamme
+ *   ├──────────────────────────────────────────┼───────────────┤
+ *   │ GENRE                                    │ Date étiquette│
+ *   ├──────┬───────────────────────────────────┼───────────────┤
+ *   │ ●    │ SAISON        (Jaune = Été …)     │ Heure         │
+ *   │coul. │                                   │ Poids         │
+ *   ├──────┴───────────────────────────────────┼───────────────┤
+ *   │ Code-barres + code lisible               │ Code vérif    │ ← référence courte du carton
+ *   └──────────────────────────────────────────┴───────────────┘
+ *
+ * ENCRE : tout est noir sur blanc sauf deux signes — le CONTOUR de la case
+ * Gamme (fond très pâle) et la PASTILLE de saison. Pas d'aplat.
+ *
+ * Un carton ancien réimprimé peut ne pas connaître son genre ou sa saison : la
+ * case reste alors VIDE avec la mention « non renseigné » en petit — la case
+ * ne peut pas disparaître sans casser la grille, et une case vide sans mention
+ * se lirait « oubli à l'impression ».
+ */
+
+const BORD = '0.6mm solid #000';
+
+function Case({ titre, children, style }) {
+  return (
+    <div style={{ border: BORD, padding: '3mm 4mm', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden', ...style }}>
+      {titre && <div style={{ fontSize: '10pt', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#333' }}>{titre}</div>}
+      {children}
+    </div>
+  );
+}
+
+function Manquant() {
+  return <div style={{ fontSize: '14pt', color: '#666', fontStyle: 'italic', marginTop: 'auto' }}>non renseigné</div>;
+}
 
 export default function EtiquetteA4({ data }) {
   const svgRef = useRef(null);
@@ -22,11 +53,9 @@ export default function EtiquetteA4({ data }) {
       JsBarcode(svgRef.current, data.code_barre, {
         format: 'CODE128',
         height: 110,
-        width: 2.4,
-        displayValue: true,
-        fontSize: 24,
+        width: 2.6,
+        displayValue: false, // code lisible imprimé séparément, en dessous
         margin: 0,
-        textMargin: 8,
       });
     });
     return () => { cancelled = true; };
@@ -34,70 +63,102 @@ export default function EtiquetteA4({ data }) {
 
   if (!data) return null;
 
-  const dateLabel = data.date_fabrication
-    ? new Date(data.date_fabrication).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    : '';
+  const gamme = data.gamme ? visuelGamme(data.gamme) : null;
+  const pastille = couleurSaison(data.saison);
+  const codeLisible = data.code_lisible || data.code_barre;
+  const reference = referenceCourte(data.code_barre);
 
   return (
-    <div id="etiquette-print-root" style={{ fontFamily: 'Arial, sans-serif', color: '#000' }}>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '2fr 1fr',
-        gap: '6mm',
-        border: '2px solid #000',
-        padding: '6mm',
-        height: '270mm',
-      }}>
-        <div style={{ fontSize: '52pt', fontWeight: 800, lineHeight: 1, alignSelf: 'start' }}>
-          {data.categorie_eco_org}
-        </div>
-        <div style={{
-          alignSelf: 'start',
-          textAlign: 'center',
-          fontSize: '36pt',
-          fontWeight: 800,
-          color: '#fff',
-          background: GAMME_COLORS[data.gamme] || '#1f2937',
-          borderRadius: '6mm',
-          padding: '6mm 4mm',
-        }}>
-          {data.gamme}
-        </div>
-
-        <div style={{ gridColumn: '1 / -1', borderTop: '2px solid #000', marginTop: '4mm' }} />
-
-        <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4mm', marginTop: '2mm' }}>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Produit</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.produit}</div>
+    <div id="etiquette-print-root" style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#000', background: '#fff' }}>
+      <div
+        data-testid="etiquette-a4"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 72mm',
+          gridTemplateRows: '50mm 34mm 38mm 58mm',
+          gap: '2.5mm',
+          width: '277mm',
+          height: '190mm',
+          boxSizing: 'border-box',
+        }}
+      >
+        {/* 1. Produit | Gamme */}
+        <Case titre="Produit">
+          <div data-champ="produit" style={{ fontSize: `${taillePoliceProduit(data.produit)}pt`, fontWeight: 800, lineHeight: 1.05, marginTop: 'auto' }}>
+            {data.produit || '—'}
           </div>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Genre</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.genre}</div>
+          {data.categorie_eco_org && (
+            <div data-champ="categorie" style={{ fontSize: '13pt', marginTop: '1.5mm' }}>{data.categorie_eco_org}</div>
+          )}
+        </Case>
+        <Case
+          titre="Gamme"
+          style={gamme
+            ? { border: `2.2mm solid ${gamme.color}`, background: gamme.bg, alignItems: 'center' }
+            : { alignItems: 'center' }}
+        >
+          <div data-champ="gamme" style={{ fontSize: String(data.gamme || '').length > 6 ? '26pt' : '44pt', fontWeight: 800, margin: 'auto 0', color: gamme ? gamme.color : '#000' }}>
+            {data.gamme || '—'}
           </div>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Saison</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.saison}</div>
+        </Case>
+
+        {/* 2. Genre | Date étiquette */}
+        <Case titre="Genre">
+          {data.genre
+            ? <div data-champ="genre" style={{ fontSize: '36pt', fontWeight: 700, marginTop: 'auto', lineHeight: 1.05 }}>{data.genre}</div>
+            : <Manquant />}
+        </Case>
+        <Case titre="Date étiquette">
+          <div data-champ="date" style={{ fontSize: '26pt', fontWeight: 700, marginTop: 'auto' }}>{dateEtiquette(data.date_fabrication) || '—'}</div>
+        </Case>
+
+        {/* 3. Couleur + Saison | Heure + Poids */}
+        <div style={{ display: 'grid', gridTemplateColumns: '38mm 1fr', gap: '2.5mm', minWidth: 0 }}>
+          <Case titre="Couleur" style={{ alignItems: 'center' }}>
+            {pastille ? (
+              <div
+                data-champ="pastille"
+                title={pastille.nom}
+                style={{ width: '20mm', height: '20mm', borderRadius: '50%', background: pastille.fond, border: '0.6mm solid #000', margin: 'auto 0' }}
+              />
+            ) : (
+              <div style={{ fontSize: '11pt', color: '#444', margin: 'auto 0', textAlign: 'center' }}>aucune</div>
+            )}
+          </Case>
+          <Case titre="Saison">
+            {data.saison
+              ? <div data-champ="saison" style={{ fontSize: '36pt', fontWeight: 700, marginTop: 'auto' }}>{data.saison}</div>
+              : <Manquant />}
+            <div style={{ fontSize: '9pt', color: '#444', marginTop: '1mm' }}>Jaune = Été · Bleu = Hiver</div>
+          </Case>
+        </div>
+        <div style={{ display: 'grid', gridTemplateRows: '13mm 1fr', gap: '2.5mm', minWidth: 0 }}>
+          <div style={{ border: BORD, padding: '1mm 4mm', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '10pt', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#333' }}>Heure</span>
+            <span data-champ="heure" style={{ fontSize: '20pt', fontWeight: 700 }}>{heureEtiquette(data.date_fabrication) || '—'}</span>
           </div>
-          <div>
-            <div style={{ fontSize: '14pt', color: '#444' }}>Poids</div>
-            <div style={{ fontSize: '28pt', fontWeight: 700 }}>{data.poids_kg} kg</div>
-          </div>
+          <Case titre="Poids">
+            <div data-champ="poids" style={{ fontSize: '32pt', fontWeight: 800, marginTop: 'auto' }}>
+              {data.poids_kg != null ? `${String(data.poids_kg).replace('.', ',')} kg` : '—'}
+            </div>
+          </Case>
         </div>
 
-        <div style={{ gridColumn: '1 / -1', marginTop: '8mm', textAlign: 'center' }}>
-          <div style={{ fontSize: '20pt', color: '#444', marginBottom: '2mm' }}>Identifiant</div>
-          <div style={{ fontSize: '64pt', fontWeight: 800, letterSpacing: '0.05em' }}>{data.code_barre}</div>
-        </div>
-
-        <div style={{ gridColumn: '1 / -1', marginTop: '6mm', textAlign: 'center' }}>
-          <svg ref={svgRef} />
-        </div>
-
-        <div style={{ gridColumn: '1 / -1', marginTop: 'auto', display: 'flex', justifyContent: 'space-between', fontSize: '12pt', color: '#444' }}>
-          <span>Date : {dateLabel}</span>
-          <span>{data.poste_label || `Poste ${data.poste_etiquetage_id ?? 1}`}</span>
-        </div>
+        {/* 4. Code-barres | Code vérif */}
+        <Case titre="Code-barres" style={{ alignItems: 'center' }}>
+          <svg ref={svgRef} style={{ marginTop: 'auto', maxWidth: '100%' }} />
+          <div data-champ="code-lisible" style={{ fontSize: '16pt', fontWeight: 700, letterSpacing: '0.08em', fontFamily: 'monospace', marginTop: '2mm' }}>
+            {codeLisible}
+          </div>
+        </Case>
+        <Case titre="Code vérif" style={{ alignItems: 'center' }}>
+          <div data-champ="code-verif" style={{ fontSize: reference.length > 8 ? '20pt' : '36pt', fontWeight: 800, fontFamily: 'monospace', letterSpacing: '0.06em', margin: 'auto 0' }}>
+            {reference || '—'}
+          </div>
+          {data.nb_impressions > 1 && (
+            <div style={{ fontSize: '10pt', color: '#444' }}>Réimpression n° {data.nb_impressions}</div>
+          )}
+        </Case>
       </div>
     </div>
   );

@@ -120,7 +120,7 @@ export default function Vehicles() {
   // uniquement — un rôle personnalisé est résolu via base_role (même
   // convention que EnergieGES.jsx / HomeRedirect d'App.jsx).
   const baseRole = user?.base_role || user?.role;
-  const canViewDemo = ['ADMIN', 'MANAGER'].includes(baseRole);
+  const canViewDemo = ['ADMIN'].includes(baseRole);
 
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);

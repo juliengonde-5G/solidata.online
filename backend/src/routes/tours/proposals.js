@@ -29,7 +29,7 @@ const fillFactors = require('../../utils/fill-factors');
 //      schéma actuel : la branche est prête mais ne produit rien tant qu'aucune
 //      source ne les remplit).
 // ══════════════════════════════════════════════════════════════
-router.get('/saturation-risks', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/saturation-risks', authorize('ADMIN'), async (req, res) => {
   try {
     const SCORING_CONFIG = getScoringConfig();
     const seuil = parseFloat(SCORING_CONFIG.saturationThresholdPct) || 90;
@@ -180,7 +180,7 @@ router.get('/saturation-risks', authorize('ADMIN', 'MANAGER'), async (req, res) 
 });
 
 // GET /api/tours/proposals/daily — Propositions de tournées pour une date
-router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/proposals/daily', authorize('ADMIN'), async (req, res) => {
   try {
     const SCORING_CONFIG = getScoringConfig();
     // v1-6 : le calendrier de référence affiche désormais les facteurs EFFECTIFS du
@@ -292,7 +292,7 @@ router.get('/proposals/daily', authorize('ADMIN', 'MANAGER'), async (req, res) =
 });
 
 // GET /api/tours/proposals/weekly — Plan hebdomadaire (propositions par jour)
-router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/proposals/weekly', authorize('ADMIN'), async (req, res) => {
   try {
     const SCHOOL_VACATIONS = getSchoolVacations();
 
@@ -380,7 +380,7 @@ router.get('/proposals/weekly', authorize('ADMIN', 'MANAGER'), async (req, res) 
 });
 
 // GET /api/tours/context/:date — Contexte (météo, trafic) pour une date
-router.get('/context/:date', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/context/:date', authorize('ADMIN'), async (req, res) => {
   try {
     const context = await getContextForDate(req.params.date);
     res.json(context);

@@ -808,7 +808,7 @@ const { encryptReport, decryptReport, decryptReportDetaille } = require('../util
 // liste des questions — inutile d'exposer /questionnaire publiquement.
 // Les options sont mélangées déterministiquement par question pour éviter
 // le biais "première position = analyseur".
-router.get('/questionnaire', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/questionnaire', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), (req, res) => {
   res.json(PCM_QUESTIONS.map(q => ({
     num: q.num,
     category: q.category,
@@ -824,7 +824,7 @@ router.get('/questionnaire', authenticate, requireMfa, authorize('ADMIN', 'RH', 
 });
 
 // GET /api/pcm/types — Référence des 6 types PCM
-router.get('/types', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/types', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), (req, res) => {
   const types = Object.entries(PCM_TYPES).map(([key, data]) => ({
     key,
     ...data,
@@ -833,7 +833,7 @@ router.get('/types', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER
 });
 
 // GET /api/pcm/types/:typeKey — Détail d'un type
-router.get('/types/:typeKey', authenticate, requireMfa, authorize('ADMIN', 'RH', 'MANAGER', 'PCM'), (req, res) => {
+router.get('/types/:typeKey', authenticate, requireMfa, authorize('ADMIN', 'RH', 'PCM'), (req, res) => {
   const data = PCM_TYPES[req.params.typeKey];
   if (!data) return res.status(404).json({ error: 'Type PCM inconnu' });
   res.json({ key: req.params.typeKey, ...data });
@@ -1118,7 +1118,7 @@ async function authenticateSubmit(req, res, next) {
   if (access_token) return next(); // token capabilité vérifié plus bas
   return authenticate(req, res, (err) => {
     if (err) return;
-    return authorize('ADMIN', 'RH', 'MANAGER', 'PCM')(req, res, next);
+    return authorize('ADMIN', 'RH', 'PCM')(req, res, next);
   });
 }
 

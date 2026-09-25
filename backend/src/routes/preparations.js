@@ -5,7 +5,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER'));
+router.use(authenticate, authorize('ADMIN'));
 
 // GET /api/preparations — List preparations with filters
 router.get('/', async (req, res) => {
@@ -56,7 +56,7 @@ router.get('/gantt', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT p.id, c.reference as commande_reference, cl.raison_sociale as client,
+      `SELECT p.id, p.commande_id, c.reference as commande_reference, cl.raison_sociale as client,
        c.type_produit, p.lieu_chargement, p.date_livraison_remorque as date_debut,
        p.date_expedition as date_fin, p.statut_preparation as statut, p.transporteur
        FROM preparations_expedition p
@@ -378,6 +378,16 @@ router.patch('/:id/statut', [
       params
     );
     const preparation = updateResult.rows[0];
+
+    // Fin de chargement : la commande passe « chargée » (colonne « Prête /
+    // chargée » du suivi logistique). Seulement depuis « en préparation » : une
+    // commande déjà plus loin n'est jamais ramenée en arrière.
+    if (statut_preparation === 'prete') {
+      await pool.query(
+        "UPDATE commandes_exutoires SET statut = 'chargee', updated_at = NOW() WHERE id = $1 AND statut = 'en_preparation'",
+        [current.commande_id]
+      );
+    }
 
     // Handle 'expediee' status: update commande + create stock movement
     if (statut_preparation === 'expediee') {

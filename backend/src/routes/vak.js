@@ -209,7 +209,7 @@ router.use(autoLogActivity('vak'));
 // ──────────────────────────────────────────
 // VAK CRUD
 // ──────────────────────────────────────────
-router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT v.*,
@@ -226,7 +226,7 @@ router.get('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.post('/', authorize('ADMIN'), async (req, res) => {
   try {
     const { libelle, date_debut, date_fin, lieu, latitude, longitude, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, compte_caisse, notes } = req.body;
     if (!libelle || !date_debut || !date_fin) {
@@ -250,7 +250,7 @@ router.post('/', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-router.get('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM vaks WHERE id = $1', [req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'VAK introuvable' });
@@ -260,7 +260,7 @@ router.get('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.put('/:id', authorize('ADMIN'), async (req, res) => {
   try {
     const { libelle, date_debut, date_fin, lieu, ca_objectif_ttc, poids_objectif_kg, kg_approvisionnes, compte_caisse, notes } = req.body;
     const r = await pool.query(`
@@ -318,7 +318,7 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 // Corollaire assumé : les répartitions sont exprimées en part du DÉTAIL, pas
 // du CA encaissé — sinon leurs pourcentages ne feraient pas 100 quand le
 // détail est incomplet, ce qui se lirait comme une erreur de calcul.
-router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/analytics/kpis', authorize('ADMIN'), async (req, res) => {
   try {
     const vakId = req.params.id;
     // Filtre de périmètre par caisse : les lignes suivent le compte de LEUR
@@ -417,7 +417,7 @@ router.get('/:id/analytics/kpis', authorize('ADMIN', 'MANAGER'), async (req, res
   }
 });
 
-router.get('/:id/analytics/hourly', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/analytics/hourly', authorize('ADMIN'), async (req, res) => {
   try {
     const vakId = req.params.id;
     const byHour = await pool.query(`
@@ -446,7 +446,7 @@ router.get('/:id/analytics/hourly', authorize('ADMIN', 'MANAGER'), async (req, r
   }
 });
 
-router.get('/:id/analytics/segments', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/analytics/segments', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT vv.segment,
@@ -465,7 +465,7 @@ router.get('/:id/analytics/segments', authorize('ADMIN', 'MANAGER'), async (req,
   }
 });
 
-router.get('/:id/analytics/payments', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/analytics/payments', authorize('ADMIN'), async (req, res) => {
   try {
     // MAX(entry_mode) plutôt que sous-requête corrélée : Postgres refuse
     // (avec raison) une sous-requête qui référence une colonne non agrégée
@@ -490,7 +490,7 @@ router.get('/:id/analytics/payments', authorize('ADMIN', 'MANAGER'), async (req,
   }
 });
 
-router.get('/:id/analytics/comparison', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/analytics/comparison', authorize('ADMIN'), async (req, res) => {
   try {
     const vakId = req.params.id;
     const current = await pool.query(`
@@ -572,7 +572,7 @@ router.get('/:id/analytics/comparison', authorize('ADMIN', 'MANAGER'), async (re
 });
 
 // Vue ventilée par jour de la VAK (cartes comparatives jour par jour)
-router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/analytics/by-day', authorize('ADMIN'), async (req, res) => {
   try {
     const vakId = req.params.id;
     const [days, hourly, segments, payments, meteo] = await Promise.all([
@@ -639,7 +639,7 @@ router.get('/:id/analytics/by-day', authorize('ADMIN', 'MANAGER'), async (req, r
   }
 });
 
-router.get('/:id/meteo', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/meteo', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT * FROM vak_meteo_quotidien WHERE vak_id = $1 ORDER BY date
@@ -653,7 +653,7 @@ router.get('/:id/meteo', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ──────────────────────────────────────────
 // Vues annuelles (toutes VAK)
 // ──────────────────────────────────────────
-router.get('/annual/overview', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/annual/overview', authorize('ADMIN'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
@@ -698,7 +698,7 @@ router.get('/annual/overview', authorize('ADMIN', 'MANAGER'), async (req, res) =
   }
 });
 
-router.get('/annual/hourly-heatmap', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/annual/hourly-heatmap', authorize('ADMIN'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
@@ -716,7 +716,7 @@ router.get('/annual/hourly-heatmap', authorize('ADMIN', 'MANAGER'), async (req, 
   }
 });
 
-router.get('/annual/segments-trend', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/annual/segments-trend', authorize('ADMIN'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
@@ -736,7 +736,7 @@ router.get('/annual/segments-trend', authorize('ADMIN', 'MANAGER'), async (req, 
   }
 });
 
-router.get('/annual/payment-mix', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/annual/payment-mix', authorize('ADMIN'), async (req, res) => {
   try {
     const annee = parseInt(req.query.annee) || new Date().getFullYear();
     const r = await pool.query(`
@@ -757,7 +757,7 @@ router.get('/annual/payment-mix', authorize('ADMIN', 'MANAGER'), async (req, res
 // ──────────────────────────────────────────
 // Live (dashboard temps réel)
 // ──────────────────────────────────────────
-router.get('/live/current', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/live/current', authorize('ADMIN'), async (req, res) => {
   try {
     // Jour civil PARIS (une VAK est bornée en jours civils français) — la date
     // UTC faisait basculer l'écran live sur la veille entre minuit et 01:00/02:00.
@@ -813,7 +813,7 @@ router.get('/live/current', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // ──────────────────────────────────────────
 // Le périmètre par caisse s'applique aussi à ces listes brutes (export) : ce
 // que l'utilisateur exporte correspond à ce que les KPI comptent.
-router.get('/:id/tickets', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/tickets', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT t.* FROM vak_tickets t JOIN vaks vk ON vk.id = t.vak_id
@@ -826,7 +826,7 @@ router.get('/:id/tickets', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   }
 });
 
-router.get('/:id/ventes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/ventes', authorize('ADMIN'), async (req, res) => {
   try {
     const { limit = 500, offset = 0 } = req.query;
     const r = await pool.query(`
@@ -846,7 +846,7 @@ router.get('/:id/ventes', authorize('ADMIN', 'MANAGER'), async (req, res) => {
 // Import CSV (fallback)
 // ──────────────────────────────────────────
 router.post('/:id/import-csv',
-  authorize('ADMIN', 'MANAGER'),
+  authorize('ADMIN'),
   upload.single('file'),
   async (req, res) => {
     try {
@@ -865,7 +865,7 @@ router.post('/:id/import-csv',
     }
   });
 
-router.get('/:id/csv-batches', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.get('/:id/csv-batches', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT b.*, u.first_name || ' ' || u.last_name AS imported_by_name
@@ -878,7 +878,7 @@ router.get('/:id/csv-batches', authorize('ADMIN', 'MANAGER'), async (req, res) =
   }
 });
 
-router.delete('/csv-batches/:batchId', authorize('ADMIN', 'MANAGER'), async (req, res) => {
+router.delete('/csv-batches/:batchId', authorize('ADMIN'), async (req, res) => {
   try {
     const r = await pool.query('DELETE FROM vak_import_batches WHERE id = $1', [req.params.batchId]);
     if (r.rowCount === 0) return res.status(404).json({ error: 'Batch introuvable' });

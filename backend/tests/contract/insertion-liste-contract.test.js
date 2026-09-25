@@ -9,7 +9,8 @@
 //      `is_active` n'est plus un filtre — un sorti est inactif.
 //
 //   2. `brsa` N'EST PAS LU POUR UN MANAGER. Pas masqué après lecture : ABSENT
-//      de la requête. C'est le correctif C-03 de la PR A, appliqué à la source
+//      de la requête. (Depuis le retrait du rôle sur main le 10/09/2026, le
+//      MANAGER est refusé en 403 avant la requête : c'est ce qui est testé.) C'est le correctif C-03 de la PR A, appliqué à la source
 //      cette fois-ci — la même famille de défaut a produit trois constats
 //      bloquants dans ce module.
 //
@@ -127,19 +128,22 @@ describe('périmètre (§ 5.2)', () => {
   // partie dans la liste de son encadrant, avec son poste, son dernier
   // entretien et sa pastille de risque. `?inclure=tous` allait plus loin —
   // aucune borne, aucune garde de rôle, un appel HTTP direct suffisait.
-  test('un MANAGER ne reçoit PAS les parcours terminés', async () => {
-    await get('/api/insertion', 'MANAGER');
-    const q = sqlListe();
-    expect(q).toContain("e.insertion_status = 'en_parcours'");
-    expect(q).not.toContain("e.insertion_status = 'termine'");
-    expect(q).not.toContain('make_interval');
+  //
+  // Rôle MANAGER retiré sur main (10/09/2026, fusion du 25/09/2026) : la
+  // branche « `en_parcours` seul » de la route reste en place (garde morte),
+  // mais ce qui est OBSERVABLE est le refus 403 du routeur parent, AVANT que
+  // la liste ne soit lue. Un test qui continuerait d'inspecter le SQL d'un
+  // MANAGER mesurerait une requête qui ne part plus.
+  test('un MANAGER (rôle retiré) est refusé en 403 — la liste n’est pas lue', async () => {
+    const r = await get('/api/insertion', 'MANAGER');
+    expect(r.status).toBe(403);
+    expect(sqlListe()).toBe('');
   });
 
-  test('`?inclure=tous` est SANS EFFET pour un MANAGER', async () => {
-    await get('/api/insertion?inclure=tous', 'MANAGER');
-    const q = sqlListe();
-    expect(q).toContain("e.insertion_status = 'en_parcours'");
-    expect(q).not.toContain("insertion_status <> 'none'");
+  test('`?inclure=tous` ne rouvre rien pour un MANAGER : 403, aucune liste lue', async () => {
+    const r = await get('/api/insertion?inclure=tous', 'MANAGER');
+    expect(r.status).toBe(403);
+    expect(sqlListe()).toBe('');
   });
 
   test('une CIP, elle, garde les deux (la sortie FSE+ se saisit APRÈS la sortie)', async () => {
@@ -164,17 +168,18 @@ describe('périmètre (§ 5.2)', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('projection par rôle', () => {
-  test('un MANAGER : `brsa` n’est PAS LU (colonne absente de la requête)', async () => {
-    await get('/api/insertion', 'MANAGER');
-    const q = sqlListe();
-    expect(q).toContain('NULL::boolean AS brsa');
-    expect(q).not.toMatch(/,\s*e\.brsa\b/);
+  // Rôle MANAGER retiré (main, 10/09/2026) : `brsa` ne lui est même plus
+  // exposé à la lecture « NULL::boolean » — il n'atteint pas la route.
+  test('un MANAGER (rôle retiré) : 403, et aucune requête ne lit `brsa`', async () => {
+    const r = await get('/api/insertion', 'MANAGER');
+    expect(r.status).toBe(403);
+    expect(mockQuery.mock.calls.some(([t]) => /\bbrsa\b/.test(String(t)))).toBe(false);
   });
 
-  test('un MANAGER reçoit `brsa: null`, jamais `true`', async () => {
-    branche({ 'LEFT JOIN LATERAL': [{ ...LIGNE, brsa: null }] });
+  test('un MANAGER ne reçoit aucun corps de liste (ni `brsa`, ni ligne)', async () => {
     const r = await get('/api/insertion', 'MANAGER');
-    expect(r.body[0].brsa).toBeNull();
+    expect(Array.isArray(r.body)).toBe(false);
+    expect(JSON.stringify(r.body)).not.toMatch(/brsa|BENALI/);
   });
 
   test('un ADMIN lit bien la colonne', async () => {

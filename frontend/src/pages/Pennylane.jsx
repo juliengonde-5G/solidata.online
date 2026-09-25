@@ -10,7 +10,7 @@ export default function Pennylane() {
   const isAdmin = user?.role === 'ADMIN';
   // FINANCE = consultation seule (vague 2) : test/imports (POST) refusés par
   // l'API (403) → boutons masqués. Balances (GET) et lien Pennylane restent.
-  const canEdit = ['ADMIN', 'MANAGER'].includes(user?.base_role || user?.role);
+  const canEdit = ['ADMIN'].includes(user?.base_role || user?.role);
   const [status, setStatus] = useState(null);
   const [config, setConfig] = useState(null);
   const [history, setHistory] = useState([]);

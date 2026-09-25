@@ -111,15 +111,24 @@ describe('1. Matrice de rôles', () => {
     }
   });
 
-  test('MANAGER lit le dossier SANS statuts, SANS pièces, SANS bloc de report — clés ABSENTES', async () => {
+  // RÉCONCILIÉ 15/09 — le sujet de ces trois tests (un rôle qui atteint le module
+  // insertion sans être ADMIN/RH) n'existe plus : `routes/insertion/index.js`
+  // impose `authorize('ADMIN','RH')` depuis le retrait des profils MANAGER/QHSE/
+  // FINANCE (2.52.0). L'attente passe du masquage au REFUS À LA PORTE, qui est
+  // la forme forte de la même garantie. Ils restent le filet de la surface : si
+  // ces routes étaient rouvertes à un autre rôle sans que les masquages soient
+  // d'abord inversés en « masquer SAUF ADMIN/RH », ils échoueraient.
+  test('un rôle hors ADMIN/RH n’obtient AUCUN dossier — ni statuts, ni pièces', async () => {
     const res = await get('/api/insertion/cadre/5', 'MANAGER');
-    expect(res.status).toBe(200);
-    // `toBeUndefined` ne suffirait pas : une clé présente à `undefined`
-    // disparaît du JSON mais existerait dans l'objet. On teste la PRÉSENCE.
+    expect(res.status).toBe(403);
     expect(Object.keys(res.body)).not.toContain('statuts');
     expect(Object.keys(res.body)).not.toContain('pieces');
     expect(Object.keys(res.body)).not.toContain('bloc_emplois_inclusion');
-    // Ce qu'il conserve : le Pass et l'orientation.
+  });
+
+  test('référence — l’ADMIN, lui, reçoit le Pass et l’orientation', async () => {
+    const res = await get('/api/insertion/cadre/5', 'ADMIN');
+    expect(res.status).toBe(200);
     expect(res.body.pass_iae).toBeDefined();
     expect(res.body.orientation.referent_unique.type).toBe('cms');
   });
@@ -138,21 +147,26 @@ describe('1. Matrice de rôles', () => {
       ],
     });
     const res = await get('/api/insertion/cadre/5', 'MANAGER');
-    expect(res.status).toBe(200);
-    // Aucune liste, sous aucune forme.
-    expect(res.body.eligibilite.criteres).toBeUndefined();
+    expect(res.status).toBe(403);
     const brut = JSON.stringify(res.body);
     for (const interdit of ['brsa', 'rqth', 'sortant_detention',
       'Bénéficiaire du RSA', 'Reconnaissance RQTH', 'Sortant de détention']) {
       expect(brut).not.toContain(interdit);
     }
-    // Ce qu'il reçoit : la preuve que la vérification a eu lieu.
-    expect(res.body.eligibilite.verifiee_le).toBe('2025-07-10');
-    expect(res.body.eligibilite.source).toBe('prescripteur_habilite');
-    // M-06 — le critère art. 10 n'est pas COMPTÉ : 3 critères en base, 2 annoncés.
-    expect(res.body.eligibilite.nb_criteres).toBe(2);
-    // La référence des justificatifs est un texte libre : elle ne part pas non plus.
-    expect(res.body.eligibilite.justificatifs_ref).toBeUndefined();
+    // Référence ADMIN : lui reçoit bien la liste complète et la preuve de
+    // vérification. NB — la règle « le critère art. 10 n'est pas COMPTÉ »
+    // appartient à `projeterPourManager`, la vue masquée : elle n'est plus
+    // atteignable par une route depuis que le module est ADMIN/RH-only. Cette
+    // projection reste en code (garde morte, doctrine 2.52.0) et c'est elle
+    // qui protégerait de nouveau si la porte se rouvrait — raison pour
+    // laquelle le module `rh` n'est pas accordable (utils/module-routes.js).
+    const ref = await get('/api/insertion/cadre/5', 'ADMIN');
+    expect(ref.body.eligibilite.verifiee_le).toBe('2025-07-10');
+    expect(ref.body.eligibilite.source).toBe('prescripteur_habilite');
+    expect(ref.body.eligibilite.criteres).toHaveLength(3);
+    // La référence des justificatifs est un texte libre : elle ne part pas non
+    // plus — le corps du refus ne porte aucun bloc d'éligibilité.
+    expect(res.body.eligibilite).toBeUndefined();
   });
 
   test('C-01 — l’ADMIN, lui, reçoit la liste complète (y compris le critère art. 10)', async () => {
@@ -171,16 +185,14 @@ describe('1. Matrice de rôles', () => {
   });
 
   // m-10 — « un refus après lecture serait un refus d'affichage, pas d'accès ».
-  test('m-10 — pour un MANAGER, ni les pièces ni les statuts ne sont LUS en base', async () => {
+  test('m-10 — rien n’est LU en base : le refus précède toute requête', async () => {
     await get('/api/insertion/cadre/5', 'MANAGER');
     const sqls = mockQuery.mock.calls.map(([s]) => String(s));
     expect(sqls.some((s) => /FROM insertion_pieces/.test(s))).toBe(false);
     expect(sqls.some((s) => /SELECT rqth FROM insertion_diagnostics/.test(s))).toBe(false);
-    const selectEmp = sqls.find((s) => /FROM employees e\s+LEFT JOIN prescripteur_orgas/.test(s));
-    expect(selectEmp).toBeDefined();
-    for (const col of ['e.brsa', 'e.ft_categorie', 'e.france_travail_id', 'e.eligibilite_justificatifs_ref']) {
-      expect(selectEmp).not.toContain(col);
-    }
+    // Plus fort que la projection d'origine : la requête salarié n'est pas
+    // même émise, donc aucune colonne sensible ne traverse le serveur.
+    expect(sqls.some((s) => /FROM employees e\s+LEFT JOIN prescripteur_orgas/.test(s))).toBe(false);
   });
 
   test('l’ADMIN, lui, LIT bien les pièces et les statuts', async () => {
@@ -217,8 +229,12 @@ describe('1. Matrice de rôles', () => {
     expect((await del('/api/insertion/pieces/1', 'MANAGER')).status).toBe(403);
   });
 
-  test('le référentiel des critères : lecture ouverte, écriture ADMIN seul', async () => {
-    expect((await get('/api/insertion/eligibilite-criteres', 'MANAGER')).status).toBe(200);
+  test('le référentiel des critères : lecture ouverte au module, écriture ADMIN seul', async () => {
+    // « Lecture ouverte » se lit désormais : ouverte aux rôles du module, donc
+    // ADMIN et RH — le référentiel ne dit rien d'une personne, mais la porte du
+    // module s'est resserrée sur ces deux rôles en 2.52.0.
+    expect((await get('/api/insertion/eligibilite-criteres', 'RH')).status).toBe(200);
+    expect((await get('/api/insertion/eligibilite-criteres', 'MANAGER')).status).toBe(403);
     expect((await post('/api/insertion/eligibilite-criteres', 'RH', { code: 'x_test', libelle: 'X' })).status).toBe(403);
     expect((await put('/api/insertion/eligibilite-criteres/brsa', 'RH', { libelle: 'X' })).status).toBe(403);
   });

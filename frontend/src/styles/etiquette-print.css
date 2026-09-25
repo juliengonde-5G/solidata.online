@@ -1,6 +1,7 @@
+/* Modèle 2.59.0 : étiquette carton en A4 PAYSAGE (croquis client). */
 @page {
-  size: A4 portrait;
-  margin: 12mm;
+  size: A4 landscape;
+  margin: 10mm;
 }
 
 @media print {
@@ -14,8 +15,12 @@
   #etiquette-print-root {
     position: absolute;
     inset: 0;
-    width: 186mm;
+    width: 277mm;
     margin: 0 auto;
+    /* Les pastilles de couleur (gamme, saison) doivent sortir à l'impression :
+       sans cette consigne, Chrome retire les fonds par défaut. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .no-print {
     display: none !important;

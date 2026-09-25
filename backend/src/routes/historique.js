@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 
-router.use(authenticate, authorize('ADMIN', 'MANAGER', 'AUTORITE'));
+router.use(authenticate, authorize('ADMIN', 'AUTORITE'));
 
 // GET /api/historique/tonnages — Résumé tonnages par mois/année
 router.get('/tonnages', async (req, res) => {

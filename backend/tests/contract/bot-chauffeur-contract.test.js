@@ -61,7 +61,7 @@ const { toolsForRole, EXTENDED_TOOL_ROLES, executeTool, estSessionChauffeur, sys
 const activeSummary = require('../../src/routes/tours/active-summary');
 
 const CHAUFFEUR_OUTILS = botChauffeur.CHAUFFEUR_TOOL_NAMES;
-const TOUS_LES_ROLES = ['ADMIN', 'MANAGER', 'RH', 'QHSE', 'DPO', 'FINANCE', 'RESP_BTQ', 'AUTORITE', 'COLLABORATEUR'];
+const TOUS_LES_ROLES = ['ADMIN', 'RH', 'DPO', 'RESP_BTQ', 'AUTORITE', 'COLLABORATEUR'];
 
 /** Tous les outils que le bot sait exécuter, hors périmètre chauffeur. */
 const OUTILS_HORS_PERIMETRE = [
@@ -562,12 +562,14 @@ describe('non-régression hors périmètre chauffeur', () => {
     }
   });
 
-  it('ADMIN et MANAGER conservent l\'intégralité de leurs outils', () => {
+  it('ADMIN et RH conservent leurs outils', () => {
     const admin = toolsForRole('ADMIN').map((t) => t.name);
     expect(admin).toEqual(toolsForRole('ADMIN', ctx('ADMIN')).map((t) => t.name));
     for (const reserve of Object.keys(EXTENDED_TOOL_ROLES)) expect(admin).toContain(reserve);
-    const manager = toolsForRole('MANAGER', ctx('MANAGER')).map((t) => t.name);
-    expect(manager).toEqual(expect.arrayContaining(['resume_finance', 'kpis_insertion', 'ventes_synthese']));
+    // RH garde ses outils métier (les rôles MANAGER/QHSE/FINANCE ont été retirés
+    // le 10/09/2026 : leurs outils sont revenus à l'ADMIN, contrôlé ci-dessus).
+    const rh = toolsForRole('RH', ctx('RH')).map((t) => t.name);
+    expect(rh).toEqual(expect.arrayContaining(['kpis_insertion']));
   });
 
   it('les outils réservés restent exécutables par les rôles habilités', async () => {

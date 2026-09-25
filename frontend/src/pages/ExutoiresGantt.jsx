@@ -496,10 +496,10 @@ export default function ExutoiresGantt() {
         {item.id && (
           <div className="mt-3 pt-3 border-t border-gray-100">
             <button
-              onClick={() => { setSelectedItem(null); routerNavigate('/exutoires-preparation'); }}
+              onClick={() => { setSelectedItem(null); routerNavigate(item.commande_id ? `/exutoires-commandes?commande=exu-${item.commande_id}` : '/exutoires-commandes'); }}
               className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium"
             >
-              Voir la préparation &rarr;
+              Ouvrir la commande &rarr;
             </button>
           </div>
         )}
