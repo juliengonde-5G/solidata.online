@@ -28,6 +28,8 @@ export default defineConfig({
             if (id.includes('leaflet')) return 'vendor-maps';
             if (id.includes('lucide-react')) return 'vendor-icons';
             if (id.includes('axios') || id.includes('socket.io-client')) return 'vendor-net';
+            // Lecteur caméra : chargé à la demande (sortie cartons), jamais au démarrage.
+            if (id.includes('html5-qrcode')) return 'vendor-scan';
             return 'vendor';
           }
         },

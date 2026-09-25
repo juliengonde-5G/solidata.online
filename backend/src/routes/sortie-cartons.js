@@ -31,6 +31,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { requireModule } = require('../middleware/module-access');
 const { analyserCode, formeLisible, LIBELLES_FORMAT } = require('../utils/codification-etiquettes');
+const { etatPreparation } = require('../services/boutique-catalogue');
 
 const ROLES_OPERATEUR = ['ADMIN', 'COLLABORATEUR', 'OPERATEUR_STOCK'];
 
@@ -143,7 +144,11 @@ router.get('/commandes-actives/:type', async (req, res) => {
   try {
     if (type === 'btq') {
       const { rows } = await pool.query(
-        `SELECT bc.id, bc.reference, bc.statut, bc.date_commande, b.nom AS label
+        `SELECT bc.id, bc.reference, bc.statut, bc.date_commande, b.nom AS label,
+                (SELECT SUM(COALESCE(l.nb_cartons_ajuste, l.nb_cartons_demande))
+                   FROM boutique_commande_lignes l WHERE l.commande_id = bc.id)::int AS nb_cartons_voulu,
+                (SELECT COUNT(*) FROM produits_finis pf
+                  WHERE pf.sortie_commande_type = 'btq' AND pf.sortie_commande_id = bc.id)::int AS nb_cartons_scannes
          FROM boutique_commandes bc LEFT JOIN boutiques b ON b.id = bc.boutique_id
          WHERE bc.statut = ANY($1::varchar[])
          ORDER BY bc.date_commande DESC LIMIT 50`,
@@ -298,6 +303,25 @@ router.post('/scan', async (req, res) => {
   }
   client.release();
 
+  // Commande boutique (2.58.0) : le carton est rattaché à SA ligne, et l'écran
+  // reçoit l'avancement. Un carton d'une catégorie non commandée est SIGNALÉ,
+  // pas refusé : il est déjà sorti, le refuser le ferait disparaître du suivi.
+  // Lu APRÈS la transaction et best effort : un échec ici ne défait pas un
+  // scan réussi.
+  if (issue.status === 200 && commande_type === 'btq') {
+    try {
+      const prep = await etatPreparation(pool, cmdId);
+      const ligneId = prep.ligne_par_carton[issue.body.carton.id] ?? null;
+      const ligne = prep.lignes.find((l) => l.ligne_id === ligneId) || null;
+      issue.body.preparation = prep;
+      issue.body.ligne = ligne;
+      issue.body.hors_commande = prep.lignes.some((l) => l.en_cartons) && !ligne;
+      issue.body.au_dela = !!(ligne && ligne.depasse);
+    } catch (err) {
+      console.error('[SORTIE-CARTONS] Avancement indisponible :', err.message);
+    }
+  }
+
   await journaliser({ ...base, commande_id: cmdId, ...issue.journal });
   return res.status(issue.status).json(issue.body);
 });
@@ -318,7 +342,8 @@ router.get('/session/:type/:commande_id', async (req, res) => {
     );
     const items = rows.map((r) => formaterCarton(r));
     const total_kg = items.reduce((s, r) => s + Number(r.poids_kg || 0), 0);
-    res.json({ items, count: items.length, total_kg });
+    const preparation = type === 'btq' ? await etatPreparation(pool, cmdId) : null;
+    res.json({ items, count: items.length, total_kg, preparation });
   } catch (err) {
     console.error('[SORTIE-CARTONS] Erreur session :', err);
     res.status(500).json({ error: 'Erreur serveur' });
