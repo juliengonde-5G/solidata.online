@@ -355,6 +355,13 @@ router.get('/politique', authorize('ADMIN', 'DPO'), async (req, res) => {
             source: retentionDialogues.source === 'code' ? 'code' : 'rgpd.dialogues_gestion_retention_jours',
             reference: 'backend/src/services/rgpd-purges.js (purgeDialoguesGestion), backend/src/services/dialogue-gestion.js (appliquerKAnonymat)',
           },
+          {
+            titre: 'Instantanés du reporting Convergence (programme CVG)',
+            description: "Le document transmis au réseau Convergence est figé en instantané au moment de sa génération, dans la même table et sous la même purge que les synthèses de dialogue de gestion. Il applique son propre seuil de confidentialité (insertion.cvg_k_min, défaut 5, que seul le DPO peut abaisser jusqu'à 1 pour reproduire le format brut du réseau) : un tableau des sortis de moins de k personnes ne diffuse ni ses lignes santé et justice, ni son logement, ni « dont parcours de soin », et une mention de diffusion restreinte accompagne tout document portant des effectifs inférieurs à cinq. Le frein judiciaire (art. 10) n'est pas transmis sans décision du DPO (insertion.cvg_transmettre_justice). Sa Partie 2 nomme les permanents de l'accompagnement : il est réservé aux rôles ADMIN et RH et chaque aperçu, génération, consultation, comparaison et export est journalisé. La situation de sortie saisie par salarié (catégorie, habitat et santé à la sortie) et son historique sont supprimés à l'anonymisation du dossier ; le registre des moyens humains suit sa propre purge (trois ans après la fin d'une ressource).",
+            valeur: `${retentionDialogues.valeur} jours`,
+            source: retentionDialogues.source === 'code' ? 'code' : 'rgpd.dialogues_gestion_retention_jours',
+            reference: 'backend/src/services/rgpd-purges.js (purgeDialoguesGestion), backend/src/services/convergence-cvg.js, backend/src/services/anonymization.js',
+          },
         ],
       },
       {

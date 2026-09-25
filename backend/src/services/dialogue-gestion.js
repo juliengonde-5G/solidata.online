@@ -124,13 +124,19 @@ const FT_CATEGORIES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
  * liste est rangée sous « non renseigné » : on ne recopie pas dans une pièce de
  * conventionnement un texte que personne n'a validé.
  */
-const NIVEAUX_FORMATION = ['infra3', 'niv3', 'niv4', 'niv5', 'niv6plus'];
+// 2.60.0 (Convergence) — les niveaux 6, 7 et 8 sont désormais saisis détaillés ;
+// `niv6plus` reste la valeur des fiches antérieures. Sans eux, un niveau 7 saisi
+// aujourd'hui tomberait ici en « non renseigné ».
+const NIVEAUX_FORMATION = ['infra3', 'niv3', 'niv4', 'niv5', 'niv6', 'niv7', 'niv8', 'niv6plus'];
 const NIVEAU_FORMATION_LABELS = {
   infra3: 'Infra niveau 3 (sans diplôme)',
   niv3: 'Niveau 3 (CAP/BEP)',
   niv4: 'Niveau 4 (Bac)',
   niv5: 'Niveau 5 (Bac+2)',
-  niv6plus: 'Niveau 6 et plus (Bac+3 et au-delà)',
+  niv6: 'Niveau 6 (Bac+3/4)',
+  niv7: 'Niveau 7 (Bac+5)',
+  niv8: 'Niveau 8 (doctorat)',
+  niv6plus: 'Niveau 6 et plus (Bac+3 et au-delà — niveau non détaillé)',
   non_renseigne: 'Non renseigné',
 };
 
@@ -409,8 +415,16 @@ function ecrireChemin(racine, chemin, valeur) {
  * visiblement vides à leur place, et la CIP qui a besoin du détail le lit sur
  * l'écran interne, qui n'applique aucune suppression.
  */
-function appliquerKAnonymat(document, seuil) {
+function appliquerKAnonymat(document, seuil, regles = null) {
   const s = Number.isFinite(seuil) && seuil >= 1 ? Math.round(seuil) : 5;
+  // Tables de règles : celles de la synthèse par défaut. Un autre document
+  // transmis (le reporting Convergence, lot 2.60.0) passe les SIENNES — même
+  // passe, mêmes quatre étapes, une seule implémentation de la règle ; seules
+  // changent les listes qui décrivent la forme du document.
+  const {
+    effectifsPublies = K_EFFECTIFS_PUBLIES, mesures = K_MESURES, dependancesFratrie = K_DEPENDANCES_FRATRIE,
+    taux = K_TAUX, distributions = K_DISTRIBUTIONS, libelles = K_BLOC_LIBELLES,
+  } = regles || {};
   const retires = new Map(); // bloc → nombre d'agrégats retirés
   const marquer = (chemin) => {
     const bloc = chemin.split('.')[1] || 'document';
@@ -433,12 +447,12 @@ function appliquerKAnonymat(document, seuil) {
       const sousChemin = `${chemin}.${cle}`;
       if (val && typeof val === 'object') { parcourir(val, sousChemin); continue; }
       if (typeof val !== 'number') continue;
-      if (K_MESURES.has(cle)) continue;
-      if (K_EFFECTIFS_PUBLIES.has(sousChemin)) continue;
+      if (mesures.has(cle)) continue;
+      if (effectifsPublies.has(sousChemin)) continue;
       if (sousSeuil(val)) { noeud[cle] = null; marquer(sousChemin); }
     }
     // ── 2. Dépendances de fratrie, dans le MÊME objet ─────────────────────
-    for (const [compteur, dependants] of Object.entries(K_DEPENDANCES_FRATRIE)) {
+    for (const [compteur, dependants] of Object.entries(dependancesFratrie)) {
       if (!(compteur in noeud)) continue;
       const v = noeud[compteur];
       const doitTomber = v === null || sousSeuil(v);
@@ -453,7 +467,7 @@ function appliquerKAnonymat(document, seuil) {
   parcourir(document.blocs || {}, 'blocs');
 
   // ── 3. Taux miroirs : un taux ne survit pas à la case qu'il reflète ──────
-  for (const t of K_TAUX) {
+  for (const t of taux) {
     const den = lireChemin(document, t.denominateur);
     if (den == null) continue;                // dénominateur retiré : rien à reconstituer
     const comptes = lireChemin(document, t.comptes);
@@ -473,7 +487,7 @@ function appliquerKAnonymat(document, seuil) {
   }
 
   // ── 4. Suppression complémentaire ────────────────────────────────────────
-  for (const d of K_DISTRIBUTIONS) {
+  for (const d of distributions) {
     const total = lireChemin(document, d.total);
     if (total == null) continue;              // total retiré : aucune soustraction possible
     const dist = lireChemin(document, d.chemin);
@@ -482,7 +496,7 @@ function appliquerKAnonymat(document, seuil) {
     // reprendrait d'une main ce que l'exigence de l'autorité donne de l'autre.
     const candidates = Object.keys(dist)
       .filter((c) => typeof dist[c] === 'number' && dist[c] > 0)
-      .filter((c) => !K_EFFECTIFS_PUBLIES.has(`${d.chemin}.${c}`))
+      .filter((c) => !effectifsPublies.has(`${d.chemin}.${c}`))
       .sort((a, b) => dist[a] - dist[b]);
 
     // Quand le TOTAL publié est lui-même sous le seuil, la ventilation entière
@@ -506,7 +520,7 @@ function appliquerKAnonymat(document, seuil) {
   }
 
   return [...retires.entries()]
-    .map(([bloc, nb]) => ({ bloc, libelle: K_BLOC_LIBELLES[bloc] || bloc, nb }))
+    .map(([bloc, nb]) => ({ bloc, libelle: libelles[bloc] || bloc, nb }))
     .sort((a, b) => a.bloc.localeCompare(b.bloc));
 }
 
@@ -1034,7 +1048,14 @@ async function bloc5Immersions(soft, db, p) {
  * Le chargement vit donc ici, et les appelants l'APPELLENT au lieu de le
  * recopier — une précondition ne se transmet pas par commentaire.
  */
-async function chargerSorties(soft, db, p, anneeDoubleMethode) {
+/**
+ * Les deux lectures qui alimentent le moteur des sorties : les fins de parcours
+ * de la période et les bilans de sortie classés. Extraites pour que le
+ * reporting Convergence (2.60.0) compte ses sortants avec EXACTEMENT les mêmes
+ * requêtes — une seconde copie de ce SQL, c'est deux dénominateurs un jour.
+ * `null` = source illisible (jamais confondu avec « aucune ligne »).
+ */
+async function chargerFinsEtBilans(soft, p) {
   const fins = await soft('fins_parcours', `
     SELECT e.id AS employee_id, COALESCE(e.parcours_num, 1) AS parcours_num
     FROM employees e
@@ -1049,6 +1070,11 @@ async function chargerSorties(soft, db, p, anneeDoubleMethode) {
       AND im.sortie_classification IS NOT NULL
       AND COALESCE(im.completed_date, im.updated_at::date) BETWEEN $1::date AND $2::date
     ORDER BY COALESCE(im.completed_date, im.updated_at::date), im.id`, [p.debut, p.fin]);
+  return { fins, bilans };
+}
+
+async function chargerSorties(soft, db, p, anneeDoubleMethode) {
+  const { fins, bilans } = await chargerFinsEtBilans(soft, p);
 
   // Sorties déclarées à l'ASP sur la période — le rapprochement que l'autorité
   // demande. Aucune ligne importée → `null`, jamais 0.
@@ -1662,6 +1688,9 @@ module.exports = {
   composerDialogueGestion,
   composerBlocsInternes,
   chargerSorties,
+  chargerFinsEtBilans,
+  projeterSortieType,
+  lireConvention,
   faireSoft,
   aplatirEnLignes,
   appliquerKAnonymat,

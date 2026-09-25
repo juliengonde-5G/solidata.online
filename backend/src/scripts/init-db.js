@@ -8892,6 +8892,8 @@ async function executerInitialisation() {
     await require('./migrations/insertion-salarie').run(client);
     // PR D (2.55.0) — reporting autorité (débouché PMSMP, DORA, aides, catégories, snapshots de synthèse)
     await require('./migrations/insertion-reporting').run(client);
+    // 2.60.0 — suivi Convergence (CVG) : habitat, orienteurs, situation de sortie, moyens humains, instantanés
+    await require('./migrations/insertion-convergence').run(client);
     await require('./migrations/etiquettes-v2').run(client);
     await require('./migrations/boutique-commandes-cartons').run(client);
 

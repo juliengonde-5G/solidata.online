@@ -1491,6 +1491,7 @@ const {
   purgeBordereauxDecheterie,
   purgeRappelsRdv,
   purgeDialoguesGestion,
+  purgeCvgRessources,
   purgeExpiredRefreshTokens,
 } = require('./rgpd-purges');
 
@@ -2173,6 +2174,10 @@ async function runAllJobs() {
     // CONVENTIONNEMENT, donc une durée longue — mais écrite (correctif m-09 :
     // la table n'avait aucune règle de conservation).
     await runInstrumented('purgeDialoguesGestion', purgeDialoguesGestion);
+    // 2.60.0 (M-03) — registre des moyens humains du reporting Convergence
+    // (trois ans après la fin d'une ressource). Il NOMME des permanents : sa
+    // durée de vie est écrite, comme celle des instantanés ci-dessus.
+    await runInstrumented('purgeCvgRessources', purgeCvgRessources);
     await runInstrumented('purgeExpiredRefreshTokens', purgeExpiredRefreshTokens);
     await runInstrumented('purgeMessagerieRetention', () => messagerie().purgeMessagerieRetention());
     // `notifier: true` — c'est le SEUL chemin réellement automatique : une
@@ -2244,6 +2249,7 @@ module.exports = {
   purgeBordereauxDecheterie,
   purgeRappelsRdv,
   purgeDialoguesGestion,
+  purgeCvgRessources,
   purgePcmNonRecrute,
   purgeExpiredCandidates,
   purgeInsertionDossiers,

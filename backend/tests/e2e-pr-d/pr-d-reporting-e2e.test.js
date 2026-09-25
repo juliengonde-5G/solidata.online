@@ -738,7 +738,10 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
     });
 
     test('V-26 — historique puis rejeu d\'un snapshot (journal CONSULTATION)', async () => {
-      const h = await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion/historique?annee=${AN}`), 'MANAGER');
+      // Rôle MANAGER RETIRÉ (2.52.0) : l'historique se lit par la CIP (RH) ; le
+      // MANAGER est refusé à la porte (rapport 31 § 5).
+      expect((await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion/historique?annee=${AN}`), 'MANAGER')).status).toBe(403);
+      const h = await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion/historique?annee=${AN}`), 'RH');
       expect(h.status).toBe(200);
       expect(h.body.length).toBeGreaterThanOrEqual(1);
       expect(h.body[0]).toHaveProperty('genere_par_role');
@@ -885,9 +888,10 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
   // 5. Habilitations et fuites de pool
   // ═════════════════════════════════════════════════════════════════════
   describe('habilitations', () => {
-    test('V-32 — MANAGER lit (200) et n\'enregistre pas (403) — refus AVANT toute requête', async () => {
+    test('V-32 — MANAGER (rôle retiré) ne lit pas (403) et n\'enregistre pas (403) — refus AVANT toute requête', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : la lecture lui est désormais refusée aussi.
       const lecture = await auth(request(app).get(`/api/insertion/reporting/dialogue-gestion?annee=${AN}`), 'MANAGER');
-      expect(lecture.status).toBe(200);
+      expect(lecture.status).toBe(403);
 
       const espion = jest.spyOn(pool, 'query');
       const ecriture = await auth(request(app).post('/api/insertion/reporting/dialogue-gestion'), 'MANAGER').send({ annee: AN });
@@ -944,17 +948,14 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
     // ── CORRECTIF B-02 (bloquant) ─────────────────────────────────────────
     test("V-35d — CORRECTIF B-02 · un MANAGER ne reçoit AUCUN statut social, sur les deux routes", async () => {
       for (const url of [`/api/insertion/audit?year=${AN}`, `/api/exports/insertion-synthese?year=${AN}&format=json`]) {
+        // Rôle MANAGER RETIRÉ (2.52.0) : refusé À LA PORTE — plus de projection
+        // à éprouver, plus rien ne sort (rapport 31 § 5).
         const r = await auth(request(app).get(url), 'MANAGER');
-        expect([url, r.status]).toEqual([url, 200]);
+        expect([url, r.status]).toEqual([url, 403]);
         expect([url, 'publics_entree' in r.body]).toEqual([url, false]);
-        const { projection_role: _n, ...donnees } = r.body;
-        const brut = JSON.stringify(donnees);
-        // La cohorte de recette porte 5 BRSA, 3 RQTH et des catégories FT.
+        const brut = JSON.stringify(r.body);
         expect([url, /"brsa"/.test(brut)]).toEqual([url, false]);
         expect([url, /Travailleur handicapé|par_categorie_ft|par_referent_unique/i.test(brut)]).toEqual([url, false]);
-        expect([url, 'rqth' in r.body.typologies]).toEqual([url, false]);
-        expect([url, 'ressources' in r.body.typologies]).toEqual([url, false]);
-        expect([url, r.body.projection_role.applique]).toEqual([url, true]);
       }
     });
 
@@ -965,10 +966,11 @@ function bilan(employeeId, dateIso, freins, extra = {}) {
       expect(r.body.projection_role).toBeUndefined();
     });
 
-    test('V-35b — MANAGER : /audit répond 200 et ne porte AUCUNE ventilation par salarié', async () => {
+    test('V-35b — MANAGER (rôle retiré) : /audit refusé (403), AUCUNE ventilation ne sort', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé à la porte — aucune clé ne sort.
       const r = await auth(request(app).get(`/api/insertion/audit?year=${AN}`), 'MANAGER');
-      expect(r.status).toBe(200);
-      expect(r.body.heures_accompagnement).not.toHaveProperty('par_salarie');
+      expect(r.status).toBe(403);
+      expect(r.body.heures_accompagnement).toBeUndefined();
       const cles = toutesLesCles({
         freins_evolution: r.body.freins_evolution, publics_entree: r.body.publics_entree,
         immersions: r.body.immersions, conformite: r.body.conformite,

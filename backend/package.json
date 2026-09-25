@@ -1,6 +1,6 @@
 {
   "name": "solidata-backend",
-  "version": "2.55.0",
+  "version": "2.60.0",
   "description": "SOLIDATA ERP - Backend API",
   "main": "src/index.js",
   "scripts": {

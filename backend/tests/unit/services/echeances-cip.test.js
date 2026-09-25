@@ -21,8 +21,9 @@ const fs = require('fs');
 const path = require('path');
 
 jest.mock('../../../src/config/database', () => ({ query: jest.fn(), connect: jest.fn() }));
+const mockSurcharges = {};
 jest.mock('../../../src/utils/insertion-settings', () => ({
-  readInsertionSetting: jest.fn(async (k) => ({
+  readInsertionSetting: jest.fn(async (k) => (Object.prototype.hasOwnProperty.call(mockSurcharges, k) ? mockSurcharges[k] : {
     'insertion.file_active_terminees_mois': 7,
     'insertion.delai_diagnostic_jours': 30,
     'insertion.alerte_pass_iae_mois': 7,
@@ -137,7 +138,7 @@ describe('3. habilitation — le MANAGER ne fait pas partir les requêtes social
   test('`typesPourRole` retire les familles sociales', () => {
     const admin = svc.typesPourRole('ADMIN');
     const manager = svc.typesPourRole('MANAGER');
-    for (const t of ['sortie_fse_a_saisir', 'fse_entree_manquant', 'categorie_g', 'sous_15h']) {
+    for (const t of ['sortie_fse_a_saisir', 'fse_entree_manquant', 'categorie_g', 'sous_15h', 'sortie_cvg']) {
       expect(admin).toContain(t);
       expect(manager).not.toContain(t);
     }
@@ -387,5 +388,77 @@ describe('7. lien public de l’écran ETI', () => {
     delete process.env.PUBLIC_BASE_URL;
     expect(svc.lienEti('abc')).toMatch(/^https:\/\/[^/]+\/eti\/renouvellement\/abc$/);
     if (avant !== undefined) process.env.PUBLIC_BASE_URL = avant;
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('8. situation de sortie Convergence (2.60.0) — 10ᵉ famille `sortie_cvg`', () => {
+  const TERMINE = (joursDepuisFin) => ({
+    ...SALARIE, insertion_status: 'termine', insertion_end_date: ilYA(joursDepuisFin),
+  });
+  const DIAG = { 'FROM insertion_diagnostics d': [{ employee_id: 5, socle_complet: true, fse_entree_complet: true }] };
+
+  test('famille déclarée : sociale (ADMIN/RH), cible le bilan de sortie', () => {
+    const meta = svc.TYPES_OBLIGATIONS.find((t) => t.type === 'sortie_cvg');
+    expect(meta).toEqual(expect.objectContaining({ social: true, onglet: 'suivi', champ: 'sortie_cvg' }));
+    expect(svc.TYPES_OBLIGATIONS).toHaveLength(10);
+    expect(svc.TYPES_OBLIGATIONS_CLES).toContain('sortie_cvg');
+  });
+
+  test('parcours terminé depuis plus de 30 jours sans situation → ROUGE, échéance fin + 30 j', async () => {
+    const db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    const r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    const o = r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg');
+    expect(o).toEqual(expect.objectContaining({ niveau: 'rouge', jours: 45, echeance: decalerJours(ilYA(45), 30) }));
+    expect(o.libelle).toMatch(/Situation de sortie Convergence à saisir/);
+    expect(o.cible).toEqual({ onglet: 'suivi', champ: 'sortie_cvg' });
+  });
+
+  test('situation saisie pour ce parcours → aucune obligation ; moins de 30 jours → aucune', async () => {
+    let db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG, 'FROM insertion_sortie_cvg': [{ employee_id: 5, parcours_num: 1 }] });
+    let r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeUndefined();
+    db = fauxDb({ 'FROM employees e WHERE': [TERMINE(20)], ...DIAG });
+    r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeUndefined();
+  });
+
+  test('une situation saisie pour un AUTRE parcours ne couvre pas celui-ci', async () => {
+    const db = fauxDb({ 'FROM employees e WHERE': [{ ...TERMINE(45), parcours_num: 2 }], ...DIAG, 'FROM insertion_sortie_cvg': [{ employee_id: 5, parcours_num: 1 }] });
+    const r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeDefined();
+  });
+
+  test('source illisible → famille NON calculée (jamais chaque sortant réclamé) et nommée', async () => {
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const e = new Error('relation absente'); e.code = '42P01';
+    const db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG, 'FROM insertion_sortie_cvg': e });
+    const r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeUndefined();
+    expect(r.sources).toContain('sorties_cvg');
+    err.mockRestore();
+  });
+
+  test('m-11 (2.60.0) — un parcours terminé AVANT la mise en service ne lève pas d’obligation', async () => {
+    mockSurcharges['insertion.cvg_sortie_depuis'] = decalerJours(ilYA(45), 1); // mise en service le lendemain de la fin
+    let db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    let r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeUndefined();
+    mockSurcharges['insertion.cvg_sortie_depuis'] = ilYA(45); // fin le jour même de la mise en service : réclamée
+    db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeDefined();
+    mockSurcharges['insertion.cvg_sortie_depuis'] = 'n’importe quoi'; // illisible : aucune borne
+    db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeDefined();
+    delete mockSurcharges['insertion.cvg_sortie_depuis'];
+  });
+
+  test('aucune requête sur la situation de sortie hors ADMIN/RH', async () => {
+    const journal = [];
+    const db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)] }, journal);
+    await svc.chargerObligations({ db, baseRole: 'MANAGER' });
+    expect(journal.some(([s]) => s.includes('insertion_sortie_cvg'))).toBe(false);
   });
 });

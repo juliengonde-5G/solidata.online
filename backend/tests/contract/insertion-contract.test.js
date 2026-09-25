@@ -1457,7 +1457,7 @@ describe('CONTRAT GET /insertion/audit — blocs conventionnel/typologies/contr�
     expect(res.body.pmsmp).toHaveProperty('par_debouche');
     expect(res.body.pmsmp).toHaveProperty('embauches_chez_accueillant');
     expect(res.body.satisfaction).toEqual({ nb_reponses: 0, moyenne_globale: null });
-    expect(res.body.cvg.statut).toBe('trame_en_attente');
+    expect(res.body.cvg.statut).toBe('livre');
   });
 
   it('typologies NON nominatives : RQTH (avec repli texte paie), ressources, niveaux, TRANCHES d’âge (jamais la date de naissance)', async () => {

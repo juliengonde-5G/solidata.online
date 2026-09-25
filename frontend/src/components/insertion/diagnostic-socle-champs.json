@@ -6,6 +6,7 @@
     { "colonne": "allocataire_caf", "type": "booleen", "rubrique": "cadre" },
     { "colonne": "ressources", "type": "liste", "rubrique": "cadre" },
     { "colonne": "logement_statut", "type": "texte", "rubrique": "logement" },
+    { "colonne": "habitat_type", "type": "texte", "rubrique": "logement" },
     { "colonne": "mutuelle_statut", "type": "texte", "rubrique": "sante" },
     { "colonne": "rqth", "type": "booleen", "rubrique": "sante" },
     { "colonne": "contre_indications", "type": "booleen", "rubrique": "sante" },

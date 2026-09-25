@@ -39,6 +39,7 @@
  * Module sans dépendance DB — testé unitairement (ordre des colonnes,
  * complétude REC-UX-14).
  */
+const { rqthDepuisStatutHandicap } = require('./rqth');
 const { FREINS } = require('../routes/insertion/freins-registry');
 
 const freinByKey = (k) => FREINS.find((f) => f.key === k);
@@ -165,11 +166,13 @@ const fmtDate = (v) => {
  */
 function rowToCells(r, sensibles = false) {
   // RQTH : booléen structuré du diagnostic (rubrique IV) prioritaire, repli sur
-  // le texte disability_status de l'import Malibou (présence = Oui).
+  // le texte disability_status de l'import Malibou — 2.60.0 (M-02, même
+  // famille) : seul un libellé qui DIT une reconnaissance vaut « Oui » (règle
+  // unique `utils/rqth.js`) ; « Non concerné », « En cours »… restent vides.
   let rqth = '';
   if (r.rqth === true) rqth = 'Oui';
   else if (r.rqth === false) rqth = 'Non';
-  else if (r.disability_status && String(r.disability_status).trim() !== '') rqth = 'Oui';
+  else if (rqthDepuisStatutHandicap(r.disability_status) === true) rqth = 'Oui';
 
   // PMSMP : nombre réalisé + date de la dernière (colonne 21 du CDC).
   let pmsmp = '';

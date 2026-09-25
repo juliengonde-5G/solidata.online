@@ -76,6 +76,15 @@ function extraireActionsEcrites(texte) {
     for (const m of texte.matchAll(re)) actions.add(m[1]);
   }
 
+  // Forme du module Insertion (`utils/insertion-journal.js`) : la fabrique
+  // `journalPour` rend `journaliser` / `journaliserDocument`, qui écrivent
+  // dans `rgpd_audit_log` par `ecrireJournal`. Aucun des deux motifs
+  // ci-dessus ne les voyait — tout le module Insertion échappait à la garde
+  // (constat du lot 2.60.0). On lit donc aussi leurs appels.
+  for (const m of texte.matchAll(/journaliser(?:Document)?\(\s*\w+\s*,\s*req\s*,\s*'([A-Z][A-Z0-9_]{2,})'/g)) {
+    actions.add(m[1]);
+  }
+
   return actions;
 }
 
@@ -110,5 +119,17 @@ describe('journal d’audit RGPD — libellés à jour', () => {
     const connus = clesDuDictionnaire(dictionnaire, 'RGPD_ACTION_LABELS');
     const absents = [...actionsEcrites].filter((a) => !connus.has(a)).sort();
     expect(absents).toEqual([]);
+  });
+
+  test('les codes du module Insertion (journaliser / journaliserDocument) sont recensés', () => {
+    expect(actionsEcrites.has('INSERTION_DIALOGUE_GESTION_APERCU')).toBe(true);
+    for (const code of ['INSERTION_CVG_APERCU', 'INSERTION_CVG_GENERATION', 'INSERTION_CVG_CONSULTATION',
+      'INSERTION_CVG_COMPARAISON', 'EXPORT_CVG', 'INSERTION_SORTIE_CVG_ECRITURE',
+      // 2.60.0 — journaux tolérants (m-01, m-02, m-06) et 12ᵉ purge (M-03).
+      'INSERTION_SORTIE_CVG_LECTURE', 'INSERTION_CVG_COMPLETUDE', 'INSERTION_CVG_RESSOURCE_CREATION',
+      'INSERTION_CVG_RESSOURCE_MODIFICATION', 'INSERTION_CVG_RESSOURCE_SUPPRESSION',
+      'PURGE_CVG_RESSOURCES']) {
+      expect(actionsEcrites.has(code)).toBe(true);
+    }
   });
 });

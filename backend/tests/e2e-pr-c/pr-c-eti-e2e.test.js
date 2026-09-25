@@ -142,11 +142,13 @@ const tokenDe = async (id) => (await pool.query('SELECT eti_token, eti_token_exp
       expect(r.status).toBe(404);
     });
 
-    test('V-49 MANAGER non encadrant → 403 ; encadrant du salarié → 201', async () => {
+    test('V-49 MANAGER (rôle retiré) → 403, qu\'il soit ou non encadrant du salarié ; aucun jeton posé', async () => {
       const refus = await auth(request(app).post(`/api/insertion/renouvellements/${msB}/lien-eti`), 'MANAGER');
       expect(refus.status).toBe(403);
-      expect(refus.body.code).toBe('renouvellement_non_autorise');
       expect((await tokenDe(msB)).eti_token).toBeNull();
+      // Rôle MANAGER RETIRÉ (2.52.0) : même ENCADRANT du salarié, il est refusé à
+      // la porte du module — le lien ETI ne se génère plus que par ADMIN/RH
+      // (rapport 31 § 5 ; la garde `managerOwnsEmployee` reste au code).
 
       // `managerOwnsEmployee` : le compte MANAGER est rattaché à la fiche
       // encadrant du salarié.
@@ -155,8 +157,9 @@ const tokenDe = async (id) => (await pool.query('SELECT eti_token, eti_token_exp
          VALUES ('PRCETI_MGR', 'Manu', 'Encadrant', $1, true) RETURNING id`, [U.MANAGER.id]
       );
       await pool.query('UPDATE employees SET manager_id = $1 WHERE id = $2', [fiche.rows[0].id, empB]);
-      const ok = await auth(request(app).post(`/api/insertion/renouvellements/${msB}/lien-eti`), 'MANAGER');
-      expect(ok.status).toBe(201);
+      const encadrant = await auth(request(app).post(`/api/insertion/renouvellements/${msB}/lien-eti`), 'MANAGER');
+      expect(encadrant.status).toBe(403);
+      expect((await tokenDe(msB)).eti_token).toBeNull();
       await pool.query('DELETE FROM employees WHERE malibou_id = $1', ['PRCETI_MGR']);
     });
 
@@ -348,9 +351,10 @@ const tokenDe = async (id) => (await pool.query('SELECT eti_token, eti_token_exp
       expect(JSON.stringify(maj.body)).not.toContain('"eti_token":"');
     });
 
-    test('DÉFAUT D-02 (suite) — un MANAGER reçoit lui aussi le jeton en clair', async () => {
+    test('DÉFAUT D-02 (suite) — un MANAGER (rôle retiré) ne reçoit rien, jeton compris', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé à la porte, il ne reçoit plus rien.
       const liste = await auth(request(app).get(`/api/insertion/milestones/${empA}`), 'MANAGER');
-      expect(liste.status).toBe(200);
+      expect(liste.status).toBe(403);
       // `maskInsertionRow` retire le judiciaire, la santé et les questionnaires
       // FSE+ — pas le jeton.
       expect(JSON.stringify(liste.body)).not.toContain('"eti_token":"');
@@ -378,25 +382,27 @@ const tokenDe = async (id) => (await pool.query('SELECT eti_token, eti_token_exp
     // module, il contournait `managerOwnsEmployee` — la garde posée en P1 après
     // la revue Codex PR#74 et dont le commentaire dit « sinon tout encadrant
     // pourrait écrire le renouvellement d'autrui ».
-    test('V-64bis un MANAGER NON encadrant ne reçoit PAS le lien (ni par /renouvellements, ni par /echeances)', async () => {
+    test('V-64bis un MANAGER (rôle retiré) ne reçoit PAS le lien (ni par /renouvellements, ni par /echeances)', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé à la porte sur les deux écrans.
       const r = await auth(request(app).get('/api/insertion/renouvellements'), 'MANAGER');
-      expect(r.status).toBe(200);
-      const ligne = r.body.renouvellements.find((x) => x.employee_id === empA);
-      expect(ligne).toBeDefined();          // il voit la ligne : c'est son écran de travail
-      expect(ligne.entretien.lien_eti).toBeNull();   // mais pas la clé
+      expect(r.status).toBe(403);
       expect(JSON.stringify(r.body)).not.toContain('/eti/renouvellement/');
 
       const e = await auth(request(app).get('/api/insertion/echeances'), 'MANAGER');
-      expect(e.status).toBe(200);
+      expect(e.status).toBe(403);
       expect(JSON.stringify(e.body)).not.toContain('/eti/renouvellement/');
     });
 
-    test('V-64ter l\'encadrant RÉFÉRENT, lui, reçoit le lien (il a le droit d\'écrire ce formulaire)', async () => {
+    test('V-64ter référent ou non, le MANAGER (rôle retiré) est refusé ; la CIP reçoit le lien', async () => {
       // `managerOwnsEmployee` reconnaît le CIP référent ET l'encadrant : on
       // rend le compte MANAGER référent de ce salarié, comme en production.
       await pool.query('UPDATE employees SET cip_referent_user_id = $1 WHERE id = $2', [U.MANAGER.id, empA]);
       try {
-        const r = await auth(request(app).get('/api/insertion/renouvellements'), 'MANAGER');
+        // Rôle MANAGER RETIRÉ (2.52.0) : même RÉFÉRENT, il est refusé à la porte ;
+        // le lien reste servi à la CIP (RH).
+        const m = await auth(request(app).get('/api/insertion/renouvellements'), 'MANAGER');
+        expect(m.status).toBe(403);
+        const r = await auth(request(app).get('/api/insertion/renouvellements'), 'RH');
         const ligne = r.body.renouvellements.find((x) => x.employee_id === empA);
         expect(ligne.entretien.lien_eti).toMatch(/\/eti\/renouvellement\/[0-9a-f]{32}$/);
       } finally {

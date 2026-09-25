@@ -12,6 +12,10 @@
 > désormais **la façon dont ces obligations remontent chaque semaine à la conseillère** (§ 11), **les
 > deux documents produits pour la personne accompagnée** (§ 12), et **le document annuel transmis à
 > l'autorité de tutelle avant le dialogue de gestion** (§ 13, chantier D, livré le 14/09/2026, v. 2.55.0).
+> **Complété le 25/09/2026 (chantier E « Suivi Convergence (programme CVG) », v. 2.60.0)** : un nouveau
+> § 16 renvoie au document **distinct** transmis au réseau **Convergence France** — ce n'est ni l'autorité
+> de tutelle du § 13 ni le cofinanceur européen des § 3 à 7, et ses obligations ont leur propre pas à pas
+> dans [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) (cas 33 à 35).
 >
 > - **Public** : CIP, RH, administrateur. Les écrans décrits sont réservés aux rôles **ADMIN et RH** — un
 >   encadrant technique n'en voit aucun ; la synthèse de dialogue de gestion (§ 13) fait exception dans
@@ -41,6 +45,7 @@
 13. [La synthèse de dialogue de gestion](#13-la-synthèse-de-dialogue-de-gestion)
 14. [Ce qui protège les personnes](#14-ce-qui-protège-les-personnes)
 15. [FAQ — 13 questions](#15-faq--13-questions)
+16. [Reporting Convergence](#16-reporting-convergence)
 
 ---
 
@@ -511,4 +516,51 @@ De quoi répondre à un salarié qui demande « qu'est-ce que vous notez sur moi
 
 ---
 
-*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée), **puis à la livraison de la PR C « Section CIP et documents du salarié » (v. 2.54.0)** : nouveaux § 11 (écran « Mes échéances », obligations reportables 48 h) et § 12 (« Mon parcours en une page », « Mon Récap », rappels de rendez-vous), anciens § 11-12 renumérotés § 13-14, deux nouvelles questions de FAQ, mise à jour des renvois d'onglets (Dossier administratif, Suivi) et de la question 8. Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail — les blocs de la PR C n'ont pas encore de maquette illustrée ici. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », v. 2.55.0)** : nouveau § 13 (synthèse de dialogue de gestion, tableau des freins enrichi), anciens § 13-14 renumérotés § 14-15, deux nouvelles questions de FAQ (12 et 13), la question 8 mise à jour ; **repassé le même jour** après la livraison du lot 6 et ses correctifs de revue — le § 13 avait d'abord été écrit pendant que l'écran se construisait et le disait « non livré » ; il décrit désormais l'écran en service, vérifié dans le code (onglet « Dialogue de gestion », blocs DORA / aide, sélecteur de débouché, export (d) à 45 colonnes, aperçu journalisé, k-anonymat structurel). Le § 8 a été corrigé au passage : le rattachement d'un participant à un projet se fait depuis le Dossier administratif, l'écran existe.*
+## 16. Reporting Convergence
+
+**Objectif** : dire ce qui distingue le document transmis au réseau **Convergence France** de tout ce
+qui précède dans ce guide — pour ne pas le confondre avec la synthèse de dialogue de gestion (§ 13) ni
+avec les exports FSE+ (§ 3 à 7).
+
+**Ce n'est ni votre autorité de tutelle, ni le cofinanceur européen.** Convergence France a sa **propre
+nomenclature** — cinq types d'habitat, douze orienteurs, huit catégories de sortie — distincte de la
+classification DREETS/ASP que vous utilisez par ailleurs. Le document se produit, se compare et se
+transmet depuis **RH et Insertion → Pilotage & indicateurs → onglet « Convergence (CVG) »**, et le pas à
+pas complet, cas par cas, vit dans [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) — cas **33** (le
+document lui-même, sa génération, sa comparaison de deux périodes), **34** (la situation à la sortie
+Convergence, saisie à part dans le bilan de sortie) et **35** (ce qui se saisit à l'entrée : habitat,
+parcours de rue, pension d'invalidité, médecin traitant, les douze orienteurs).
+
+**Ce que vous alimentez déjà, sans y penser, pour ce document** : le statut de logement et le niveau de
+formation du diagnostic, l'orienteur du dossier administratif, les neuf freins évalués (sept sont
+transmis à Convergence : le frein « numérique » n'a pas d'équivalent dans son référentiel, et le frein
+« justice » — donnée relevant de l'article 10 du RGPD — n'est **pas transmis** par défaut, sa ligne
+s'imprime « non transmis » ; seule une décision du délégué à la protection des données peut l'ouvrir). Trois saisies sont **nouvelles**, toutes au diagnostic d'accueil (rubriques Logement et
+Santé) : le type d'habitat dans la nomenclature Convergence, le fait d'avoir connu un parcours de rue,
+la pension d'invalidité et le médecin traitant déclaré.
+
+**Réservé ADMIN et RH, sans exception** — à la différence de la synthèse de dialogue de gestion (§ 13),
+aucun encadrant technique n'y a accès, même en lecture agrégée : le document porte des catégories de
+santé nommément (RQTH, AAH, pension d'invalidité, médecin traitant). Il applique un **seuil de
+confidentialité** de 5 personnes par défaut (abaissable par le seul délégué à la protection des données) :
+un tableau des sortis de moins de 5 personnes ne diffuse ni santé, ni justice, ni logement, ni parcours de
+soin (case « s ») — voir [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 33.
+
+> **FAQ**
+> **1. Les chiffres de ce document diffèrent de ma synthèse de dialogue de gestion (§ 13), pourquoi ?**
+> Ce sont deux documents distincts, avec deux dénominateurs et deux périodes qui ne coïncident pas
+> forcément : la synthèse de dialogue de gestion se calcule sur l'**année civile** (ou le trimestre) et
+> compte les sorties selon la nomenclature DREETS ; le document Convergence se calcule sur la **période
+> choisie à l'écran** (un semestre du réseau, par défaut) et classe les sorties dans sa propre
+> nomenclature. Un écart entre les deux n'est pas une erreur : ce sont deux règles de comptage
+> différentes, appliquées à deux périodes qui peuvent différer.
+> **2. Pourquoi une personne apparaît-elle dans « non renseigné » ?**
+> Parce qu'une information Convergence (habitat, orienteur, freins évalués, situation de sortie…) n'a pas
+> encore été saisie dans son dossier — jamais parce que le document a deviné une valeur à sa place :
+> une donnée non saisie s'affiche « — » et compte comme non renseignée, elle n'est jamais devinée à partir
+> d'une information voisine. L'onglet **« À compléter »** de l'écran Convergence (CVG) liste nommément qui
+> et quoi, avec un lien direct vers la fiche.
+
+---
+
+*Guide établi le 13/09/2026 à la livraison de la PR A « Conformité immédiate » (dossier administratif, questionnaires FSE+, dossier de conformité, export participants et bilan d'exécution), **complété le même jour** à la livraison de la PR B « Cadre RSA et temps d'accompagnement » (§ 9 et § 10 : compteur d'activité, deux entretiens dédiés, fiche pour le référent tracée, relevé d'assiduité, actualisation France Travail, feuille de temps signée), **puis à la livraison de la PR C « Section CIP et documents du salarié » (v. 2.54.0)** : nouveaux § 11 (écran « Mes échéances », obligations reportables 48 h) et § 12 (« Mon parcours en une page », « Mon Récap », rappels de rendez-vous), anciens § 11-12 renumérotés § 13-14, deux nouvelles questions de FAQ, mise à jour des renvois d'onglets (Dossier administratif, Suivi) et de la question 8. Les illustrations sont les maquettes validées le 12/09/2026 : l'écran livré peut différer dans le détail — les blocs de la PR C n'ont pas encore de maquette illustrée ici. **Complété le 14/09/2026 (chantier D « Reporting autorité et présentation », v. 2.55.0)** : nouveau § 13 (synthèse de dialogue de gestion, tableau des freins enrichi), anciens § 13-14 renumérotés § 14-15, deux nouvelles questions de FAQ (12 et 13), la question 8 mise à jour ; **repassé le même jour** après la livraison du lot 6 et ses correctifs de revue — le § 13 avait d'abord été écrit pendant que l'écran se construisait et le disait « non livré » ; il décrit désormais l'écran en service, vérifié dans le code (onglet « Dialogue de gestion », blocs DORA / aide, sélecteur de débouché, export (d) à 45 colonnes, aperçu journalisé, k-anonymat structurel). Le § 8 a été corrigé au passage : le rattachement d'un participant à un projet se fait depuis le Dossier administratif, l'écran existe. **Complété le 25/09/2026 (chantier E « Suivi Convergence (programme CVG) », v. 2.60.0)** : nouveau § 16, qui renvoie le pas à pas complet à [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 33 à 35 — ce guide n'en donne que le repère de conformité et deux questions de FAQ ; aucun paragraphe antérieur modifié.*

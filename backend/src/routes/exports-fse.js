@@ -50,6 +50,11 @@ const NIVEAU_FORMATION_LABELS = {
   niv3: 'Niveau 3 (CAP/BEP)',
   niv4: 'Niveau 4 (Bac)',
   niv5: 'Niveau 5 (Bac+2)',
+  // 2.60.0 — niveaux 6, 7 et 8 détaillés (saisie du diagnostic) ; `niv6plus`
+  // reste la valeur des fiches antérieures.
+  niv6: 'Niveau 6 (Bac+3/4)',
+  niv7: 'Niveau 7 (Bac+5)',
+  niv8: 'Niveau 8 (doctorat)',
   niv6plus: 'Niveau 6 et plus (Bac+3 et au-delà)',
 };
 

@@ -147,8 +147,10 @@ router.get('/dialogue-gestion/historique', [
   try {
     const limit = parseInt(req.query.limit, 10) || 25;
     const params = [limit];
-    let filtre = '';
-    if (req.query.annee) { params.push(parseInt(req.query.annee, 10)); filtre = ' WHERE d.annee = $2'; }
+    // 2.60.0 — la table porte aussi les instantanés Convergence (`type = 'cvg'`) :
+    // ils ont leur propre historique et ne se mélangent pas à celui-ci.
+    let filtre = " WHERE d.type = 'dialogue'";
+    if (req.query.annee) { params.push(parseInt(req.query.annee, 10)); filtre += ' AND d.annee = $2'; }
     // Le PRÉNOM et l'INITIALE du générateur, jamais le nom complet : l'autorité
     // veut savoir à quel titre le document a été produit, pas recevoir un
     // répertoire du personnel.
@@ -197,7 +199,7 @@ router.get('/dialogue-gestion/:id', [
   try {
     const r = await pool.query(
       `SELECT id, annee, trimestre, contenu, genere_le, version_application
-       FROM insertion_dialogues_gestion WHERE id = $1`, [req.params.id]
+       FROM insertion_dialogues_gestion WHERE id = $1 AND type = 'dialogue'`, [req.params.id]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Synthèse introuvable' });
     const row = r.rows[0];
@@ -243,8 +245,8 @@ router.post('/dialogue-gestion', authorize('ADMIN', 'RH'), [
     client = await pool.connect();
     await client.query('BEGIN');
     const ins = await client.query(
-      `INSERT INTO insertion_dialogues_gestion (annee, trimestre, contenu, genere_par, version_application)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, genere_le`,
+      `INSERT INTO insertion_dialogues_gestion (annee, trimestre, contenu, genere_par, version_application, type)
+       VALUES ($1, $2, $3, $4, $5, 'dialogue') RETURNING id, genere_le`,
       [annee, trimestre, JSON.stringify(synthese), req.user?.id ?? null, APP_VERSION]
     );
     // Trace BLOQUANTE, DANS la transaction : le snapshot et sa preuve tombent

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { LoadingSpinner, PageHeader } from '../components';
-import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil, FileText, BarChart3 } from 'lucide-react';
+import { ClipboardList, Sparkles, Printer, Users, Target, LogOut, ListChecks, Download, Pencil, FileText, BarChart3, Network } from 'lucide-react';
 import DialogueGestionPanel from '../components/insertion/DialogueGestionPanel';
+import ConvergenceCvgPanel from '../components/insertion/ConvergenceCvgPanel';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { getInsertionParametres, PARAMETRES_DEFAUTS } from '../components/insertion/parametres';
@@ -820,7 +821,7 @@ export default function AuditInsertion() {
       + convRow('ETP réalisés (approché)', data.etp_realises_approx?.valeur, conv.cibles?.cible_etp_conventionnes, conv.ecarts?.etp, 'ETP')
       + `</table>`
       + `<div class="note">${esc(data.etp_realises_approx?.note || '')}</div>`
-      + `<div class="note">Délai moyen du diagnostic d'accueil : ${data.delai_moyen_diagnostic_jours != null ? data.delai_moyen_diagnostic_jours + ' j' : '—'} • PMSMP : ${data.pmsmp?.nb ?? 0} convention(s), ${data.pmsmp?.jours ?? 0} j • Satisfaction de sortie : ${data.satisfaction?.nb_reponses ? (data.satisfaction.moyenne_globale ?? '—') + '/4 (' + data.satisfaction.nb_reponses + ' rép.)' : 'aucune réponse'} • CVG : trame de reporting en attente (direction).</div>`
+      + `<div class="note">Délai moyen du diagnostic d'accueil : ${data.delai_moyen_diagnostic_jours != null ? data.delai_moyen_diagnostic_jours + ' j' : '—'} • PMSMP : ${data.pmsmp?.nb ?? 0} convention(s), ${data.pmsmp?.jours ?? 0} j • Satisfaction de sortie : ${data.satisfaction?.nb_reponses ? (data.satisfaction.moyenne_globale ?? '—') + '/4 (' + data.satisfaction.nb_reponses + ' rép.)' : 'aucune réponse'}.</div>`
       + `<div class="note">${esc(conv.methode || '')}</div></div>`;
 
     // 1. Indicateurs clés — cartes KPI
@@ -985,6 +986,9 @@ export default function AuditInsertion() {
           {[
             ['pilotage', 'Pilotage & indicateurs', BarChart3],
             ['dialogue', 'Dialogue de gestion', FileText],
+            // Convergence (CVG) : agrégats portant BRSA, RQTH, AAH, freins
+            // santé/judiciaire et la Partie 2 nominative — ADMIN/RH strict.
+            ...(canIa ? [['cvg', 'Convergence (CVG)', Network]] : []),
           ].map(([cle, label, Icon]) => (
             <button key={cle} type="button" role="tab" aria-selected={onglet === cle}
               onClick={() => setOnglet(cle)}
@@ -999,6 +1003,10 @@ export default function AuditInsertion() {
           <DialogueGestionPanel year={year} canGenerer={canIa} />
         )}
 
+        {onglet === 'cvg' && canIa && (
+          <ConvergenceCvgPanel canGenerer={canIa} />
+        )}
+
         {error && onglet === 'pilotage' && <div className="mb-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg p-3">Impossible de charger l'audit : {error}</div>}
         {syntheseError && onglet === 'pilotage' && <div className="mb-4 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2">{syntheseError}</div>}
 
@@ -1006,7 +1014,8 @@ export default function AuditInsertion() {
           <div className="space-y-6">
             {/* 0. Indicateurs conventionnels (EXG-47/D12) — EN TÊTE : réalisé vs
                 cibles de l'annexe financière, ETP « contrôle ERP », typologies,
-                délai diagnostic, PMSMP, satisfaction, encart CVG. */}
+                délai diagnostic, PMSMP, satisfaction. Le reporting Convergence
+                (CVG) a son propre onglet. */}
             <div className="bg-white rounded-xl border p-5">
               <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
                 <h3 className="font-semibold text-gray-800 flex items-center gap-2"><Target className="w-4 h-4 text-teal-600" /> Indicateurs conventionnels ({data.annee})</h3>
@@ -1103,11 +1112,6 @@ export default function AuditInsertion() {
                 <MiniBars title="Niveaux de formation" data={data.typologies?.niveaux_formation} emptyLabel="Niveaux non renseignés au diagnostic" />
               </div>
 
-              {/* Encart CVG — réservé, en attente de la trame direction */}
-              <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">
-                <strong>Programme Convergence (CVG)</strong> — en attente de la trame de reporting (direction).
-                {data.cvg?.note ? ` ${data.cvg.note}` : ''}
-              </div>
             </div>
 
             {/* 1. Indicateurs clés */}

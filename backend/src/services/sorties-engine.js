@@ -75,6 +75,54 @@ function cle(ligne) {
   return `${id}#${Number.isFinite(num) ? num : 1}`;
 }
 
+/**
+ * Index des bilans par parcours. Deux bilans pour un même parcours (une
+ * réouverture suivie d'une reprise) : le PREMIER rencontré fait foi — la
+ * requête appelante les ordonne, et compter deux fois la même personne
+ * gonflerait à la fois le numérateur et le dénominateur de la méthode A.
+ */
+function indexerBilans(bilansClasses) {
+  const bilans = Array.isArray(bilansClasses)
+    ? bilansClasses.filter((b) => b && b.sortie_classification)
+    : [];
+  const bilanParParcours = new Map();
+  for (const b of bilans) {
+    const k = cle(b);
+    if (k && !bilanParParcours.has(k)) bilanParParcours.set(k, b);
+  }
+  return bilanParParcours;
+}
+
+/**
+ * La liste des SORTANTS de la méthode B — une ligne par fin de parcours, avec
+ * le bilan classé qui lui est apparié (ou `null` : sortie non documentée).
+ *
+ * Exposée pour les documents qui ventilent les sortants PERSONNE PAR PERSONNE
+ * (reporting Convergence, 2.60.0) : ils doivent compter exactement les mêmes
+ * personnes que le dénominateur de `calculerSorties`, avec le même appariement.
+ * Recopier cette boucle ailleurs, c'est accepter qu'un jour les deux documents
+ * annoncent deux nombres de sorties différents pour la même période.
+ *
+ * @returns {Array<{employee_id:number, parcours_num:number, bilan:object|null}>}
+ */
+function listerSortants({ finsParcours = [], bilansClasses = [] } = {}) {
+  const fins = Array.isArray(finsParcours) ? finsParcours.filter((f) => cle(f)) : [];
+  const bilanParParcours = indexerBilans(bilansClasses);
+  const vues = new Set();
+  const out = [];
+  for (const f of fins) {
+    const k = cle(f);
+    if (vues.has(k)) continue; // une personne, une fin de parcours
+    vues.add(k);
+    out.push({
+      employee_id: Number(f.employee_id),
+      parcours_num: f.parcours_num == null ? 1 : Number(f.parcours_num),
+      bilan: bilanParParcours.get(k) || null,
+    });
+  }
+  return out;
+}
+
 /** Compteur initialisé à zéro sur les cinq lignes — aucune ne doit manquer. */
 function compteurVide(avecNonDocumentee) {
   const o = {};
@@ -107,19 +155,8 @@ function calculerSorties({
   annee_double_methode = null,
 } = {}) {
   const fins = Array.isArray(finsParcours) ? finsParcours.filter((f) => cle(f)) : [];
-  const bilans = Array.isArray(bilansClasses)
-    ? bilansClasses.filter((b) => b && b.sortie_classification)
-    : [];
-
-  // Index des bilans par parcours. Deux bilans pour un même parcours (une
-  // réouverture suivie d'une reprise) : le PREMIER rencontré fait foi — la
-  // requête appelante les ordonne, et compter deux fois la même personne
-  // gonflerait à la fois le numérateur et le dénominateur de la méthode A.
-  const bilanParParcours = new Map();
-  for (const b of bilans) {
-    const k = cle(b);
-    if (k && !bilanParParcours.has(k)) bilanParParcours.set(k, b);
-  }
+  // Index des bilans par parcours — règle unique (`indexerBilans`).
+  const bilanParParcours = indexerBilans(bilansClasses);
 
   // ── Méthode B — dénominateur = toutes les fins de parcours ───────────────
   const parClassificationB = compteurVide(true);
@@ -261,6 +298,7 @@ function calculerSorties({
 
 module.exports = {
   calculerSorties,
+  listerSortants,
   SORTIE_CLASSES,
   CLASSES_DYNAMIQUES,
   CLASSE_NON_DOCUMENTEE,

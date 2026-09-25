@@ -209,3 +209,74 @@ export const frDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—
 export function isAdminRh(user) {
   return ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
 }
+
+// ── Convergence France (programme CVG) — lot 2.60.0, contrat 30 § 2 ──
+// UN SEUL fichier porte ces libellés : le diagnostic, le bilan de sortie, le
+// dossier administratif et l'écran CVG les lisent ici. Les clés sont celles des
+// CHECK du backend (migrations/insertion-convergence.js).
+
+/** Type d'habitat — référentiel Convergence (entrée ET sortie). */
+export const CVG_HABITAT_LABELS = {
+  autonome: 'Logement autonome',
+  semi_durable: 'Logement semi-durable',
+  hebergement_collectif: 'Hébergement collectif',
+  hebergement_precaire: 'Hébergement précaire',
+  rue: 'Rue',
+};
+export const CVG_HABITAT_KEYS = Object.keys(CVG_HABITAT_LABELS);
+
+/** Situation à la sortie — liste fermée Convergence. */
+export const CVG_SORTIE_LABELS = {
+  emploi: 'Emploi (CDI, CDD, création d\'entreprise…)',
+  suite_parcours_insertion: 'Suite de parcours en insertion (CDDI…)',
+  formation: 'Formation',
+  retraite: 'Retraite',
+  sans_solution: 'Sans solution emploi',
+  sans_nouvelles: 'Sans nouvelles',
+  sortie_neutre: 'Sortie neutre',
+  autre_positive: 'Sortie autre reconnue comme positive',
+};
+export const CVG_SORTIE_EMPLOI = ['emploi', 'suite_parcours_insertion', 'formation'];
+export const CVG_SORTIE_HORS_EMPLOI = ['retraite', 'sans_solution', 'sans_nouvelles', 'sortie_neutre', 'autre_positive'];
+
+/** Les 8 difficultés à l'entrée, dans l'ordre du formulaire Convergence. */
+export const CVG_FREINS_LABELS = {
+  linguistique: 'Illettrisme, analphabétisme, FLE',
+  sante: 'Santé',
+  logement: 'Logement',
+  administratif: 'Démarches administratives et accès aux droits',
+  finances: 'Surendettement — difficultés financières',
+  judiciaire: 'Justice',
+  famille: 'Manque de disponibilité (garde d\'enfant)',
+  mobilite: 'Mobilité',
+};
+
+/** Orienteurs — les 12 valeurs Convergence, dans l'ordre du formulaire. */
+export const ORIENTEUR_LABELS = {
+  france_travail: 'France Travail',
+  mission_locale: 'Mission locale',
+  cap_emploi: 'Cap emploi',
+  plie_pmie: 'PLIE / PMIE',
+  autre_spe: 'Autre acteur local du Service public de l\'emploi',
+  structure_hebergement: 'Structure d\'hébergement',
+  maraude_veille_sociale: 'Maraude / accueil de jour / veille sociale',
+  premieres_heures_chantier: 'Premières Heures en Chantier',
+  autre_siae: 'Autre SIAE',
+  services_sociaux_departement: 'Services sociaux du Département',
+  autre_accompagnement: 'Autre acteur local d\'accompagnement',
+  candidature_spontanee: 'Candidature spontanée',
+};
+export const ORIENTEUR_KEYS = Object.keys(ORIENTEUR_LABELS);
+
+/** Anciennes valeurs : lues et affichées, plus proposées à la saisie. */
+export const ORIENTEUR_LEGACY_LABELS = {
+  departement_cms: 'Département / CMS (ancienne saisie)',
+  ccas: 'CCAS (ancienne saisie)',
+  autre: 'Autre (ancienne saisie)',
+};
+
+/** Libellé d'un orienteur, nouvelle ou ancienne valeur. */
+export function orienteurLabel(v) {
+  if (!v) return '—';
+  return ORIENTEUR_LABELS[v] || ORIENTEUR_LEGACY_LABELS[v] || v;
+}

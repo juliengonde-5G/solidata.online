@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, Users, Lock, FolderOpen, Info, Copy, Check, Plus } from 'lucide-react';
 import { FormField, Section, LoadingSpinner, useToast } from '../index';
 import api from '../../services/api';
-import { frDate, isAdminRh } from './freins';
+import { frDate, isAdminRh, ORIENTEUR_KEYS, ORIENTEUR_LABELS, ORIENTEUR_LEGACY_LABELS } from './freins';
 import PassIaePanel from './PassIaePanel';
 import PiecesPanel from './PiecesPanel';
 import DossierConformite from './DossierConformite';
@@ -35,14 +35,17 @@ import { exportBilanProlongationPassIae } from './pdf-insertion';
  * pas (la clé est absente de la réponse, pas nulle).
  */
 
-const ORIENTEUR_OPTIONS = [
-  { value: 'departement_cms', label: 'Département — CMS' },
-  { value: 'france_travail', label: 'France Travail' },
-  { value: 'mission_locale', label: 'Mission locale' },
-  { value: 'cap_emploi', label: 'Cap emploi' },
-  { value: 'ccas', label: 'CCAS' },
-  { value: 'autre', label: 'Autre' },
-];
+// Orienteurs : les 12 valeurs du référentiel Convergence (freins.js porte les
+// libellés). Les anciennes valeurs (departement_cms, ccas, autre) restent
+// LISIBLES — elles ne sont proposées que sur la fiche qui les porte déjà, pour
+// ne pas afficher un champ vide là où une saisie existe.
+const ORIENTEUR_OPTIONS = ORIENTEUR_KEYS.map((k) => ({ value: k, label: ORIENTEUR_LABELS[k] }));
+function orienteurOptions(valeurCourante) {
+  if (valeurCourante && ORIENTEUR_LEGACY_LABELS[valeurCourante]) {
+    return [...ORIENTEUR_OPTIONS, { value: valeurCourante, label: ORIENTEUR_LEGACY_LABELS[valeurCourante] }];
+  }
+  return ORIENTEUR_OPTIONS;
+}
 
 const REFERENT_OPTIONS = [
   { value: 'non_determine', label: '— non déterminé' },
@@ -408,7 +411,7 @@ export default function DossierAdministratif({ employeeId, employee, baseRole, o
         <Section title="Orientation et référent unique" icon={Users}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <FormField label="Orienteur" name="orienteur_type" type="select" disabled={!adminRh}
-              placeholder="— à renseigner" value={orient.orienteur_type} options={ORIENTEUR_OPTIONS}
+              placeholder="— à renseigner" value={orient.orienteur_type} options={orienteurOptions(orient.orienteur_type)}
               onChange={(e) => setOrient({ ...orient, orienteur_type: e.target.value })} />
             <FormField label="Prescripteur habilité" name="prescripteur_id" type="select" disabled={!adminRh}
               placeholder="— à renseigner" value={orient.prescripteur_id}

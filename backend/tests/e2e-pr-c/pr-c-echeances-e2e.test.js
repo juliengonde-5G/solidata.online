@@ -59,7 +59,7 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
     piece_identite_validite: '2030-01-01', allocataire_caf: true, ressources: ['salaire'],
     logement_statut: 'locataire_social', mutuelle_statut: 'cmu', rqth: false, contre_indications: false,
     suivi_sante: false, permis_b_statut: 'oui', moyen_transport: ['bus'],
-    niveau_formation: 'CAP', metiers_souhaites: 'Tri', cecrl_niveau: 'B1',
+    niveau_formation: 'CAP', metiers_souhaites: 'Tri', cecrl_niveau: 'B1', habitat_type: 'autonome',
     attentes_parcours: 'Trouver un emploi', difficultes_exprimees: 'Aucune',
   };
   const c = { employee_id: employeeId, parcours_num: 1, ...base, ...extra };
@@ -285,17 +285,14 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
     // mois dans la liste de son encadrant, avec son poste, son dernier
     // entretien, son prochain rendez-vous et sa pastille de risque.
     test('V-06bis un MANAGER ne voit AUCUN parcours terminé, et `?inclure=tous` ne lui donne rien', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé À LA PORTE du module (403) — la
+      // forme forte de la garantie d'origine (rapport 31 § 5).
       const r = await auth(request(app).get('/api/insertion'), 'MANAGER');
-      expect(r.status).toBe(200);
-      expect(r.body.find((l) => l.id === E.termine3)).toBeUndefined();
-      expect(r.body.find((l) => l.id === E.termine9)).toBeUndefined();
-      // …et il garde bien les parcours en cours.
-      expect(r.body.find((l) => l.id === E.ok)).toBeDefined();
-
+      expect(r.status).toBe(403);
+      expect(Array.isArray(r.body)).toBe(false);
       const tous = await auth(request(app).get('/api/insertion?inclure=tous'), 'MANAGER');
-      expect(tous.status).toBe(200);
-      expect(tous.body.find((l) => l.id === E.termine9)).toBeUndefined();
-      expect(tous.body.find((l) => l.id === E.permanent)).toBeUndefined();
+      expect(tous.status).toBe(403);
+      expect(Array.isArray(tous.body)).toBe(false);
     });
 
     test('V-07 ?mine=1 borne aux salariés dont le compte est CIP référent', async () => {
@@ -373,10 +370,10 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
         return vraie(...args);
       });
       try {
+        // Rôle MANAGER RETIRÉ (2.52.0) : refusé à la porte — rien n'est lu.
         const r = await auth(request(app).get('/api/insertion'), 'MANAGER');
-        expect(r.status).toBe(200);
-        const l = r.body.find((x) => x.id === E.categG);
-        expect(l.brsa == null).toBe(true);
+        expect(r.status).toBe(403);
+        expect(JSON.stringify(r.body)).not.toMatch(/brsa/);
         expect(textes.filter((t) => /\be\.brsa\b/.test(t))).toEqual([]);
       } finally {
         pool.query.mockRestore();
@@ -601,19 +598,15 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
         textes.push(typeof args[0] === 'string' ? args[0] : (args[0] && args[0].text) || '');
         return vraie(...args);
       });
-      let corps;
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé à la porte (403) — aucune famille
+      // n'est calculée, sociale ou non (rapport 31 § 5).
       try {
         const r = await auth(request(app).get('/api/insertion/echeances'), 'MANAGER');
-        expect(r.status).toBe(200);
-        corps = r.body;
+        expect(r.status).toBe(403);
+        expect(r.body.obligations).toBeUndefined();
       } finally {
         pool.query.mockRestore();
       }
-      const types = new Set(corps.obligations.map((o) => o.type));
-      for (const t of ['sortie_fse_a_saisir', 'fse_entree_manquant', 'categorie_g', 'sous_15h']) {
-        expect(types.has(t)).toBe(false);
-      }
-      expect(corps.rendez_vous_reguliers).toBeNull();
       // Les requêtes ADMIN-only ne partent pas : ni `insertion_fse_sorties`,
       // ni la participation ASI, ni `ft_categorie`.
       expect(textes.filter((t) => /insertion_fse_sorties/.test(t))).toEqual([]);
@@ -621,8 +614,9 @@ async function poserDiagnosticComplet(employeeId, extra = {}) {
       expect(textes.filter((t) => /\be\.ft_categorie\b/.test(t))).toEqual([]);
     });
 
-    test('V-32 les types non sociaux restent rendus au MANAGER', async () => {
-      const r = await auth(request(app).get('/api/insertion/echeances'), 'MANAGER');
+    test('V-32 les types non sociaux sont rendus à la CIP (RH) — le MANAGER, rôle retiré, est refusé', async () => {
+      expect((await auth(request(app).get('/api/insertion/echeances'), 'MANAGER')).status).toBe(403);
+      const r = await auth(request(app).get('/api/insertion/echeances'), 'RH');
       const types = new Set(r.body.obligations.map((o) => o.type));
       expect(types.has('referent_unique')).toBe(true);
       expect(types.has('pass_iae')).toBe(true);

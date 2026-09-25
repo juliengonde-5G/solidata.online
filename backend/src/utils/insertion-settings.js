@@ -145,6 +145,33 @@ const INSERTION_SETTING_DEFAULTS = {
   // Base unique des documents de conventionnement (repli si l'annexe financière
   // `effectifs.convention_<annee>` ne porte pas d'heures annuelles par ETP).
   'insertion.heures_annuelles_etp': 1820,
+  // ── 2.60.0 — reporting Convergence (programme CVG) ──
+  // Niveau de frein (échelle 1-5) à partir duquel une « difficulté à
+  // l'entrée » est comptée dans le formulaire Convergence.
+  'insertion.cvg_frein_seuil': 3,
+  // Délai après la fin de parcours au-delà duquel la situation de sortie
+  // Convergence non saisie devient une OBLIGATION rouge de « Mes échéances ».
+  'insertion.cvg_sortie_delai_jours': 30,
+  // Un salarié parti SANS bilan de sortie est compté « sans nouvelles » dans le
+  // formulaire (approximation annoncée en méthode, arbitrage 2 du contrat 30) ;
+  // à `false`, il reste « non catégorisé ».
+  'insertion.cvg_sans_bilan_est_sans_nouvelles': true,
+  // ── 2.60.0 — correctifs de la revue de sécurité PR E (rapport 32) ──
+  // B-02 — le frein JUDICIAIRE (donnée d'infraction, art. 10 RGPD) n'est PAS
+  // transmis à Convergence par défaut : la colonne n'est même pas lue, la ligne
+  // « Justice » s'imprime « non transmis ». La synthèse de dialogue de gestion,
+  // la fiche pour le référent et l'export (d) l'excluent déjà ; seule une
+  // décision du DPO (base légale art. 46 LIL) peut poser `true`.
+  'insertion.cvg_transmettre_justice': false,
+  // B-01 — seuil de confidentialité du document Convergence. Défaut 5 (même
+  // plancher que la synthèse de dialogue de gestion) ; PLANCHER DE CODE 1 —
+  // une valeur illisible ou inférieure à 1 retombe sur 5, jamais sur « aucun
+  // seuil ». Le DPO peut poser 1 pour reproduire le format brut du réseau.
+  'insertion.cvg_k_min': 5,
+  // m-11 — date de mise en service de l'obligation « situation de sortie
+  // Convergence à saisir » (AAAA-MM-JJ). Un parcours terminé AVANT cette date
+  // ne lève pas d'obligation rouge. Absent (défaut) : aucune borne.
+  'insertion.cvg_sortie_depuis': null,
   // « Mon Récap » est fait pour CIRCULER (la personne peut le remettre à un
   // employeur). Deux libellés y disaient plus que ce que la personne croit
   // partager : « Entretien de conciliation (protection des droits) » — la

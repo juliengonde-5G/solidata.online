@@ -84,7 +84,9 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
     let pid;
 
     test('les deux opérations seedées sont présentes, avec leur nombre de participants', async () => {
-      const r = await auth(request(app).get('/api/insertion/projets'), 'MANAGER');
+      // Lu par la CIP (RH) : le MANAGER, rôle retiré (2.52.0), est refusé à la porte.
+      expect((await auth(request(app).get('/api/insertion/projets'), 'MANAGER')).status).toBe(403);
+      const r = await auth(request(app).get('/api/insertion/projets'), 'RH');
       expect(r.status).toBe(200);
       const codes = r.body.map((p) => p.code);
       expect(codes).toEqual(expect.arrayContaining(['ASI-2026-2027', 'OCS-CIP-2026-2027']));
