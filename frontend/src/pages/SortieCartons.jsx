@@ -602,7 +602,7 @@ export default function SortieCartons() {
                   type="text"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
-                  placeholder="Code-barres endommagé — saisie manuelle"
+                  placeholder="Code-barres endommagé : tapez le code ou le « code vérif »"
                   className="flex-1 border rounded-lg px-3 py-2 font-mono text-sm"
                   disabled={busy}
                 />

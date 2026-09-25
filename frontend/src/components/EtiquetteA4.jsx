@@ -152,7 +152,7 @@ export default function EtiquetteA4({ data }) {
           </div>
         </Case>
         <Case titre="Code vérif" style={{ alignItems: 'center' }}>
-          <div data-champ="code-verif" style={{ fontSize: '36pt', fontWeight: 800, fontFamily: 'monospace', letterSpacing: '0.06em', margin: 'auto 0' }}>
+          <div data-champ="code-verif" style={{ fontSize: reference.length > 8 ? '20pt' : '36pt', fontWeight: 800, fontFamily: 'monospace', letterSpacing: '0.06em', margin: 'auto 0' }}>
             {reference || '—'}
           </div>
           {data.nb_impressions > 1 && (

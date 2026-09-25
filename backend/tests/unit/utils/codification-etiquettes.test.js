@@ -1,5 +1,5 @@
 const {
-  composerCode, decomposerCodeV2, formeLisible, normaliserScan, analyserCode, LONGUEUR_V2, REFERENCE_MAX,
+  composerCode, decomposerCodeV2, formeLisible, normaliserScan, analyserCode, candidatsCode, LONGUEUR_V2, REFERENCE_MAX,
 } = require('../../../src/utils/codification-etiquettes');
 
 describe('codification v2 — composition', () => {
@@ -73,11 +73,43 @@ describe('analyse des formats', () => {
   test('balance', () => {
     expect(analyserCode('PF-1712345678901').format).toBe('balance');
   });
-  test.each(['', 'XYZ', 'P1ZZZZ', '312A0220000', '312A02200001FF', 'P1'])('inconnu : %s', (c) => {
+  test.each(['', 'XYZ', 'P1ZZZZ', '312A0220000', '312A02200001FF', 'P1', '00001G', '0001F'])('inconnu : %s', (c) => {
     expect(analyserCode(c).format).toBe('inconnu');
   });
   test('aucun code v2 ne peut être lu comme un ancien code (et inversement)', () => {
     expect(analyserCode('P10AAH').format).not.toBe('v2');
     expect(/^P/.test(composerCode({ gamme: 15, categorie: 1, produit: 1, genre: 1, saison: 1, reference: 1 }))).toBe(false);
+  });
+});
+
+describe('code vérif (référence courte imprimée sur l\'étiquette, 2.59.0)', () => {
+  test('6 hex → référence courte, valeur décodée', () => {
+    expect(analyserCode('00001f')).toEqual({ normalise: '00001F', format: 'reference_courte', details: { reference: 31 } });
+  });
+  test('aucun ancien code ne peut être lu comme une référence courte', () => {
+    expect(analyserCode('P10AAH').format).toBe('ancien_base24');
+  });
+
+  const db = (rows) => ({ query: jest.fn().mockResolvedValue({ rows }) });
+
+  test('résolue en code complet via reference_colis, avec contrôle de la fin du code', async () => {
+    const d = db([{ code_barre: '312A02200001F' }]);
+    const c = await candidatsCode(d, '00001f', analyserCode('00001f'));
+    expect(c).toContain('312A02200001F');
+    const [sql, params] = d.query.mock.calls[0];
+    expect(sql).toMatch(/reference_colis = \$1/);
+    expect(sql).toMatch(/codification = 'v2'/);
+    expect(sql).toMatch(/RIGHT\(code_barre, \$2\) = \$3/);
+    expect(params).toEqual([31, 6, '00001F']);
+  });
+  test('référence inconnue : aucun code inventé', async () => {
+    const c = await candidatsCode(db([]), '00001F', analyserCode('00001F'));
+    expect(c).toEqual(['00001F']);
+  });
+  test('un code complet ne déclenche aucune requête supplémentaire', async () => {
+    const d = db([]);
+    const c = await candidatsCode(d, ' 312a02200001f ', analyserCode(' 312a02200001f '));
+    expect(d.query).not.toHaveBeenCalled();
+    expect(c).toEqual(['312A02200001F', '312a02200001f']);
   });
 });
