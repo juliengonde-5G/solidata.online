@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
@@ -379,18 +379,13 @@ router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
 
 // POST /api/vehicles/:id/regenerate-token — Régénérer l'URL (révoque l'ancienne)
 //
-// Réservé ADMIN (action de révocation, plus sensible que la simple lecture
-// de l'URL courante). À déclencher quand : changement de chauffeur titulaire,
+// Même habilitation que la lecture (action de révocation). À déclencher quand : changement de chauffeur titulaire,
 // téléphone perdu/volé, ou suspicion de compromission. L'ancien raccourci
 // devient immédiatement invalide → tap-renvoi 401 côté chauffeur.
-// Un accord de module ouvre l'écran Véhicules, pas la révocation : on exige ici
-// que le rôle (ou son rôle de base) soit ADMIN, accord ou pas.
-function adminStrict(req, res, next) {
-  if (resolveBaseRole(req.user?.role) === 'ADMIN') return next();
-  return res.status(403).json({ error: "Régénération réservée à un administrateur" });
-}
-
-router.post('/:id/regenerate-token', authorize('ADMIN'), adminStrict, async (req, res) => {
+// Ouvert à ADMIN et à tout profil à qui l'écran Véhicules est ACCORDÉ (module
+// « operations », via authorize) : c'est l'encadrant qui reparamètre le
+// téléphone au dépôt après une perte ou un changement de chauffeur.
+router.post('/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE vehicles

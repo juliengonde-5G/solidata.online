@@ -21,7 +21,7 @@ import { modulesDuChemin } from '../navigation/navTree';
  * Fonctions :
  *   - Affiche l'URL d'accès courante (à copier sur le téléphone du chauffeur).
  *   - Bouton Copier (clipboard API + feedback visuel).
- *   - Bouton Régénérer (ADMIN seul — révoque l'ancienne URL, confirme avant).
+ *   - Bouton Régénérer (mêmes personnes que la lecture — révoque l'ancienne URL, confirme avant).
  *   - Mode d'emploi manager pour le pairing physique au dépôt (D3).
  */
 export default function VehicleAccessPanel({ vehicleId, registration, name }) {
@@ -37,10 +37,11 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
   // même règle (authorize consulte l'accord du module « operations ») : sans
   // cette lecture, l'encadrant qui paramètre le téléphone au dépôt ouvrait la
   // fiche et n'y trouvait pas le bloc, sans aucune explication.
-  // Régénération : ADMIN strict, côté écran ET côté serveur — c'est une
-  // révocation, pas une consultation.
+  // Régénération : même habilitation que la lecture — l'encadrant qui
+  // paramètre le téléphone doit pouvoir le reparamètrer après une perte.
   const isAdmin = user?.role === 'ADMIN' || user?.base_role === 'ADMIN';
   const canView = isAdmin || modulesDuChemin('/vehicles').some(isModuleGranted);
+  const canRegenerate = canView;
 
   useEffect(() => {
     if (!vehicleId || !canView) {
@@ -152,7 +153,7 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
             </div>
           </div>
 
-          {isAdmin ? (
+          {canRegenerate && (
             <button
               type="button"
               onClick={regenerate}
@@ -163,10 +164,6 @@ export default function VehicleAccessPanel({ vehicleId, registration, name }) {
               <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} strokeWidth={1.8} />
               {regenerating ? 'Régénération…' : "Régénérer l'URL (révoque l'ancien raccourci)"}
             </button>
-          ) : (
-            <p className="text-xs text-slate-400 px-3">
-              La régénération de l'URL (en cas de perte du téléphone ou de changement de chauffeur) est réservée à un administrateur.
-            </p>
           )}
         </>
       ) : null}
