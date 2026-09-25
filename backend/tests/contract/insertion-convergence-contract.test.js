@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// CONTRAT — REPORTING CONVERGENCE (programme CVG), lot 2.58.0
+// CONTRAT — REPORTING CONVERGENCE (programme CVG), lot 2.60.0
 // ───────────────────────────────────────────────────────────────────────────
 // `pg` est simulé ; on exerce les VRAIS handlers à travers le routeur monté
 // (`src/routes/insertion`).
@@ -73,13 +73,23 @@ function branche(over = {}) {
       const id = Number(params[0]);
       return Promise.resolve({ rows: (over.snapshots || []).filter((x) => x.id === id) });
     }
-    if (/FROM settings/.test(s)) return Promise.resolve({ rows: [] });
-    if (/FROM employees e\s+LEFT JOIN insertion_diagnostics d/.test(s)) return Promise.resolve({ rows: over.cohorte ?? [] });
-    if (/insertion_end_date BETWEEN/.test(s)) return Promise.resolve({ rows: over.fins ?? [] });
+    if (/FROM settings/.test(s)) return Promise.resolve({ rows: over.settings ?? [] });
+    if (/FROM employees e\s+LEFT JOIN insertion_diagnostics d/.test(s)) {
+      if (over.cohorteIllisible) return Promise.reject(Object.assign(new Error('cohorte'), { code: '42P01' }));
+      return Promise.resolve({ rows: over.cohorte ?? [] });
+    }
+    if (/insertion_end_date BETWEEN/.test(s)) {
+      if (over.finsIllisibles) return Promise.reject(Object.assign(new Error('fins'), { code: '42P01' }));
+      return Promise.resolve({ rows: over.fins ?? [] });
+    }
+    if (/SELECT 1 FROM users WHERE id/.test(s)) return Promise.resolve({ rows: over.userExiste === false ? [] : [{ '?column?': 1 }] });
+    if (/SELECT 1 FROM employees WHERE id/.test(s)) return Promise.resolve({ rows: over.employeExiste === false ? [] : [{ '?column?': 1 }] });
+    if (/FROM insertion_sortie_cvg WHERE employee_id = \$1 AND parcours_num = \$2 FOR UPDATE/.test(s)) return Promise.resolve({ rows: over.existante ?? [] });
+    if (/INSERT INTO insertion_sortie_cvg_history/.test(s)) return Promise.resolve({ rows: [] });
     if (/INSERT INTO insertion_sortie_cvg/.test(s)) return Promise.resolve({ rows: [] });
     if (/FROM insertion_sortie_cvg s/.test(s)) return Promise.resolve({ rows: over.situation ?? [] });
-    if (/FROM employees WHERE id = \$1/.test(s) && /parcours_num/.test(s)) return Promise.resolve({ rows: over.employe ?? [{ id: 42, parcours_num: 1 }] });
-    if (/SELECT disability_status FROM employees/.test(s)) return Promise.resolve({ rows: [{ disability_status: null }] });
+    if (/FROM employees WHERE id = \$1/.test(s) && /parcours_num/.test(s)) return Promise.resolve({ rows: over.employe ?? [{ id: 42, parcours_num: 1, insertion_status: 'termine' }] });
+    if (/SELECT disability_status FROM employees/.test(s)) return Promise.resolve({ rows: [{ disability_status: over.disability ?? null }] });
     if (/milestone_type = 'bilan_sortie'/.test(s) && /LIMIT 1/.test(s)) return Promise.resolve({ rows: over.bilanSortie ?? [] });
     if (/FROM insertion_diagnostics WHERE employee_id/.test(s)) return Promise.resolve({ rows: over.diag ?? [] });
     if (/FROM employee_eligibilite/.test(s)) return Promise.resolve({ rows: over.criteres ?? [] });
@@ -110,6 +120,7 @@ describe('1. habilitation — refus AVANT toute requête', () => {
     ['get', `/api/insertion/convergence/apercu?${PERIODE}`],
     ['post', '/api/insertion/convergence/generer'],
     ['get', '/api/insertion/convergence/historique'],
+    ['get', '/api/insertion/convergence/parametres'],
     ['get', '/api/insertion/convergence/snapshot/1'],
     ['get', '/api/insertion/convergence/comparaison?a=1&b=2'],
     ['get', `/api/insertion/convergence/completude?${PERIODE}`],
@@ -119,6 +130,7 @@ describe('1. habilitation — refus AVANT toute requête', () => {
     ['get', '/api/insertion/convergence/ressources'],
     ['post', '/api/insertion/convergence/ressources'],
     ['delete', '/api/insertion/convergence/ressources/5'],
+    ['put', '/api/insertion/convergence/ressources/5'],
   ];
   it.each(['COLLABORATEUR', 'AUTORITE', 'DPO', 'CHAUFFEUR'])('%s est refusé en 403 sur toutes les routes', async (role) => {
     for (const [verbe, url] of routes) {
@@ -208,7 +220,7 @@ describe('2. aperçu, génération, CSV — journal bloquant', () => {
 
 describe('3. historique, instantané, comparaison', () => {
   it('l’historique CVG ne lit que type = cvg', async () => {
-    branche({ historique: [{ id: 31, periode_debut: '2026-04-01', periode_fin: '2026-09-30', genere_le: 'x', version_application: '2.58.0', first_name: 'Claire', last_name: 'MARTIN' }] });
+    branche({ historique: [{ id: 31, periode_debut: '2026-04-01', periode_fin: '2026-09-30', genere_le: 'x', version_application: '2.60.0', first_name: 'Claire', last_name: 'MARTIN' }] });
     const r = await get('/api/insertion/convergence/historique');
     expect(r.status).toBe(200);
     expect(r.body[0]).toEqual(expect.objectContaining({ id: 31, genere_par_nom: 'Claire M.', periode_debut: '2026-04-01' }));
@@ -234,7 +246,7 @@ describe('3. historique, instantané, comparaison', () => {
 
   it('instantané : rendu tel qu’enregistré, consultation journalisée ; inconnu → 404', async () => {
     const contenu = { en_tete: { periode_debut: '2026-04-01', periode_fin: '2026-09-30' }, partie1: { base: 46 } };
-    branche({ snapshots: [{ id: 31, periode_debut: '2026-04-01', periode_fin: '2026-09-30', contenu, genere_le: 'x', version_application: '2.58.0' }] });
+    branche({ snapshots: [{ id: 31, periode_debut: '2026-04-01', periode_fin: '2026-09-30', contenu, genere_le: 'x', version_application: '2.60.0' }] });
     const r = await get('/api/insertion/convergence/snapshot/31');
     expect(r.status).toBe(200);
     expect(r.body.contenu).toEqual(contenu);
@@ -373,5 +385,152 @@ describe('6. orienteurs étendus — la liste fermée du dossier administratif s
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'src', 'routes', 'insertion', 'cadre.js'), 'utf8');
     expect(src).toMatch(/ORIENTEUR_TYPES = require\('..\/..\/utils\/convergence-cvg-referentiels'\)\.ORIENTEURS_ACCEPTES/);
     expect(R.ORIENTEURS_ACCEPTES).toHaveLength(15);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. CORRECTIFS 2.60.0 — revue de sécurité PR E (rapport 32)
+// ═══════════════════════════════════════════════════════════════════════════
+describe('7. correctifs 2.60.0', () => {
+  it('GET /parametres : k = 5 et justice non transmise par défaut (encadré avant « Générer »)', async () => {
+    const r = await get('/api/insertion/convergence/parametres');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ k_min: 5, k_source: 'defaut', base_marginales_brutes: 20, transmettre_justice: false });
+    expect(journaux()).toHaveLength(0);
+  });
+
+  it('B-02 — l’aperçu par défaut ne lit PAS la colonne du frein judiciaire', async () => {
+    const r = await get(`/api/insertion/convergence/apercu?${PERIODE}`);
+    expect(r.status).toBe(200);
+    expect(r.body.partie1.difficultes_entree.judiciaire).toBeUndefined();
+    const sqls = mockQuery.mock.calls.map(([x]) => String(x)).join('\n');
+    expect(sqls).not.toMatch(/frein_judiciaire/);
+  });
+
+  it('m-07 — cohorte ET sorties illisibles : 503 SOURCE_ILLISIBLE (génération et CSV), jamais « aucun salarié »', async () => {
+    branche({ cohorteIllisible: true, finsIllisibles: true });
+    const g = await post('/api/insertion/convergence/generer', 'RH', { debut: '2026-04-01', fin: '2026-09-30' });
+    expect(g.status).toBe(503);
+    expect(g.body.code).toBe('SOURCE_ILLISIBLE');
+    expect(g.body.error).not.toMatch(/Aucun salarié accueilli ni sorti/);
+    const c = await get(`/api/insertion/convergence/csv?${PERIODE}`);
+    expect(c.status).toBe(503);
+    expect(mockQuery.mock.calls.some(([x]) => /INSERT INTO insertion_dialogues_gestion/.test(String(x)))).toBe(false);
+  });
+
+  it('m-01 — lecture d’une situation de sortie : trace TOLÉRANTE, sans valeur', async () => {
+    branche({ situation: [], diag: [{ rqth: true, diag_id: 3 }] });
+    const r = await get('/api/insertion/convergence/situation-sortie/42');
+    expect(r.status).toBe(200);
+    const j = journalPour('INSERTION_SORTIE_CVG_LECTURE');
+    expect(j).toBeTruthy();
+    expect(j[1][3]).toBe(42);
+    const d = JSON.parse(j[1][4]);
+    expect(d.parcours_num).toBe(1);
+    expect(JSON.stringify(d)).not.toMatch(/rqth|true/);
+    branche({ situation: [], journalEnEchec: true });
+    expect((await get('/api/insertion/convergence/situation-sortie/42')).status).toBe(200);
+  });
+
+  it('m-02 — liste de complétude nominative : trace TOLÉRANTE (période, nombre — jamais les noms)', async () => {
+    const r = await get(`/api/insertion/convergence/completude?${PERIODE}`);
+    expect(r.status).toBe(200);
+    const j = journalPour('INSERTION_CVG_COMPLETUDE');
+    expect(JSON.parse(j[1][4])).toEqual(expect.objectContaining({ periode_debut: '2026-04-01', nb_personnes: r.body.length }));
+    branche({ cohorte: [PERSONNE], journalEnEchec: true });
+    expect((await get(`/api/insertion/convergence/completude?${PERIODE}`)).status).toBe(200);
+  });
+
+  it.each(['Non concerné', 'Pas de RQTH', 'En cours', 'NON RQTH'])('M-02 — fiche « %s » : aucune RQTH proposée à la sortie', async (texte) => {
+    branche({ situation: [], diag: [{ rqth: null, diag_id: 3 }], disability: texte });
+    const r = await get('/api/insertion/convergence/situation-sortie/42');
+    expect(r.body.proposition.rqth_sortie).not.toBe(true);
+    expect(r.body.proposition.source.rqth_sortie).toBeUndefined();
+  });
+
+  it('M-02 — fiche « RQTH 2024 » : RQTH proposée, sourcée', async () => {
+    branche({ situation: [], diag: [{ rqth: null, diag_id: 3 }], disability: 'RQTH 2024' });
+    const r = await get('/api/insertion/convergence/situation-sortie/42');
+    expect(r.body.proposition.rqth_sortie).toBe(true);
+  });
+
+  it('m-05 — personne sans parcours → 409 ; parcours au-delà du courant → 400 ; rien n’est écrit', async () => {
+    branche({ employe: [{ id: 42, parcours_num: 1, insertion_status: 'none' }] });
+    const a = await put('/api/insertion/convergence/situation-sortie/42', 'RH', { categorie: 'emploi' });
+    expect(a.status).toBe(409);
+    expect(a.body.code).toBe('SANS_PARCOURS');
+    branche({});
+    const b = await put('/api/insertion/convergence/situation-sortie/42', 'RH', { categorie: 'emploi', parcours_num: 3 });
+    expect(b.status).toBe(400);
+    expect(b.body.code).toBe('PARCOURS_INVALIDE');
+    expect((await get('/api/insertion/convergence/situation-sortie/42?parcours_num=3')).status).toBe(400);
+    expect(mockQuery.mock.calls.some(([x]) => /INSERT INTO insertion_sortie_cvg/.test(String(x)))).toBe(false);
+  });
+
+  it('m-04 — la catégorie devient « retraite » : « parcours de soin » remis à vide dans la MÊME écriture', async () => {
+    branche({ existante: [{ id: 9, categorie: 'autre_positive', parcours_de_soin: true, saisi_par: 7 }] });
+    const r = await put('/api/insertion/convergence/situation-sortie/42', 'RH', { categorie: 'retraite' });
+    expect(r.status).toBe(200);
+    const up = mockQuery.mock.calls.find(([x]) => /INSERT INTO insertion_sortie_cvg \(/.test(String(x)));
+    const cols = String(up[0]).match(/\(([^)]*)\)/)[1].split(',').map((x) => x.trim());
+    expect(cols).toContain('parcours_de_soin');
+    expect(up[1][cols.indexOf('parcours_de_soin')]).toBeNull();
+    expect(up[1][cols.indexOf('categorie')]).toBe('retraite');
+  });
+
+  it('m-04 — « parcours de soin : oui » envoyé avec une catégorie autre que « autre positive » n’est pas écrit', async () => {
+    branche({});
+    await put('/api/insertion/convergence/situation-sortie/42', 'RH', { categorie: 'sortie_neutre', parcours_de_soin: true });
+    const up = mockQuery.mock.calls.find(([x]) => /INSERT INTO insertion_sortie_cvg \(/.test(String(x)));
+    const cols = String(up[0]).match(/\(([^)]*)\)/)[1].split(',').map((x) => x.trim());
+    expect(up[1][cols.indexOf('parcours_de_soin')]).toBeNull();
+  });
+
+  it('m-03 — l’état ANTÉRIEUR est déposé dans l’historique avant la modification ; l’auteur initial n’est plus écrasé', async () => {
+    branche({ existante: [{ id: 9, categorie: 'formation', rqth_sortie: true, saisi_par: 7, saisi_at: '2026-10-01' }] });
+    const r = await put('/api/insertion/convergence/situation-sortie/42', 'ADMIN', { categorie: 'emploi' });
+    expect(r.status).toBe(200);
+    const appels = mockQuery.mock.calls.map(([x]) => String(x));
+    const iHist = appels.findIndex((x) => /INSERT INTO insertion_sortie_cvg_history/.test(x));
+    const iUp = appels.findIndex((x) => /INSERT INTO insertion_sortie_cvg \(/.test(x));
+    expect(iHist).toBeGreaterThan(-1);
+    expect(iUp).toBeGreaterThan(iHist);
+    const hist = mockQuery.mock.calls[iHist][1];
+    expect(hist[0]).toBe(9);
+    expect(JSON.parse(hist[3])).toEqual(expect.objectContaining({ categorie: 'formation', saisi_par: 7 }));
+    expect(appels[iUp]).toMatch(/modifie_par = EXCLUDED\.saisi_par/);
+    expect(appels[iUp]).not.toMatch(/SET saisi_par = /);
+    // Première saisie : pas d'historique.
+    branche({ existante: [] });
+    mockQuery.mockClear();
+    await put('/api/insertion/convergence/situation-sortie/42', 'RH', { categorie: 'emploi' });
+    expect(mockQuery.mock.calls.some(([x]) => /INSERT INTO insertion_sortie_cvg_history/.test(String(x)))).toBe(false);
+  });
+
+  it('m-06 — registre : trace tolérante des trois gestes, jamais le nom ; références et booléens vérifiés', async () => {
+    branche({ ressourceExistante: [{ id: 5, type: 'interne', nom: 'MARTIN Claire', etp_total: 1 }] });
+    await post('/api/insertion/convergence/ressources', 'RH', { type: 'interne', nom: 'MARTIN Claire', etp_total: 1 });
+    await put('/api/insertion/convergence/ressources/5', 'RH', { fonction: 'CIP' });
+    await del('/api/insertion/convergence/ressources/5');
+    for (const code of ['INSERTION_CVG_RESSOURCE_CREATION', 'INSERTION_CVG_RESSOURCE_MODIFICATION', 'INSERTION_CVG_RESSOURCE_SUPPRESSION']) {
+      const j = journalPour(code);
+      expect(j).toBeTruthy();
+      expect(j[1][2]).toBe('insertion_cvg_ressources');
+      expect(j[1][4]).not.toMatch(/MARTIN|Claire|CIP"/);
+    }
+    // Utilisateur inconnu : 400 et non 500 ; aucune écriture.
+    branche({ userExiste: false });
+    mockQuery.mockClear();
+    const u = await post('/api/insertion/convergence/ressources', 'RH', { type: 'interne', nom: 'X', user_id: 999 });
+    expect(u.status).toBe(400);
+    expect(mockQuery.mock.calls.some(([x]) => /INSERT INTO insertion_cvg_ressources/.test(String(x)))).toBe(false);
+    branche({ employeExiste: false });
+    expect((await post('/api/insertion/convergence/ressources', 'RH', { type: 'interne', nom: 'X', employee_id: 999 })).status).toBe(400);
+    // « "1" » n'est plus un booléen accepté puis normalisé à faux.
+    branche({});
+    expect((await post('/api/insertion/convergence/ressources', 'RH', { type: 'interne', nom: 'X', actif: '1' })).status).toBe(400);
+    // Journal indisponible : le geste passe quand même (écran interne).
+    branche({ journalEnEchec: true });
+    expect((await post('/api/insertion/convergence/ressources', 'RH', { type: 'interne', nom: 'X' })).status).toBe(201);
   });
 });

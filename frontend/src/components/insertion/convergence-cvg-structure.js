@@ -1,7 +1,7 @@
 /**
  * Structure du formulaire « Outil de dialogue de gestion — programme CVG »
  * (Convergence France), partagée par l'écran (ConvergenceCvgPanel) et le PDF
- * (pdf-convergence-cvg). Lot 2.58.0, contrat 30 § 0 et § 2.
+ * (pdf-convergence-cvg). Lot 2.60.0, contrat 30 § 0 et § 2.
  *
  * ═══ L'ORDRE EST CELUI DU FORMULAIRE, PAS LE NÔTRE ════════════════════════
  * Chaque tableau liste ses lignes dans l'ordre du document scanné reçu le
@@ -15,6 +15,14 @@
  *   · un objet indexé par clé `{ hommes: { nb, pct }, … }` (ou `{ hommes: 18 }`)
  *     — rendu dans l'ordre du formulaire ci-dessous.
  * Une valeur absente ou `null` s'affiche « — », jamais 0.
+ *
+ * ═══ 2.60.0 — CONFIDENTIALITÉ (revue de sécurité PR E, B-01 / B-02) ═══════
+ *   · une cellule `{ nb: null, pct: null, secret: true }` est RETENUE au titre
+ *     du seuil de confidentialité : elle s'affiche « s » (secret) et la légende
+ *     le dit — jamais « — », qui se lirait « donnée non disponible » ;
+ *   · quand `en_tete.parametres.transmettre_justice === false`, la ligne
+ *     « Justice » s'affiche « non transmis (art. 10 RGPD) » — mention
+ *     STRUCTURELLE, identique quelles que soient les données.
  */
 
 import { CVG_HABITAT_LABELS, CVG_FREINS_LABELS, ORIENTEUR_LABELS, CVG_SORTIE_LABELS } from './freins';
@@ -33,7 +41,8 @@ export const LIGNES_PUBLICS = [
   ['femmes', 'Femmes'],
   ['moins_26', 'Moins de 26 ans', { alias: ['age_moins_26', 'moins_26_ans'] }],
   ['de_26_a_49', '26 et moins de 50 ans', { alias: ['age_26_49', 'de_26_a_50', 'age_26_50', 'entre_26_50'] }],
-  ['plus_50', 'Plus de 50 ans', { alias: ['age_50_plus', 'plus_50_ans', '50_et_plus'] }],
+  // m-10 — la règle compte 50 ans révolus à la date de fin.
+  ['plus_50', '50 ans et plus', { alias: ['age_50_plus', 'plus_50_ans', '50_et_plus'] }],
   ['niv1_2', 'Formation niveau 1-2 : pas de diplôme', { alias: ['formation_niv1_2', 'infra3', 'niveau_1_2'] }],
   ['niv3', 'Formation niveau 3', { alias: ['formation_niv3', 'niveau_3'] }],
   ['niv4', 'Formation niveau 4', { alias: ['formation_niv4', 'niveau_4'] }],
@@ -105,15 +114,21 @@ export function brut(bloc, cle, alias = []) {
   return undefined;
 }
 
-/** { nb, pct } à partir d'un nombre, d'un objet ou d'une ligne de liste. */
+/** { nb, pct, secret } à partir d'un nombre, d'un objet ou d'une ligne de liste. */
 export function cellule(v) {
-  if (estVide(v)) return { nb: null, pct: null };
-  if (typeof v === 'number' || typeof v === 'string') return { nb: v, pct: null };
+  if (estVide(v)) return { nb: null, pct: null, secret: false };
+  if (typeof v === 'number' || typeof v === 'string') return { nb: v, pct: null, secret: false };
   return {
     nb: v.nb ?? v.nombre ?? v.n ?? v.valeur ?? null,
     pct: v.pct ?? v.pourcentage ?? v.part_pct ?? null,
+    secret: v.secret === true,
   };
 }
+
+/** Mention imprimée sur la ligne d'un frein non transmis (B-02). */
+export const MENTION_NON_TRANSMIS = "non transmis (donnée relevant de l'article 10 du RGPD)";
+/** Légende d'une case retenue (B-01). */
+export const legendeSecret = (k) => `« s » : secret — case retenue au titre de la confidentialité (effectif inférieur au seuil k = ${k ?? 5}), ni vide ni zéro.`;
 
 /** Cellule à deux temps (entrée / sortie ou résolution). */
 export function celluleDouble(v) {
@@ -136,6 +151,7 @@ export const baseDe = (bloc, repli = null) => {
  * connue du bloc ; sinon rien. Un effectif inconnu ne donne jamais « 0 % ».
  */
 export function pctDe(c, base) {
+  if (c.secret) return null;
   if (!estVide(c.pct)) return Number(c.pct);
   if (estVide(c.nb) || estVide(base) || Number(base) === 0) return null;
   return (Number(c.nb) / Number(base)) * 100;
@@ -150,7 +166,7 @@ export const fmtPct = (v) => (estVide(v) || Number.isNaN(Number(v)) ? null
  * existe, sinon la structure du formulaire. Chaque ligne : { cle, libelle, nb,
  * pct, bold, indent }.
  */
-export function lignesSimples(bloc, structure, baseRepli = null) {
+export function lignesSimples(bloc, structure, baseRepli = null, { nonTransmis = [] } = {}) {
   const base = baseDe(bloc, baseRepli);
   const liste = lignesServeur(bloc);
   if (liste) {
@@ -159,30 +175,36 @@ export function lignesSimples(bloc, structure, baseRepli = null) {
       const s = structure.find(([k]) => k === cleDe(it));
       return {
         cle: cleDe(it), libelle: it.libelle || it.label || s?.[1] || String(cleDe(it)),
-        nb: c.nb, pct: pctDe(c, base), bold: !!(it.total || s?.[2]?.bold), indent: !!(it.dont || s?.[2]?.indent),
+        nb: c.nb, pct: pctDe(c, base), secret: c.secret, bold: !!(it.total || s?.[2]?.bold), indent: !!(it.dont || s?.[2]?.indent),
       };
     });
   }
   return structure
     .map(([cle, libelle, opt = {}]) => {
       const v = brut(bloc, cle, opt.alias);
+      if (nonTransmis.includes(cle) && v === undefined) {
+        return { cle, libelle, nb: null, pct: null, nonTransmis: true, bold: !!opt.bold, indent: !!opt.indent };
+      }
       if (opt.siPresent && estVide(v)) return null;
-      if (opt.siPresent && typeof v === 'object' && estVide(cellule(v).nb)) return null;
+      if (opt.siPresent && typeof v === 'object' && estVide(cellule(v).nb) && !cellule(v).secret) return null;
       const c = cellule(v);
-      return { cle, libelle, nb: c.nb, pct: pctDe(c, base), bold: !!opt.bold, indent: !!opt.indent };
+      return { cle, libelle, nb: c.nb, pct: pctDe(c, base), secret: c.secret, bold: !!opt.bold, indent: !!opt.indent };
     })
     .filter(Boolean);
 }
 
 /** Lignes d'un tableau à deux temps (freins, logement, santé). */
-export function lignesDoubles(bloc, structure, baseRepli = null) {
+export function lignesDoubles(bloc, structure, baseRepli = null, { nonTransmis = [] } = {}) {
   const base = baseDe(bloc, baseRepli);
   const fabrique = (cle, libelle, v, opt = {}) => {
+    if (nonTransmis.includes(cle) && v === undefined) {
+      return { cle, libelle, indent: !!opt.indent, nonTransmis: true, entree: cellule(null), sortie: cellule(null) };
+    }
     const { entree, sortie } = celluleDouble(v);
     return {
       cle, libelle, indent: !!opt.indent,
-      entree: { nb: entree.nb, pct: pctDe(entree, base) },
-      sortie: { nb: sortie.nb, pct: pctDe(sortie, base) },
+      entree: { nb: entree.nb, pct: pctDe(entree, base), secret: entree.secret },
+      sortie: { nb: sortie.nb, pct: pctDe(sortie, base), secret: sortie.secret },
     };
   };
   const liste = lignesServeur(bloc);
@@ -194,6 +216,9 @@ export function lignesDoubles(bloc, structure, baseRepli = null) {
   }
   return structure.map(([cle, libelle, opt = {}]) => fabrique(cle, libelle, brut(bloc, cle, opt.alias), opt));
 }
+
+/** Vrai si une ligne (simple ou double) porte une case retenue. */
+export const ligneSecrete = (l) => !!(l && (l.secret || l.entree?.secret || l.sortie?.secret));
 
 /** « non renseigné » d'un bloc : nombre, ou liste de phrases si objet. */
 export function nonRenseigne(bloc) {
@@ -218,8 +243,14 @@ export function partiesCvg(contenu) {
   const p1 = c.partie1 || {};
   const p2 = c.partie2 || {};
   const so = c.sorties || {};
+  const parametres = (c.en_tete && c.en_tete.parametres) || {};
   return {
     en_tete: c.en_tete || {},
+    // B-02 — lignes imprimées « non transmis » (instantané antérieur à 2.60.0 :
+    // aucun paramètre enregistré → rien n'est marqué, la ligne y figure).
+    nonTransmis: parametres.transmettre_justice === false ? ['judiciaire'] : [],
+    confidentialite: c.confidentialite || null,
+    mentionDiffusion: (c.en_tete && c.en_tete.mention_diffusion) || null,
     effectifs: p1.effectifs || p1,
     publics: p1.publics || {},
     habitat: p1.habitat_entree || p1.habitat || {},
@@ -251,6 +282,7 @@ export function blocJumeau(b) {
     sante: x.sante || x.evolution_sante || {},
     postSortie: x.post_sortie ?? x.accompagnement_post_sortie ?? null,
     nonRenseigne: nonRenseigne(x),
+    confidentialite: x.confidentialite || null,
   };
 }
 

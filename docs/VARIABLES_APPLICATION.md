@@ -290,9 +290,10 @@ Lue par `backend/src/middleware/mfa.js` (cache 60 s), **aucun seed en base** —
 | `securite.mfa_duree_heures` | `backend/src/middleware/mfa.js` | `24` — durée de validité d'un second facteur. Au-delà, la session est renvoyée au code TOTP (403 `MFA_EXPIREE`), même si son jeton de renouvellement court encore. Bornée à [1 ; 168] h : une valeur hors bornes, illisible ou absente retombe sur le défaut en code. Le renouvellement de jeton NE repousse PAS l'horodatage — sans quoi une session simplement restée active ne se périmerait jamais. |
 | `vak.caisses_exclues` | `backend/src/services/sumup.js` | `Caisse Vintiz` — caisses EXCLUES de **toutes** les VAK, sans saisie par événement (alias séparés par des virgules, comme `vaks.compte_caisse`). Se combine à la liste blanche facultative `compte_caisse` : un ticket est compté s'il n'est pas exclu ET s'il passe le périmètre de sa VAK. Un compte **inconnu** n'est jamais exclu (sinon l'écran TV, alimenté par des webhooks sans identifiant de caisse, se viderait). Réglage **vidé** = plus aucune exclusion (décision respectée) ; réglage **absent** = défaut en code. |
 
-### Purges de rétention RGPD (2.44.0, étendues en 2.45.0, 2.50.0, 2.54.0, 2.55.0)
+### Purges de rétention RGPD (2.44.0, étendues en 2.45.0, 2.50.0, 2.54.0, 2.55.0, 2.60.0)
 
-Les onze purges (2.50.0 : bordereaux de collecte en déchèterie ; 2.55.0 / PR D : snapshots de la
+Les douze purges (2.60.0 / PR E : registre des moyens humains du reporting Convergence —
+`purgeCvgRessources`, seuil `rgpd.cvg_ressources_retention_jours` **défaut 1 095 jours** ; 2.50.0 : bordereaux de collecte en déchèterie ; 2.55.0 / PR D : snapshots de la
 synthèse de dialogue de gestion — `purgeDialoguesGestion`, seuil `rgpd.dialogues_gestion_retention_jours`
 **défaut 2 190 jours** (six ans, durée de conservation des pièces de dialogue de gestion), ajouté par le
 correctif m-09 de la revue de sécurité de la PR D : la table n'avait ni rétention ni purge ; 2.54.0 / PR C : trace des rappels
@@ -323,6 +324,7 @@ comportement**.
 | Clé `settings` | Purge concernée | Valeur par défaut |
 |-----------------|-----------------|--------------------|
 | `rgpd.dialogues_gestion_retention_jours` | **Snapshots de la synthèse de dialogue de gestion** (`insertion_dialogues_gestion`) — document **agrégé et non nominatif** (k-anonymat structurel), conservé comme pièce du dialogue de gestion avec l'autorité. Suppression (`DELETE`) depuis `genere_le`. 11ᵉ purge de `services/rgpd-purges.js`. | `2190` (jours, six ans) |
+| `rgpd.cvg_ressources_retention_jours` | **Registre des moyens humains du reporting Convergence** (`insertion_cvg_ressources`) — nom, fonction, quotité, employeur des permanents de l'accompagnement. Supprime (`DELETE`) les ressources inactives ou dont la date de fin est passée, au-delà du délai compté depuis la date de fin (à défaut, la dernière modification). 12ᵉ purge de `services/rgpd-purges.js` (2.60.0, correctif M-03). | `1095` (jours, trois ans) |
 | `rgpd.bordereaux_decheterie_retention_jours` | **Bordereaux de collecte en déchèterie** (`tour_decheterie_bordereaux`) — PDF et les deux signatures manuscrites qu'il porte (dont celle d'un agent de déchèterie, tiers). Le délai court depuis `created_at`, c'est-à-dire depuis le passage du camion — une validation par le gestionnaire est un événement de gestion interne, elle ne prolonge pas la durée de vie de la signature d'un tiers. Suppression (`DELETE`), pas anonymisation : ce qui resterait après retrait des signatures et du PDF n'aurait plus aucun usage. | `1095` (jours, soit 3 ans — arbitrage client 06/09/2026) |
 
 ### Bordereau de collecte en déchèterie — seed du référentiel Métropole (2.50.0)
@@ -411,9 +413,11 @@ les cibles de sorties (`PUT /cibles`), `effectifs.convention_<année>`, `inserti
 
 Chantier `rapports/cip-refonte-2026-09-12/` (contrat `30-convergence-cvg-cartographie.md` § 2.2). Ce
 document est **distinct** de la synthèse de dialogue de gestion (PR D ci-dessus) : il s'adresse au réseau
-**Convergence France**, dans sa propre nomenclature (habitat, orienteurs, catégories de sortie), et
-n'applique **pas** le seuil de k-anonymat de la synthèse — le format du réseau porte lui-même des
-effectifs de 1 et 2 (arbitrage direction/DPO ouvert, voir `PRESENTATION_AUTORITE_INSERTION.md` § 12).
+**Convergence France**, dans sa propre nomenclature (habitat, orienteurs, catégories de sortie). Il
+applique son **propre seuil de confidentialité** (`insertion.cvg_k_min`, défaut 5, plancher de code 1 :
+seul le DPO peut l'abaisser, jusqu'à 1 pour reproduire le format brut du réseau) et ne transmet pas le frein
+judiciaire sans décision du DPO (`insertion.cvg_transmettre_justice`) — correctifs B-01 et B-02 de la
+revue de sécurité (rapport 32 ; arbitrage direction/DPO, voir `PRESENTATION_AUTORITE_INSERTION.md` § 12).
 Défauts en code dans `backend/src/utils/insertion-settings.js`, éditables dans `settings`
 (`PUT /api/settings/:key`, ADMIN) — non exposés dans l'écran « Réglages insertion ».
 
@@ -422,18 +426,29 @@ Défauts en code dans `backend/src/utils/insertion-settings.js`, éditables dans
 | `insertion.cvg_frein_seuil` | `3` | Niveau de frein (échelle 1-5 du diagnostic) à partir duquel une « difficulté à l'entrée » est comptée dans le document Convergence (Partie 1 et évolution des freins des tableaux de sortie). |
 | `insertion.cvg_sortie_delai_jours` | `30` | Délai après la fin de parcours au-delà duquel la situation de sortie Convergence non saisie devient l'obligation rouge « Situation de sortie Convergence à saisir » de « Mes échéances » — reportable 48 h comme les autres obligations, jamais acquittable sans être saisie. |
 | `insertion.cvg_sans_bilan_est_sans_nouvelles` | `true` | Un salarié parti **sans bilan de sortie** rédigé est compté « sans nouvelles » dans le document (approximation annoncée en méthode sur le document lui-même) ; à `false`, il reste « non catégorisé ». La catégorie reste saisissable dans les deux cas — c'est la valeur proposée par défaut, jamais une valeur imposée. |
+| `insertion.cvg_k_min` | `5` | **Seuil de confidentialité** du document Convergence (correctif B-01). Un tableau des sortis comptant de 1 à k−1 personnes ne diffuse ni ses lignes santé (RQTH, AAH, pension, médecin traitant, couverture) et justice, ni son logement entrée/sortie, ni « dont parcours de soin » — zéros compris, la case s'imprime « s » ; sous 20 accueillis (ou sous k s'il est plus grand), la Partie 1 passe par la même règle que la synthèse de dialogue de gestion (`appliquerKAnonymat`, suppression complémentaire). **Plancher de code 1** : une valeur illisible, nulle ou négative retombe sur 5, jamais sur « aucun seuil » ; `1` = format brut du réseau, **décision du DPO**. À k = 5, avec 3 à 4 sortants par semestre, les lignes santé/justice des tableaux des sortis sont vides — c'est le prix de la protection. |
+| `insertion.cvg_transmettre_justice` | `false` | Frein **judiciaire** (art. 10 RGPD) transmis ou non (correctif B-02). À `false`, la colonne n'est **pas lue** et la ligne « Justice » s'imprime « non transmis (donnée relevant de l'article 10 du RGPD) » dans la Partie 1, les tableaux des sortis et le CSV — mention structurelle, identique quelles que soient les données. Seul un `true` explicite (décision du DPO, base légale art. 46 LIL) rétablit la transmission. |
+| `insertion.cvg_sortie_depuis` | *(absent)* | Date de mise en service (AAAA-MM-JJ) de l'obligation « Situation de sortie Convergence à saisir » (correctif m-11) : un parcours terminé avant cette date ne lève pas d'obligation rouge. Absent ou illisible : aucune borne. À poser à la date du déploiement pour éviter une vague d'obligations sur les semestres déjà transmis. |
 
 **Rétention des instantanés enregistrés** : chaque génération du document Convergence (bouton « Générer
 et enregistrer ») est un **snapshot** qui réutilise la **même table** que la synthèse de dialogue de
 gestion (`insertion_dialogues_gestion`, colonne `type = 'cvg'`) — donc la **même purge**, la 11ᵉ du
 registre `PURGES_RGPD` (`rgpd.dialogues_gestion_retention_jours`, défaut `2190` jours, six ans — voir
-§ « Purges de rétention RGPD » ci-dessus). Ce n'est pas une 12ᵉ purge : un seul job, une seule règle,
-pour les deux familles de documents rangées dans cette table — `GET /insertion/dialogue-gestion/historique`
-filtre sur `type = 'dialogue'` pour que les deux ne se mélangent jamais à l'écran.
+§ « Purges de rétention RGPD » ci-dessus) : un seul job, une seule règle, pour les deux familles de
+documents rangées dans cette table — `GET /insertion/dialogue-gestion/historique` filtre sur
+`type = 'dialogue'` pour que les deux ne se mélangent jamais à l'écran.
 
-**Aucune migration ni paramétrage requis au déploiement** — les trois réglages ci-dessus ont leur défaut
-en code ; le registre art. 30 « Reporting Convergence (programme CVG) » est posé une seule fois par la
-migration `migrations/insertion-convergence.js`, appelée par `init-db.js`. Comme pour tout document portant
+**Registre des moyens humains** (`insertion_cvg_ressources`, Partie 2 — nomme des permanents) : c'est lui
+qui reçoit la **12ᵉ purge** (correctif M-03) — `purgeCvgRessources`, seuil
+`rgpd.cvg_ressources_retention_jours` (défaut `1095` jours, trois ans), qui supprime les ressources
+inactives ou dont la date de fin est passée, le délai courant depuis la date de fin (à défaut, la
+dernière modification). La ligne rattachée à un salarié anonymisé est supprimée dès l'anonymisation.
+
+**Aucun paramétrage requis au déploiement** — les réglages ci-dessus ont leur défaut en code (les plus
+protecteurs : k = 5, justice non transmise) ; le registre art. 30 « Reporting Convergence (programme
+CVG) » est posé une seule fois par la migration `migrations/insertion-convergence.js`, appelée par
+`init-db.js`, qui le met aussi à jour une fois (texte d'origine seulement) et crée l'historique des
+situations de sortie (`insertion_sortie_cvg_history`, `insertion_sortie_cvg.modifie_par`). Comme pour tout document portant
 un en-tête de traçabilité (§ 2.9 ci-dessus), penser à poser `APP_VERSION=2.60.0` dans le `.env` serveur au
 déploiement de ce lot — sinon l'en-tête du document Convergence porte la version de `package.json`, pas
 celle du lot réellement livré.

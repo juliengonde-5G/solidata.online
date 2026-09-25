@@ -181,6 +181,20 @@ const EVALS = {
   8: { completed_date: '2026-07-01', freins: { frein_mobilite: 1 } },
 };
 
+const REGLAGES_BRUTS = [['insertion.cvg_k_min', '1'], ['insertion.cvg_transmettre_justice', 'true']];
+async function poserReglagesBruts() {
+  for (const [k, v] of REGLAGES_BRUTS) {
+    await pool.query(
+      `INSERT INTO settings (key, value, category) VALUES ($1, $2, 'insertion')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [k, v]
+    );
+  }
+}
+async function retirerReglages() {
+  await pool.query("DELETE FROM settings WHERE key = ANY($1::text[])",
+    [[...REGLAGES_BRUTS.map(([k]) => k), 'rgpd.cvg_ressources_retention_jours']]);
+}
+
 async function creerPersonne(i, over = {}) {
   const p = { ...profil(i), ...over };
   const id = await creerSalarie(pool, over.malibou_id || MAT(i), p);
@@ -212,6 +226,11 @@ async function poserDossier(i, id) {
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       [JSON.stringify({ etp_conventionnes: 25.17, heures_annuelles_etp: 1820 })]
     );
+    // 2.60.0 — la cohorte du scan se vérifie cellule par cellule au FORMAT BRUT
+    // du réseau (k = 1, justice transmise) : c'est la décision que le DPO peut
+    // prendre. Les défauts protecteurs du code (k = 5, justice non transmise)
+    // sont éprouvés à part (bloc « correctifs 2.60.0 »), réglages retirés.
+    await poserReglagesBruts();
 
     // ── La cohorte du scan : 46 personnes ─────────────────────────────────
     for (let i = 1; i <= N; i += 1) {
@@ -284,6 +303,7 @@ async function poserDossier(i, id) {
     if (conventionAvant === undefined) await pool.query("DELETE FROM settings WHERE key = 'effectifs.convention_2026'");
     else await pool.query("UPDATE settings SET value = $1 WHERE key = 'effectifs.convention_2026'", [conventionAvant]);
     await pool.query("DELETE FROM settings WHERE key = 'insertion.cvg_sans_bilan_est_sans_nouvelles'");
+    await retirerReglages();
   });
 
   test('V-10 — la base ne porte AUCUN autre parcours que la cohorte de la suite', async () => {
@@ -681,7 +701,7 @@ async function poserDossier(i, id) {
       expect(r9.body.situation).toBeNull();
     });
 
-    test('V-41 — upsert idempotent : deux PUT = une ligne, la seconde met à jour ; journal sans valeur', async () => {
+    test('V-41 — upsert idempotent : deux PUT = une ligne, la seconde met à jour ; auteur initial CONSERVÉ, état antérieur historisé (m-03) ; journal sans valeur', async () => {
       const avant = await dernierIdJournal(pool);
       const a = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E[8]}`), 'RH')
         .send({ categorie: 'suite_parcours_insertion', rqth_sortie: true });
@@ -689,16 +709,29 @@ async function poserDossier(i, id) {
       const b = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E[8]}`), 'ADMIN')
         .send({ categorie: 'emploi', couverture_sante_amelioree: true });
       expect(b.status).toBe(200);
-      const l = await pool.query('SELECT categorie, rqth_sortie, couverture_sante_amelioree, saisi_par FROM insertion_sortie_cvg WHERE employee_id = $1', [E[8]]);
-      expect(l.rows).toEqual([{ categorie: 'emploi', rqth_sortie: true, couverture_sante_amelioree: true, saisi_par: U.ADMIN.id }]);
+      const l = await pool.query('SELECT id, categorie, rqth_sortie, couverture_sante_amelioree, saisi_par, modifie_par FROM insertion_sortie_cvg WHERE employee_id = $1', [E[8]]);
+      expect(l.rows).toEqual([{
+        id: expect.any(Number), categorie: 'emploi', rqth_sortie: true, couverture_sante_amelioree: true,
+        saisi_par: U.RH.id, modifie_par: U.ADMIN.id,
+      }]);
+      // CORRECTIF m-03 — l'état ANTÉRIEUR (catégorie transmissible au semestre
+      // précédent) est retrouvable, avec son auteur.
+      const h = await pool.query('SELECT situation_id, action, changed_by, snapshot FROM insertion_sortie_cvg_history WHERE employee_id = $1', [E[8]]);
+      expect(h.rows).toHaveLength(1);
+      expect(h.rows[0]).toEqual(expect.objectContaining({ situation_id: l.rows[0].id, action: 'update', changed_by: U.ADMIN.id }));
+      expect(h.rows[0].snapshot).toEqual(expect.objectContaining({ categorie: 'suite_parcours_insertion', rqth_sortie: true, saisi_par: U.RH.id }));
+      const g = await auth(request(app).get(`/api/insertion/convergence/situation-sortie/${E[8]}`), 'RH');
+      expect(g.body.situation).toEqual(expect.objectContaining({ saisi_par_nom: 'Jest R.', modifie_par_nom: 'Jest A.', versions_anterieures: 1 }));
       const j = await journalParAction(pool, 'INSERTION_SORTIE_CVG_ECRITURE', avant);
       expect(j).toHaveLength(2);
       expect(j.map((x) => x.entity_id)).toEqual([E[8], E[8]]);
-      expect(j[1].details).toEqual(expect.objectContaining({ parcours_num: 1, champs: ['categorie', 'couverture_sante_amelioree'] }));
+      expect(j[1].details).toEqual(expect.objectContaining({ parcours_num: 1, champs: ['categorie', 'couverture_sante_amelioree'], geste: 'modification' }));
+      expect(j[0].details.geste).toBe('creation');
       const brut = JSON.stringify(j.map((x) => x.details));
       expect(brut).not.toMatch(/suite_parcours_insertion|"emploi"|true/);
       // Remise en état : sortant 8 redevient sans situation (cohorte du scan).
       await pool.query('DELETE FROM insertion_sortie_cvg WHERE employee_id = $1', [E[8]]);
+      await pool.query('DELETE FROM insertion_sortie_cvg_history WHERE employee_id = $1', [E[8]]);
     });
 
     test('V-42 — listes fermées refusées en 400, rien n\'est écrit', async () => {
@@ -711,7 +744,16 @@ async function poserDossier(i, id) {
       expect(x.status).toBe(404);
     });
 
-    test('V-43 — `parcours_num` respecté : deux parcours = deux lignes, lues séparément', async () => {
+    test('V-43 — `parcours_num` respecté : deux parcours = deux lignes, lues séparément ; au-delà du parcours courant → 400 (m-05)', async () => {
+      // CORRECTIF m-05 — le sortant 9 en est à son PREMIER parcours : une ligne
+      // « parcours 2 » serait orpheline (aucun tableau ne la relit).
+      const refus = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E[9]}`), 'RH')
+        .send({ parcours_num: 2, categorie: 'retraite' });
+      expect(refus.status).toBe(400);
+      expect(refus.body.code).toBe('PARCOURS_INVALIDE');
+      expect((await pool.query('SELECT COUNT(*)::int n FROM insertion_sortie_cvg WHERE employee_id = $1', [E[9]])).rows[0].n).toBe(0);
+      // Second parcours ouvert : les deux lignes coexistent.
+      await pool.query('UPDATE employees SET parcours_num = 2 WHERE id = $1', [E[9]]);
       const a = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E[9]}`), 'RH')
         .send({ parcours_num: 2, categorie: 'retraite' });
       expect(a.status).toBe(200);
@@ -723,6 +765,8 @@ async function poserDossier(i, id) {
       expect(l.rows).toEqual([{ parcours_num: 1, categorie: 'formation' }, { parcours_num: 2, categorie: 'retraite' }]);
       const g2 = await auth(request(app).get(`/api/insertion/convergence/situation-sortie/${E[9]}?parcours_num=2`), 'RH');
       expect(g2.body.situation.categorie).toBe('retraite');
+      await pool.query('UPDATE employees SET parcours_num = 1 WHERE id = $1', [E[9]]);
+      expect((await auth(request(app).get(`/api/insertion/convergence/situation-sortie/${E[9]}?parcours_num=2`), 'RH')).status).toBe(400);
       // Le document lit le parcours COURANT (1) : le sortant 9 passe « formation ».
       const r = await apercu();
       expect(r.body.sorties.emploi.categories.formation.nb).toBe(3);
@@ -731,7 +775,7 @@ async function poserDossier(i, id) {
       await pool.query('DELETE FROM insertion_sortie_cvg WHERE employee_id = $1', [E[9]]);
     });
 
-    test('V-44 — complétude : liste NOMINATIVE interne, manques nommés, jamais dans le document ; lecture NON journalisée (O-02)', async () => {
+    test('V-44 — complétude : liste NOMINATIVE interne, manques nommés, jamais dans le document ; lecture JOURNALISÉE sans nom (m-02)', async () => {
       const avant = await dernierIdJournal(pool);
       const r = await auth(request(app).get(`/api/insertion/convergence/completude?${PERIODE}`), 'RH');
       expect(r.status).toBe(200);
@@ -744,8 +788,12 @@ async function poserDossier(i, id) {
       expect(l46.manques.join(' ')).toMatch(/Type d'habitat à l'entrée à préciser/);
       // Le sortant 5 (situation saisie, catégorie « sortie neutre ») n'a plus rien à compléter.
       expect(r.body.find((x) => x.employee_id === E[5])).toBeUndefined();
-      const j = await pool.query('SELECT action FROM rgpd_audit_log WHERE id > $1', [avant]);
-      expect(j.rows).toEqual([]);
+      // CORRECTIF m-02 (O-02 du debug) — une trace, qui dit la période et le
+      // NOMBRE de personnes, jamais qui.
+      const j = await journalParAction(pool, 'INSERTION_CVG_COMPLETUDE', avant);
+      expect(j).toHaveLength(1);
+      expect(j[0].details).toEqual(expect.objectContaining({ periode_debut: DEBUT, periode_fin: FIN, nb_personnes: r.body.length }));
+      expect(JSON.stringify(j[0].details)).not.toMatch(/PERSONNE|Cvg\d/);
     });
   });
 
@@ -936,6 +984,182 @@ async function poserDossier(i, id) {
       const apres = (await pool.query('SELECT contenu FROM insertion_dialogues_gestion WHERE id = $1', [g.body.id])).rows[0].contenu;
       expect(apres).toEqual(avant);
       expect(JSON.stringify(apres)).not.toMatch(/employee_id|Personne1"/);
+    });
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // CORRECTIFS 2.60.0 — revue de sécurité PR E (rapport 32), sur base réelle.
+  // Les réglages sont RETIRÉS : ce sont les défauts du code qui s'appliquent.
+  describe('correctifs 2.60.0 (revue de sécurité) — défauts protecteurs du code', () => {
+    let c;
+    beforeAll(async () => {
+      await retirerReglages();
+      const r = await apercu();
+      if (r.status !== 200) throw new Error(`aperçu ${r.status} ${JSON.stringify(r.body)}`);
+      c = r.body;
+    });
+    afterAll(async () => { await poserReglagesBruts(); });
+
+    const S = { nb: null, pct: null, secret: true };
+
+    test('V-90 — B-02 : le frein judiciaire n\'est ni lu ni transmis, la méthode le dit', async () => {
+      expect(c.partie1.difficultes_entree.judiciaire).toBeUndefined();
+      expect(c.sorties.emploi.freins.judiciaire).toBeUndefined();
+      expect(c.sorties.hors_emploi.freins.judiciaire).toBeUndefined();
+      expect(c.en_tete.parametres).toEqual(expect.objectContaining({ transmettre_justice: false, k_min: 5 }));
+      expect(c.methode.join(' ')).toMatch(/Frein « Justice » : non transmis/);
+      // Les sept autres difficultés, elles, ne bougent pas (scan).
+      expect(['linguistique', 'sante', 'logement', 'administratif', 'finances', 'famille', 'mobilite']
+        .map((a) => c.partie1.difficultes_entree[a].nb)).toEqual([16, 20, 19, 31, 7, 6, 23]);
+      const csv = await auth(request(app).get(`/api/insertion/convergence/csv?${PERIODE}`), 'RH');
+      expect(csv.text).toMatch(/Justice — non transmis \(donnée relevant de l'article 10 du RGPD\)/);
+    });
+
+    test('V-91 — B-01 : jumeaux de 3 et 4 sortants — santé, justice, logement, parcours de soin retenus (« s »)', async () => {
+      for (const cle of ['emploi', 'hors_emploi']) {
+        const j = c.sorties[cle];
+        expect(j.confidentialite).toEqual(expect.objectContaining({ lignes_retenues: true, k: 5 }));
+        for (const l of ['rqth', 'aah', 'pension_invalidite', 'medecin_traitant', 'couverture_sante_amelioree']) {
+          expect(j.sante[l]).toEqual({ entree: S, sortie: S });
+        }
+        expect(j.freins.sante).toEqual({ entree: S, resolution: S });
+        expect(j.logement.rue).toEqual({ entree: S, sortie: S });
+      }
+      expect(c.sorties.hors_emploi.categories.parcours_de_soin).toEqual(S);
+      // Ce que le réseau lit en premier reste publié.
+      expect(c.sorties.emploi.total).toBe(3);
+      expect(c.sorties.hors_emploi.categories.sortie_neutre).toEqual({ nb: 2, pct: 22.2 });
+      expect(c.sorties.emploi.freins.linguistique.resolution).toEqual({ nb: 2, pct: 66.7 });
+      // Partie 1 (46 accueillis) : marginales brutes.
+      expect(c.partie1.publics.rth).toEqual({ nb: 5, pct: 10.9 });
+      expect(c.confidentialite).toEqual(expect.objectContaining({ k_min: 5, k_source: 'defaut', sous_seuil_total: expect.any(Number) }));
+      expect(c.en_tete.mention_diffusion).toMatch(/diffusion restreinte/);
+      const csv = await auth(request(app).get(`/api/insertion/convergence/csv?${PERIODE}`), 'RH');
+      expect(csv.text).toMatch(/# DIFFUSION RESTREINTE;/);
+      expect(csv.text).toMatch(/Sorties hors emploi;Dont sortie en parcours de soin;s;s/);
+      // L'instantané enregistré est le document PROTÉGÉ.
+      const g = await auth(request(app).post('/api/insertion/convergence/generer'), 'RH').send({ debut: DEBUT, fin: FIN });
+      expect(g.status).toBe(201);
+      const snap = (await pool.query('SELECT contenu FROM insertion_dialogues_gestion WHERE id = $1', [g.body.id])).rows[0].contenu;
+      expect(snap.sorties.emploi.sante.rqth.entree).toEqual(S);
+    });
+
+    test('V-92 — GET /parametres : l\'encadré dit le seuil et sa provenance', async () => {
+      const r = await auth(request(app).get('/api/insertion/convergence/parametres'), 'RH');
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual({ k_min: 5, k_source: 'defaut', base_marginales_brutes: 20, transmettre_justice: false });
+    });
+
+    test('V-93 — M-01 : situations de sortie illisibles → cellules de sortie VIDES, jamais 0 ; source nommée', async () => {
+      await poserReglagesBruts(); // k = 1 : on veut voir les cellules, pas le secret
+      await pool.query('ALTER TABLE insertion_sortie_cvg RENAME TO insertion_sortie_cvg_x');
+      let r;
+      try { r = await apercu(); } finally {
+        await pool.query('ALTER TABLE insertion_sortie_cvg_x RENAME TO insertion_sortie_cvg');
+        await retirerReglages();
+      }
+      expect(r.status).toBe(200);
+      const he = r.body.sorties.hors_emploi;
+      expect(he.sante.medecin_traitant.sortie).toEqual({ nb: null, pct: null });
+      expect(he.post_sortie).toEqual({ nb: null, pct: null });
+      expect(he.categories.parcours_de_soin).toEqual({ nb: null, pct: null });
+      expect(he.non_renseigne.situation_sortie).toBeNull();
+      expect(he.sante.medecin_traitant.entree.nb).not.toBeNull();
+      expect(r.body.methode.join(' ')).toMatch(/Situations de sortie Convergence illisibles/);
+    });
+
+    test('V-94 — M-02 : « Non concerné » sur la fiche de paie ne vaut ni RTH ni proposition de RQTH', async () => {
+      await pool.query("UPDATE employees SET disability_status = 'Non concerné' WHERE id = $1", [E.avant]);
+      const r = await auth(request(app).get(`/api/insertion/convergence/situation-sortie/${E.avant}`), 'RH');
+      expect(r.status).toBe(200);
+      expect(r.body.proposition.rqth_sortie).not.toBe(true);
+      // Le document : RTH inchangé à 5 (les pièges « non » / « Aucun » ne comptent pas non plus).
+      expect(c.partie1.publics.rth.nb).toBe(5);
+      await pool.query("UPDATE employees SET disability_status = 'RQTH 2024' WHERE id = $1", [E.avant]);
+      const r2 = await auth(request(app).get(`/api/insertion/convergence/situation-sortie/${E.avant}`), 'RH');
+      expect(r2.body.proposition.rqth_sortie).toBe(true);
+      await pool.query('UPDATE employees SET disability_status = NULL WHERE id = $1', [E.avant]);
+    });
+
+    test('V-95 — m-01 : la lecture d\'une situation de sortie est tracée, sans valeur', async () => {
+      const avant = await dernierIdJournal(pool);
+      await auth(request(app).get(`/api/insertion/convergence/situation-sortie/${E[5]}`), 'RH');
+      const j = await journalParAction(pool, 'INSERTION_SORTIE_CVG_LECTURE', avant);
+      expect(j).toHaveLength(1);
+      expect(j[0].entity_id).toBe(E[5]);
+      expect(j[0].details).toEqual(expect.objectContaining({ parcours_num: 1 }));
+      expect(JSON.stringify(j[0].details)).not.toMatch(/sortie_neutre|autonome|true/);
+    });
+
+    test('V-96 — m-04 / m-05 : parcours de soin remis à vide hors « autre positive » ; permanent refusé en 409', async () => {
+      const a = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E.avant}`), 'RH')
+        .send({ categorie: 'autre_positive', parcours_de_soin: true });
+      expect(a.status).toBe(200);
+      expect(a.body.situation.parcours_de_soin).toBe(true);
+      const b = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E.avant}`), 'RH')
+        .send({ categorie: 'retraite' });
+      expect(b.status).toBe(200);
+      expect(b.body.situation.parcours_de_soin).toBeNull();
+      const h = await pool.query('SELECT snapshot FROM insertion_sortie_cvg_history WHERE employee_id = $1', [E.avant]);
+      expect(h.rows.map((x) => x.snapshot.categorie)).toEqual(['autre_positive']);
+      const p = await auth(request(app).put(`/api/insertion/convergence/situation-sortie/${E.perm}`), 'RH')
+        .send({ categorie: 'emploi' });
+      expect(p.status).toBe(409);
+      expect(p.body.code).toBe('SANS_PARCOURS');
+      expect((await pool.query('SELECT COUNT(*)::int n FROM insertion_sortie_cvg WHERE employee_id = $1', [E.perm])).rows[0].n).toBe(0);
+    });
+
+    test('V-97 — M-03 / m-06 : registre — référence inconnue en 400, gestes tracés, ligne du salarié supprimée à l\'anonymisation, purge des ressources passées', async () => {
+      const avant = await dernierIdJournal(pool);
+      const bad = await auth(request(app).post('/api/insertion/convergence/ressources'), 'RH')
+        .send({ type: 'interne', nom: `${RESS}Inconnu`, user_id: 2147483000 });
+      expect(bad.status).toBe(400);
+      const liee = await auth(request(app).post('/api/insertion/convergence/ressources'), 'RH')
+        .send({ type: 'interne', nom: `${RESS}Liée`, employee_id: E.avant, etp_total: 0.5 });
+      expect(liee.status).toBe(201);
+      const j = await journalParAction(pool, 'INSERTION_CVG_RESSOURCE_CREATION', avant);
+      expect(j).toHaveLength(1);
+      expect(j[0].entity_type).toBe('insertion_cvg_ressources');
+      expect(JSON.stringify(j[0].details)).not.toMatch(/Liée/);
+
+      // Purge : une ressource inactive modifiée il y a 4 ans part ; une active reste.
+      const vieille = await pool.query(
+        `INSERT INTO insertion_cvg_ressources (type, nom, actif, updated_at) VALUES ('interne', $1, false, NOW() - INTERVAL '4 years') RETURNING id`,
+        [`${RESS}Vieille`]
+      );
+      const { purgeCvgRessources } = require('../../src/services/rgpd-purges');
+      const p = await purgeCvgRessources({ trigger: 'manual', userId: U.ADMIN.id });
+      expect(p.ok).toBe(true);
+      expect(p.total).toBeGreaterThanOrEqual(1);
+      expect((await pool.query('SELECT 1 FROM insertion_cvg_ressources WHERE id = $1', [vieille.rows[0].id])).rows).toHaveLength(0);
+      expect((await pool.query('SELECT 1 FROM insertion_cvg_ressources WHERE id = $1', [liee.body.id])).rows).toHaveLength(1);
+      expect(await journalParAction(pool, 'PURGE_CVG_RESSOURCES', avant)).toHaveLength(1);
+
+      // Anonymisation : la ligne du registre et l'historique de la situation du salarié partent.
+      const { anonymizeEmployee } = require('../../src/services/anonymization');
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await anonymizeEmployee(client, E.avant);
+        await client.query('COMMIT');
+      } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+      expect((await pool.query('SELECT 1 FROM insertion_cvg_ressources WHERE id = $1', [liee.body.id])).rows).toHaveLength(0);
+      expect((await pool.query('SELECT 1 FROM insertion_sortie_cvg_history WHERE employee_id = $1', [E.avant])).rows).toHaveLength(0);
+      expect((await pool.query('SELECT 1 FROM insertion_sortie_cvg WHERE employee_id = $1', [E.avant])).rows).toHaveLength(0);
+    });
+
+    test('V-98 — m-08 : deux instantanés composés avec des réglages différents — le changement est DIT', async () => {
+      await poserReglagesBruts();
+      const a = await auth(request(app).post('/api/insertion/convergence/generer'), 'RH').send({ debut: DEBUT, fin: FIN });
+      await retirerReglages();
+      const b = await auth(request(app).post('/api/insertion/convergence/generer'), 'RH').send({ debut: DEBUT, fin: FIN });
+      const r = await auth(request(app).get(`/api/insertion/convergence/comparaison?a=${a.body.id}&b=${b.body.id}`), 'RH');
+      expect(r.status).toBe(200);
+      expect(r.body.methode_identique).toBe(false);
+      expect(r.body.lecture.join(' ')).toMatch(/la transmission du frein « Justice » valait « oui » puis « non »/);
+      expect(r.body.lecture.join(' ')).toMatch(/le seuil de confidentialité valait « 1 » puis « 5 »/);
+      expect(r.body.deltas.find((x) => x.indicateur === 'difficulte_judiciaire'))
+        .toEqual(expect.objectContaining({ non_comparable: true, motif: 'methode' }));
     });
   });
 });

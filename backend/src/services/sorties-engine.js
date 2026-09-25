@@ -98,7 +98,7 @@ function indexerBilans(bilansClasses) {
  * le bilan classé qui lui est apparié (ou `null` : sortie non documentée).
  *
  * Exposée pour les documents qui ventilent les sortants PERSONNE PAR PERSONNE
- * (reporting Convergence, 2.58.0) : ils doivent compter exactement les mêmes
+ * (reporting Convergence, 2.60.0) : ils doivent compter exactement les mêmes
  * personnes que le dénominateur de `calculerSorties`, avec le même appariement.
  * Recopier cette boucle ailleurs, c'est accepter qu'un jour les deux documents
  * annoncent deux nombres de sorties différents pour la même période.

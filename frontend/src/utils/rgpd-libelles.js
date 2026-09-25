@@ -45,6 +45,8 @@ export const RGPD_ACTION_LABELS = {
   // PR C lot 7 — 10ᵉ purge : trace des rappels de rendez-vous envoyés aux salariés.
   PURGE_RAPPELS_RDV: 'Purge manuelle — rappels de rendez-vous envoyés aux salariés',
   PURGE_DIALOGUES_GESTION: 'Purge manuelle — synthèses de dialogue de gestion enregistrées',
+  // 2.60.0 — 12ᵉ purge : registre des moyens humains du reporting Convergence.
+  PURGE_CVG_RESSOURCES: 'Purge manuelle — registre des moyens humains (reporting Convergence)',
   PURGE_REFRESH_TOKENS: 'Purge manuelle — jetons de connexion expirés',
 
   // ── Purges — job planifié (préfixe AUTO_ = déclenchement automatique) ────
@@ -58,6 +60,7 @@ export const RGPD_ACTION_LABELS = {
   AUTO_PURGE_MESSAGERIE: 'Purge automatique — messagerie interne',
   AUTO_PURGE_RAPPELS_RDV: 'Purge automatique — rappels de rendez-vous envoyés aux salariés',
   AUTO_PURGE_DIALOGUES_GESTION: 'Purge automatique — synthèses de dialogue de gestion enregistrées',
+  AUTO_PURGE_CVG_RESSOURCES: 'Purge automatique — registre des moyens humains (reporting Convergence)',
   AUTO_PURGE_REFRESH_TOKENS: 'Purge automatique — jetons de connexion expirés',
   AUTO_PURGE_BADGEUSE: 'Purge automatique — module Temps & Présence (badgeuse)',
 
@@ -157,13 +160,20 @@ export const RGPD_ACTION_LABELS = {
   INSERTION_DIALOGUE_GESTION_CONSULTATION: 'Consultation d’une synthèse de dialogue de gestion déjà générée',
   EXPORT_DIALOGUE_GESTION: 'Export CSV de la synthèse de dialogue de gestion',
   EXPORT_INSERTION_FREINS_ENRICHI: 'Export du tableau des freins enrichi (cadre 2026)',
-  // Reporting Convergence (programme CVG) — 2.58.0
+  // Reporting Convergence (programme CVG) — 2.60.0
   INSERTION_CVG_APERCU: 'Aperçu du reporting Convergence (programme CVG), sans enregistrement',
   INSERTION_CVG_GENERATION: 'Génération enregistrée du reporting Convergence (programme CVG)',
   INSERTION_CVG_CONSULTATION: 'Consultation d’un instantané Convergence déjà généré',
   INSERTION_CVG_COMPARAISON: 'Comparaison de deux périodes du reporting Convergence',
   EXPORT_CVG: 'Export CSV du reporting Convergence (programme CVG)',
   INSERTION_SORTIE_CVG_ECRITURE: 'Saisie de la situation de sortie Convergence d’un salarié',
+  // 2.60.0 — lectures NOMINATIVES d'écran interne (journal tolérant, m-01 / m-02)
+  // et gestes sur le registre des moyens humains (m-06).
+  INSERTION_SORTIE_CVG_LECTURE: 'Lecture de la situation de sortie Convergence d’un salarié (et de sa proposition)',
+  INSERTION_CVG_COMPLETUDE: 'Lecture de la liste nominative des dossiers Convergence à compléter',
+  INSERTION_CVG_RESSOURCE_CREATION: 'Ajout d’une personne au registre des moyens humains (Convergence)',
+  INSERTION_CVG_RESSOURCE_MODIFICATION: 'Modification d’une ressource du registre des moyens humains (Convergence)',
+  INSERTION_CVG_RESSOURCE_SUPPRESSION: 'Suppression d’une ressource du registre des moyens humains (Convergence)',
   // Message de vérification du contact, envoyé AU MOMENT du recueil pour que la
   // conseillère puisse demander « vous l’avez reçu ? » tant que la personne est
   // devant elle (correctif M-05 de la revue de sécurité PR C).
@@ -240,6 +250,9 @@ export const RGPD_ENTITY_LABELS = {
   insertion_cadre: 'Dossier administratif d’insertion',
   insertion_rsa: 'Cadre RSA — alimentation du référent unique',
   insertion_temps: 'Temps d’accompagnement (feuilles de temps)',
+  insertion_convergence: 'Reporting Convergence (programme CVG)',
+  insertion_cvg_ressources: 'Registre des moyens humains (Convergence)',
+  insertion_dialogues_gestion: 'Synthèses et instantanés transmis (dialogue de gestion, Convergence)',
   tours: 'Tournées',
   cav: 'Conteneurs d’apport volontaire (CAV)',
   production_daily: 'Production quotidienne',

@@ -210,7 +210,7 @@ export function isAdminRh(user) {
   return ['ADMIN', 'RH'].includes(user?.base_role || user?.role);
 }
 
-// ── Convergence France (programme CVG) — lot 2.58.0, contrat 30 § 2 ──
+// ── Convergence France (programme CVG) — lot 2.60.0, contrat 30 § 2 ──
 // UN SEUL fichier porte ces libellés : le diagnostic, le bilan de sortie, le
 // dossier administratif et l'écran CVG les lisent ici. Les clés sont celles des
 // CHECK du backend (migrations/insertion-convergence.js).

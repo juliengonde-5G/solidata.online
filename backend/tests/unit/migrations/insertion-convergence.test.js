@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// UNIT — Migration 2.58.0 « Suivi Convergence (CVG) »
+// UNIT — Migration 2.60.0 « Suivi Convergence (CVG) »
 //   backend/src/scripts/migrations/insertion-convergence.js
 //
 // Client SIMULÉ : on tient le contrat d'exécution (aucune transaction interne,
@@ -44,7 +44,10 @@ describe("contrat d'exécution", () => {
     const c = faireClient();
     await migration.run(c);
     for (const { sql } of c.sqls) {
-      expect(/IF NOT EXISTS|IF EXISTS|pg_get_constraintdef|WHERE NOT EXISTS/i.test(sql)).toBe(true);
+      // 2.60.0 : la mise à jour de l'entrée art. 30 est gardée par le MARQUEUR
+      // du texte d'origine — elle ne s'applique qu'une fois et n'écrase jamais
+      // une rédaction du DPO.
+      expect(/IF NOT EXISTS|IF EXISTS|pg_get_constraintdef|WHERE NOT EXISTS|LIKE '%n''applique PAS le seuil de k-anonymat%'/i.test(sql)).toBe(true);
     }
   });
 
@@ -104,5 +107,30 @@ describe('DDL du contrat § 2.2', () => {
 
   it('registre art. 30 posé une seule fois', () => {
     expect(tout).toMatch(/INSERT INTO rgpd_registre[\s\S]*'Reporting Convergence \(programme CVG\)'[\s\S]*WHERE NOT EXISTS/);
+  });
+
+  it('2.60.0 — historique de la situation de sortie et auteur de la modification (m-03)', () => {
+    expect(tout).toContain('ADD COLUMN IF NOT EXISTS modifie_par INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    expect(tout).toContain('CREATE TABLE IF NOT EXISTS insertion_sortie_cvg_history');
+    expect(tout).toMatch(/insertion_sortie_cvg_history[\s\S]*employee_id INTEGER NOT NULL REFERENCES employees\(id\) ON DELETE CASCADE/);
+    // Pas de clé étrangère vers la situation : l'historique lui survit.
+    expect(tout).toMatch(/situation_id INTEGER NOT NULL,/);
+  });
+
+  it('2.60.0 — entrée art. 30 : seuil de confidentialité, justice non transmise, durée du registre (B-01, B-02, M-03)', async () => {
+    const c = faireClient();
+    await migration.run(c);
+    const ins = c.sqls.find((q) => /INSERT INTO rgpd_registre/.test(q.sql));
+    const upd = c.sqls.find((q) => /UPDATE rgpd_registre/.test(q.sql));
+    for (const q of [ins, upd]) {
+      const [cat, duree, mesures] = q.params;
+      expect(cat).toMatch(/cvg_k_min/);
+      expect(cat).toMatch(/FREIN JUDICIAIRE \(art\. 10 RGPD\) n'est PAS transmis par défaut/);
+      expect(cat).not.toMatch(/n'applique PAS le seuil/);
+      expect(duree).toMatch(/rgpd\.cvg_ressources_retention_jours/);
+      expect(mesures).toMatch(/« s »/);
+    }
+    // La mise à jour ne vise QUE le texte d'origine.
+    expect(upd.sql).toMatch(/LIKE '%n''applique PAS le seuil de k-anonymat%'/);
   });
 });

@@ -1139,7 +1139,7 @@ export default function EntretienForm({
                 </div>
               </div>
 
-              {/* Lot 2.58.0 — situation de sortie Convergence : enregistrement
+              {/* Lot 2.60.0 — situation de sortie Convergence : enregistrement
                   PROPRE (table insertion_sortie_cvg), resté ouvert après la
                   clôture du bilan. */}
               <SituationSortieCvg employeeId={employeeId} parcoursNum={milestone.parcours_num ?? null} canEdit={adminRh} />

@@ -73,7 +73,7 @@ const TYPES_OBLIGATIONS = [
   { type: 'suivi_6_mois', social: false, onglet: 'dossier', champ: 'situation_6mois' },
   { type: 'referent_unique', social: false, onglet: 'dossier', champ: 'referent_unique' },
   { type: 'sous_15h', social: true, agregee: true, onglet: 'situation', champ: null },
-  // 2.58.0 — situation de sortie Convergence (programme CVG) non saisie 30 j
+  // 2.60.0 — situation de sortie Convergence (programme CVG) non saisie 30 j
   // après la fin du parcours. SOCIALE : elle porte des données de santé à la
   // sortie (RQTH, AAH, pension, médecin traitant) — ADMIN/RH strict.
   { type: 'sortie_cvg', social: true, onglet: 'suivi', champ: 'sortie_cvg' },
@@ -241,7 +241,7 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
   const autorises = new Set(typesPourRole(baseRole));
   const adminRh = autorises.has('sortie_fse_a_saisir');
 
-  const [moisTermines, delaiDiag, moisPass, j1, j2, joursG, delaiCvg] = await Promise.all([
+  const [moisTermines, delaiDiag, moisPass, j1, j2, joursG, delaiCvg, cvgDepuisBrut] = await Promise.all([
     readInsertionSetting('insertion.file_active_terminees_mois'),
     readInsertionSetting('insertion.delai_diagnostic_jours'),
     readInsertionSetting('insertion.alerte_pass_iae_mois'),
@@ -249,7 +249,14 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
     readInsertionSetting('insertion.alerte_sortie_fse_j2'),
     readInsertionSetting('insertion.categorie_g_alerte_jours'),
     readInsertionSetting('insertion.cvg_sortie_delai_jours'),
+    readInsertionSetting('insertion.cvg_sortie_depuis'),
   ]);
+  // CORRECTIF m-11 — borne de mise en service de l'obligation « situation de
+  // sortie Convergence » : sans elle, le premier déploiement levait d'un coup
+  // une obligation rouge pour chaque parcours terminé depuis 30 jours à
+  // 7 mois, y compris ceux d'un semestre déjà transmis. Illisible → aucune borne.
+  const cvgDepuis = /^\d{4}-\d{2}-\d{2}$/.test(String(cvgDepuisBrut || '').trim())
+    ? String(cvgDepuisBrut).trim() : null;
 
   // Même borne que la file active (M-07) : les familles d'obligations qui
   // portent sur un parcours TERMINÉ sont toutes ADMIN/RH.
@@ -506,7 +513,7 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
       }
     }
 
-    // (h bis) Situation de sortie Convergence non saisie (2.58.0). ROUGE : le
+    // (h bis) Situation de sortie Convergence non saisie (2.60.0). ROUGE : le
     //     formulaire du réseau se remplit au fil de l'eau, jamais en campagne —
     //     une sortie qui reste sans situation un mois après ne se documentera
     //     plus. Reportable 48 h, jamais acquittable. Source illisible (`null`)
@@ -515,7 +522,9 @@ async function chargerObligations({ db = pool, baseRole = 'ADMIN', userId = null
         && e.insertion_status === 'termine' && e.insertion_end_date) {
       const finParcours = isoDate(e.insertion_end_date);
       const jours = finParcours ? ecartJours(finParcours, jour) : null;
-      if (jours != null && jours > seuilCvg && !cvgSaisies.has(`${id}#${Number(e.parcours_num) || 1}`)) {
+      const avantMiseEnService = cvgDepuis != null && finParcours != null && finParcours < cvgDepuis;
+      if (jours != null && jours > seuilCvg && !avantMiseEnService
+          && !cvgSaisies.has(`${id}#${Number(e.parcours_num) || 1}`)) {
         pousser(id, ligne({
           type: 'sortie_cvg', niveau: 'rouge', employeeId: id, nom,
           libelle: `Situation de sortie Convergence à saisir — parcours terminé depuis ${jours} jour(s)`,

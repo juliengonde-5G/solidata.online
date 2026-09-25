@@ -1,6 +1,6 @@
 /**
  * Référentiels du reporting Convergence France (programme CVG) — module PUR
- * (lot 2.58.0, contrat `rapports/cip-refonte-2026-09-12/30-convergence-cvg-cartographie.md`).
+ * (lot 2.60.0, contrat `rapports/cip-refonte-2026-09-12/30-convergence-cvg-cartographie.md`).
  *
  * ═══ POURQUOI UN FICHIER À PART ═══════════════════════════════════════════
  *

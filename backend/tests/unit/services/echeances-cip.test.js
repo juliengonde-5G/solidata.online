@@ -21,8 +21,9 @@ const fs = require('fs');
 const path = require('path');
 
 jest.mock('../../../src/config/database', () => ({ query: jest.fn(), connect: jest.fn() }));
+const mockSurcharges = {};
 jest.mock('../../../src/utils/insertion-settings', () => ({
-  readInsertionSetting: jest.fn(async (k) => ({
+  readInsertionSetting: jest.fn(async (k) => (Object.prototype.hasOwnProperty.call(mockSurcharges, k) ? mockSurcharges[k] : {
     'insertion.file_active_terminees_mois': 7,
     'insertion.delai_diagnostic_jours': 30,
     'insertion.alerte_pass_iae_mois': 7,
@@ -391,7 +392,7 @@ describe('7. lien public de l’écran ETI', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('8. situation de sortie Convergence (2.58.0) — 10ᵉ famille `sortie_cvg`', () => {
+describe('8. situation de sortie Convergence (2.60.0) — 10ᵉ famille `sortie_cvg`', () => {
   const TERMINE = (joursDepuisFin) => ({
     ...SALARIE, insertion_status: 'termine', insertion_end_date: ilYA(joursDepuisFin),
   });
@@ -436,6 +437,22 @@ describe('8. situation de sortie Convergence (2.58.0) — 10ᵉ famille `sortie_
     expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeUndefined();
     expect(r.sources).toContain('sorties_cvg');
     err.mockRestore();
+  });
+
+  test('m-11 (2.60.0) — un parcours terminé AVANT la mise en service ne lève pas d’obligation', async () => {
+    mockSurcharges['insertion.cvg_sortie_depuis'] = decalerJours(ilYA(45), 1); // mise en service le lendemain de la fin
+    let db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    let r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeUndefined();
+    mockSurcharges['insertion.cvg_sortie_depuis'] = ilYA(45); // fin le jour même de la mise en service : réclamée
+    db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeDefined();
+    mockSurcharges['insertion.cvg_sortie_depuis'] = 'n’importe quoi'; // illisible : aucune borne
+    db = fauxDb({ 'FROM employees e WHERE': [TERMINE(45)], ...DIAG });
+    r = await svc.chargerObligations({ db, baseRole: 'ADMIN' });
+    expect(r.parEmploye.get(5).find((x) => x.type === 'sortie_cvg')).toBeDefined();
+    delete mockSurcharges['insertion.cvg_sortie_depuis'];
   });
 
   test('aucune requête sur la situation de sortie hors ADMIN/RH', async () => {

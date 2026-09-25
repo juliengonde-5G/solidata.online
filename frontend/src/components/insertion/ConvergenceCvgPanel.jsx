@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  FileText, Download, Printer, History, RefreshCw, ShieldCheck, GitCompare, ListChecks, Users, Plus, Pencil, Trash2, Save, X,
+  FileText, Download, Printer, History, RefreshCw, ShieldCheck, GitCompare, ListChecks, Users, Plus, Pencil, Trash2, Save, X, Lock,
 } from 'lucide-react';
 import api from '../../services/api';
 import { exportConvergenceCvgPDF } from './pdf-convergence-cvg';
@@ -9,11 +9,11 @@ import {
   partiesCvg, blocJumeau, lignesSimples, lignesDoubles, valeurSimple, nonRenseigne, cellule, pctDe,
   LIGNES_EFFECTIFS, LIGNES_PUBLICS, LIGNES_HABITAT, LIGNES_FREINS, LIGNES_ORIENTEURS,
   LIGNES_SORTIE_EMPLOI, LIGNES_SORTIE_HORS_EMPLOI, LIGNES_SANTE,
-  fmtNb, fmtPct, sommeEtp, phrasesMethode, periodeTexte,
+  fmtNb, fmtPct, sommeEtp, phrasesMethode, periodeTexte, MENTION_NON_TRANSMIS, legendeSecret, ligneSecrete,
 } from './convergence-cvg-structure';
 
 /**
- * Onglet « Convergence (CVG) » de l'audit insertion (lot 2.58.0, contrat 30 § 2.4).
+ * Onglet « Convergence (CVG) » de l'audit insertion (lot 2.60.0, contrat 30 § 2.4).
  *
  * Le document que le réseau Convergence France demande pour son dialogue de
  * gestion (programme CVG) : Partie 1 — le public, Partie 2 — les moyens
@@ -96,8 +96,13 @@ async function messageErreurBlob(err, defaut) {
 }
 
 const Tiret = () => <span className="text-gray-300">—</span>;
-const Nb = ({ v }) => (fmtNb(v) == null ? <Tiret /> : fmtNb(v));
-const Pct = ({ v }) => (fmtPct(v) == null ? <Tiret /> : fmtPct(v));
+/** Case retenue au titre de la confidentialité (B-01) : « s », jamais « — » ni 0. */
+const Secret = () => (
+  <span className="text-slate-500 italic" title="Secret : effectif inférieur au seuil de confidentialité — case non diffusée">s</span>
+);
+const Nb = ({ v, secret }) => (secret ? <Secret /> : fmtNb(v) == null ? <Tiret /> : fmtNb(v));
+const Pct = ({ v, secret }) => (secret ? <Secret /> : fmtPct(v) == null ? <Tiret /> : fmtPct(v));
+const NonTransmis = () => <span className="text-[11px] italic text-slate-500">{MENTION_NON_TRANSMIS}</span>;
 
 function NonRenseigne({ bloc, lignes }) {
   const nr = lignes || nonRenseigne(bloc);
@@ -133,8 +138,14 @@ function TableSimple({ titre, entete = ['', 'nb', '%'], lignes, children }) {
           ) : (
             <tr key={`${l.cle}${i}`} className={`border-t border-gray-200 ${l.bold ? 'font-semibold' : ''}`}>
               <td className={`px-2 py-1 ${l.indent ? 'pl-6 italic text-gray-600' : ''}`}>{l.libelle}</td>
-              <td className="px-2 py-1 text-right tabular-nums"><Nb v={l.nb} /></td>
-              <td className="px-2 py-1 text-right tabular-nums text-gray-600"><Pct v={l.pct} /></td>
+              {l.nonTransmis ? (
+                <td colSpan={2} className="px-2 py-1 text-right"><NonTransmis /></td>
+              ) : (
+                <>
+                  <td className="px-2 py-1 text-right tabular-nums"><Nb v={l.nb} secret={l.secret} /></td>
+                  <td className="px-2 py-1 text-right tabular-nums text-gray-600"><Pct v={l.pct} secret={l.secret} /></td>
+                </>
+              )}
             </tr>
           )
         ))}
@@ -167,10 +178,16 @@ function TableDouble({ titre, col1, col2, lignes, note }) {
           {lignes.map((l) => (
             <tr key={l.cle} className="border-t border-gray-200">
               <td className={`px-2 py-1 ${l.indent ? 'pl-6 italic' : ''}`}>{l.libelle}</td>
-              <td className="px-2 py-1 text-right tabular-nums"><Nb v={l.entree.nb} /></td>
-              <td className="px-2 py-1 text-right tabular-nums text-gray-600"><Pct v={l.entree.pct} /></td>
-              <td className="px-2 py-1 text-right tabular-nums"><Nb v={l.sortie.nb} /></td>
-              <td className="px-2 py-1 text-right tabular-nums text-gray-600"><Pct v={l.sortie.pct} /></td>
+              {l.nonTransmis ? (
+                <td colSpan={4} className="px-2 py-1 text-right"><NonTransmis /></td>
+              ) : (
+                <>
+                  <td className="px-2 py-1 text-right tabular-nums"><Nb v={l.entree.nb} secret={l.entree.secret} /></td>
+                  <td className="px-2 py-1 text-right tabular-nums text-gray-600"><Pct v={l.entree.pct} secret={l.entree.secret} /></td>
+                  <td className="px-2 py-1 text-right tabular-nums"><Nb v={l.sortie.nb} secret={l.sortie.secret} /></td>
+                  <td className="px-2 py-1 text-right tabular-nums text-gray-600"><Pct v={l.sortie.pct} secret={l.sortie.secret} /></td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>
@@ -180,7 +197,7 @@ function TableDouble({ titre, col1, col2, lignes, note }) {
   );
 }
 
-function TableauJumeau({ titre, structure, bloc, totalSorties, sousPop, postLibelle }) {
+function TableauJumeau({ titre, structure, bloc, totalSorties, sousPop, postLibelle, nonTransmis = [] }) {
   const j = blocJumeau(bloc);
   const cTot = cellule(j.total);
   const base = cTot.nb ?? null;
@@ -192,8 +209,15 @@ function TableauJumeau({ titre, structure, bloc, totalSorties, sousPop, postLibe
       <TableSimple titre={titre} entete={['', 'nombre', '% du total sorties']}
         lignes={[...cats, { cle: 'total', libelle: 'Total', nb: cTot.nb, pct: pctDe(cTot, totalSorties), bold: true }]} />
       <NonRenseigne lignes={j.nonRenseigne} />
+      {j.confidentialite && (
+        <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1 flex items-start gap-1.5">
+          <Lock className="w-3 h-3 mt-0.5 shrink-0" />
+          Tableau de moins de {j.confidentialite.k} personnes : les lignes santé et justice, le logement et
+          « dont parcours de soin » ne sont pas diffusés (« s ») — sa catégorie de sortie désigne les personnes.
+        </p>
+      )}
       <TableDouble titre="Évolution des freins" col1="Difficultés à l'entrée" col2="Résolution totale ou partielle à la sortie"
-        lignes={lignesDoubles(j.freins, LIGNES_FREINS, base)} note={note} />
+        lignes={lignesDoubles(j.freins, LIGNES_FREINS, base, { nonTransmis })} note={note} />
       <NonRenseigne bloc={j.freins} />
       <TableDouble titre="Évolution de la situation logement entrée / sortie" col1="Logement à l'entrée" col2="Logement à la sortie"
         lignes={lignesDoubles(j.logement, LIGNES_HABITAT, base)} note={note} />
@@ -202,7 +226,7 @@ function TableauJumeau({ titre, structure, bloc, totalSorties, sousPop, postLibe
         lignes={lignesDoubles(j.sante, LIGNES_SANTE, base)} note={note} />
       <NonRenseigne bloc={j.sante} />
       <TableSimple titre="Accompagnement post-sortie"
-        lignes={[{ cle: 'post', libelle: postLibelle, nb: post.nb, pct: pctDe(post, base) }]} />
+        lignes={[{ cle: 'post', libelle: postLibelle, nb: post.nb, pct: pctDe(post, base), secret: post.secret }]} />
     </div>
   );
 }
@@ -219,14 +243,18 @@ function ApercuCvg({ contenu }) {
     ...lignesSimples(P.publics, LIGNES_PUBLICS, base),
     { inter: "Type d'habitat à l'entrée du chantier" },
     ...hab,
-    { cle: 'total_habitat', libelle: 'Total habitat', nb: totHab.nb, pct: pctDe(totHab, base), bold: true },
-    { cle: 'parcours_rue', libelle: 'Personnes ayant connu un parcours de rue', nb: rue.nb, pct: pctDe(rue, base), bold: true },
+    { cle: 'total_habitat', libelle: 'Total habitat', nb: totHab.nb, pct: pctDe(totHab, base), secret: totHab.secret, bold: true },
+    { cle: 'parcours_rue', libelle: 'Personnes ayant connu un parcours de rue', nb: rue.nb, pct: pctDe(rue, base), secret: rue.secret, bold: true },
     { inter: "Difficultés à l'entrée" },
-    ...lignesSimples(P.difficultes, LIGNES_FREINS, base),
+    ...lignesSimples(P.difficultes, LIGNES_FREINS, base, { nonTransmis: P.nonTransmis }),
     { inter: "Type d'orienteur (CVG)" },
     ...orient,
-    { cle: 'total_orienteurs', libelle: 'Total orienteurs', nb: totOr.nb, pct: pctDe(totOr, base), bold: true },
+    { cle: 'total_orienteurs', libelle: 'Total orienteurs', nb: totOr.nb, pct: pctDe(totOr, base), secret: totOr.secret, bold: true },
   ];
+  // Une case retenue n'est jamais laissée sans explication : légende dès qu'il y en a une.
+  const aDesSecrets = lignesP1.some(ligneSecrete)
+    || [P.emploi, P.horsEmploi].some((b) => !!(b && b.confidentialite));
+  const kMin = P.confidentialite?.k_min;
   const nrP1 = [
     ['Publics', nonRenseigne(P.publics)], ['Habitat', nonRenseigne(P.habitat)],
     ['Difficultés', nonRenseigne(P.difficultes)], ['Orienteurs', nonRenseigne(P.orienteurs)],
@@ -244,6 +272,13 @@ function ApercuCvg({ contenu }) {
 
   return (
     <div className="space-y-6">
+      {P.mentionDiffusion && (
+        <div className="text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-2.5 flex items-start gap-2">
+          <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+          <span><strong>Diffusion restreinte.</strong> {P.mentionDiffusion}</span>
+        </div>
+      )}
+      {aDesSecrets && <p className="text-[11px] text-slate-600">{legendeSecret(kMin)}</p>}
       {/* Partie 1 */}
       <section className="space-y-3">
         <h5 className="font-semibold text-gray-800 underline">Partie 1 : le public</h5>
@@ -370,10 +405,10 @@ function ApercuCvg({ contenu }) {
         </table>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <TableauJumeau titre="Salariés accédant à un emploi ou une formation à la sortie" structure={LIGNES_SORTIE_EMPLOI}
-            bloc={P.emploi} totalSorties={P.totalSorties} sousPop="en emploi ou formation"
+            bloc={P.emploi} totalSorties={P.totalSorties} sousPop="en emploi ou formation" nonTransmis={P.nonTransmis}
             postLibelle="Sortis en emploi ou formation ayant bénéficié d'un accompagnement post-sortie" />
           <TableauJumeau titre="Salariés n'accédant pas à l'emploi à la sortie" structure={LIGNES_SORTIE_HORS_EMPLOI}
-            bloc={P.horsEmploi} totalSorties={P.totalSorties} sousPop="hors emploi"
+            bloc={P.horsEmploi} totalSorties={P.totalSorties} sousPop="hors emploi" nonTransmis={P.nonTransmis}
             postLibelle="Sortis hors emploi ayant bénéficié d'un accompagnement post-sortie" />
         </div>
       </section>
@@ -538,6 +573,12 @@ function Comparaison({ historique }) {
           <p className="text-xs text-gray-600">
             <strong>A</strong> : {libPeriode(resultat.a)} · <strong>B</strong> : {libPeriode(resultat.b)}
           </p>
+          {resultat.methode_identique === false && (
+            <p className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-2">
+              Les deux documents n’ont pas été composés avec les mêmes réglages : les indicateurs concernés ne sont pas
+              comparés (voir la lecture ci-dessous).
+            </p>
+          )}
           {groupes.length === 0 ? (
             <p className="text-sm text-gray-400">Aucun indicateur comparable.</p>
           ) : (
@@ -563,7 +604,12 @@ function Comparaison({ historique }) {
                       const ton = tonEcart(d);
                       return (
                         <tr key={`${bloc}-${i}`} className="border-b border-gray-50">
-                          <td className="py-1 pr-2 text-gray-700">{d.indicateur}</td>
+                          <td className="py-1 pr-2 text-gray-700">
+                            {d.indicateur}
+                            {d.motif === 'methode' && (
+                              <span className="ml-1 text-[10px] text-amber-700" title="Réglage de méthode différent entre les deux périodes">(méthode différente — non comparé)</span>
+                            )}
+                          </td>
                           <td className="py-1 pr-2 text-right tabular-nums"><Nb v={d.a_nb} /></td>
                           <td className="py-1 pr-2 text-right tabular-nums text-gray-500"><Pct v={d.a_pct} /></td>
                           <td className="py-1 pr-2 text-right tabular-nums"><Nb v={d.b_nb} /></td>
@@ -676,7 +722,8 @@ const RESSOURCE_VIDE = {
   etp_total: '', etp_accompagnement: '', etp_encadrement: '', date_debut: '', date_fin: '', actif: true,
 };
 
-const etpValide = (v) => v === '' || v === null || (/^\d+([.,]\d{1,2})?$/.test(String(v)) && Number(String(v).replace(',', '.')) <= 1.5);
+// m-06 — même borne que le serveur et le CHECK de la base (0 à 2 ETP).
+const etpValide = (v) => v === '' || v === null || (/^\d+([.,]\d{1,2})?$/.test(String(v)) && Number(String(v).replace(',', '.')) <= 2);
 const etpNum = (v) => (v === '' || v === null || v === undefined ? null : Math.round(Number(String(v).replace(',', '.')) * 100) / 100);
 
 function MoyensHumains() {
@@ -734,7 +781,7 @@ function MoyensHumains() {
     setErreur(null); setInfo(null);
     if (!e.nom.trim()) { setErreur('Indiquez le nom de la personne.'); return; }
     for (const [k, l] of [['etp_total', 'La quotité totale'], ['etp_accompagnement', "La quotité d'accompagnement"], ['etp_encadrement', "La quotité d'encadrement"]]) {
-      if (!etpValide(e[k])) { setErreur(`${l} doit être un nombre entre 0 et 1,5 (deux décimales au plus).`); return; }
+      if (!etpValide(e[k])) { setErreur(`${l} doit être un nombre entre 0 et 2 (deux décimales au plus).`); return; }
     }
     const tot = etpNum(e.etp_total);
     const somme = (etpNum(e.etp_accompagnement) || 0) + (etpNum(e.etp_encadrement) || 0);
@@ -972,6 +1019,7 @@ export default function ConvergenceCvgPanel({ canGenerer = false }) {
   const [historique, setHistorique] = useState([]);
   const [histoOuvert, setHistoOuvert] = useState(false);
   const [vue, setVue] = useState('document'); // 'document' | 'comparer' | 'completude' | 'moyens'
+  const [parametres, setParametres] = useState(null); // réglages de confidentialité en vigueur (B-01, B-02)
 
   const { debut, fin } = useMemo(() => {
     if (mode === 'semestre') { const [d, f] = semestre.split('|'); return { debut: d, fin: f }; }
@@ -988,6 +1036,11 @@ export default function ConvergenceCvgPanel({ canGenerer = false }) {
   }, []);
 
   useEffect(() => { chargerHistorique(); }, [chargerHistorique]);
+  useEffect(() => {
+    api.get('/insertion/convergence/parametres')
+      .then((r) => setParametres(r.data || null))
+      .catch(() => setParametres(null));
+  }, []);
 
   // La période change → l'aperçu affiché ne lui correspond plus : on l'efface.
   useEffect(() => { setContenu(null); setEnregistre(null); setInfo(null); }, [debut, fin]);
@@ -1128,6 +1181,40 @@ export default function ConvergenceCvgPanel({ canGenerer = false }) {
             </>
           )}
           <span className="text-xs text-gray-500 pb-2">{periodeValide ? periodeTexte({ debut, fin }) : 'Période invalide'}</span>
+        </div>
+
+        {/* Encadré de confidentialité — AVANT « Générer » (correctif B-01) : ce
+            qui sortira, et en vertu de quel réglage. */}
+        <div className="mt-4 text-xs bg-slate-50 border border-slate-300 rounded-lg p-3 text-slate-700 space-y-1">
+          <p className="font-semibold flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> Confidentialité du document transmis</p>
+          {parametres ? (
+            <>
+              <p>
+                {parametres.k_min > 1 ? (
+                  <>Seuil de confidentialité <strong>k = {parametres.k_min}</strong>{' '}
+                    ({parametres.k_source === 'defaut' ? 'défaut de l’outil' : 'réglage de la structure — décision du DPO'}) :
+                    un tableau des sortis de moins de {parametres.k_min} personnes ne diffuse ni ses lignes santé et justice, ni son
+                    logement, ni « dont parcours de soin » ; sous {Math.max(parametres.base_marginales_brutes, parametres.k_min)} accueillis,
+                    les petites cases de la Partie 1 sont retenues. Une case retenue s’imprime « s ».</>
+                ) : (
+                  <>Aucun seuil de confidentialité (<strong>k = 1</strong>, décision de la structure) : le document reproduit le
+                    format brut du réseau, effectifs de 1 et 2 compris.</>
+                )}
+              </p>
+              <p>
+                Frein « Justice » (article 10 du RGPD) :{' '}
+                {parametres.transmettre_justice
+                  ? <strong>transmis en agrégat (décision de la structure)</strong>
+                  : <strong>non transmis</strong>}.
+              </p>
+              <p className="text-slate-500">
+                Aucun nom de personne accompagnée — mais des effectifs très faibles peuvent désigner une personne : le document
+                se transmet au seul dialogue de gestion avec Convergence France, il ne se publie ni ne se rediffuse.
+              </p>
+            </>
+          ) : (
+            <p className="text-slate-500">Réglages de confidentialité indisponibles : ils sont appliqués et rappelés dans la méthode du document.</p>
+          )}
         </div>
 
         <div className="mt-3 flex items-end gap-2 flex-wrap">

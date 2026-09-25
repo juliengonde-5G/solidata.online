@@ -1,6 +1,6 @@
 /**
  * Reporting Convergence France (programme CVG) — « Outil de dialogue de
- * gestion » (lot 2.58.0 ; contrat `rapports/cip-refonte-2026-09-12/
+ * gestion » (lot 2.60.0 ; contrat `rapports/cip-refonte-2026-09-12/
  * 30-convergence-cvg-cartographie.md` § 2.3).
  *
  * ═══ CE QUE CE DOCUMENT EST ═══════════════════════════════════════════════
@@ -39,9 +39,16 @@
  *    synthèse de dialogue de gestion (`chargerFinsEtBilans`).
  *  · Transmettre le frein `numerique`, sans équivalent dans le référentiel du
  *    réseau (la méthode le dit).
- *  · Appliquer le k-anonymat de la synthèse : le format du réseau porte des
- *    effectifs de 1 et 2 — arbitrage DPO ouvert (§ 4 du contrat), c'est
- *    pourquoi toute la surface est ADMIN/RH strict et journalisée.
+ *  · Transmettre le frein JUDICIAIRE (art. 10) sans décision du DPO : par
+ *    défaut la colonne n'est pas lue et la ligne « Justice » s'imprime « non
+ *    transmis » (correctif B-02, 2.60.0 — réglage
+ *    `insertion.cvg_transmettre_justice`).
+ *  · Publier la fiche d'une personne : un tableau des sortis comptant moins de
+ *    `insertion.cvg_k_min` personnes (défaut 5, plancher 1) ne diffuse ni ses
+ *    lignes santé et justice, ni son logement, ni « dont parcours de soin » ;
+ *    sous 20 accueillis, la Partie 1 passe par la MÊME règle que la synthèse
+ *    de dialogue de gestion (`appliquerKAnonymat`). Correctif B-01, 2.60.0 —
+ *    voir `protegerJumeau` et `protegerPartie1`.
  */
 
 'use strict';
@@ -52,22 +59,44 @@ const { isoDate, ecartJours } = require('../utils/date-iso');
 const { escCsv } = require('../utils/export-csv');
 const { listerSortants } = require('./sorties-engine');
 const {
-  chargerFinsEtBilans, lireConvention, APP_VERSION,
+  chargerFinsEtBilans, lireConvention, APP_VERSION, appliquerKAnonymat,
 } = require('./dialogue-gestion');
 const R = require('../utils/convergence-cvg-referentiels');
+const { rqthDepuisStatutHandicap } = require('../utils/rqth');
 
 const STRUCTURE = 'Solidarité Textiles';
 const MENTION = "Document destiné à Convergence France (programme CVG). Parties « Public » et « Sorties » : agrégats, sans nom ni identifiant de salarié en insertion. Partie 2 : nomme les permanents de l'accompagnement. Diffusion ADMIN/RH.";
 
-/** Axes SOLIDATA transmis, dans l'ordre du formulaire (`numerique` exclu). */
+/**
+ * Mention de DIFFUSION RESTREINTE (correctif B-01) — imprimée en tête de
+ * chaque page du PDF et en ligne `#` du CSV dès qu'une case publiée compte
+ * entre 1 et 4 personnes. Seuil fixe à 5 : elle dit un fait du document
+ * (« des effectifs très faibles y figurent »), pas le réglage `k`.
+ */
+const MENTION_DIFFUSION = 'Contient des effectifs inférieurs à 5 : données à diffusion restreinte, réservées au dialogue de gestion avec Convergence France — ne pas publier ni rediffuser.';
+const SEUIL_MENTION = 5;
+
+/** Axes SOLIDATA du formulaire, dans son ordre (`numerique` exclu). */
 const AXES = R.DIFFICULTES.map((d) => d.frein);
+/** Axe relevant de l'art. 10 RGPD — transmis seulement sur décision du DPO (B-02). */
+const AXE_ART10 = 'judiciaire';
+/** Axes dont un tableau des sortis sous le seuil ne diffuse pas les lignes (B-01). */
+const AXES_SENSIBLES = ['sante', 'judiciaire'];
+/** Axes effectivement lus et transmis selon le réglage `insertion.cvg_transmettre_justice`. */
+const axesTransmis = (transmettreJustice) => (transmettreJustice ? AXES : AXES.filter((a) => a !== AXE_ART10));
 const COL_AXE = (axe) => `frein_${axe}`;
+
+/** Seuil de confidentialité par défaut (réglage `insertion.cvg_k_min`, plancher 1). */
+const K_DEFAUT = 5;
+/**
+ * Effectif accueilli à partir duquel les marginales de la Partie 1 sont
+ * publiées brutes : sur une base large, une marginale à 1 ne croise rien et ne
+ * désigne personne ; en dessous, la passe de la synthèse s'applique.
+ */
+const BASE_MARGINALES_BRUTES = 20;
 
 /** Critères d'éligibilité LUS — liste blanche (aucun critère art. 10 n'est lu). */
 const CRITERES_LUS = ['brsa', 'ass', 'aah', 'rqth', 'refugie_bpi', 'detld'];
-
-/** Valeurs de `disability_status` qui disent « pas de RQTH ». */
-const PAS_DE_HANDICAP = /^(non|aucun|aucune|none|false|0|-|nr|n\/a|sans)$/i;
 
 // ───────────────────────────────────────────────────────────────────────────
 // Outils
@@ -87,6 +116,13 @@ function pctDe(n, base) {
 
 /** Cellule `{ nb, pct }`. */
 const cellule = (n, base) => ({ nb: n == null ? null : n, pct: pctDe(n, base) });
+
+/**
+ * Cellule RETENUE au titre de la confidentialité (B-01) : vide comme une
+ * source illisible, mais marquée — l'écran, le PDF et le CSV impriment « s »
+ * (secret) et la légende, pour qu'aucune case vide ne reste inexpliquée.
+ */
+const celluleSecrete = () => ({ nb: null, pct: null, secret: true });
 
 /** Compte `nb` d'une cellule, d'un nombre ou d'une valeur absente. */
 function nbDe(v) {
@@ -152,7 +188,7 @@ function erreurPeriode(debut, fin) {
  * Tout ce que le document dit d'une personne, dérivé de SA ligne de cohorte
  * et de ses critères d'éligibilité. Aucune E/S.
  */
-function profilPersonne(row, criteres = new Set(), dateRef) {
+function profilPersonne(row, criteres = new Set(), dateRef, axes = AXES) {
   const fse = lireJson(row.fse_entree) || {};
   const ressources = Array.isArray(row.ressources) ? row.ressources : [];
   const ressFse = String(fse.ressources_principales || '').toLowerCase();
@@ -160,12 +196,15 @@ function profilPersonne(row, criteres = new Set(), dateRef) {
   const habitatSaisi = R.HABITAT_TYPES.includes(row.habitat_type) ? row.habitat_type : null;
   const habitat = habitatSaisi || R.transcoderHabitat(row.logement_statut);
 
-  const disab = row.disability_status == null ? '' : String(row.disability_status).trim();
-  const rqth = criteres.has('rqth') || row.rqth === true || (disab !== '' && !PAS_DE_HANDICAP.test(disab));
+  // CORRECTIF M-02 — la fiche de paie porte un TEXTE LIBRE (« Statut
+  // handicap ») : seule une valeur qui DIT une reconnaissance compte (liste
+  // blanche partagée `utils/rqth.js`) ; « Non concerné », « En cours »… ne
+  // valent jamais RQTH.
+  const rqth = criteres.has('rqth') || row.rqth === true || rqthDepuisStatutHandicap(row.disability_status) === true;
   const aah = criteres.has('aah') || contient(ressources, 'aah') || ressFse === 'aah';
 
   const difficultes = {};
-  for (const axe of AXES) difficultes[axe] = num(row[`entree_${COL_AXE(axe)}`]);
+  for (const axe of axes) difficultes[axe] = num(row[`entree_${COL_AXE(axe)}`]);
 
   const orienteurBrut = row.orienteur_type == null ? null : String(row.orienteur_type);
 
@@ -209,7 +248,7 @@ function manquesDe(p, sortant = null) {
       ? 'Orienteur à préciser : l\'ancienne valeur « Autre » ne correspond à aucune case Convergence'
       : 'Orienteur non renseigné (dossier administratif)']);
   }
-  if (AXES.every((a) => p.difficultes[a] == null)) m.push(['freins', "Freins non évalués au diagnostic d'accueil"]);
+  if (Object.values(p.difficultes).every((v) => v == null)) m.push(['freins', "Freins non évalués au diagnostic d'accueil"]);
   if (sortant) {
     if (!sortant.situation) m.push(['situation_sortie', 'Situation de sortie Convergence non saisie (bilan de sortie)']);
     if (!sortant.categorie) m.push(['categorie_sortie', 'Catégorie de sortie Convergence à préciser']);
@@ -226,7 +265,26 @@ async function chargerDonnees({ debut, fin, db = pool }) {
   const soft = faireSoft(db, sources);
   const annee = Number(String(fin).slice(0, 4));
 
-  const colsEntree = AXES.map((a) => `d.${COL_AXE(a)} AS entree_${COL_AXE(a)}`).join(', ');
+  // Réglages lus AVANT toute requête : le réglage art. 10 décide des COLONNES
+  // lues (retrait à la source, comme `AXES_BLOC3` de la synthèse).
+  const [seuilBrut, sansBilanBrut, kBrut, justiceBrut] = await Promise.all([
+    readInsertionSetting('insertion.cvg_frein_seuil'),
+    readInsertionSetting('insertion.cvg_sans_bilan_est_sans_nouvelles'),
+    readInsertionSetting('insertion.cvg_k_min'),
+    readInsertionSetting('insertion.cvg_transmettre_justice'),
+  ]);
+  const seuilNum = num(seuilBrut);
+  const seuil = seuilNum != null && seuilNum >= 1 && seuilNum <= 5 ? Math.round(seuilNum) : 3;
+  const sansBilanSansNouvelles = sansBilanBrut == null ? true : sansBilanBrut === true;
+  // B-01 — PLANCHER DE CODE 1 : une valeur illisible, nulle ou négative ne
+  // désactive pas la protection, elle retombe sur le défaut.
+  const kNum = num(kBrut);
+  const kMin = kNum != null && kNum >= 1 ? Math.round(kNum) : K_DEFAUT;
+  // B-02 — seul un `true` explicite (décision du DPO) fait lire le frein judiciaire.
+  const transmettreJustice = justiceBrut === true;
+  const axes = axesTransmis(transmettreJustice);
+
+  const colsEntree = axes.map((a) => `d.${COL_AXE(a)} AS entree_${COL_AXE(a)}`).join(', ');
   const cohorte = await soft('cohorte', `
     SELECT e.id, e.gender, e.civility, e.birth_date, e.brsa, e.orienteur_type, e.disability_status,
            e.insertion_status, e.insertion_start_date, e.insertion_end_date,
@@ -298,8 +356,8 @@ async function chargerDonnees({ debut, fin, db = pool }) {
     if (!s.bilan) s.bilan = bilanHorsPeriodeParCle.get(`${s.employee_id}#${s.parcours_num}`) || null;
   }
 
-  const colsLm = AXES.map((a) => `im.${COL_AXE(a)}`).join(', ');
-  const colsSortie = AXES.map((a) => `lm.${COL_AXE(a)} AS sortie_${COL_AXE(a)}`).join(', ');
+  const colsLm = axes.map((a) => `im.${COL_AXE(a)}`).join(', ');
+  const colsSortie = axes.map((a) => `lm.${COL_AXE(a)} AS sortie_${COL_AXE(a)}`).join(', ');
   const derniereEval = idsSortants.length ? await soft('derniere_evaluation', `
     SELECT e.id, ${colsSortie}
       FROM employees e
@@ -338,18 +396,10 @@ async function chargerDonnees({ debut, fin, db = pool }) {
   let convention = { etp_conventionnes: null, source: 'non_parametre' };
   try { convention = await lireConvention(db, annee); } catch (_) { /* reste non paramétrée */ }
 
-  const [seuilBrut, sansBilanBrut] = await Promise.all([
-    readInsertionSetting('insertion.cvg_frein_seuil'),
-    readInsertionSetting('insertion.cvg_sans_bilan_est_sans_nouvelles'),
-  ]);
-  const seuilNum = num(seuilBrut);
-  const seuil = seuilNum != null && seuilNum >= 1 && seuilNum <= 5 ? Math.round(seuilNum) : 3;
-  const sansBilanSansNouvelles = sansBilanBrut == null ? true : sansBilanBrut === true;
-
   // ── Profils ───────────────────────────────────────────────────────────────
   const profils = new Map();
   for (const row of cohorte || []) {
-    profils.set(Number(row.id), profilPersonne(row, criteres.get(Number(row.id)) || new Set(), fin));
+    profils.set(Number(row.id), profilPersonne(row, criteres.get(Number(row.id)) || new Set(), fin, axes));
   }
 
   const evalParId = new Map((derniereEval || []).map((r) => [Number(r.id), r]));
@@ -372,7 +422,7 @@ async function chargerDonnees({ debut, fin, db = pool }) {
     }
     const ev = evalParId.get(s.employee_id) || {};
     const sortieFreins = {};
-    for (const axe of AXES) sortieFreins[axe] = num(ev[`sortie_${COL_AXE(axe)}`]);
+    for (const axe of axes) sortieFreins[axe] = num(ev[`sortie_${COL_AXE(axe)}`]);
 
     const debutParcours = (p && p.debut) || debutContratParId.get(s.employee_id) || null;
     const finParcours = p && p.fin;
@@ -393,7 +443,13 @@ async function chargerDonnees({ debut, fin, db = pool }) {
 
   return {
     debut, fin, annee, sources, seuil, sansBilanSansNouvelles,
+    kMin, kSource: kMin === K_DEFAUT ? 'defaut' : 'reglage', transmettreJustice, axes,
     cohorteLisible: cohorte != null,
+    // CORRECTIF M-01 — deux sources secondaires des tableaux des sortis. Une
+    // source illisible rend `null` (voir `faireSoft`) ; sans drapeau, les
+    // comptages la lisaient comme « personne » et imprimaient 0 %.
+    situationsLisibles: situations != null,
+    evaluationsLisibles: derniereEval != null,
     profils,
     enContrat: enContratRows == null ? null : enContratRows.length,
     convention,
@@ -450,8 +506,8 @@ function composerPartie1(d) {
   habitat_entree.non_renseigne = compte((p) => p.habitat == null);
 
   const difficultes_entree = {};
-  for (const axe of AXES) difficultes_entree[axe] = c((p) => p.difficultes[axe] != null && p.difficultes[axe] >= d.seuil);
-  difficultes_entree.non_evalue = compte((p) => AXES.every((a) => p.difficultes[a] == null));
+  for (const axe of d.axes) difficultes_entree[axe] = c((p) => p.difficultes[axe] != null && p.difficultes[axe] >= d.seuil);
+  difficultes_entree.non_evalue = compte((p) => d.axes.every((a) => p.difficultes[a] == null));
 
   const orienteurs = {};
   for (const o of R.ORIENTEURS_CVG) orienteurs[o] = c((p) => p.orienteur === o);
@@ -470,6 +526,106 @@ function composerPartie1(d) {
     difficultes_entree,
     orienteurs,
   };
+}
+
+/**
+ * B-01 — Partie 1 d'un PETIT effectif (moins de 20 accueillis, ou moins que
+ * `k` si le DPO l'a relevé au-delà) : sur 5 accueillis, « Femmes : 1 » désigne
+ * la seule femme du chantier, et avec elle tout ce que les autres lignes à
+ * 100 % disent de la cohorte. La protection est celle de la synthèse de
+ * dialogue de gestion, RÉUTILISÉE et non recopiée : `appliquerKAnonymat`
+ * reçoit une projection de la Partie 1 (des comptes, sans les pourcentages)
+ * et les tables de règles propres à ce formulaire — les cinq ventilations qui
+ * somment à l'effectif accueilli (sexe, âge, formation, habitat, orienteur)
+ * reçoivent la suppression complémentaire ; les marginales (minima sociaux,
+ * RTH, parcours de rue, difficultés) ne somment à rien et sont traitées case
+ * par case. Au-delà de 20 accueillis, les marginales sont publiées brutes :
+ * elles ne croisent rien et ne désignent personne.
+ *
+ * @returns {number} nombre de valeurs retenues
+ */
+function protegerPartie1(p1, k) {
+  const base = p1 && p1.base;
+  if (!(k > 1) || base == null || base >= Math.max(BASE_MARGINALES_BRUTES, k)) return 0;
+  const pub = p1.publics;
+  const nr = pub.non_renseigne || {};
+  const nb = (cel) => (cel && typeof cel === 'object' ? cel.nb : cel);
+  const cles = (bloc, liste) => Object.fromEntries(liste.filter((c) => bloc[c] !== undefined).map((c) => [c, nb(bloc[c])]));
+
+  const niveaux = R.NIVEAUX_FORMATION_CVG.filter((n) => pub[n] !== undefined);
+  const blocs = {
+    base,
+    sexe: { ...cles(pub, ['hommes', 'femmes']), non_renseigne: nr.sexe },
+    age: { ...cles(pub, ['moins_26', 'de_26_a_49', 'plus_50']), non_renseigne: nr.age },
+    formation: { ...cles(pub, niveaux), non_renseigne: nr.formation },
+    marginales: {
+      ...cles(pub, ['sans_emploi_2ans', 'rsa_socle', 'ass', 'rth', 'aah', 'refugies']),
+      parcours_rue: nb(p1.habitat_entree.parcours_rue),
+    },
+    habitat: { ...cles(p1.habitat_entree, R.HABITAT_TYPES), non_renseigne: p1.habitat_entree.non_renseigne },
+    difficultes: { ...cles(p1.difficultes_entree, Object.keys(p1.difficultes_entree)) },
+    orienteurs: { ...cles(p1.orienteurs, R.ORIENTEURS_CVG), non_renseigne: p1.orienteurs.non_renseigne },
+  };
+  const avant = JSON.parse(JSON.stringify(blocs));
+  const repartitions = ['sexe', 'age', 'formation', 'habitat', 'orienteurs']
+    .map((b) => ({ chemin: `blocs.${b}`, total: 'blocs.base' }));
+  appliquerKAnonymat({ blocs }, k, {
+    effectifsPublies: new Map([['blocs.base', "effectif accueilli : tête de chapitre de la Partie 1, base de tous ses pourcentages."]]),
+    mesures: new Set(),
+    dependancesFratrie: {},
+    taux: [],
+    distributions: repartitions,
+    libelles: {},
+  });
+
+  let n = 0;
+  const retenu = (bloc, cle) => avant[bloc][cle] != null && blocs[bloc][cle] == null;
+  const secret = (obj, cle) => { obj[cle] = celluleSecrete(); n += 1; };
+  const reporter = (bloc, cible, ventilation) => {
+    for (const cle of Object.keys(blocs[bloc])) {
+      if (!retenu(bloc, cle)) continue;
+      if (cle === 'non_renseigne') { ventilation(); n += 1; continue; }
+      if (bloc === 'marginales' && cle === 'parcours_rue') secret(p1.habitat_entree, 'parcours_rue');
+      else secret(cible, cle);
+    }
+  };
+  reporter('sexe', pub, () => { nr.sexe = null; });
+  reporter('age', pub, () => { nr.age = null; });
+  reporter('formation', pub, () => { nr.formation = null; });
+  reporter('marginales', pub, () => {});
+  reporter('habitat', p1.habitat_entree, () => { p1.habitat_entree.non_renseigne = null; });
+  reporter('difficultes', p1.difficultes_entree, () => {});
+  reporter('orienteurs', p1.orienteurs, () => { p1.orienteurs.non_renseigne = null; });
+  // Un total égale l'effectif moins le « non renseigné » : quand celui-ci est
+  // retenu, le publier le rendrait par soustraction.
+  if (retenu('formation', 'non_renseigne') && pub.total_formation) secret(pub, 'total_formation');
+  if (retenu('habitat', 'non_renseigne') && p1.habitat_entree.total) secret(p1.habitat_entree, 'total');
+  if (retenu('orienteurs', 'non_renseigne') && p1.orienteurs.total) secret(p1.orienteurs, 'total');
+  if (n > 0) p1.confidentialite = { marginales_protegees: true, k, base_marginales_brutes: BASE_MARGINALES_BRUTES, valeurs_retenues: n };
+  return n;
+}
+
+/** Vrai si une case PUBLIÉE du document compte entre 1 et 4 personnes. */
+function contientEffectifsFaibles(contenu) {
+  let trouve = false;
+  const faible = (v) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v < SEUIL_MENTION;
+  const parcourir = (x) => {
+    if (trouve || x == null) return;
+    if (Array.isArray(x)) { x.forEach((y) => parcourir(y)); return; }
+    if (typeof x === 'object') {
+      for (const [k, v] of Object.entries(x)) {
+        // Ni les pourcentages, ni les mesures, ni les méta-données de
+        // confidentialité ne comptent des personnes.
+        if (['pct', 'duree_moyenne_mois', 'etp_conventionnes', 'confidentialite'].includes(k)) continue;
+        parcourir(v);
+      }
+      return;
+    }
+    if (faible(x)) trouve = true;
+  };
+  parcourir(contenu.partie1);
+  parcourir(contenu.sorties);
+  return trouve;
 }
 
 function composerPartie2(d) {
@@ -504,78 +660,120 @@ function composerPartie2(d) {
   };
 }
 
+/**
+ * B-01 — un tableau des sortis de 1 à k−1 personnes n'est plus un agrégat :
+ * c'est la fiche d'une personne que tout l'atelier sait nommer (sa catégorie
+ * de sortie la désigne). Ses lignes SENSIBLES sont retenues, zéros compris —
+ * sur trois personnes, « 0 % en difficulté de santé » est un attribut des
+ * trois autant que « 100 % » (attaque d'homogénéité) :
+ *   · freins santé et justice (entrée et résolution) ;
+ *   · tout le logement entrée / sortie — rue et hébergement précaire en
+ *     premier, mais retenir ces deux lignes seules les laisserait se
+ *     reconstituer par soustraction des trois autres et du « non renseigné » ;
+ *   · toute la santé (RQTH, AAH, pension, médecin traitant, couverture) ;
+ *   · « dont sortie en parcours de soin ».
+ * Restent publiés : le total, les catégories de sortie et les autres freins —
+ * ce que le réseau lit en premier.
+ *
+ * POURQUOI PAS `appliquerKAnonymat` ICI : cette passe garde les ZÉROS
+ * (« personne dans cette catégorie ne désigne personne »), ce qui est juste sur
+ * une base large et faux sur un tableau plus petit que le seuil, où le zéro
+ * est le complément exact d'une personne nommable. La règle est donc « tableau
+ * sous le seuil → lignes sensibles retenues », et non « case sous le seuil ».
+ *
+ * @returns {number} nombre de cellules retenues (0 si le tableau est diffusé)
+ */
+function protegerJumeau(j, k) {
+  if (!(k > 1) || !(j.total >= 1) || j.total >= k) return 0;
+  let n = 0;
+  const retenir = (obj, cle) => { if (obj && obj[cle] !== undefined) { obj[cle] = celluleSecrete(); n += 1; } };
+  for (const axe of AXES_SENSIBLES) {
+    if (j.freins[axe]) { retenir(j.freins[axe], 'entree'); retenir(j.freins[axe], 'resolution'); }
+  }
+  for (const h of Object.keys(j.logement)) { retenir(j.logement[h], 'entree'); retenir(j.logement[h], 'sortie'); }
+  for (const l of Object.keys(j.sante)) { retenir(j.sante[l], 'entree'); retenir(j.sante[l], 'sortie'); }
+  retenir(j.categories, 'parcours_de_soin');
+  j.confidentialite = { lignes_retenues: true, k, cellules_retenues: n };
+  return n;
+}
+
 /** Un tableau jumeau (emploi ou hors emploi) à partir de SES sortants. */
 function composerSousPopulation(d, sortants, categories, totalSorties, nonCategorises) {
   const n = sortants.length;
   const base = n;
   const cptSortants = (pred) => sortants.filter(pred).length;
+  // CORRECTIF M-01 — une source illisible rend la cellule VIDE, jamais 0 :
+  // la situation de sortie porte logement / santé à la sortie, post-sortie et
+  // parcours de soin ; la dernière évaluation porte la résolution des freins.
+  const siSituations = (x) => (d.situationsLisibles ? x : null);
+  const siEvaluations = (x) => (d.evaluationsLisibles ? x : null);
 
   const cats = {};
   for (const k of categories) cats[k] = cellule(cptSortants((s) => s.categorie === k), totalSorties);
   if (categories.includes('autre_positive')) {
-    cats.parcours_de_soin = cellule(cptSortants((s) => s.situation && s.situation.parcours_de_soin === true), totalSorties);
+    // CORRECTIF m-04 — « DONT » parcours de soin : un sous-ensemble de la
+    // sortie « autre reconnue positive », jamais au-delà.
+    cats.parcours_de_soin = cellule(siSituations(cptSortants((s) => s.categorie === 'autre_positive'
+      && s.situation && s.situation.parcours_de_soin === true)), totalSorties);
   }
 
   const freins = {};
-  for (const axe of AXES) {
+  for (const axe of d.axes) {
     const entree = cptSortants((s) => s.profil && s.profil.difficultes[axe] != null && s.profil.difficultes[axe] >= d.seuil);
     const resolution = cptSortants((s) => {
       const e = s.profil ? s.profil.difficultes[axe] : null;
       const f = s.sortieFreins[axe];
       return e != null && f != null && f < e;
     });
-    freins[axe] = { entree: cellule(entree, base), resolution: cellule(resolution, base) };
+    freins[axe] = { entree: cellule(entree, base), resolution: cellule(siEvaluations(resolution), base) };
   }
 
   const logement = {};
   for (const h of R.HABITAT_TYPES) {
     logement[h] = {
       entree: cellule(cptSortants((s) => s.profil && s.profil.habitat === h), base),
-      sortie: cellule(cptSortants((s) => s.situation && s.situation.habitat_type_sortie === h), base),
+      sortie: cellule(siSituations(cptSortants((s) => s.situation && s.situation.habitat_type_sortie === h)), base),
     };
   }
 
   const bool = (s, champ) => !!(s.situation && s.situation[champ] === true);
+  const sortie = (champ) => cellule(siSituations(cptSortants((s) => bool(s, champ))), base);
   const sante = {
-    rqth: {
-      entree: cellule(cptSortants((s) => s.profil && s.profil.rth), base),
-      sortie: cellule(cptSortants((s) => bool(s, 'rqth_sortie')), base),
-    },
-    aah: {
-      entree: cellule(cptSortants((s) => s.profil && s.profil.aah), base),
-      sortie: cellule(cptSortants((s) => bool(s, 'aah_sortie')), base),
-    },
+    rqth: { entree: cellule(cptSortants((s) => s.profil && s.profil.rth), base), sortie: sortie('rqth_sortie') },
+    aah: { entree: cellule(cptSortants((s) => s.profil && s.profil.aah), base), sortie: sortie('aah_sortie') },
     pension_invalidite: {
       entree: cellule(cptSortants((s) => s.profil && s.profil.pension_invalidite), base),
-      sortie: cellule(cptSortants((s) => bool(s, 'pension_invalidite_sortie')), base),
+      sortie: sortie('pension_invalidite_sortie'),
     },
     medecin_traitant: {
       entree: cellule(cptSortants((s) => s.profil && s.profil.medecin_traitant), base),
-      sortie: cellule(cptSortants((s) => bool(s, 'medecin_traitant_sortie')), base),
+      sortie: sortie('medecin_traitant_sortie'),
     },
     couverture_sante_amelioree: {
       // À l'entrée : personnes DÉJÀ couvertes (complémentaire santé déclarée) —
       // repère pour lire l'amélioration saisie à la sortie.
       entree: cellule(cptSortants((s) => s.profil && s.profil.couverture), base),
-      sortie: cellule(cptSortants((s) => bool(s, 'couverture_sante_amelioree')), base),
+      sortie: sortie('couverture_sante_amelioree'),
     },
   };
 
-  return {
+  const j = {
     total: n,
     categories: cats,
     non_categorises: nonCategorises,
     freins,
     logement,
     sante,
-    post_sortie: cellule(cptSortants((s) => bool(s, 'accompagnement_post_sortie')), base),
+    post_sortie: sortie('accompagnement_post_sortie'),
     non_renseigne: {
       habitat_entree: cptSortants((s) => !s.profil || s.profil.habitat == null),
-      habitat_sortie: cptSortants((s) => !s.situation || !s.situation.habitat_type_sortie),
-      freins_non_evalues: cptSortants((s) => !s.profil || AXES.every((a) => s.profil.difficultes[a] == null)),
-      situation_sortie: cptSortants((s) => !s.situation),
+      habitat_sortie: siSituations(cptSortants((s) => !s.situation || !s.situation.habitat_type_sortie)),
+      freins_non_evalues: cptSortants((s) => !s.profil || d.axes.every((a) => s.profil.difficultes[a] == null)),
+      situation_sortie: siSituations(cptSortants((s) => !s.situation)),
     },
   };
+  protegerJumeau(j, d.kMin);
+  return j;
 }
 
 function composerSorties(d) {
@@ -639,9 +837,12 @@ function composerMethode(d, contenu) {
     "ETP conventionnés : annexe financière saisie dans le module Effectifs ETP (repli : cible « insertion »). Non paramétré → cellule vide, jamais une valeur estimée.",
     "Sexe : la donnée déclarée de la fiche fait foi, la civilité n'est qu'un repli ; une civilité non reconnue est comptée « non renseigné ». Âge : calculé à la date de fin de période (moins de 26 ans, 26 à 49 ans, 50 ans et plus).",
     "Niveau de formation : celui du diagnostic d'accueil. La ligne « 6 et plus (niveau non détaillé) » regroupe les fiches saisies avant la distinction des niveaux 6, 7 et 8 ; elle n'est imprimée que si elle compte quelqu'un.",
-    "N'ayant pas travaillé depuis 2 ans et plus : critère d'éligibilité « chômage de très longue durée » OU réponse « plus de 24 mois » au questionnaire d'entrée. RSA socle : statut BRSA de la fiche, critère d'éligibilité ou ressource déclarée. ASS, AAH, réfugiés : critère d'éligibilité ou ressource déclarée. RTH : critère RQTH, RQTH du diagnostic ou reconnaissance portée par la fiche ; l'AAH est comptée qu'il y ait ou non une RQTH saisie.",
+    "N'ayant pas travaillé depuis 2 ans et plus : critère d'éligibilité « chômage de très longue durée » OU réponse « plus de 24 mois » au questionnaire d'entrée. RSA socle : statut BRSA de la fiche, critère d'éligibilité ou ressource déclarée. ASS, AAH, réfugiés : critère d'éligibilité ou ressource déclarée. RTH : critère RQTH, RQTH du diagnostic ou reconnaissance portée par la fiche de paie — pour celle-ci, seul un libellé qui DIT une reconnaissance compte (« RQTH », « Travailleur handicapé », « Reconnu »…) ; « Non concerné », « En cours », « Pas de RQTH » ou tout texte inconnu ne sont jamais comptés. L'AAH est comptée qu'il y ait ou non une RQTH saisie.",
     "Type d'habitat à l'entrée : celui saisi au diagnostic dans la nomenclature Convergence ; à défaut, déduit du statut de logement quand la correspondance est univoque (locataire ou propriétaire → logement autonome ; sans abri → rue). « Hébergé » ne se range dans aucune case sans saisie : il est compté « non renseigné ».",
     `Difficulté à l'entrée : niveau du frein au diagnostic d'accueil supérieur ou égal à ${d.seuil} sur l'échelle 1 (pas de difficulté) à 5 (bloquant). Le frein « numérique » de l'outil n'a pas d'équivalent Convergence : il n'est pas transmis.`,
+    d.transmettreJustice
+      ? "Frein « Justice » : donnée relevant de l'article 10 du RGPD (infractions et condamnations), transmise en agrégat sur décision de la structure (réglage insertion.cvg_transmettre_justice, réservé à une décision du DPO)."
+      : "Frein « Justice » : non transmis — donnée relevant de l'article 10 du RGPD (infractions et condamnations), que la structure ne communique pas à un tiers privé sans décision du DPO. La ligne figure au formulaire avec la mention « non transmis », à l'entrée comme dans les tableaux des sortis ; cette mention est la même quelle que soit la situation des personnes.",
     "Orienteur : les anciennes saisies « Département — CMS » et « CCAS » sont rangées respectivement en « Services sociaux du Département » et « Autre acteur local d'accompagnement » ; l'ancienne valeur « Autre » ne dit pas lequel des acteurs : elle est comptée « non renseigné » jusqu'à ce qu'elle soit précisée.",
     "Moyens humains : registre tenu dans l'outil (ressources actives sur la période) ; un registre vide rend des totaux vides, jamais zéro.",
     "Salariés sortis : TOUTES les fins de parcours de la période, qu'un bilan de sortie ait été rédigé ou non — même dénominateur que la synthèse de dialogue de gestion. Durée moyenne : de l'entrée à la fin du parcours (à défaut de date d'entrée, le premier contrat), en mois moyens de 30,4 jours.",
@@ -653,8 +854,18 @@ function composerMethode(d, contenu) {
     `Évolution des freins d'un tableau : « difficultés à l'entrée » = niveau au diagnostic ≥ ${d.seuil} ; « résolution totale ou partielle » = niveau à la DERNIÈRE évaluation (dernier entretien réalisé portant une cotation) strictement inférieur au niveau d'entrée, quel que soit ce niveau d'entrée.`,
     "Logement et santé à la sortie, accompagnement post-sortie : saisis dans la situation de sortie Convergence ; non saisis → non comptés, et le nombre de situations non saisies est donné à part. Couverture santé à l'entrée : complémentaire santé déclarée au diagnostic (tout statut autre que « aucune »).",
     "Les pourcentages sont calculés sur l'effectif accueilli (Partie 1), sur le total des sorties (catégories de sortie) ou sur le total du tableau (freins, logement, santé, post-sortie) ; une base nulle ne donne jamais « 0 % ».",
-    "Aucun seuil de confidentialité n'est appliqué à ce document : le format du réseau porte des effectifs de 1 et 2 (arbitrage à confirmer par le DPO). Il est réservé aux rôles ADMIN et RH et chaque production est journalisée.",
+    "« Dont sortie en parcours de soin » : sous-ensemble des sorties « autre reconnue positive », jamais au-delà.",
+    d.kMin > 1
+      ? `Seuil de confidentialité k = ${d.kMin} (${d.kSource === 'defaut' ? 'défaut de l\'outil' : 'réglage de la structure'}, insertion.cvg_k_min — arbitrage du DPO). Un tableau des sortis comptant moins de ${d.kMin} personnes ne diffuse pas ses lignes santé et justice, son logement entrée / sortie ni « dont parcours de soin » : sa catégorie de sortie désigne les personnes, et ces lignes deviendraient leur fiche. Sous ${Math.max(BASE_MARGINALES_BRUTES, d.kMin)} accueillis, les cases de la Partie 1 comptant de 1 à ${d.kMin - 1} personnes sont retenues, ainsi qu'une case complémentaire par ventilation (même règle que la synthèse de dialogue de gestion). Une case retenue s'imprime « s » (secret), jamais 0. À k = 5, avec 3 à 4 sortants par semestre, les lignes santé / justice des tableaux des sortis sont vides — c'est le prix de la protection, arbitrage DPO.`
+      : "Aucun seuil de confidentialité n'est appliqué (k = 1, décision de la structure — insertion.cvg_k_min) : le document reproduit le format brut du réseau, effectifs de 1 et 2 compris.",
+    "Réservé aux rôles ADMIN et RH ; chaque production est journalisée. Aucun nom de personne accompagnée n'y figure — mais des effectifs très faibles peuvent désigner une personne : diffusion restreinte au dialogue de gestion avec Convergence France.",
   ];
+  if (!d.situationsLisibles) {
+    m.push("Situations de sortie Convergence illisibles lors de la composition : logement et santé à la sortie, accompagnement post-sortie et parcours de soin sont vides, jamais à zéro.");
+  }
+  if (!d.evaluationsLisibles) {
+    m.push("Évaluations de sortie illisibles lors de la composition : la résolution des freins est vide, jamais à zéro.");
+  }
   if (d.sources.length) {
     m.push(`Sources illisibles lors de la composition (${d.sources.join(', ')}) : les cellules concernées sont vides, jamais à zéro.`);
   }
@@ -690,10 +901,38 @@ async function composerCvg({ debut, fin, db = pool, user = null } = {}) {
       genere_par_role: user && user.role ? String(user.role) : null,
       version: APP_VERSION,
       mention: MENTION,
+      // CORRECTIF m-08 — la méthode est ENREGISTRÉE avec le document : la
+      // comparaison de deux instantanés vérifie qu'ils ont été composés avec
+      // les mêmes réglages avant de rédiger une « hausse ».
+      parametres: {
+        seuil_frein: d.seuil,
+        sans_bilan_sans_nouvelles: d.sansBilanSansNouvelles,
+        k_min: d.kMin,
+        transmettre_justice: d.transmettreJustice,
+      },
     },
     partie1: composerPartie1(d),
     partie2: composerPartie2(d),
     sorties: composerSorties(d),
+  };
+  // ── B-01 : protection APRÈS composition, AVANT la méthode et la mention ──
+  const retenuesP1 = protegerPartie1(contenu.partie1, d.kMin);
+  const sousSeuil = [];
+  if (retenuesP1 > 0) sousSeuil.push({ bloc: 'partie1', libelle: 'Partie 1 — le public', nb: retenuesP1 });
+  for (const [cle, libelle] of [['emploi', 'Sortis en emploi ou formation'], ['hors_emploi', 'Sortis hors emploi']]) {
+    const j = contenu.sorties && contenu.sorties[cle];
+    if (j && j.confidentialite) sousSeuil.push({ bloc: cle, libelle, nb: j.confidentialite.cellules_retenues });
+  }
+  const diffusionRestreinte = contientEffectifsFaibles(contenu);
+  contenu.en_tete.diffusion_restreinte = diffusionRestreinte;
+  contenu.en_tete.mention_diffusion = diffusionRestreinte ? MENTION_DIFFUSION : null;
+  contenu.confidentialite = {
+    k_min: d.kMin,
+    k_source: d.kSource,
+    base_marginales_brutes: BASE_MARGINALES_BRUTES,
+    transmettre_justice: d.transmettreJustice,
+    sous_seuil: sousSeuil,
+    sous_seuil_total: sousSeuil.reduce((a, b) => a + b.nb, 0),
   };
   const comp = composerCompletudeInterne(d);
   contenu.completude = { nb_incomplets: comp.nb_incomplets, manques_par_type: comp.manques_par_type };
@@ -728,11 +967,21 @@ async function composerCompletude({ debut, fin, db = pool } = {}) {
     .sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
 }
 
-/** Le document est VIDE quand la période n'a ni accueilli ni sorti. */
+/**
+ * Le document est VIDE quand la période n'a ni accueilli ni sorti.
+ *
+ * CORRECTIF m-07 — `null` (INCONNU) quand ni l'un ni l'autre n'a pu être lu
+ * et qu'aucun des deux n'est positif : « aucun salarié accueilli ni sorti »
+ * serait alors une affirmation fausse ; la route répond 503 en le disant.
+ * @returns {true|false|null}
+ */
 function cvgEstVide(contenu) {
-  const acc = contenu && contenu.partie1 ? Number(contenu.partie1.effectifs?.accueillis) || 0 : 0;
-  const so = contenu && contenu.sorties ? Number(contenu.sorties.total) || 0 : 0;
-  return acc === 0 && so === 0;
+  const lire = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+  const acc = lire(contenu && contenu.partie1 && contenu.partie1.effectifs ? contenu.partie1.effectifs.accueillis : null);
+  const so = lire(contenu && contenu.sorties ? contenu.sorties.total : null);
+  if ((acc || 0) > 0 || (so || 0) > 0) return false;
+  if (acc === 0 && so === 0) return true;
+  return null;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -745,7 +994,27 @@ const LIBELLES_FREINS = Object.fromEntries(R.DIFFICULTES.map((x) => [x.frein, x.
  * Indicateurs comparés. `polarite` : +1 une hausse est favorable, −1
  * défavorable, 0 neutre (structure du public : ni bien ni mal).
  */
-function indicateurs(c) {
+/**
+ * Axes « résolution » comparés : hors santé et justice. Ces deux lignes sont
+ * retenues dans tout tableau des sortis sous le seuil de confidentialité (B-01)
+ * et la justice n'est transmise que sur décision du DPO (B-02) : les inclure
+ * rendrait l'indicateur non comparable presque chaque semestre, ou le ferait
+ * varier au gré d'un réglage plutôt que des parcours.
+ */
+const AXES_RESOLUTION_COMPARES = AXES.filter((a) => !AXES_SENSIBLES.includes(a));
+
+/** Axes présents dans l'un au moins des deux documents (union, ordre du formulaire). */
+function axesDe(...docs) {
+  const presents = new Set();
+  for (const c of docs) {
+    const dif = (c && c.partie1 && c.partie1.difficultes_entree) || null;
+    if (!dif) continue;
+    for (const a of AXES) if (Object.prototype.hasOwnProperty.call(dif, a)) presents.add(a);
+  }
+  return presents.size ? AXES.filter((a) => presents.has(a)) : AXES;
+}
+
+function indicateurs(c, axes = AXES) {
   const p1 = (c && c.partie1) || {};
   const pub = p1.publics || {};
   const hab = p1.habitat_entree || {};
@@ -758,7 +1027,7 @@ function indicateurs(c) {
     if (!so.emploi || !so.hors_emploi) return null;
     const v = [];
     for (const j of [so.emploi, so.hors_emploi]) {
-      for (const axe of AXES) v.push(nbDe(j.freins && j.freins[axe] && j.freins[axe].resolution));
+      for (const axe of AXES_RESOLUTION_COMPARES) v.push(nbDe(j.freins && j.freins[axe] && j.freins[axe].resolution));
     }
     return somme(...v);
   };
@@ -774,7 +1043,7 @@ function indicateurs(c) {
     { bloc: 'Public', indicateur: 'refugies', libelle: 'Part des réfugiés', nb: nbDe(pub.refugies), base: base1, polarite: 0 },
     { bloc: 'Habitat', indicateur: 'precaire_ou_rue', libelle: 'Part en hébergement précaire ou à la rue à l’entrée', nb: somme(nbDe(hab.hebergement_precaire), nbDe(hab.rue)), base: base1, polarite: 0 },
     { bloc: 'Habitat', indicateur: 'parcours_rue', libelle: 'Part ayant connu un parcours de rue', nb: nbDe(hab.parcours_rue), base: base1, polarite: 0 },
-    ...AXES.map((axe) => ({
+    ...axes.map((axe) => ({
       bloc: 'Difficultés à l’entrée', indicateur: `difficulte_${axe}`, libelle: `Difficulté à l’entrée — ${LIBELLES_FREINS[axe]}`,
       nb: nbDe(dif[axe]), base: base1, polarite: 0,
     })),
@@ -783,7 +1052,7 @@ function indicateurs(c) {
     { bloc: 'Sorties', indicateur: 'hors_emploi', libelle: 'Part des sortants hors emploi', nb: so.hors_emploi ? num(so.hors_emploi.total) : null, base: tot, polarite: 0 },
     { bloc: 'Sorties', indicateur: 'non_documentees', libelle: 'Part des sorties sans bilan de sortie', nb: num(so.non_documentees), base: tot, polarite: -1 },
     { bloc: 'Sorties', indicateur: 'post_sortie', libelle: 'Part des sortants accompagnés après la sortie', nb: somme(nbDe(so.emploi && so.emploi.post_sortie), nbDe(so.hors_emploi && so.hors_emploi.post_sortie)), base: tot, polarite: 1 },
-    { bloc: 'Sorties', indicateur: 'freins_resolus', libelle: 'Freins résolus totalement ou partiellement à la sortie', nb: resol(), base: null, polarite: 1 },
+    { bloc: 'Sorties', indicateur: 'freins_resolus', libelle: 'Freins résolus totalement ou partiellement à la sortie (hors santé et justice)', nb: resol(), base: null, polarite: 1 },
     { bloc: 'Sorties', indicateur: 'duree_moyenne_mois', libelle: 'Durée moyenne du parcours (mois)', nb: num(so.duree_moyenne_mois), base: null, polarite: 0, duree: true },
   ];
   return liste;
@@ -817,13 +1086,47 @@ const libellePeriode = (p) => `du ${frDate(p.debut)} au ${frDate(p.fin)}`;
  * Compare deux contenus composés : `a` est la période de référence, `b` la
  * période comparée. Les phrases décrivent ce qui CHANGE, jamais pourquoi.
  */
+/**
+ * CORRECTIF m-08 — réglages de méthode qui changent les comptes. Deux
+ * documents composés avec des réglages différents ne se comparent pas sur les
+ * indicateurs que ces réglages touchent : la « hausse » ne serait que l'effet
+ * du réglage.
+ */
+const PARAMETRES_METHODE = [
+  { cle: 'seuil_frein', libelle: "le seuil de difficulté à l'entrée", blocs: ['Difficultés à l’entrée'], indicateurs: [] },
+  { cle: 'sans_bilan_sans_nouvelles', libelle: 'le rangement des sortis sans bilan en « sans nouvelles »', blocs: [], indicateurs: ['acces_emploi_formation', 'hors_emploi'] },
+  { cle: 'transmettre_justice', libelle: 'la transmission du frein « Justice »', blocs: [], indicateurs: ['difficulte_judiciaire'] },
+  { cle: 'k_min', libelle: 'le seuil de confidentialité', blocs: [], indicateurs: [] },
+];
+
+function differencesDeMethode(a, b) {
+  const pa = a && a.en_tete && a.en_tete.parametres;
+  const pb = b && b.en_tete && b.en_tete.parametres;
+  if (!pa || !pb) return { connues: false, differences: [] };
+  return {
+    connues: true,
+    differences: PARAMETRES_METHODE.filter((p) => JSON.stringify(pa[p.cle]) !== JSON.stringify(pb[p.cle]))
+      .map((p) => ({ ...p, a: pa[p.cle], b: pb[p.cle] })),
+  };
+}
+
 function comparerCvg(a, b) {
-  const ia = indicateurs(a);
-  const ib = indicateurs(b);
+  const axes = axesDe(a, b);
+  const ia = indicateurs(a, axes);
+  const ib = indicateurs(b, axes);
+  const methode = differencesDeMethode(a, b);
+  const touche = (x) => methode.differences.some((p) => p.blocs.includes(x.bloc) || p.indicateurs.includes(x.indicateur));
   const deltas = ia.map((x, i) => {
     const y = ib[i];
     const aPct = x.base == null ? null : pctDe(x.nb, x.base);
     const bPct = y.base == null ? null : pctDe(y.nb, y.base);
+    if (touche(x)) {
+      return {
+        bloc: x.bloc, indicateur: x.indicateur, libelle: x.libelle,
+        a_nb: x.nb, a_pct: aPct, b_nb: y.nb, b_pct: bPct,
+        delta_nb: null, delta_pts: null, sens: 'neutre', non_comparable: true, motif: 'methode',
+      };
+    }
     const { sens, comparable } = sensDe(x, x.nb, aPct, y.nb, bPct);
     const deltaNb = comparable ? Math.round((y.nb - x.nb) * 10) / 10 : null;
     const deltaPts = comparable && aPct != null && bPct != null ? Math.round((bPct - aPct) * 10) / 10 : null;
@@ -854,6 +1157,14 @@ function comparerCvg(a, b) {
   const lecture = [
     `Comparaison de la période ${libellePeriode(pa)} (référence) avec la période ${libellePeriode(pb)}. Les écarts de ${SEUIL_STABLE_PTS} points ou moins sont lus comme stables ; les phrases décrivent les variations, elles n'en donnent pas la cause.`,
   ];
+  const lireParam = (v) => (v === true ? 'oui' : v === false ? 'non' : v == null ? 'non renseigné' : String(v));
+  for (const p of methode.differences) {
+    lecture.push(`La méthode a changé entre les deux périodes : ${p.libelle} valait « ${lireParam(p.a)} » puis « ${lireParam(p.b)} ».${
+      p.blocs.length || p.indicateurs.length ? ' Les indicateurs concernés ne sont pas comparés : leur écart serait l’effet du réglage, pas celui des parcours.' : ' Les cases retenues d’un côté seulement ne sont pas comparées.'}`);
+  }
+  if (!methode.connues) {
+    lecture.push("Les réglages de méthode ne sont pas enregistrés pour l'une des deux périodes (document antérieur à la version 2.60.0) : un changement de réglage entre les deux ne peut pas être vérifié.");
+  }
   const acc = trouver('accueillis');
   if (acc.non_comparable) lecture.push(`L'effectif accueilli ne peut pas être comparé : donnée non renseignée sur ${cote(acc)}.`);
   else {
@@ -903,7 +1214,10 @@ function comparerCvg(a, b) {
   const nc = deltas.filter((d) => d.non_comparable).length;
   if (nc > 0) lecture.push(`${nc} indicateur(s) ne peuvent pas être comparés (donnée non renseignée ou effectif nul d'un côté) : ils sont signalés dans le tableau, sans écart calculé.`);
 
-  return { a: { periode: pa }, b: { periode: pb }, deltas, lecture };
+  return {
+    a: { periode: pa }, b: { periode: pb }, deltas, lecture,
+    methode_identique: methode.connues ? methode.differences.length === 0 : null,
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -912,7 +1226,9 @@ function comparerCvg(a, b) {
 
 const LIBELLES_PUBLICS = {
   hommes: 'Hommes', femmes: 'Femmes', moins_26: 'Moins de 26 ans', de_26_a_49: '26 et moins de 50 ans',
-  plus_50: 'Plus de 50 ans', ...R.NIVEAUX_FORMATION_CVG_LABELS, total_formation: 'Total formation',
+  // CORRECTIF m-10 — la règle compte 50 ans révolus à la date de fin : le
+  // libellé le dit (« Plus de 50 ans » excluait la personne de 50 ans pile).
+  plus_50: '50 ans et plus', ...R.NIVEAUX_FORMATION_CVG_LABELS, total_formation: 'Total formation',
   sans_emploi_2ans: "Personnes n'ayant pas travaillé depuis 2 ans et plus", rsa_socle: 'Bénéficiaires du RSA socle',
   ass: "Bénéficiaires de l'ASS", rth: "Demandeurs d'emploi (RTH)", aah: "Dont bénéficiaires de l'AAH", refugies: 'Réfugiés',
 };
@@ -928,12 +1244,24 @@ const LIBELLES_SANTE = {
  */
 function cvgVersCsv(contenu, { generePar = null } = {}) {
   const lignes = [];
+  let secrets = 0;
   const push = (partie, indicateur, v, pctForce) => {
+    // B-01 — une case retenue s'écrit « s » (secret), jamais vide ni 0 :
+    // une cellule vide dit « donnée non disponible », ce qui serait faux.
+    if (v && typeof v === 'object' && v.secret === true) {
+      secrets += 1;
+      lignes.push([partie, indicateur, 's', 's']);
+      return;
+    }
     const nb = nbDe(v);
     const pct = pctForce !== undefined ? pctForce : (v && typeof v === 'object' ? v.pct : null);
     lignes.push([partie, indicateur, nb == null ? '' : String(nb).replace('.', ','), pct == null ? '' : String(pct).replace('.', ',')]);
   };
   const c = contenu || {};
+  // B-02 — la justice non transmise s'écrit comme une ligne du formulaire,
+  // avec une mention STRUCTURELLE (identique quelles que soient les données).
+  const justiceNonTransmise = c.en_tete && c.en_tete.parametres && c.en_tete.parametres.transmettre_justice === false;
+  const NON_TRANSMIS = "Justice — non transmis (donnée relevant de l'article 10 du RGPD)";
   const p1 = c.partie1 || {};
   const eff = p1.effectifs || {};
   push('Partie 1 — Effectifs', "Nombre d'ETP conventionnés à la date de fin", eff.etp_conventionnes, null);
@@ -949,8 +1277,9 @@ function cvgVersCsv(contenu, { generePar = null } = {}) {
     push("Partie 1 — Habitat à l'entrée", lib, v, typeof v === 'object' ? undefined : null);
   }
   for (const [k, v] of Object.entries(p1.difficultes_entree || {})) {
-    push("Partie 1 — Difficultés à l'entrée", LIBELLES_FREINS[k] || 'Non évalué', v, typeof v === 'object' ? undefined : null);
+    push("Partie 1 — Difficultés à l'entrée", LIBELLES_FREINS[k] || 'Non évalué', v, v && typeof v === 'object' ? undefined : null);
   }
+  if (justiceNonTransmise) lignes.push(["Partie 1 — Difficultés à l'entrée", NON_TRANSMIS, '', '']);
   for (const [k, v] of Object.entries(p1.orienteurs || {})) {
     const lib = R.ORIENTEUR_LABELS[k] || (k === 'total' ? 'Total orienteurs' : 'Non renseigné');
     push('Partie 1 — Orienteurs', lib, v, typeof v === 'object' ? undefined : null);
@@ -980,6 +1309,7 @@ function cvgVersCsv(contenu, { generePar = null } = {}) {
       push(titre, `Frein « ${LIBELLES_FREINS[k] || k} » — difficulté à l'entrée`, v.entree);
       push(titre, `Frein « ${LIBELLES_FREINS[k] || k} » — résolution totale ou partielle`, v.resolution);
     }
+    if (justiceNonTransmise) lignes.push([titre, `Frein « ${NON_TRANSMIS} »`, '', '']);
     for (const [k, v] of Object.entries(j.logement || {})) {
       push(titre, `Logement à l'entrée — ${R.HABITAT_LABELS[k] || k}`, v.entree);
       push(titre, `Logement à la sortie — ${R.HABITAT_LABELS[k] || k}`, v.sortie);
@@ -990,21 +1320,48 @@ function cvgVersCsv(contenu, { generePar = null } = {}) {
     }
     push(titre, 'Accompagnement post-sortie', j.post_sortie);
     for (const [k, v] of Object.entries(j.non_renseigne || {})) push(titre, `Non renseigné — ${k}`, v, null);
+    if (j.confidentialite) {
+      lignes.push([titre, `Tableau de moins de ${j.confidentialite.k} personnes : lignes santé, justice, logement et parcours de soin non diffusées (s)`, '', '']);
+    }
   }
   for (const m of c.methode || []) lignes.push(['Méthode', m, '', '']);
 
   const e = c.en_tete || {};
+  const conf = c.confidentialite || {};
   const meta = [
     `# Export;Outil de dialogue de gestion — programme CVG (Convergence France);Période;du ${frDate(e.periode_debut)} au ${frDate(e.periode_fin)}`,
+    ...(e.mention_diffusion ? [`# DIFFUSION RESTREINTE;${escCsv(e.mention_diffusion)}`] : []),
     `# Généré le;${new Date().toLocaleString('fr-FR')};Généré par;${escCsv(generePar || e.genere_par_nom || '')};Rôle;${escCsv(e.genere_par_role || '')}`,
     `# Périmètre;${escCsv("parcours d'insertion (hors permanents) ; Partie 2 : moyens humains de l'accompagnement")}`,
     `# Nombre de lignes;${lignes.length};Version de l'outil;${escCsv(e.version || APP_VERSION)}`,
     `# ${escCsv(e.mention || MENTION)}`,
     '# Une cellule vide signifie « donnée non disponible » — jamais zéro',
+    ...(secrets > 0 || conf.k_min > 1
+      ? [`# Une cellule « s » signifie « secret » : effectif inférieur au seuil de confidentialité (k = ${conf.k_min || K_DEFAUT}) — ni vide ni zéro`]
+      : []),
     '',
   ].join('\n');
   const corps = lignes.map((l) => l.map((x) => escCsv(x)).join(';')).join('\n');
   return '﻿' + meta + 'Partie;Indicateur;Nombre;%\n' + corps + '\n';
+}
+
+/**
+ * Réglages de confidentialité en vigueur — pour l'encadré de l'écran, AVANT la
+ * génération (le chargé de reporting doit savoir ce qui sortira).
+ */
+async function lireParametresCvg() {
+  const [kBrut, justiceBrut] = await Promise.all([
+    readInsertionSetting('insertion.cvg_k_min'),
+    readInsertionSetting('insertion.cvg_transmettre_justice'),
+  ]);
+  const kNum = num(kBrut);
+  const kMin = kNum != null && kNum >= 1 ? Math.round(kNum) : K_DEFAUT;
+  return {
+    k_min: kMin,
+    k_source: kMin === K_DEFAUT ? 'defaut' : 'reglage',
+    base_marginales_brutes: BASE_MARGINALES_BRUTES,
+    transmettre_justice: justiceBrut === true,
+  };
 }
 
 module.exports = {
@@ -1017,6 +1374,12 @@ module.exports = {
   profilPersonne,
   manquesDe,
   pctDe,
+  lireParametresCvg,
+  axesTransmis,
   AXES,
+  AXES_SENSIBLES,
+  K_DEFAUT,
+  BASE_MARGINALES_BRUTES,
   MENTION,
+  MENTION_DIFFUSION,
 };

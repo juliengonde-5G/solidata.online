@@ -63,7 +63,7 @@ Légende : **✓** disponible tel quel · **≈** disponible sous une forme vois
 - **Disponible à transcodage près** : âge (bornes), niveaux de formation (6-8 confondus), habitat (liste voisine), orienteur (6/12), catégories de sortie (emploi / formation / suite de parcours).
 - **Absent** : parcours de rue, pension d'invalidité, médecin traitant, situation logement et santé **à la sortie**, retraite / sortie neutre / autre positive / parcours de soin, accompagnement post-sortie explicite, **toute la Partie 2** (moyens humains).
 
-## 2. Contrat du lot « Suivi Convergence (CVG) » — 2.58.0
+## 2. Contrat du lot « Suivi Convergence (CVG) » — 2.60.0
 
 ### 2.1 Doctrine
 
@@ -113,3 +113,4 @@ Le formulaire est un classeur Excel de Convergence : SOLIDATA en produit les val
 2. Transcodage proposé `sans_suite → sans nouvelles` et « sortie non documentée » → sans nouvelles : à valider par la CIP (la catégorie reste saisissable).
 3. `numerique` non transmis (absent du référentiel Convergence).
 4. La Partie 2 nomme les permanents : entrée art. 30 « reporting Convergence » à poser (données RH, base légale : intérêt légitime / convention).
+5. *(Ajouté le 25/09/2026, correctifs de la revue de sécurité — rapport 33.)* **Frein judiciaire (art. 10 RGPD)** : transmettre ou non une donnée d'infraction à une association privée — non soumis à l'arbitrage dans la première version de ce contrat. En attendant la décision du DPO (base légale art. 46 LIL), il **n'est pas transmis** (`insertion.cvg_transmettre_justice` = `false`). Et, sur le point 1 : le document applique par défaut un seuil `insertion.cvg_k_min` = 5 (plancher de code 1), que seul le DPO peut abaisser.

@@ -39,7 +39,7 @@
  * AUTO_PURGE_24M, PURGE_EXPIRED, AUTO_PURGE_INSERTION, PURGE_INSERTION,
  * AUTO_PURGE_GPS_90D, PURGE_GPS, AUTO_PURGE_ARRETS_GPS, PURGE_ARRETS_GPS,
  * PURGE_MESSAGERIE, PURGE_REFRESH_TOKENS, AUTO_PURGE_PCM_REPONSES,
- * PURGE_PCM_REPONSES.
+ * PURGE_PCM_REPONSES, AUTO_PURGE_CVG_RESSOURCES, PURGE_CVG_RESSOURCES.
  */
 const pool = require('../config/database');
 
@@ -116,7 +116,8 @@ async function journaliserSynthese({ action, entiteAudit, userId = null, details
       // 'PURGE_REFRESH_TOKENS', 'PURGE_EXPIRED', 'PURGE_INSERTION',
       // 'AUTO_PURGE_PCM_REPONSES', 'PURGE_PCM_REPONSES',
       // 'AUTO_PURGE_BORDEREAUX_DECHETERIE', 'PURGE_BORDEREAUX_DECHETERIE',
-      // 'AUTO_PURGE_RAPPELS_RDV', 'PURGE_RAPPELS_RDV'.
+      // 'AUTO_PURGE_RAPPELS_RDV', 'PURGE_RAPPELS_RDV',
+      // 'AUTO_PURGE_CVG_RESSOURCES', 'PURGE_CVG_RESSOURCES'.
       [userId, action, entiteAudit, JSON.stringify(details)]
     );
     return true;
@@ -863,6 +864,69 @@ async function purgeDialoguesGestion({ trigger = 'auto', userId = null } = {}) {
   }
 }
 
+/**
+ * 12ᵉ purge (2.60.0, correctif M-03 de la revue de sécurité PR E) — REGISTRE
+ * DES MOYENS HUMAINS du reporting Convergence (`insertion_cvg_ressources`).
+ *
+ * Le registre NOMME des permanents (nom, fonction, quotité, employeur pour les
+ * mutualisés) et n'avait aucune durée : une ressource désactivée restait
+ * indéfiniment. Une ressource est purgée quand elle ne sert plus — inactive,
+ * ou dont la date de fin est passée — depuis plus que le délai
+ * (`rgpd.cvg_ressources_retention_jours`, défaut trois ans : de quoi recomposer
+ * et comparer les semestres récents ; les documents transmis, eux, vivent en
+ * instantané six ans — 11ᵉ purge). Le délai court depuis la date de fin, à
+ * défaut depuis la dernière modification (la désactivation).
+ */
+const CVG_RESSOURCES_RETENTION_DEFAUT_JOURS = 1095;
+
+async function purgeCvgRessources({ trigger = 'auto', userId = null } = {}) {
+  const manuel = trigger === 'manual';
+  const retentionJours = await readSetting('rgpd.cvg_ressources_retention_jours', CVG_RESSOURCES_RETENTION_DEFAUT_JOURS);
+  try {
+    const result = await pool.query(
+      `DELETE FROM insertion_cvg_ressources
+        WHERE (actif = false OR date_fin IS NOT NULL)
+          AND COALESCE(date_fin, updated_at::date, created_at::date) < CURRENT_DATE - ($1 || ' days')::interval`,
+      [String(retentionJours)]
+    );
+    const supprimes = result.rowCount || 0;
+    if (supprimes > 0) {
+      console.log(`[RGPD-PURGES] Registre des moyens humains (Convergence) : ${supprimes} ressource(s) supprimée(s) (> ${retentionJours} jours)`);
+    }
+    let journalise = false;
+    if (manuel || supprimes > 0) {
+      journalise = await journaliserSynthese({
+        action: manuel ? 'PURGE_CVG_RESSOURCES' : 'AUTO_PURGE_CVG_RESSOURCES',
+        entiteAudit: 'insertion_cvg_ressources',
+        userId: manuel ? userId : null,
+        details: {
+          trigger, rows_deleted: supprimes, retention_days: retentionJours,
+          supprimes: { insertion_cvg_ressources: supprimes },
+        },
+      });
+    }
+    return resume('cvg_ressources', { insertion_cvg_ressources: supprimes }, retentionJours, journalise,
+      { ok: true, ressources_supprimees: supprimes });
+  } catch (err) {
+    const absente = err && err.code === '42P01';
+    if (absente) {
+      console.warn('[RGPD-PURGES] Table insertion_cvg_ressources absente (base non migrée) — purge ignorée.');
+    } else {
+      console.error('[RGPD-PURGES] Erreur purgeCvgRessources :', err.message);
+    }
+    const motif = absente ? 'table insertion_cvg_ressources absente' : err.message;
+    let journalise = false;
+    if (manuel) {
+      journalise = await journaliserSynthese({
+        action: 'PURGE_CVG_RESSOURCES', entiteAudit: 'insertion_cvg_ressources', userId,
+        details: { trigger, rows_deleted: 0, retention_days: retentionJours, echec: motif },
+      });
+    }
+    return resume('cvg_ressources', { insertion_cvg_ressources: 0 }, retentionJours, journalise,
+      { ok: false, motif, ressources_supprimees: 0 });
+  }
+}
+
 async function purgeRappelsRdv({ trigger = 'auto', userId = null } = {}) {
   const manuel = trigger === 'manual';
   const retentionJours = await readSetting('insertion.rappels_retention_jours', RAPPELS_RDV_RETENTION_DEFAUT_JOURS);
@@ -1039,7 +1103,7 @@ const PURGES_RGPD = [
   {
     cle: 'dialogues_gestion',
     libelle: 'Synthèses de dialogue de gestion enregistrées',
-    description: "Supprime les synthèses de dialogue de gestion générées et figées en snapshot au-delà du délai — ainsi que les instantanés du reporting Convergence (programme CVG), rangés dans la même table. La synthèse est strictement AGRÉGÉE et non nominative (k-anonymat appliqué à tout le document avant enregistrement) ; l'instantané Convergence est agrégé sans seuil de k-anonymat et nomme les permanents de l'accompagnement (Partie 2). Ce sont des pièces de conventionnement : elles se conservent longtemps — six ans, durée des pièces justificatives d'un cofinancement européen — et pas indéfiniment. DELETE : un snapshot amputé ne prouverait plus ce qui a été transmis.",
+    description: "Supprime les synthèses de dialogue de gestion générées et figées en snapshot au-delà du délai — ainsi que les instantanés du reporting Convergence (programme CVG), rangés dans la même table. La synthèse est strictement AGRÉGÉE et non nominative (k-anonymat appliqué à tout le document avant enregistrement) ; l'instantané Convergence est agrégé sous le seuil de confidentialité insertion.cvg_k_min (défaut 5, réglable par le DPO jusqu'à 1) et nomme les permanents de l'accompagnement (Partie 2). Ce sont des pièces de conventionnement : elles se conservent longtemps — six ans, durée des pièces justificatives d'un cofinancement européen — et pas indéfiniment. DELETE : un snapshot amputé ne prouverait plus ce qui a été transmis.",
     fn: purgeDialoguesGestion,
     actionAuto: 'AUTO_PURGE_DIALOGUES_GESTION',
     actionManuelle: 'PURGE_DIALOGUES_GESTION',
@@ -1047,6 +1111,19 @@ const PURGES_RGPD = [
     entiteAudit: 'insertion_dialogues_gestion',
     retentionSetting: 'rgpd.dialogues_gestion_retention_jours',
     retentionDefaut: DIALOGUE_GESTION_RETENTION_DEFAUT_JOURS,
+    retentionUnite: 'jours',
+  },
+  {
+    cle: 'cvg_ressources',
+    libelle: 'Registre des moyens humains du reporting Convergence',
+    description: "Supprime les ressources du registre des moyens humains (Partie 2 du document Convergence : nom, fonction, quotité, employeur) qui ne servent plus — inactives, ou dont la date de fin est passée — au-delà du délai, compté depuis la date de fin (à défaut, la dernière modification). Les documents déjà transmis n'en dépendent pas : ils vivent en instantané, conservé six ans par la purge précédente. La ligne d'un salarié anonymisé, elle, est supprimée dès l'anonymisation.",
+    fn: purgeCvgRessources,
+    actionAuto: 'AUTO_PURGE_CVG_RESSOURCES',
+    actionManuelle: 'PURGE_CVG_RESSOURCES',
+    jobName: 'purgeCvgRessources',
+    entiteAudit: 'insertion_cvg_ressources',
+    retentionSetting: 'rgpd.cvg_ressources_retention_jours',
+    retentionDefaut: CVG_RESSOURCES_RETENTION_DEFAUT_JOURS,
     retentionUnite: 'jours',
   },
   {
@@ -1104,6 +1181,7 @@ module.exports = {
   purgeExpiredRefreshTokens,
   purgeRappelsRdv,
   purgeDialoguesGestion,
+  purgeCvgRessources,
   // Exposés pour les tests et pour la politique affichée à l'écran.
   readSetting,
   PCM_RETENTION_DEFAUT_JOURS,
@@ -1114,4 +1192,5 @@ module.exports = {
   INSERTION_RETENTION_DEFAUT_MOIS,
   RAPPELS_RDV_RETENTION_DEFAUT_JOURS,
   DIALOGUE_GESTION_RETENTION_DEFAUT_JOURS,
+  CVG_RESSOURCES_RETENTION_DEFAUT_JOURS,
 };

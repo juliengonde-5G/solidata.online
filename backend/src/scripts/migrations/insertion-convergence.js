@@ -1,5 +1,5 @@
 /**
- * Migration — lot 2.58.0 « Suivi Convergence (CVG) »
+ * Migration — lot 2.60.0 « Suivi Convergence (CVG) »
  * (contrat : rapports/cip-refonte-2026-09-12/30-convergence-cvg-cartographie.md § 2.2).
  *
  * ═══ CE QU'ELLE POSE, ET POURQUOI ═════════════════════════════════════════
@@ -32,10 +32,18 @@
  *     six ans), et l'historique de la synthèse de dialogue de gestion filtre
  *     désormais sur `type = 'dialogue'` pour que les deux ne se mélangent pas.
  *
- *  6. UNE ENTRÉE AU REGISTRE ART. 30 : contrairement à la synthèse de
- *     dialogue de gestion, ce document n'est pas soumis au k-anonymat (le
- *     format du réseau porte des effectifs de 1 et 2 — arbitrage DPO ouvert)
- *     et sa Partie 2 NOMME des salariés permanents.
+ *  6. UNE ENTRÉE AU REGISTRE ART. 30 : sa Partie 2 NOMME des salariés
+ *     permanents, et ses tableaux croisent santé et situation de sortie sur de
+ *     petits effectifs.
+ *
+ *  7. (2.60.0 — correctifs de la revue de sécurité, rapport 32)
+ *     · `insertion_sortie_cvg.modifie_par` et l'HISTORIQUE
+ *       `insertion_sortie_cvg_history` (m-03) : l'auteur initial n'est plus
+ *       écrasé, l'état antérieur de chaque modification est conservé ;
+ *     · l'entrée art. 30 est MISE À JOUR — une seule fois, et seulement si elle
+ *       porte encore le texte d'origine (une rédaction du DPO n'est jamais
+ *       écrasée) : seuil de confidentialité (B-01), frein judiciaire non
+ *       transmis par défaut (B-02), durée du registre des moyens humains (M-03).
  *
  * Contrat d'exécution : `run(client)` est appelé par `init-db.js` DANS sa
  * transaction, juste après `insertion-reporting`. `client.query` uniquement,
@@ -62,6 +70,11 @@ async function poserCheck(client, table, nom, expr) {
     END $$;
   `);
 }
+
+// ── Entrée art. 30 (texte 2.60.0 — correctifs B-01, B-02, M-03) ───────────
+const CATEGORIES_DONNEES = "Parties 1 et Sorties : AGRÉGATS uniquement (comptes par catégorie), comprenant des catégories de santé (RQTH, AAH, pension d'invalidité, médecin traitant, couverture santé) ; aucun nom ni identifiant de salarié en insertion. SEUIL DE CONFIDENTIALITÉ `insertion.cvg_k_min` (défaut 5, plancher 1, arbitrage du DPO) : un tableau des sortis de moins de k personnes ne diffuse ni ses lignes santé et justice, ni son logement, ni « dont parcours de soin » ; sous 20 accueillis, la Partie 1 suit la règle de la synthèse de dialogue de gestion ; une mention de diffusion restreinte accompagne tout document portant des effectifs inférieurs à 5. Le FREIN JUDICIAIRE (art. 10 RGPD) n'est PAS transmis par défaut — la colonne n'est pas lue ; seul le réglage `insertion.cvg_transmettre_justice`, sur décision du DPO (art. 46 LIL), le transmet en agrégat. Partie 2 : nom, fonction, employeur et quotités (ETP) des personnes affectées à l'accompagnement. Saisie de la situation de sortie : catégorie, habitat et situation de santé à la sortie, par salarié (ADMIN/RH), avec l'historique de ses modifications.";
+const DUREE_CONSERVATION = "Instantanés enregistrés : six ans (11ᵉ purge, rgpd.dialogues_gestion_retention_jours). Situation de sortie par salarié et son historique : durée du dossier, supprimés à l'anonymisation. Registre des moyens humains : une ressource inactive ou dont la date de fin est passée est supprimée au-delà de rgpd.cvg_ressources_retention_jours (défaut trois ans, 12ᵉ purge) ; la ligne d'un salarié anonymisé est supprimée à l'anonymisation.";
+const MESURES_SECURITE = "Accès ADMIN/RH avec double authentification, refus posé avant toute lecture, journalisation RGPD bloquante de l'aperçu, de la génération, de la consultation, de la comparaison, de l'export et de chaque saisie de situation de sortie ; journalisation tolérante de la lecture d'une situation de sortie, de la liste de complétude et des gestes sur le registre des moyens humains (la trace ne recopie jamais le contenu) ; instantané figé du document transmis ; cellule vide jamais zéro pour une donnée non renseignée, cellule « s » pour une case retenue au titre de la confidentialité.";
 
 async function run(client) {
   // ── 1. Diagnostic : habitat CVG, parcours de rue, pension, médecin traitant ──
@@ -175,6 +188,30 @@ async function run(client) {
     + 'ON insertion_dialogues_gestion(type, genere_le DESC);'
   );
 
+  // ── 5 bis. (2.60.0, m-03) Auteur de la modification et historique ───────
+  await client.query(`
+    ALTER TABLE insertion_sortie_cvg ADD COLUMN IF NOT EXISTS modifie_par INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    CREATE TABLE IF NOT EXISTS insertion_sortie_cvg_history (
+      id SERIAL PRIMARY KEY,
+      situation_id INTEGER NOT NULL,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      parcours_num INTEGER NOT NULL DEFAULT 1,
+      snapshot JSONB NOT NULL,
+      action VARCHAR(20) NOT NULL,
+      changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      changed_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  // `situation_id` SANS clé étrangère (modèle insertion_notes_suivi_history) :
+  // l'historique doit survivre à la ligne qu'il documente ; la clé vers le
+  // salarié le garde purgeable à l'anonymisation.
+  await poserCheck(client, 'insertion_sortie_cvg_history', 'insertion_sortie_cvg_history_action_check',
+    "action IN ('update','delete')");
+  await client.query(
+    'CREATE INDEX IF NOT EXISTS idx_insertion_sortie_cvg_history '
+    + 'ON insertion_sortie_cvg_history(situation_id, changed_at DESC);'
+  );
+
   // ── 6. Registre art. 30 — posé UNE fois ───────────────────────────────────
   await client.query(
     `INSERT INTO rgpd_registre
@@ -184,16 +221,27 @@ async function run(client) {
       'Production de l''outil de dialogue de gestion du programme Convergence France : public accompagné sur la période (sexe, tranche d''âge, niveau de formation, minima sociaux, reconnaissance de handicap, habitat, difficultés à l''entrée, orienteur), situation des salariés sortis (catégorie de sortie, évolution des freins, du logement et de la santé, accompagnement post-sortie) et moyens humains dédiés à l''accompagnement.',
       'Exécution de la convention avec le réseau Convergence France / intérêt légitime — base légale à confirmer par le DPO',
       'Salariés en parcours d''insertion (données agrégées) ; salariés permanents de l''accompagnement socioprofessionnel et technique (Partie 2, nominatif)',
-      'Parties 1 et Sorties : AGRÉGATS uniquement (comptes par catégorie), comprenant des catégories de santé (RQTH, AAH, pension d''invalidité, médecin traitant, couverture santé) et le frein judiciaire en agrégat ; aucun nom ni identifiant de salarié en insertion. Le document n''applique PAS le seuil de k-anonymat de la synthèse de dialogue de gestion (le format du réseau porte des effectifs de 1 et 2) — arbitrage à confirmer par le DPO. Partie 2 : nom, fonction, employeur et quotités (ETP) des personnes affectées à l''accompagnement. Saisie de la situation de sortie : catégorie, habitat et situation de santé à la sortie, par salarié (ADMIN/RH).',
+      $1,
       'Convergence France (réseau), sur transmission par la direction. En interne : ADMIN et RH uniquement.',
-      'Instantanés enregistrés : six ans (11ᵉ purge, rgpd.dialogues_gestion_retention_jours). Situation de sortie par salarié : durée du dossier, supprimée à l''anonymisation.',
-      'Accès ADMIN/RH avec double authentification, refus posé avant toute lecture, journalisation RGPD bloquante de l''aperçu, de la génération, de la consultation, de la comparaison, de l''export et de chaque saisie de situation de sortie (la trace ne recopie jamais le contenu), instantané figé du document transmis, cellule vide jamais zéro pour une donnée non renseignée.'
+      $2,
+      $3
      WHERE NOT EXISTS (
       SELECT 1 FROM rgpd_registre WHERE nom_traitement ILIKE 'Reporting Convergence%'
-     )`
+     )`, [CATEGORIES_DONNEES, DUREE_CONSERVATION, MESURES_SECURITE]
   );
 
-  console.log('[INIT-DB] Migration « Suivi Convergence (CVG) » (2.58.0) ✓');
+  // ── 6 bis. (2.60.0) Mise à jour de l'entrée posée par la 2.60.0 — UNE fois,
+  //    et seulement tant qu'elle porte le texte d'origine (marqueur « n'applique
+  //    PAS le seuil ») : une rédaction du DPO n'est jamais écrasée.
+  await client.query(
+    `UPDATE rgpd_registre
+        SET categories_donnees = $1, duree_conservation = $2, mesures_securite = $3
+      WHERE nom_traitement ILIKE 'Reporting Convergence%'
+        AND categories_donnees LIKE '%n''applique PAS le seuil de k-anonymat%'`,
+    [CATEGORIES_DONNEES, DUREE_CONSERVATION, MESURES_SECURITE]
+  );
+
+  console.log('[INIT-DB] Migration « Suivi Convergence (CVG) » (2.60.0 + correctifs 2.60.0) ✓');
 }
 
 module.exports = { run };

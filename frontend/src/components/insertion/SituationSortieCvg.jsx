@@ -7,7 +7,7 @@ import {
 
 /**
  * Bloc « Situation à la sortie (Convergence) » du bilan de sortie
- * (lot 2.58.0, contrat 30 § 2.1 et § 2.4).
+ * (lot 2.60.0, contrat 30 § 2.1 et § 2.4).
  *
  * ═══ POURQUOI UN ENREGISTREMENT À PART ════════════════════════════════════
  * Ces réponses vivent dans `insertion_sortie_cvg`, pas dans l'entretien : le
@@ -112,7 +112,14 @@ export default function SituationSortieCvg({ employeeId, parcoursNum = null, can
       if (s) {
         setForm({ ...VIDE, ...Object.fromEntries(CHAMPS.map((c) => [c, s[c] ?? null])) });
         setSaisie(true);
-        setMeta({ saisi_par_nom: s.saisi_par_nom || null, saisi_at: s.updated_at || s.saisi_at || null });
+        // 2.60.0 (m-03) : l'auteur initial n'est plus écrasé — la dernière
+        // modification a son propre auteur, et le nombre de versions antérieures
+        // conservées est dit.
+        setMeta({
+          saisi_par_nom: s.saisi_par_nom || null, saisi_at: s.saisi_at || s.updated_at || null,
+          modifie_par_nom: s.modifie_par_nom || null, modifie_at: s.modifie_par ? s.updated_at : null,
+          versions: Number(s.versions_anterieures) || 0,
+        });
       } else {
         setForm(VIDE);
         setSaisie(false);
@@ -178,6 +185,8 @@ export default function SituationSortieCvg({ employeeId, parcoursNum = null, can
         {meta?.saisi_at && (
           <span className="text-[11px] text-gray-400">
             Enregistrée le {new Date(meta.saisi_at).toLocaleDateString('fr-FR')}{meta.saisi_par_nom ? ` par ${meta.saisi_par_nom}` : ''}
+            {meta.modifie_at && ` · modifiée le ${new Date(meta.modifie_at).toLocaleDateString('fr-FR')}${meta.modifie_par_nom ? ` par ${meta.modifie_par_nom}` : ''}`}
+            {meta.versions > 0 && ` · ${meta.versions} version(s) antérieure(s) conservée(s)`}
           </span>
         )}
       </div>

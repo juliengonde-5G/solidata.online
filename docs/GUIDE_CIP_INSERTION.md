@@ -913,9 +913,17 @@ enregistrés »** liste les générations passées et rejoue n'importe laquelle 
 > - Cet onglet est **réservé aux profils ADMIN et RH**, sans exception — à la différence de la synthèse
 >   de dialogue de gestion (cas 29), aucun encadrant technique n'y a accès, même en lecture agrégée : le
 >   document porte des catégories de santé (RQTH, AAH, pension d'invalidité, médecin traitant).
-> - Ce document **n'applique pas** le seuil de k-anonymat (5 personnes minimum) de la synthèse de
->   dialogue de gestion : le format du réseau porte lui-même des effectifs de 1 et 2. C'est un point que
->   la direction et le délégué à la protection des données doivent encore trancher.
+> - Ce document applique un **seuil de confidentialité** (5 personnes par défaut, réglage
+>   `insertion.cvg_k_min` que seul le délégué à la protection des données peut abaisser, jusqu'à 1 pour
+>   retrouver le format brut du réseau) : un tableau des sortis de moins de 5 personnes ne diffuse ni ses
+>   lignes santé et justice, ni son logement, ni « dont parcours de soin » — la case s'imprime **« s »**
+>   (secret). Avec 3 ou 4 sortants par semestre, ces lignes seront donc vides : c'est le prix de la
+>   protection, et l'encadré au-dessus de « Générer » dit le seuil appliqué. Dès qu'une case publiée compte
+>   moins de 5 personnes, le document porte une mention de **diffusion restreinte** (à ne pas publier ni
+>   rediffuser).
+> - Le frein **« Justice »** (donnée d'infraction, article 10 du RGPD) **n'est pas transmis** par défaut :
+>   la ligne s'imprime « non transmis ». Seule une décision du délégué à la protection des données peut
+>   l'ouvrir (réglage `insertion.cvg_transmettre_justice`).
 > - Une période sans aucun salarié accueilli ni sorti est **refusée**, comme tous les documents du
 >   module : jamais un fichier vide qui se lirait « rien à signaler ».
 

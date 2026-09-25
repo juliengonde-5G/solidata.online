@@ -532,15 +532,19 @@ Convergence, saisie à part dans le bilan de sortie) et **35** (ce qui se saisit
 parcours de rue, pension d'invalidité, médecin traitant, les douze orienteurs).
 
 **Ce que vous alimentez déjà, sans y penser, pour ce document** : le statut de logement et le niveau de
-formation du diagnostic, l'orienteur du dossier administratif, les neuf freins évalués (huit sont repris
-par Convergence — le frein « numérique » n'a pas d'équivalent dans son référentiel et n'est jamais
-transmis). Trois saisies sont **nouvelles**, toutes au diagnostic d'accueil (rubriques Logement et
+formation du diagnostic, l'orienteur du dossier administratif, les neuf freins évalués (sept sont
+transmis à Convergence : le frein « numérique » n'a pas d'équivalent dans son référentiel, et le frein
+« justice » — donnée relevant de l'article 10 du RGPD — n'est **pas transmis** par défaut, sa ligne
+s'imprime « non transmis » ; seule une décision du délégué à la protection des données peut l'ouvrir). Trois saisies sont **nouvelles**, toutes au diagnostic d'accueil (rubriques Logement et
 Santé) : le type d'habitat dans la nomenclature Convergence, le fait d'avoir connu un parcours de rue,
 la pension d'invalidité et le médecin traitant déclaré.
 
 **Réservé ADMIN et RH, sans exception** — à la différence de la synthèse de dialogue de gestion (§ 13),
 aucun encadrant technique n'y a accès, même en lecture agrégée : le document porte des catégories de
-santé nommément (RQTH, AAH, pension d'invalidité, médecin traitant).
+santé nommément (RQTH, AAH, pension d'invalidité, médecin traitant). Il applique un **seuil de
+confidentialité** de 5 personnes par défaut (abaissable par le seul délégué à la protection des données) :
+un tableau des sortis de moins de 5 personnes ne diffuse ni santé, ni justice, ni logement, ni parcours de
+soin (case « s ») — voir [GUIDE_CIP_INSERTION.md](GUIDE_CIP_INSERTION.md) cas 33.
 
 > **FAQ**
 > **1. Les chiffres de ce document diffèrent de ma synthèse de dialogue de gestion (§ 13), pourquoi ?**

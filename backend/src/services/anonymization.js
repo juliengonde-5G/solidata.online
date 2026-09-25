@@ -230,7 +230,7 @@ async function anonymizeEmployee(client, id) {
     'metiers_souhaites', 'projet_formation', 'emploi_vise', 'emploi_vise_rome',
     'attentes_parcours', 'difficultes_exprimees', 'objectifs_exprimes', 'aide_souhaitee',
     'mutuelle_statut', 'rqth', 'rqth_fin', 'contre_indications', 'suivi_sante',
-    // 2.58.0 (Convergence) — deux réponses de SANTÉ (art. 9), traitées comme la
+    // 2.60.0 (Convergence) — deux réponses de SANTÉ (art. 9), traitées comme la
     // RQTH. `habitat_type` / `parcours_rue` sont conservés, catégoriels comme
     // `logement_statut` (typologies non nominatives des tableaux de bord).
     'pension_invalidite', 'medecin_traitant',
@@ -348,7 +348,7 @@ async function anonymizeEmployee(client, id) {
     await client.query('DELETE FROM insertion_rappels_rdv WHERE employee_id = $1', [id]);
   }
 
-  // ── 2.58.0 — situation de sortie Convergence (programme CVG) ────────────
+  // ── 2.60.0 — situation de sortie Convergence (programme CVG) ────────────
   //
   // Purge INTÉGRALE : la ligne porte la situation de SANTÉ à la sortie (RQTH,
   // AAH, pension d'invalidité, médecin traitant) d'une personne identifiée. Les
@@ -357,6 +357,18 @@ async function anonymizeEmployee(client, id) {
   // désigne personne.
   if (await tableExists(client, 'insertion_sortie_cvg')) {
     await client.query('DELETE FROM insertion_sortie_cvg WHERE employee_id = $1', [id]);
+  }
+  // 2.60.0 (m-03) — l'historique des modifications porte les mêmes valeurs de
+  // santé, figées : il suit la ligne qu'il documente.
+  if (await tableExists(client, 'insertion_sortie_cvg_history')) {
+    await client.query('DELETE FROM insertion_sortie_cvg_history WHERE employee_id = $1', [id]);
+  }
+  // 2.60.0 (M-03) — REGISTRE DES MOYENS HUMAINS (Partie 2 Convergence) : une
+  // ligne rattachée au salarié porte son NOM en clair, relié par clé à la
+  // fiche qu'on anonymise — la liaison défait l'anonymisation. Suppression :
+  // les documents déjà transmis vivent en instantané, ils n'en dépendent pas.
+  if (await tableExists(client, 'insertion_cvg_ressources')) {
+    await client.query('DELETE FROM insertion_cvg_ressources WHERE employee_id = $1', [id]);
   }
 
   // REPORTS D'ÉCHÉANCE (table du lot 5, purgée ici parce qu'un seul fichier est

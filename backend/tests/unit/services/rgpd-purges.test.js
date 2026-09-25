@@ -324,7 +324,7 @@ describe('purges déplacées — comportement automatique inchangé', () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('registre PURGES_RGPD — source unique', () => {
-  it('couvre les 11 purges de rétention, avec des clés uniques', () => {
+  it('couvre les 12 purges de rétention, avec des clés uniques', () => {
     const cles = purges.PURGES_RGPD.map((p) => p.cle);
     // 2.45.0 : `pcm_reponses` s'intercale juste après `pcm_non_recrute` — les
     // deux règles PCM se lisent d'affilée à l'écran comme au journal des jobs.
@@ -341,8 +341,11 @@ describe('registre PURGES_RGPD — source unique', () => {
     expect(cles).toEqual([
       'pcm_non_recrute', 'pcm_reponses', 'candidats_expires', 'insertion_dossiers',
       'gps_positions', 'arrets_gps', 'bordereaux_decheterie', 'messagerie',
-      'rappels_rdv', 'dialogues_gestion', 'refresh_tokens',
+      'rappels_rdv', 'dialogues_gestion', 'cvg_ressources', 'refresh_tokens',
     ]);
+    // 2.60.0 (correctif M-03, revue PR E) : `cvg_ressources` suit les
+    // instantanés qu'elle alimente — le registre des moyens humains NOMME des
+    // permanents et n'avait aucune durée de conservation.
     expect(new Set(cles).size).toBe(cles.length);
   });
 
@@ -420,5 +423,50 @@ describe('retentionEffective — jamais une durée que le code n’applique pas'
     const r = await purges.retentionEffective(purges.trouverPurge('refresh_tokens'));
     expect(r.valeur).toBeNull();
     expect(r.source).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2.60.0 — 12ᵉ purge : registre des moyens humains du reporting Convergence
+// (correctif M-03 de la revue de sécurité PR E, rapport 32).
+describe('purgeCvgRessources — registre des moyens humains (Convergence)', () => {
+  const brancherDelete = (n) => {
+    const orig = mockQuery.getMockImplementation();
+    mockQuery.mockImplementation(async (sql, params) => {
+      if (/DELETE FROM insertion_cvg_ressources/.test(sql)) return { rows: [], rowCount: n };
+      return orig(sql, params);
+    });
+  };
+
+  it('ne vise que les ressources qui ne servent plus, au-delà de trois ans par défaut', async () => {
+    brancherDelete(2);
+    const r = await purges.purgeCvgRessources();
+    const [sql, params] = sqlDe(/DELETE FROM insertion_cvg_ressources/);
+    expect(sql).toMatch(/actif = false OR date_fin IS NOT NULL/);
+    expect(sql).toMatch(/COALESCE\(date_fin, updated_at::date, created_at::date\)/);
+    expect(params).toEqual(['1095']);
+    expect(r).toEqual(expect.objectContaining({ cle: 'cvg_ressources', total: 2, retention_jours: 1095, ok: true }));
+    expect(journal()[0][1][1]).toBe('AUTO_PURGE_CVG_RESSOURCES');
+  });
+
+  it('seuil paramétrable ; automatique à zéro ligne : aucune trace ; manuel : trace même à zéro', async () => {
+    db.settings['rgpd.cvg_ressources_retention_jours'] = '400';
+    brancherDelete(0);
+    await purges.purgeCvgRessources();
+    expect(sqlDe(/DELETE FROM insertion_cvg_ressources/)[1]).toEqual(['400']);
+    expect(journal()).toHaveLength(0);
+    await purges.purgeCvgRessources({ trigger: 'manual', userId: 3 });
+    expect(journal()[0][1][1]).toBe('PURGE_CVG_RESSOURCES');
+    expect(journal()[0][1][0]).toBe(3);
+  });
+
+  it('table absente : purge ignorée, jamais une exception', async () => {
+    const orig = mockQuery.getMockImplementation();
+    mockQuery.mockImplementation(async (sql, params) => {
+      if (/DELETE FROM insertion_cvg_ressources/.test(sql)) throw Object.assign(new Error('absente'), { code: '42P01' });
+      return orig(sql, params);
+    });
+    const r = await purges.purgeCvgRessources();
+    expect(r).toEqual(expect.objectContaining({ ok: false, total: 0, motif: 'table insertion_cvg_ressources absente' }));
   });
 });

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// UNITAIRE — reporting Convergence (programme CVG), lot 2.58.0
+// UNITAIRE — reporting Convergence (programme CVG), lot 2.60.0
 // ───────────────────────────────────────────────────────────────────────────
 // Le composeur est exercé avec un `db` INJECTÉ qui reproduit la cohorte du
 // formulaire scanné (période 01/04/2026 → 30/09/2026) : 46 accueillis, 18 H /
@@ -17,11 +17,21 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 jest.mock('../../../src/config/database', () => ({ query: jest.fn(async () => ({ rows: [] })), connect: jest.fn() }));
+// Réglages MUTABLES : les sections 1 à 6 reproduisent le FORMAT BRUT du réseau
+// (k = 1 et justice transmise — la décision que le DPO peut prendre) pour
+// tenir les chiffres du scan cellule par cellule ; la section 7 remet les
+// DÉFAUTS protecteurs du code (réglages absents).
+const mockReglages = {};
+const REGLAGES_BRUTS = {
+  'insertion.cvg_frein_seuil': 3,
+  'insertion.cvg_sans_bilan_est_sans_nouvelles': true,
+  'insertion.cvg_k_min': 1,
+  'insertion.cvg_transmettre_justice': true,
+};
+const reglages = (r) => { for (const k of Object.keys(mockReglages)) delete mockReglages[k]; Object.assign(mockReglages, r); };
+reglages(REGLAGES_BRUTS);
 jest.mock('../../../src/utils/insertion-settings', () => ({
-  readInsertionSetting: jest.fn(async (k) => ({
-    'insertion.cvg_frein_seuil': 3,
-    'insertion.cvg_sans_bilan_est_sans_nouvelles': true,
-  }[k] ?? null)),
+  readInsertionSetting: jest.fn(async (k) => (Object.prototype.hasOwnProperty.call(mockReglages, k) ? mockReglages[k] : null)),
   INSERTION_SETTING_DEFAULTS: {},
 }));
 
@@ -507,5 +517,288 @@ describe('6. bilan rédigé hors période (D-01)', () => {
     const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
     expect(c.sorties.non_documentees).toBe(1);
     expect(c.sorties.hors_emploi.categories.sans_nouvelles.nb).toBe(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. CORRECTIFS 2.60.0 — revue de sécurité PR E (rapport 32). Les réglages sont
+// ABSENTS : ce sont les DÉFAUTS DU CODE qui s'appliquent (k = 5, justice non
+// transmise) — exactement ce qu'une installation neuve produit.
+// ═══════════════════════════════════════════════════════════════════════════
+const SECRET = { nb: null, pct: null, secret: true };
+const LIGNES_SANTE = ['rqth', 'aah', 'pension_invalidite', 'medecin_traitant', 'couverture_sante_amelioree'];
+
+describe('7. B-02 — frein judiciaire (art. 10) : non transmis par défaut', () => {
+  let c; let journal;
+  beforeAll(async () => {
+    reglages({});
+    const f = fauxDb();
+    journal = f.journal;
+    c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db: f.db });
+  });
+  afterAll(() => reglages(REGLAGES_BRUTS));
+
+  test('la colonne n’est même pas LUE (retrait à la source)', () => {
+    const sqls = journal.map(([s]) => s).join('\n');
+    expect(sqls).toMatch(/frein_sante/);
+    expect(sqls).not.toMatch(/frein_judiciaire/);
+  });
+
+  test('ligne absente de la Partie 1 comme des tableaux des sortis ; paramètre enregistré', () => {
+    expect(c.partie1.difficultes_entree.judiciaire).toBeUndefined();
+    expect(c.sorties.emploi.freins.judiciaire).toBeUndefined();
+    expect(c.sorties.hors_emploi.freins.judiciaire).toBeUndefined();
+    expect(c.en_tete.parametres.transmettre_justice).toBe(false);
+    expect(c.confidentialite.transmettre_justice).toBe(false);
+    expect(c.methode.join(' ')).toMatch(/Frein « Justice » : non transmis — donnée relevant de l'article 10 du RGPD/);
+  });
+
+  test('le CSV imprime la ligne « non transmis » dans les trois couches', () => {
+    const csv = svc.cvgVersCsv(c);
+    expect(csv).toMatch(/Partie 1 — Difficultés à l'entrée;Justice — non transmis \(donnée relevant de l'article 10 du RGPD\);;/);
+    expect(csv).toMatch(/Sorties en emploi ou formation;Frein « Justice — non transmis/);
+    expect(csv).toMatch(/Sorties hors emploi;Frein « Justice — non transmis/);
+    expect(csv).not.toMatch(/Frein « Justice » — difficulté/);
+  });
+
+  test('à `true` (décision du DPO), le comportement antérieur revient', async () => {
+    reglages({ 'insertion.cvg_transmettre_justice': true, 'insertion.cvg_k_min': 1 });
+    const { db } = fauxDb();
+    const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    expect(x.partie1.difficultes_entree.judiciaire.nb).toBe(3);
+    expect(x.en_tete.parametres.transmettre_justice).toBe(true);
+    reglages({});
+  });
+
+  test('« true » ne se devine pas : toute autre valeur vaut « non transmis »', async () => {
+    for (const v of ['oui', 1, 'true', null]) {
+      reglages({ 'insertion.cvg_transmettre_justice': v });
+      const { db } = fauxDb();
+      const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+      expect(x.partie1.difficultes_entree.judiciaire).toBeUndefined();
+    }
+    reglages({});
+  });
+});
+
+describe('8. B-01 — seuil de confidentialité (k = 5 par défaut)', () => {
+  let c;
+  beforeAll(async () => {
+    reglages({ 'insertion.cvg_transmettre_justice': true }); // justice transmise : sa ligne doit AUSSI être retenue
+    const { db } = fauxDb();
+    c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+  });
+  afterAll(() => reglages(REGLAGES_BRUTS));
+
+  test('tableaux de 3 et 4 sortants : santé, justice, logement et parcours de soin RETENUS, zéros compris', () => {
+    for (const cle of ['emploi', 'hors_emploi']) {
+      const j = c.sorties[cle];
+      expect(j.total).toBeLessThan(5);
+      for (const l of LIGNES_SANTE) expect(j.sante[l]).toEqual({ entree: SECRET, sortie: SECRET });
+      for (const axe of ['sante', 'judiciaire']) expect(j.freins[axe]).toEqual({ entree: SECRET, resolution: SECRET });
+      for (const h of R.HABITAT_TYPES) expect(j.logement[h]).toEqual({ entree: SECRET, sortie: SECRET });
+      expect(j.confidentialite).toEqual(expect.objectContaining({ lignes_retenues: true, k: 5 }));
+    }
+    expect(c.sorties.hors_emploi.categories.parcours_de_soin).toEqual(SECRET);
+  });
+
+  test('restent publiés : total, catégories, autres freins, post-sortie — ce que le réseau lit en premier', () => {
+    expect(c.sorties.emploi.total).toBe(3);
+    expect(c.sorties.emploi.categories.formation).toEqual({ nb: 2, pct: 22.2 });
+    expect(c.sorties.emploi.freins.linguistique).toEqual({ entree: { nb: 3, pct: 100 }, resolution: { nb: 1, pct: 33.3 } });
+    expect(c.sorties.hors_emploi.post_sortie).toEqual({ nb: 1, pct: 25 });
+  });
+
+  test('Partie 1 sur 46 accueillis : marginales publiées brutes (pas de croisement)', () => {
+    expect(c.partie1.publics.rth).toEqual({ nb: 5, pct: 10.9 });
+    expect(c.partie1.publics.ass).toEqual({ nb: 3, pct: 6.5 });
+    expect(c.partie1.confidentialite).toBeUndefined();
+  });
+
+  test('compte PAR BLOC, jamais le chemin ; mention de diffusion restreinte ; méthode', () => {
+    expect(c.confidentialite).toEqual(expect.objectContaining({ k_min: 5, k_source: 'defaut', base_marginales_brutes: 20 }));
+    expect(c.confidentialite.sous_seuil.map((b) => b.bloc)).toEqual(['emploi', 'hors_emploi']);
+    for (const b of c.confidentialite.sous_seuil) expect(b.nb).toBeGreaterThan(0);
+    expect(JSON.stringify(c.confidentialite)).not.toMatch(/sante\.|freins\./);
+    expect(c.en_tete.diffusion_restreinte).toBe(true);
+    expect(c.en_tete.mention_diffusion).toBe(svc.MENTION_DIFFUSION);
+    const m = c.methode.join(' ');
+    expect(m).toMatch(/Seuil de confidentialité k = 5 \(défaut de l'outil/);
+    expect(m).toMatch(/À k = 5, avec 3 à 4 sortants par semestre, les lignes santé \/ justice des tableaux des sortis sont vides — c'est le prix de la protection, arbitrage DPO/);
+    expect(m).toMatch(/mais des effectifs très faibles peuvent désigner une personne/);
+    expect(m).not.toMatch(/Aucun seuil de confidentialité n'est appliqué à ce document/);
+  });
+
+  test('CSV : cellule « s » (ni vide ni 0), ligne # de diffusion restreinte, légende', () => {
+    const csv = svc.cvgVersCsv(c);
+    expect(csv).toMatch(/# DIFFUSION RESTREINTE;Contient des effectifs inférieurs à 5/);
+    expect(csv).toMatch(/Sorties hors emploi;Dont sortie en parcours de soin;s;s/);
+    expect(csv).toMatch(/Sorties en emploi ou formation;Santé à l'entrée — RQTH;s;s/);
+    expect(csv).toMatch(/# Une cellule « s » signifie « secret »/);
+    expect(csv).toMatch(/Tableau de moins de 5 personnes : lignes santé, justice, logement et parcours de soin non diffusées/);
+  });
+
+  test('STRUCTUREL — un tableau d’UNE personne ne dit plus rien de sa santé ni de sa justice', async () => {
+    const { db } = fauxDb({
+      fins: [{ employee_id: 7, parcours_num: 1 }],
+      bilans: BILANS.filter((b) => b.employee_id === 7),
+      situations: [{ employee_id: 7, parcours_num: 1, categorie: 'autre_positive', parcours_de_soin: true,
+        rqth_sortie: true, pension_invalidite_sortie: true, habitat_type_sortie: 'hebergement_collectif' }],
+    });
+    const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    const j = x.sorties.hors_emploi;
+    expect(j.total).toBe(1);
+    expect(j.categories.autre_positive.nb).toBe(1);
+    const sensibles = [
+      ...LIGNES_SANTE.flatMap((l) => [j.sante[l].entree, j.sante[l].sortie]),
+      j.freins.sante.entree, j.freins.sante.resolution, j.freins.judiciaire.entree, j.freins.judiciaire.resolution,
+      ...R.HABITAT_TYPES.flatMap((h) => [j.logement[h].entree, j.logement[h].sortie]),
+      j.categories.parcours_de_soin,
+    ];
+    for (const cel of sensibles) expect(cel).toEqual(SECRET);
+  });
+
+  test('Partie 1 d’un PETIT effectif (8 accueillis) : la règle de la synthèse, réutilisée', async () => {
+    const { db } = fauxDb({ cohorte: cohorteScan().slice(0, 8), fins: [], bilans: [] });
+    const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    const p = x.partie1.publics;
+    expect(x.partie1.base).toBe(8);
+    expect(p.hommes).toEqual({ nb: 8, pct: 100 });           // ≥ k : publié
+    expect(p.femmes).toEqual({ nb: 0, pct: 0 });             // zéro : publié
+    expect(p.moins_26).toEqual(SECRET);                      // 4 : retenu
+    expect(p.de_26_a_49).toEqual(SECRET);                    // 4 : retenu
+    expect(p.ass).toEqual(SECRET);                           // 3 : retenu (marginale)
+    expect(x.partie1.difficultes_entree.judiciaire).toEqual(SECRET);
+    expect(x.partie1.confidentialite).toEqual(expect.objectContaining({ marginales_protegees: true, k: 5 }));
+    expect(x.confidentialite.sous_seuil[0]).toEqual(expect.objectContaining({ bloc: 'partie1' }));
+    // Aucune case publiée de 1 à 4 dans la Partie 1.
+    const faibles = [];
+    const scan = (o) => { for (const [k, v] of Object.entries(o || {})) {
+      if (v && typeof v === 'object') scan(v); else if (k === 'nb' && Number.isInteger(v) && v >= 1 && v < 5) faibles.push(v);
+    } };
+    scan(x.partie1.publics); scan(x.partie1.habitat_entree); scan(x.partie1.difficultes_entree); scan(x.partie1.orienteurs);
+    expect(faibles).toEqual([]);
+  });
+
+  test('ventilation à UNE case retenue : suppression complémentaire (pas de soustraction possible)', async () => {
+    // 8 accueillis : 7 formation niv3 + 1 niv4 → la case à 1 est retenue ET une seconde.
+    const coh = cohorteScan().slice(0, 8).map((r, i) => ({ ...r, niveau_formation: i === 0 ? 'niv4' : 'niv3' }));
+    const { db } = fauxDb({ cohorte: coh, fins: [], bilans: [] });
+    const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    const p = x.partie1.publics;
+    expect(p.niv4).toEqual(SECRET);
+    expect(p.niv3).toEqual(SECRET); // victime complémentaire (la plus petite case positive publiée)
+  });
+
+  test('plancher de code : k illisible, nul ou négatif → 5 ; k = 1 → format brut, sans mention de seuil', async () => {
+    for (const v of [0, -3, 'abc', null]) {
+      reglages({ 'insertion.cvg_k_min': v });
+      const { db } = fauxDb();
+      const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+      expect(x.confidentialite.k_min).toBe(5);
+      expect(x.sorties.emploi.sante.rqth.entree).toEqual(SECRET);
+    }
+    reglages({ 'insertion.cvg_k_min': 1 });
+    const { db } = fauxDb();
+    const x = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    expect(x.confidentialite).toEqual(expect.objectContaining({ k_min: 1, k_source: 'reglage', sous_seuil: [] }));
+    expect(x.sorties.emploi.confidentialite).toBeUndefined();
+    expect(x.methode.join(' ')).toMatch(/Aucun seuil de confidentialité n'est appliqué \(k = 1/);
+    expect(x.en_tete.diffusion_restreinte).toBe(true); // des effectifs < 5 sont publiés : la mention reste
+  });
+});
+
+describe('9. M-01 — une source illisible donne une cellule VIDE, jamais 0', () => {
+  test('situations de sortie illisibles : sortie, post-sortie, parcours de soin et non-renseignés vides', async () => {
+    const { db } = fauxDb({ situations: Object.assign(new Error('x'), { code: '42P01' }) });
+    const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    for (const cle of ['emploi', 'hors_emploi']) {
+      const j = c.sorties[cle];
+      for (const l of LIGNES_SANTE) expect(j.sante[l].sortie).toEqual({ nb: null, pct: null });
+      for (const h of R.HABITAT_TYPES) expect(j.logement[h].sortie).toEqual({ nb: null, pct: null });
+      expect(j.post_sortie).toEqual({ nb: null, pct: null });
+      expect(j.non_renseigne.situation_sortie).toBeNull();
+      expect(j.sante.rqth.entree.nb).not.toBeNull(); // l'entrée, elle, reste lue
+    }
+    expect(c.sorties.hors_emploi.categories.parcours_de_soin).toEqual({ nb: null, pct: null });
+    expect(c.methode.join(' ')).toMatch(/Situations de sortie Convergence illisibles/);
+  });
+
+  test('dernière évaluation illisible : résolutions vides, difficultés à l’entrée lues', async () => {
+    const { db } = fauxDb({ eval: Object.assign(new Error('x'), { code: '42703' }) });
+    const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    expect(c.sorties.emploi.freins.linguistique).toEqual({ entree: { nb: 3, pct: 100 }, resolution: { nb: null, pct: null } });
+    expect(c.methode.join(' ')).toMatch(/Évaluations de sortie illisibles/);
+  });
+});
+
+describe('10. M-02 — la RQTH ne se déduit que d’un libellé qui la DIT', () => {
+  test.each(['Non concerné', 'Non reconnu', 'Pas de RQTH', 'En cours', 'Demande en cours', 'NON RQTH', 'Aucun handicap', 'RQTH en cours'])(
+    '« %s » ne vaut PAS RQTH', (texte) => {
+      expect(svc.profilPersonne({ id: 1, disability_status: texte }, new Set(), FIN).rth).toBe(false);
+    }
+  );
+  test.each(['RQTH', 'RQTH 2024', 'Travailleur handicapé', 'Reconnu'])('« %s » vaut RQTH', (texte) => {
+    expect(svc.profilPersonne({ id: 1, disability_status: texte }, new Set(), FIN).rth).toBe(true);
+  });
+  test('critère d’éligibilité et RQTH du diagnostic priment toujours', () => {
+    expect(svc.profilPersonne({ id: 1, disability_status: 'Non concerné' }, new Set(['rqth']), FIN).rth).toBe(true);
+    expect(svc.profilPersonne({ id: 1, rqth: true, disability_status: 'Non' }, new Set(), FIN).rth).toBe(true);
+  });
+});
+
+describe('11. mineurs — m-04, m-07, m-08, m-10', () => {
+  test('m-04 : « dont parcours de soin » ne compte que les sorties « autre reconnue positive »', async () => {
+    const { db } = fauxDb({
+      situations: SITUATIONS.map((x) => (x.employee_id === 5 ? { ...x, parcours_de_soin: true } : x)),
+    });
+    const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    expect(c.sorties.hors_emploi.categories.parcours_de_soin.nb).toBe(0); // sortant 5 : sortie neutre
+  });
+
+  test('m-07 : période vide / inconnue / non vide', () => {
+    expect(svc.cvgEstVide({ partie1: { effectifs: { accueillis: null } }, sorties: { total: null } })).toBeNull();
+    expect(svc.cvgEstVide({ partie1: { effectifs: { accueillis: 0 } }, sorties: { total: null } })).toBeNull();
+    expect(svc.cvgEstVide({ partie1: { effectifs: { accueillis: null } }, sorties: { total: 2 } })).toBe(false);
+    expect(svc.cvgEstVide({ partie1: { effectifs: { accueillis: 0 } }, sorties: { total: 0 } })).toBe(true);
+  });
+
+  test('m-08 : un réglage changé entre deux instantanés est DIT, et les indicateurs qu’il touche ne sont pas comparés', async () => {
+    reglages({ ...REGLAGES_BRUTS });
+    const a = await svc.composerCvg({ debut: DEBUT, fin: FIN, db: fauxDb().db });
+    reglages({ ...REGLAGES_BRUTS, 'insertion.cvg_frein_seuil': 2, 'insertion.cvg_sans_bilan_est_sans_nouvelles': false });
+    const b = await svc.composerCvg({ debut: DEBUT, fin: FIN, db: fauxDb().db });
+    reglages(REGLAGES_BRUTS);
+    const r = svc.comparerCvg(a, b);
+    expect(r.methode_identique).toBe(false);
+    expect(r.lecture.join(' ')).toMatch(/La méthode a changé entre les deux périodes : le seuil de difficulté à l'entrée valait « 3 » puis « 2 »/);
+    expect(r.lecture.join(' ')).toMatch(/le rangement des sortis sans bilan en « sans nouvelles » valait « oui » puis « non »/);
+    const d = (k) => r.deltas.find((x) => x.indicateur === k);
+    expect(d('difficulte_sante')).toEqual(expect.objectContaining({ non_comparable: true, motif: 'methode', delta_pts: null }));
+    expect(d('acces_emploi_formation')).toEqual(expect.objectContaining({ non_comparable: true, motif: 'methode' }));
+    expect(d('femmes').non_comparable).toBeUndefined();
+    // Mêmes réglages : méthode identique.
+    expect(svc.comparerCvg(a, a).methode_identique).toBe(true);
+    // Instantané antérieur à 2.60.0 (sans paramètres) : on le dit.
+    const ancien = { ...a, en_tete: { ...a.en_tete, parametres: undefined } };
+    const r2 = svc.comparerCvg(ancien, a);
+    expect(r2.methode_identique).toBeNull();
+    expect(r2.lecture.join(' ')).toMatch(/réglages de méthode ne sont pas enregistrés/);
+  });
+
+  test('m-08 : la justice absente des DEUX documents n’ajoute pas d’indicateur « non comparable »', async () => {
+    reglages({});
+    const a = await svc.composerCvg({ debut: DEBUT, fin: FIN, db: fauxDb().db });
+    reglages(REGLAGES_BRUTS);
+    const r = svc.comparerCvg(a, a);
+    expect(r.deltas.find((x) => x.indicateur === 'difficulte_judiciaire')).toBeUndefined();
+    expect(r.deltas.find((x) => x.indicateur === 'freins_resolus').libelle).toMatch(/hors santé et justice/);
+  });
+
+  test('m-10 : « 50 ans et plus », comme la règle', async () => {
+    const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db: fauxDb().db });
+    const csv = svc.cvgVersCsv(c);
+    expect(csv).toMatch(/Partie 1 — Publics;50 ans et plus;11;/);
+    expect(csv).not.toMatch(/Plus de 50 ans/);
   });
 });

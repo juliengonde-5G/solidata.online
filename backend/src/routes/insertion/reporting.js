@@ -147,7 +147,7 @@ router.get('/dialogue-gestion/historique', [
   try {
     const limit = parseInt(req.query.limit, 10) || 25;
     const params = [limit];
-    // 2.58.0 — la table porte aussi les instantanés Convergence (`type = 'cvg'`) :
+    // 2.60.0 — la table porte aussi les instantanés Convergence (`type = 'cvg'`) :
     // ils ont leur propre historique et ne se mélangent pas à celui-ci.
     let filtre = " WHERE d.type = 'dialogue'";
     if (req.query.annee) { params.push(parseInt(req.query.annee, 10)); filtre += ' AND d.annee = $2'; }

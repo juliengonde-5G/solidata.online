@@ -59,6 +59,10 @@ const TABLE_COLUMNS = {
   insertion_pieces: ['id', 'employee_id', 'type', 'nom_fichier', 'mime', 'taille', 'contenu', 'sha256', 'depose_par'],
   insertion_fse_sorties: ['id', 'employee_id', 'parcours_num', 'projet_id', 'source', 'date_sortie', 'situation_sortie', 'fse_sortie', 'situation_6mois'],
   insertion_projet_participants: ['id', 'projet_id', 'employee_id', 'date_entree', 'date_sortie'],
+  // 2.60.0 (Convergence) — situation de sortie, son historique, registre des moyens humains.
+  insertion_sortie_cvg: ['id', 'employee_id', 'parcours_num', 'categorie', 'rqth_sortie'],
+  insertion_sortie_cvg_history: ['id', 'situation_id', 'employee_id', 'snapshot'],
+  insertion_cvg_ressources: ['id', 'type', 'employee_id', 'user_id', 'nom', 'fonction'],
 };
 
 function makeMockClient(userIdLie = null) {
@@ -375,5 +379,16 @@ describe('anonymization — dossier administratif d’insertion (PR A)', () => {
     }
     // Le point de reprise PARTAGÉ a disparu : c'était lui le défaut.
     expect(sqls).not.toContain('SAVEPOINT dossier_administratif_insertion');
+  });
+});
+
+describe('anonymization — reporting Convergence (2.60.0, correctifs M-03 / m-03)', () => {
+  it('SUPPRIME la situation de sortie, son HISTORIQUE et la ligne du registre des moyens humains du salarié', async () => {
+    const client = makeMockClient();
+    await anonymizeEmployee(client, 5);
+    const sqls = dataSql(client.calls);
+    for (const t of ['insertion_sortie_cvg', 'insertion_sortie_cvg_history', 'insertion_cvg_ressources']) {
+      expect(sqls.some((x) => new RegExp(`DELETE FROM ${t} WHERE employee_id = \\$1`, 'i').test(x))).toBe(true);
+    }
   });
 });

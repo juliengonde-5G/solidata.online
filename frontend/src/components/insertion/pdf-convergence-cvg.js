@@ -1,6 +1,6 @@
 /**
  * « Outil de dialogue de gestion — programme CVG » (Convergence France) —
- * PDF A4 portrait par fenêtre d'impression (lot 2.58.0, contrat 30 § 2.4).
+ * PDF A4 portrait par fenêtre d'impression (lot 2.60.0, contrat 30 § 2.4).
  *
  * ═══ RENDU EXCLUSIVEMENT DEPUIS `contenu` ═════════════════════════════════
  * Comme la synthèse de dialogue de gestion : rien d'autre que l'objet composé
@@ -16,6 +16,12 @@
  *
  * Une valeur absente s'imprime « — », jamais 0 ; chaque tableau dit combien de
  * personnes n'ont pas l'information renseignée.
+ *
+ * 2.60.0 (revue de sécurité PR E) — une case RETENUE au titre de la
+ * confidentialité s'imprime « s » avec sa légende (B-01) ; le frein « Justice »
+ * non transmis s'imprime « non transmis (art. 10 RGPD) » (B-02) ; la mention
+ * de DIFFUSION RESTREINTE figure en tête de CHAQUE page dès que le document
+ * porte des effectifs inférieurs à 5.
  */
 
 import { openPrintWindow, esc } from './pdf-insertion';
@@ -24,6 +30,7 @@ import {
   LIGNES_EFFECTIFS, LIGNES_PUBLICS, LIGNES_HABITAT, LIGNES_FREINS, LIGNES_ORIENTEURS,
   LIGNES_SORTIE_EMPLOI, LIGNES_SORTIE_HORS_EMPLOI, LIGNES_SANTE,
   fmtNb, fmtPct, pctDe, cellule, sommeEtp, phrasesMethode, periodeTexte,
+  MENTION_NON_TRANSMIS, legendeSecret, ligneSecrete,
 } from './convergence-cvg-structure';
 
 const frDateHeure = (v) => {
@@ -34,13 +41,19 @@ const frDateHeure = (v) => {
 
 const nul = '<span class="nul">—</span>';
 const v = (x) => (x === null || x === undefined ? nul : esc(x));
+/** Case retenue (B-01) : « s », expliqué par la légende — jamais « — » ni 0. */
+const SECRET = '<span class="secret">s</span>';
+const nbC = (c) => (c && c.secret ? SECRET : v(fmtNb(c && c.nb)));
+const pctC = (c) => (c && c.secret ? SECRET : v(fmtPct(c && c.pct)));
+const nonTransmisTd = (span) => `<td class="num nt" colspan="${span}">${esc(MENTION_NON_TRANSMIS)}</td>`;
 
 const trSimple = (l) => `<tr class="${l.bold ? 'tot' : ''}"><td class="${l.indent ? 'dont' : ''}">${esc(l.libelle)}</td>`
-  + `<td class="num">${v(fmtNb(l.nb))}</td><td class="num">${v(fmtPct(l.pct))}</td></tr>`;
+  + (l.nonTransmis ? nonTransmisTd(2) : `<td class="num">${nbC(l)}</td><td class="num">${pctC(l)}</td>`) + '</tr>';
 
 const trDouble = (l) => `<tr><td class="${l.indent ? 'dont' : ''}">${esc(l.libelle)}</td>`
-  + `<td class="num">${v(fmtNb(l.entree.nb))}</td><td class="num">${v(fmtPct(l.entree.pct))}</td>`
-  + `<td class="num">${v(fmtNb(l.sortie.nb))}</td><td class="num">${v(fmtPct(l.sortie.pct))}</td></tr>`;
+  + (l.nonTransmis ? nonTransmisTd(4)
+    : `<td class="num">${nbC(l.entree)}</td><td class="num">${pctC(l.entree)}</td>`
+      + `<td class="num">${nbC(l.sortie)}</td><td class="num">${pctC(l.sortie)}</td>`) + '</tr>';
 
 const intertitre = (t) => `<tr class="inter"><td colspan="3">${esc(t)}</td></tr>`;
 
@@ -58,7 +71,7 @@ function tableauDouble(titre, col1, col2, lignes, piedDePage) {
     + (piedDePage ? `<div class="note">${esc(piedDePage)}</div>` : '');
 }
 
-function pageSortis({ titre, structure, bloc, totalSorties, sousPop, postLibelle }) {
+function pageSortis({ titre, structure, bloc, totalSorties, sousPop, postLibelle, nonTransmis = [] }) {
   const j = blocJumeau(bloc);
   const cats = lignesSimples(j.categories, structure, totalSorties);
   const cTot = cellule(j.total);
@@ -73,15 +86,16 @@ function pageSortis({ titre, structure, bloc, totalSorties, sousPop, postLibelle
     + `<tr class="tot"><td>Total</td><td class="num">${v(fmtNb(cTot.nb))}</td><td class="num">${v(fmtPct(pctDe(cTot, totalSorties)))}</td></tr>`
     + '</tbody></table>'
     + (j.nonRenseigne && j.nonRenseigne.length ? `<div class="note">Non renseigné : ${esc(j.nonRenseigne.join(' · '))}.</div>` : '')
+    + (j.confidentialite ? `<div class="note conf">Tableau de moins de ${esc(j.confidentialite.k)} personnes : les lignes santé et justice, le logement et « dont parcours de soin » ne sont pas diffusés (« s ») — la catégorie de sortie désigne les personnes.</div>` : '')
     + tableauDouble('Évolution des freins', "Difficultés à l'entrée", 'Résolution totale ou partielle à la sortie',
-      lignesDoubles(j.freins, LIGNES_FREINS, base), note) + noteNr(j.freins)
+      lignesDoubles(j.freins, LIGNES_FREINS, base, { nonTransmis }), note) + noteNr(j.freins)
     + tableauDouble('Évolution de la situation logement entrée / sortie', "Logement à l'entrée", 'Logement à la sortie',
       lignesDoubles(j.logement, LIGNES_HABITAT, base), note) + noteNr(j.logement)
     + tableauDouble('Évolution de la situation santé entrée / sortie', "À l'entrée", 'À la sortie',
       lignesDoubles(j.sante, LIGNES_SANTE, base), note) + noteNr(j.sante)
     + '<table class="cvg" style="width:70%"><thead><tr><th class="bandeau" colspan="3">Accompagnement post-sortie</th></tr>'
     + '<tr class="sous"><th></th><th class="num">nb</th><th class="num">%</th></tr></thead><tbody>'
-    + `<tr><td>${esc(postLibelle)}</td><td class="num">${v(fmtNb(post.nb))}</td><td class="num">${v(fmtPct(pctDe(post, base)))}</td></tr>`
+    + `<tr><td>${esc(postLibelle)}</td><td class="num">${nbC(post)}</td><td class="num">${post.secret ? SECRET : v(fmtPct(pctDe(post, base)))}</td></tr>`
     + '</tbody></table>'
     + '</div>';
 }
@@ -103,6 +117,11 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
   const generePar = trace.genere_par_nom || e.genere_par_nom || e.genere_par || e.genere_par_role;
   const numero = trace.id ?? e.snapshot_id ?? null;
 
+  // B-01 — mention de diffusion restreinte : encadrée en tête du document, et
+  // répétée en tête de CHAQUE page imprimée par une boîte de marge `@page`
+  // (une page de tableau qui déborde sur la suivante la porte aussi).
+  const mentionDiffusion = P.mentionDiffusion
+    ? `<div class="diffusion">DIFFUSION RESTREINTE — ${esc(P.mentionDiffusion)}</div>` : '';
   const enTetePage = (titre) => `<div class="doc-head"><div class="outil">Outil de dialogue de gestion — programme CVG</div>`
     + `<h2>${esc(titre)}</h2>`
     + `<div class="ident"><u>Structure(s)</u> : ${esc(structure)}<br/><u>Période</u> : ${esc(periode)}</div></div>`;
@@ -113,15 +132,19 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
     + `<div class="sub">Édité le ${frDateHeure(genereLe)}</div></div></div>`;
 
   // ── Traçabilité ─────────────────────────────────────────────────────────
-  body += '<table class="trace"><tbody>'
+  body += mentionDiffusion + '<table class="trace"><tbody>'
     + `<tr><td>Période couverte</td><td>${esc(periode)}</td></tr>`
     + `<tr><td>Généré le</td><td>${esc(frDateHeure(genereLe))}</td></tr>`
     + `<tr><td>Généré par</td><td>${v(generePar)}</td></tr>`
     + `<tr><td>Version de l'outil</td><td>${v(e.version)}</td></tr>`
     + `<tr><td>Exemplaire</td><td>${numero != null ? `Instantané enregistré n° ${esc(numero)}` : 'Aperçu non enregistré'}</td></tr>`
     + '</tbody></table>'
-    + '<div class="note">Document agrégé — aucun nom de personne accompagnée. Les données sont celles saisies dans '
-    + 'SOLIDATA à la date de génération ; une valeur non renseignée est imprimée « — », jamais 0.</div>';
+    + '<div class="note">Document agrégé — aucun nom de personne accompagnée, mais des effectifs très faibles peuvent '
+    + 'désigner une personne. Les données sont celles saisies dans SOLIDATA à la date de génération ; une valeur non '
+    + 'renseignée est imprimée « — », jamais 0.</div>'
+    + (P.confidentialite
+      ? `<div class="note">Seuil de confidentialité appliqué : k = ${esc(P.confidentialite.k_min)}${P.confidentialite.k_min > 1 ? ` — ${esc(legendeSecret(P.confidentialite.k_min))}` : ' (aucune case retenue — format brut du réseau, décision de la structure).'}</div>`
+      : '');
 
   // ── Page 1 : Partie 1 — le public ────────────────────────────────────────
   const base = P.baseP1;
@@ -139,16 +162,21 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
   const hab = lignesSimples(P.habitat, LIGNES_HABITAT, base);
   body += hab.filter((l) => !['total', 'parcours_rue'].includes(l.cle)).map(trSimple).join('');
   const totHab = cellule(P.habitat?.total);
-  body += `<tr class="tot"><td>Total habitat</td><td class="num">${v(fmtNb(totHab.nb))}</td><td class="num">${v(fmtPct(pctDe(totHab, base)))}</td></tr>`;
+  body += trSimple({ libelle: 'Total habitat', nb: totHab.nb, pct: pctDe(totHab, base), secret: totHab.secret, bold: true });
   const rue = cellule(P.parcoursRue);
-  body += `<tr class="tot"><td>Personnes ayant connu un parcours de rue</td><td class="num">${v(fmtNb(rue.nb))}</td><td class="num">${v(fmtPct(pctDe(rue, base)))}</td></tr>`
+  body += trSimple({ libelle: 'Personnes ayant connu un parcours de rue', nb: rue.nb, pct: pctDe(rue, base), secret: rue.secret, bold: true })
     + intertitre("Difficultés à l'entrée")
-    + lignesSimples(P.difficultes, LIGNES_FREINS, base).map(trSimple).join('')
+    + lignesSimples(P.difficultes, LIGNES_FREINS, base, { nonTransmis: P.nonTransmis }).map(trSimple).join('')
     + intertitre("Type d'orienteur (CVG)")
     + lignesSimples(P.orienteurs, LIGNES_ORIENTEURS, base).filter((l) => l.cle !== 'total').map(trSimple).join('');
   const totOr = cellule(P.orienteurs?.total);
-  body += `<tr class="tot"><td>Total orienteurs</td><td class="num">${v(fmtNb(totOr.nb))}</td><td class="num">${v(fmtPct(pctDe(totOr, base)))}</td></tr>`
+  body += trSimple({ libelle: 'Total orienteurs', nb: totOr.nb, pct: pctDe(totOr, base), secret: totOr.secret, bold: true })
     + '</tbody></table>';
+  const secretsP1 = [
+    ...lignesSimples(P.publics, LIGNES_PUBLICS, base), ...lignesSimples(P.habitat, LIGNES_HABITAT, base),
+    ...lignesSimples(P.difficultes, LIGNES_FREINS, base), ...lignesSimples(P.orienteurs, LIGNES_ORIENTEURS, base),
+  ].some(ligneSecrete) || totHab.secret || rue.secret || totOr.secret;
+  if (secretsP1) body += `<div class="note conf">${esc(legendeSecret(P.confidentialite?.k_min))}</div>`;
   const nrP1 = [
     ['Publics', nonRenseigne(P.publics)], ['Habitat', nonRenseigne(P.habitat)],
     ['Difficultés', nonRenseigne(P.difficultes)], ['Orienteurs', nonRenseigne(P.orienteurs)],
@@ -198,12 +226,12 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
   // page du formulaire : on retire le saut qui les sépare.
   body += pageSortis({
     titre: 'Salariés accédant à un emploi ou une formation à la sortie', structure: LIGNES_SORTIE_EMPLOI,
-    bloc: P.emploi, totalSorties: P.totalSorties, sousPop: 'en emploi ou formation',
+    bloc: P.emploi, totalSorties: P.totalSorties, sousPop: 'en emploi ou formation', nonTransmis: P.nonTransmis,
     postLibelle: 'Nombre de salariés sortis en emploi ou formation ayant bénéficié d\'un accompagnement post-sortie',
   }).replace('<div class="page brk">', '<div class="page">');
   body += pageSortis({
     titre: "Salariés n'accédant pas à l'emploi à la sortie", structure: LIGNES_SORTIE_HORS_EMPLOI,
-    bloc: P.horsEmploi, totalSorties: P.totalSorties, sousPop: 'hors emploi',
+    bloc: P.horsEmploi, totalSorties: P.totalSorties, sousPop: 'hors emploi', nonTransmis: P.nonTransmis,
     postLibelle: "Nombre de salariés n'accédant pas à l'emploi ou à une formation ayant bénéficié d'un accompagnement post-sortie",
   });
 
@@ -216,7 +244,7 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
       : '<p class="nul">Aucune règle de méthode transmise par le serveur.</p>')
     + '</div>';
 
-  body += '<div class="footer">Document agrégé — programme CVG, Convergence France. '
+  body += `<div class="footer">${P.mentionDiffusion ? 'Diffusion restreinte — ' : ''}Document agrégé, sans nom — programme CVG. `
     + `${esc(structure)} — ${esc(periode)} — édité le ${frDateHeure(genereLe)}</div>`;
 
   // Rouge brique du formulaire Convergence pour les bandeaux ; la couleur
@@ -239,7 +267,14 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
     + 'th.c { text-align: center; }'
     + 'td.num, th.num { text-align: right; white-space: nowrap; }'
     + 'table.trace { width: 70%; margin: 8px 0 2px; } table.trace td:first-child { color: #6b7280; width: 35%; }'
+    // Pied de page resserré : la mention de diffusion restreinte (2.60.0) ne
+    // doit pas coûter une page au document.
+    + '.footer { margin-top: 6px; padding-top: 4px; }'
     + '.nul { color: #94a3b8; font-style: italic; }'
+    + '.secret { color: #475569; font-style: italic; font-weight: 700; }'
+    + 'td.nt { font-style: italic; color: #475569; text-align: right; font-size: 8.5px; }'
+    + '.note.conf { color: #334155; }'
+    + '.diffusion { border: 1px solid #b45309; background: #fffbeb; color: #78350f; font-size: 8.5px; font-weight: 700; padding: 3px 6px; margin: 0 0 4px; text-align: center; }'
     + '.note { font-size: 8.5px; color: #6b7280; margin: 1px 0 6px; font-style: italic; }'
     + '.brk { page-break-before: always; }'
     // Un tableau court ne se coupe jamais ; le tableau des publics (35 lignes)
@@ -251,6 +286,12 @@ export function exportConvergenceCvgPDF(contenu, trace = {}) {
     + 'table.cvg.longue { page-break-inside: auto; } table.cvg.longue tr { page-break-inside: avoid; }'
     + 'table.cvg thead { display: table-header-group; }'
     + 'ol.methode { margin-left: 18px; } ol.methode li { margin: 3px 0; }'
+    // Chaîne CSS : `\`, `"` et `<` sont neutralisés (le texte vient du serveur,
+    // constante fermée — l'échappement reste posé par principe).
+    + (P.mentionDiffusion
+      ? `@page { @top-center { content: "DIFFUSION RESTREINTE — ${String(P.mentionDiffusion).replace(/[\\"]/g, '\\$&').replace(/[\n\r]/g, ' ').replace(/</g, '\\3c ')}"; `
+        + 'font-family: Arial, sans-serif; font-size: 7pt; font-weight: 700; color: #78350f; } }'
+      : '')
     + '</style>';
 
   const deb = e.periode_debut ?? e.debut ?? '';

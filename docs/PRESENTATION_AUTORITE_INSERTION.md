@@ -473,20 +473,25 @@ mais nous ne prétendons pas qu'ils le reproduisent déjà.
 ### Ce que le chantier E laisse ouvert (arbitrages Convergence)
 
 Le document transmis au réseau Convergence France (§ « Ce que vous recevrez » (g)) n'est pas de votre
-ressort, mais quatre points le concernant restent à trancher par la direction et notre délégué à la
+ressort, mais cinq points le concernant restent à trancher par la direction et notre délégué à la
 protection des données — nous les disons ici par souci de cohérence avec la doctrine de transparence de
 ce document :
 
-1. **Le document ne respecte pas de seuil de confidentialité** (contrairement à la synthèse de dialogue
-   de gestion qui vous est destinée, § « Ce que vous recevrez » (e)) : le format imposé par le réseau
-   porte lui-même des effectifs de 1 et 2. À confirmer par notre délégué à la protection des données ; à
-   défaut, nous appliquerions le même plancher de cinq personnes que notre synthèse.
+1. **Le seuil de confidentialité** : le format imposé par le réseau porte des effectifs de 1 et 2. Le
+   document applique **par défaut** le même plancher de cinq personnes que notre synthèse (§ « Ce que vous
+   recevrez » (e)) aux tableaux des sortis — lignes santé, justice, logement et parcours de soin non
+   diffusées quand un tableau compte moins de cinq personnes, ce qui, avec trois ou quatre sortants par
+   semestre, les laisse vides — et porte une mention de diffusion restreinte. Seul notre délégué à la
+   protection des données peut l'abaisser, jusqu'au format brut du réseau.
 2. **Deux catégories de sortie sont déduites par approximation**, annoncée dans le document et à valider
    par nos conseillères : une sortie sans bilan classé, ou classée « sans suite », est comptée « sans
    nouvelles » — la catégorie reste saisissable à tout moment.
 3. **Le frein numérique n'a pas d'équivalent** dans le référentiel du réseau : il n'est jamais transmis,
    ce que le document dit en méthode.
-4. **La Partie 2 du document nomme nos permanents** (fonction, quotité de temps consacrée à
+4. **Le frein « justice »** (article 10 du RGPD) **n'est pas transmis** par défaut au réseau — une
+   association privée : la ligne s'imprime « non transmis ». Le transmettre relève d'une décision de notre
+   délégué à la protection des données, sur une base légale à établir.
+5. **La Partie 2 du document nomme nos permanents** (fonction, quotité de temps consacrée à
    l'accompagnement) : l'entrée correspondante est posée à notre registre des traitements, base légale
    « intérêt légitime / convention — à confirmer par notre délégué à la protection des données ».
 

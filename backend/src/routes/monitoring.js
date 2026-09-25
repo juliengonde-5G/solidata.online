@@ -158,6 +158,7 @@ const JOB_SCHEDULE = {
   // consentement révocable : sa conservation doit être bornée ET visible.
   purgeRappelsRdv:                { label: 'Purge RGPD rappels de rendez-vous', cadence: '3×/jour',            maxAgeHours: DAILY },
   purgeDialoguesGestion:          { label: 'Purge RGPD synthèses de dialogue de gestion', cadence: '3×/jour',  maxAgeHours: DAILY },
+  purgeCvgRessources:             { label: 'Purge RGPD registre des moyens humains (Convergence)', cadence: '3×/jour', maxAgeHours: DAILY },
   purgeExpiredRefreshTokens:      { label: 'Purge refresh tokens expirés',      cadence: '3×/jour',            maxAgeHours: DAILY },
   refreshMaterializedViews:       { label: 'Refresh vues matérialisées',        cadence: '3×/jour',            maxAgeHours: DAILY },
   scanBoutiqueCSVFolders:         { label: 'Scan CSV caisse boutiques',         cadence: '3×/jour + 20h',      maxAgeHours: DAILY },
