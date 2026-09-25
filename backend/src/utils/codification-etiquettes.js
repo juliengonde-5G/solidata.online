@@ -102,6 +102,29 @@ function normaliserScan(brut) {
 }
 
 /**
+ * Codes à chercher en base pour une saisie. Une RÉFÉRENCE COURTE est résolue en
+ * code complet via `reference_colis` (index unique) — et seulement si le code
+ * trouvé est un code v2 qui se termine bien par ces 6 caractères : la
+ * correspondance est vérifiée, jamais supposée. Partagé par l'étiquetage et la
+ * sortie de cartons, qui doivent accepter les MÊMES saisies.
+ * @param db pool ou client pg (dans la transaction de l'appelant)
+ */
+async function candidatsCode(db, brut, analyse) {
+  const brutPropre = String(brut ?? '').trim();
+  const cands = new Set([analyse.normalise, brutPropre].filter(Boolean));
+  if (analyse.format === 'reference_courte') {
+    const r = await db.query(
+      `SELECT code_barre FROM produits_finis
+        WHERE reference_colis = $1 AND codification = 'v2' AND RIGHT(code_barre, $2) = $3
+        LIMIT 1`,
+      [analyse.details.reference, LARGEURS.reference, analyse.normalise]
+    );
+    if (r.rows[0]?.code_barre) cands.add(r.rows[0].code_barre);
+  }
+  return [...cands];
+}
+
+/**
  * Identifie le format d'un code (après normalisation) et en extrait ce qui peut
  * l'être sans base de données. Ne dit JAMAIS qu'un code existe : seule la base le sait.
  * @returns {{ normalise: string, format: 'v2'|'ancien_base24'|'ancien_horodate'|'balance'|'inconnu', details: object|null }}
@@ -129,6 +152,14 @@ function analyserCode(brut) {
 
   if (/^PF-\d+$/.test(normalise)) return { normalise, format: 'balance', details: null };
 
+  // « Code vérif » imprimé sur l'étiquette (2.59.0) : les 6 derniers caractères
+  // d'un code v2, c'est-à-dire la référence de colis. Tapé à la main quand le
+  // code-barres est illisible. Aucun ancien code ne peut prendre cette forme
+  // (ils commencent tous par « P ») ; seule la base dit s'il existe.
+  if (new RegExp(`^[0-9A-F]{${LARGEURS.reference}}$`).test(normalise)) {
+    return { normalise, format: 'reference_courte', details: { reference: parseInt(normalise, 16) } };
+  }
+
   return { normalise, format: 'inconnu', details: null };
 }
 
@@ -137,10 +168,11 @@ const LIBELLES_FORMAT = {
   ancien_base24: 'Ancienne codification (compteur de poste)',
   ancien_horodate: 'Ancienne codification (horodatée)',
   balance: 'Kiosque balance',
+  reference_courte: 'Référence courte (code vérif)',
   inconnu: 'Format non reconnu',
 };
 
 module.exports = {
   LARGEURS, LONGUEUR_V2, REFERENCE_MAX, LIBELLES_FORMAT,
-  composerCode, decomposerCodeV2, formeLisible, normaliserScan, analyserCode,
+  composerCode, decomposerCodeV2, formeLisible, normaliserScan, analyserCode, candidatsCode,
 };

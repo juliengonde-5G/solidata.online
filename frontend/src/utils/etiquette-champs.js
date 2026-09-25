@@ -5,18 +5,18 @@
 const TZ = 'Europe/Paris';
 
 /**
- * « Code vérif » : la RÉFÉRENCE COURTE du carton, c'est-à-dire ce qui distingue
- * deux cartons identiques. Code v2 (13 hex) : ses 6 derniers caractères, la
- * référence de colis. Ancien code court (≤ 8 caractères, ex. P10AAH) : le code
- * entier — il est déjà court et le tronquer le rendrait ambigu. Ancien code
- * long (horodaté, balance) : ses 6 derniers caractères.
+ * « Code vérif » : ce qu'on TAPE quand le code-barres est illisible — donc une
+ * valeur que la sortie de cartons et la réimpression savent retrouver.
+ * Code v2 (13 hex) : ses 6 derniers caractères, la référence de colis
+ * (résolue côté serveur via `reference_colis`). Ancien code : le code ENTIER —
+ * une fin de code ancien ne serait retrouvée par rien, et « 155908 » (fin d'un
+ * code horodaté) se lirait même comme une référence v2 d'un AUTRE carton.
  */
 export function referenceCourte(code) {
   const c = String(code ?? '').trim();
   if (!c) return '';
   if (/^[0-9A-F]{13}$/i.test(c)) return c.slice(-6).toUpperCase();
-  if (c.length <= 8) return c;
-  return c.slice(-6);
+  return c;
 }
 
 /**

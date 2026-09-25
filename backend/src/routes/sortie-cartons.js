@@ -30,7 +30,7 @@ const router = express.Router();
 const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { requireModule } = require('../middleware/module-access');
-const { analyserCode, formeLisible, LIBELLES_FORMAT } = require('../utils/codification-etiquettes');
+const { analyserCode, formeLisible, LIBELLES_FORMAT, candidatsCode } = require('../utils/codification-etiquettes');
 const { etatPreparation } = require('../services/boutique-catalogue');
 
 const ROLES_OPERATEUR = ['ADMIN', 'COLLABORATEUR', 'OPERATEUR_STOCK'];
@@ -64,11 +64,6 @@ function tronquer(v, max) {
 }
 
 /** Candidats de recherche d'un code lu : forme normalisée, puis forme brute (filet). */
-function candidatsCode(brut, normalise) {
-  const brutPropre = String(brut ?? '').trim();
-  return [...new Set([normalise, brutPropre].filter(Boolean))];
-}
-
 /**
  * Inscrit un scan au journal. Toujours via le POOL (jamais le client de la
  * transaction de sortie) : la trace survit au ROLLBACK d'un refus. Aucune
@@ -130,6 +125,8 @@ function messageInconnu(analyse) {
       return `Nouvelle codification « ${code} » : aucun carton ne porte ce code`;
     case 'balance':
       return `Code du kiosque balance « ${code} » : introuvable en stock`;
+    case 'reference_courte':
+      return `Code vérif « ${code} » : aucun carton ne porte cette référence`;
     default:
       return `Format non reconnu : « ${code} » n'est pas un code d'étiquette`;
   }
@@ -213,7 +210,7 @@ router.post('/scan', async (req, res) => {
       `SELECT ${COLONNES} FROM produits_finis
        WHERE code_barre = ANY($1::varchar[])
        ORDER BY (code_barre = $2) DESC LIMIT 1 FOR UPDATE`,
-      [candidatsCode(code_barre, analyse.normalise), analyse.normalise]
+      [await candidatsCode(client, code_barre, analyse), analyse.normalise]
     );
     if (carton.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -376,8 +373,8 @@ router.post('/annuler', async (req, res) => {
          AND ${commande_type === 'libre' ? 'sortie_commande_id IS NULL' : 'sortie_commande_id = $3'}
        ORDER BY (code_barre = $${commande_type === 'libre' ? 3 : 4}) DESC LIMIT 1 FOR UPDATE`,
       commande_type === 'libre'
-        ? [candidatsCode(code_barre, analyse.normalise), commande_type, analyse.normalise]
-        : [candidatsCode(code_barre, analyse.normalise), commande_type, cmdId, analyse.normalise]
+        ? [await candidatsCode(client, code_barre, analyse), commande_type, analyse.normalise]
+        : [await candidatsCode(client, code_barre, analyse), commande_type, cmdId, analyse.normalise]
     );
     if (found.rowCount === 0) {
       await client.query('ROLLBACK');

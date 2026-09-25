@@ -4,7 +4,7 @@ const pool = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { requireModule } = require('../middleware/module-access');
 const {
-  composerCode, formeLisible, analyserCode, LIBELLES_FORMAT, REFERENCE_MAX,
+  composerCode, formeLisible, analyserCode, LIBELLES_FORMAT, REFERENCE_MAX, candidatsCode,
 } = require('../utils/codification-etiquettes');
 
 router.use(authenticate);
@@ -444,11 +444,6 @@ router.post('/generer', operateur, etiquettesHabilitees, async (req, res) => {
 });
 
 /** Candidats de recherche d'un code lu : forme normalisée, puis forme brute (filet). */
-function candidatsCode(brut, normalise) {
-  const brutPropre = String(brut ?? '').trim();
-  return [...new Set([normalise, brutPropre].filter(Boolean))];
-}
-
 const COLONNES_CARTON = `pf.id, pf.code_barre, pf.codification, pf.reference_colis, pf.produit,
   pf.categorie_eco_org, pf.genre, pf.saison, pf.gamme, pf.poids_kg, pf.date_fabrication,
   pf.batch_id, pf.poste_etiquetage_id, pf.nb_impressions, pf.status, pf.date_sortie,
@@ -463,7 +458,7 @@ router.get('/carton/:code', operateur, etiquettesHabilitees, async (req, res) =>
   const analyse = analyserCode(req.params.code);
   const format_libelle = LIBELLES_FORMAT[analyse.format] || analyse.format;
   try {
-    const cands = candidatsCode(req.params.code, analyse.normalise);
+    const cands = await candidatsCode(pool, req.params.code, analyse);
     const r = cands.length ? await pool.query(
       `SELECT ${COLONNES_CARTON}
        FROM produits_finis pf LEFT JOIN postes_etiquetage pe ON pe.id = pf.poste_etiquetage_id
@@ -509,7 +504,7 @@ router.post('/reimprimer', operateur, etiquettesHabilitees, async (req, res) => 
       `SELECT pf.id, pf.status, pf.date_sortie, pf.code_barre FROM produits_finis pf
        WHERE pf.code_barre = ANY($1::varchar[])
        ORDER BY (pf.code_barre = $2) DESC LIMIT 1 FOR UPDATE`,
-      [candidatsCode(code_barre, analyse.normalise), analyse.normalise]
+      [await candidatsCode(client, code_barre, analyse), analyse.normalise]
     );
     if (r.rowCount === 0) {
       await client.query('ROLLBACK');
