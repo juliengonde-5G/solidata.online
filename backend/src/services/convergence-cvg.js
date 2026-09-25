@@ -50,7 +50,7 @@ const pool = require('../config/database');
 const { readInsertionSetting } = require('../utils/insertion-settings');
 const { isoDate, ecartJours } = require('../utils/date-iso');
 const { escCsv } = require('../utils/export-csv');
-const { listerSortants, calculerSorties } = require('./sorties-engine');
+const { listerSortants } = require('./sorties-engine');
 const {
   chargerFinsEtBilans, lireConvention, APP_VERSION,
 } = require('./dialogue-gestion');
@@ -268,8 +268,35 @@ async function chargerDonnees({ debut, fin, db = pool }) {
 
   const { fins, bilans } = await chargerFinsEtBilans(soft, { debut, fin, annee });
   const sortantsBruts = listerSortants({ finsParcours: fins || [], bilansClasses: bilans || [] });
-  const denom = calculerSorties({ finsParcours: fins || [], bilansClasses: bilans || [], annee });
   const idsSortants = sortantsBruts.map((s) => s.employee_id);
+
+  // CORRECTIF D-01 (debug sur base réelle, rapport 31) — le bilan de sortie se
+  // rédige AVANT la fin du parcours : l'échéancier de l'outil le pose à
+  // fin − 15 jours. `chargerFinsEtBilans` ne rend que les bilans RÉDIGÉS dans
+  // la période (c'est la méthode A de la synthèse, qui compte des bilans) ; pour
+  // un sortant des quinze premiers jours d'un semestre, le bilan tombe donc
+  // dans le semestre PRÉCÉDENT, n'est pas apparié, et la personne sortait
+  // « sans bilan » — donc « sans nouvelles », hors emploi — alors que son bilan
+  // dit « CDI ». Le dénominateur (les fins de parcours) ne change pas : seul
+  // l'APPARIEMENT d'un sortant non apparié va chercher le bilan de SON
+  // parcours, quelle que soit la date où il a été rédigé.
+  const sansBilan = sortantsBruts.filter((s) => !s.bilan).map((s) => s.employee_id);
+  const bilansHorsPeriode = sansBilan.length && bilans != null ? await soft('bilans_sortie_hors_periode', `
+    SELECT DISTINCT ON (im.employee_id, COALESCE(im.parcours_num, 1))
+           im.employee_id, COALESCE(im.parcours_num, 1) AS parcours_num,
+           im.sortie_classification, im.sortie_type
+      FROM insertion_milestones im
+     WHERE im.employee_id = ANY($1::int[])
+       AND im.milestone_type = 'bilan_sortie' AND im.status = 'realise'
+       AND im.sortie_classification IS NOT NULL
+     ORDER BY im.employee_id, COALESCE(im.parcours_num, 1),
+              COALESCE(im.completed_date, im.updated_at::date) DESC, im.id DESC`, [sansBilan]) : [];
+  const bilanHorsPeriodeParCle = new Map((bilansHorsPeriode || []).map((b) => [
+    `${Number(b.employee_id)}#${b.parcours_num == null ? 1 : Number(b.parcours_num)}`, b,
+  ]));
+  for (const s of sortantsBruts) {
+    if (!s.bilan) s.bilan = bilanHorsPeriodeParCle.get(`${s.employee_id}#${s.parcours_num}`) || null;
+  }
 
   const colsLm = AXES.map((a) => `im.${COL_AXE(a)}`).join(', ');
   const colsSortie = AXES.map((a) => `lm.${COL_AXE(a)} AS sortie_${COL_AXE(a)}`).join(', ');
@@ -372,7 +399,10 @@ async function chargerDonnees({ debut, fin, db = pool }) {
     convention,
     sortants,
     sortiesLisibles: fins != null,
-    nonDocumentees: fins == null ? null : denom.methode_b.non_documentees,
+    // « Sans bilan de sortie » : compté sur l'appariement ci-dessus (bilan du
+    // parcours, quelle que soit sa date de rédaction) — et non plus sur les
+    // seuls bilans rédigés dans la période (correctif D-01).
+    nonDocumentees: fins == null || bilans == null ? null : sortantsBruts.filter((s) => !s.bilan).length,
     ressources,
   };
 }

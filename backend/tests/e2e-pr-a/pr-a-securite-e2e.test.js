@@ -87,12 +87,12 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
     });
 
     test('le MANAGER ne reçoit ni le questionnaire, ni sa complétude, ni les suggestions', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : il est refusé À LA PORTE du module (403,
+      // sans rien lire en base) — la forme forte de la garantie d'origine
+      // (rapport 31 § 5, conversion des suites antérieures).
       const r = await auth(request(app).get(`/api/insertion/diagnostic/${salarie}`), 'MANAGER');
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(403);
       expect(Object.keys(r.body)).not.toContain('fse_entree');
-      expect(Object.keys(r.body)).not.toContain('fse_entree_complet');
-      expect(r.body.suggestions_fse).toEqual({});
-      expect(r.body.fse_completude).toBeNull();
       const brut = JSON.stringify(r.body);
       expect(brut).not.toContain('psychiatrie');
       expect(brut).not.toContain('bénéficiaire du RSA');
@@ -102,8 +102,10 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       const avant = await pool.query('SELECT fse_entree FROM insertion_diagnostics WHERE employee_id = $1', [salarie]);
       const r = await auth(request(app).put(`/api/insertion/diagnostic/${salarie}`), 'MANAGER')
         .send({ fse_entree: { foyer_monoparental: false, commentaire: 'écrit par un encadrant' } });
+      // Rôle MANAGER RETIRÉ (2.52.0) : il est refusé À LA PORTE du module (403,
+      // sans rien lire en base) — la forme forte de la garantie d'origine
+      // (rapport 31 § 5, conversion des suites antérieures).
       expect(r.status).toBe(403);
-      expect(r.body.code).toBe('FSE_ADMIN_RH_STRICT');
       const apres = await pool.query('SELECT fse_entree FROM insertion_diagnostics WHERE employee_id = $1', [salarie]);
       expect(apres.rows[0].fse_entree).toEqual(avant.rows[0].fse_entree);
     });
@@ -117,8 +119,11 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       const alerte = liste.find((x) => x.type === 'referent_non_determine');
       expect(alerte).toBeDefined();
       expect(alerte.message).not.toMatch(/RSA/);
+      // Rôle MANAGER RETIRÉ (2.52.0) : il est refusé À LA PORTE du module (403,
+      // sans rien lire en base) — la forme forte de la garantie d'origine
+      // (rapport 31 § 5, conversion des suites antérieures).
       const m = await auth(request(app).get(`/api/insertion/alertes/${salarie}`), 'MANAGER');
-      expect(m.status).toBe(200);
+      expect(m.status).toBe(403);
       expect(JSON.stringify(m.body)).not.toContain('referent_non_determine');
       expect(JSON.stringify(m.body)).not.toMatch(/bénéficiaire du RSA/);
     });
@@ -140,8 +145,10 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
     test("le MANAGER est refusé et n'écrit AUCUNE ligne de sortie FSE+", async () => {
       const avant = await pool.query('SELECT count(*)::int n FROM insertion_fse_sorties WHERE employee_id = $1', [salarie]);
       const r = await auth(request(app).post(`/api/insertion/milestones/${jalonId}/close`), 'MANAGER').send({});
+      // Rôle MANAGER RETIRÉ (2.52.0) : il est refusé À LA PORTE du module (403,
+      // sans rien lire en base) — la forme forte de la garantie d'origine
+      // (rapport 31 § 5, conversion des suites antérieures).
       expect(r.status).toBe(403);
-      expect(r.body.code).toBe('BILAN_SORTIE_ADMIN_RH');
       const apres = await pool.query('SELECT count(*)::int n FROM insertion_fse_sorties WHERE employee_id = $1', [salarie]);
       expect(apres.rows[0].n).toBe(avant.rows[0].n);
       // Et le jalon n'est ni clôturé ni verrouillé.

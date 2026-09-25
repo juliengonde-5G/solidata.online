@@ -48,14 +48,12 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
 
   // ── Matrice de rôles ─────────────────────────────────────────────────────
   describe('habilitations', () => {
-    test('MANAGER lit le cadre SANS statuts, SANS pièces, SANS bloc de copie', async () => {
+    test('MANAGER (rôle retiré) ne lit PAS le cadre : 403, ni statuts, ni pièces, ni bloc de copie', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé À LA PORTE du module (403, rien
+      // n'est lu) — la forme forte de la garantie d'origine (rapport 31 § 5).
       const r = await auth(request(app).get(`/api/insertion/cadre/${salarie}`), 'MANAGER');
-      expect(r.status).toBe(200);
-      expect(r.body).toHaveProperty('eligibilite');
-      expect(r.body).toHaveProperty('pass_iae');
-      expect(r.body).toHaveProperty('orientation');
-      // Les clés doivent être ABSENTES : une clé à null dirait déjà qu'il y a
-      // un statut social à cet endroit.
+      expect(r.status).toBe(403);
+      expect(Object.keys(r.body)).not.toContain('eligibilite');
       expect(Object.keys(r.body)).not.toContain('statuts');
       expect(Object.keys(r.body)).not.toContain('pieces');
       expect(Object.keys(r.body)).not.toContain('bloc_emplois_inclusion');
@@ -126,12 +124,11 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
     // Elle s'appuie sur les critères réellement écrits juste au-dessus (brsa +
     // deld), donc sur des LIGNES en base, pas sur un faux `pg`.
     test('C-01 — le MANAGER ne reçoit ni code ni libellé de critère, seulement un compte', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé À LA PORTE du module (403, rien
+      // n'est lu) — la forme forte de la garantie d'origine (rapport 31 § 5).
       const r = await auth(request(app).get(`/api/insertion/cadre/${salarie}`), 'MANAGER');
-      expect(r.status).toBe(200);
-      expect(r.body.eligibilite.criteres).toBeUndefined();
-      expect(r.body.eligibilite.justificatifs_ref).toBeUndefined();
-      expect(r.body.eligibilite.nb_criteres).toBe(2);
-      expect(r.body.eligibilite.verifiee_le).toBeTruthy();
+      expect(r.status).toBe(403);
+      expect(r.body.eligibilite).toBeUndefined();
       const brut = JSON.stringify(r.body);
       for (const interdit of ['brsa', 'deld', 'Bénéficiaire du RSA', 'Demandeur d\'emploi']) {
         expect(brut).not.toContain(interdit);
@@ -165,8 +162,10 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
       expect(w.body.bloc_emplois_inclusion).toContain('[critère judiciaire — voir la fiche]');
       // MANAGER : 3 critères en base, 2 annoncés — le critère judiciaire ne se
       // déduit pas d'un compte.
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé À LA PORTE du module (403, rien
+      // n'est lu) — la forme forte de la garantie d'origine (rapport 31 § 5).
       const m = await auth(request(app).get(`/api/insertion/cadre/${salarie}`), 'MANAGER');
-      expect(m.body.eligibilite.nb_criteres).toBe(2);
+      expect(m.status).toBe(403);
       expect(JSON.stringify(m.body)).not.toContain('detention');
       // On revient à l'état attendu par les tests suivants.
       await auth(request(app).put(`/api/insertion/cadre/${salarie}`), 'ADMIN')
@@ -388,8 +387,11 @@ const auth = (r, role) => r.set('Authorization', `Bearer ${U[role].token}`);
   // ── Référentiel des critères ─────────────────────────────────────────────
   describe('référentiel des critères d\'éligibilité', () => {
     test('les 14 critères seedés sont servis, triés par ordre', async () => {
-      const r = await auth(request(app).get('/api/insertion/eligibilite-criteres'), 'MANAGER');
+      // Lu par la CIP (RH) : le module est ADMIN/RH depuis le retrait du MANAGER (2.52.0).
+      const r = await auth(request(app).get('/api/insertion/eligibilite-criteres'), 'RH');
       expect(r.status).toBe(200);
+      const m = await auth(request(app).get('/api/insertion/eligibilite-criteres'), 'MANAGER');
+      expect(m.status).toBe(403);
       expect(r.body.length).toBeGreaterThanOrEqual(14);
       const ordres = r.body.map((c) => c.ordre);
       expect(ordres).toEqual([...ordres].sort((a, b) => a - b));

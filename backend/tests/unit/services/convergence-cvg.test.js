@@ -461,3 +461,51 @@ describe('5. CSV', () => {
     expect(svc.cvgEstVide({ partie1: { effectifs: { accueillis: 0 } }, sorties: { total: 1 } })).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. CORRECTIF D-01 (debug sur PostgreSQL réel, rapport 31) — un sortant dont
+// le bilan de sortie a été rédigé AVANT le début de la période (l'échéancier le
+// pose à fin − 15 j) doit rester apparié à SON bilan : il ne sort ni « sans
+// bilan », ni « sans nouvelles ».
+describe('6. bilan rédigé hors période (D-01)', () => {
+  function dbAvecBilanAnterieur() {
+    const { db } = fauxDb();
+    const vraie = db.query;
+    const textes = [];
+    db.query = jest.fn(async (sql, params) => {
+      const s = String(sql);
+      textes.push(s);
+      if (/milestone_type = 'bilan_sortie'/.test(s) && /DISTINCT ON/.test(s)) {
+        return { rows: BILANS.filter((b) => b.employee_id === 1 && params[0].includes(1)) };
+      }
+      if (/milestone_type = 'bilan_sortie'/.test(s)) return { rows: BILANS.filter((b) => b.employee_id !== 1) };
+      return vraie(sql, params);
+    });
+    return { db, textes };
+  }
+
+  test('le sortant reste apparié : 1 emploi, 0 sans bilan, aucun « sans nouvelles » inventé', async () => {
+    const { db, textes } = dbAvecBilanAnterieur();
+    const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    expect(c.sorties.total).toBe(9);
+    expect(c.sorties.non_documentees).toBe(0);
+    expect(c.sorties.emploi.categories.emploi.nb).toBe(1);
+    expect(c.sorties.hors_emploi.categories.sans_nouvelles.nb).toBe(0);
+    // La recherche complémentaire ne porte QUE sur les sortants non appariés.
+    expect(textes.filter((t) => /DISTINCT ON/.test(t))).toHaveLength(1);
+  });
+
+  test('sans bilan du tout, la personne reste « sans bilan » (compte juste)', async () => {
+    const { db } = fauxDb();
+    const vraie = db.query;
+    db.query = jest.fn(async (sql, params) => {
+      const s = String(sql);
+      if (/milestone_type = 'bilan_sortie'/.test(s) && /DISTINCT ON/.test(s)) return { rows: [] };
+      if (/milestone_type = 'bilan_sortie'/.test(s)) return { rows: BILANS.filter((b) => b.employee_id !== 1) };
+      return vraie(sql, params);
+    });
+    const c = await svc.composerCvg({ debut: DEBUT, fin: FIN, db });
+    expect(c.sorties.non_documentees).toBe(1);
+    expect(c.sorties.hors_emploi.categories.sans_nouvelles.nb).toBe(1);
+  });
+});

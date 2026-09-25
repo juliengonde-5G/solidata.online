@@ -521,9 +521,10 @@ async function ins(table, obj) {
       expect(pm).toHaveProperty('debouche');
     });
 
-    test('V-60 — MANAGER : le masquage existant est inchangé sur les actions DORA', async () => {
+    test('V-60 — MANAGER (rôle retiré) : refusé, aucune action DORA ne sort', async () => {
+      // Rôle MANAGER RETIRÉ (2.52.0) : refusé à la porte — rien ne sort.
       const r = await auth(request(app).get(`/api/insertion/${E.a}`), 'MANAGER');
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(403);
       const brut = JSON.stringify(r.body);
       expect(brut).not.toMatch(/frein_judiciaire["']?\s*:\s*[1-5]/);
     });
