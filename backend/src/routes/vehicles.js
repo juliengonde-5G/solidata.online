@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, resolveBaseRole } = require('../middleware/auth');
 const { body } = require('express-validator');
 const { validate } = require('../middleware/validate');
 const { autoLogActivity } = require('../middleware/activity-logger');
@@ -352,7 +352,10 @@ router.patch('/:id/restore', authorize('ADMIN'), async (req, res) => {
 const MOBILE_BASE_URL = process.env.MOBILE_BASE_URL || 'https://m.solidata.online';
 const buildVehicleUrl = (token) => `${MOBILE_BASE_URL}/v/${token}`;
 
-// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante (ADMIN + MANAGER lecture)
+// GET /api/vehicles/:id/access-info — Récupérer l'URL d'accès courante
+// Lecture : ADMIN, et tout profil à qui le module « operations » est ACCORDÉ
+// (authorize consulte la matrice) — c'est l'encadrant qui paramètre le
+// téléphone du chauffeur au dépôt.
 router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(
@@ -380,7 +383,14 @@ router.get('/:id/access-info', authorize('ADMIN'), async (req, res) => {
 // de l'URL courante). À déclencher quand : changement de chauffeur titulaire,
 // téléphone perdu/volé, ou suspicion de compromission. L'ancien raccourci
 // devient immédiatement invalide → tap-renvoi 401 côté chauffeur.
-router.post('/:id/regenerate-token', authorize('ADMIN'), async (req, res) => {
+// Un accord de module ouvre l'écran Véhicules, pas la révocation : on exige ici
+// que le rôle (ou son rôle de base) soit ADMIN, accord ou pas.
+function adminStrict(req, res, next) {
+  if (resolveBaseRole(req.user?.role) === 'ADMIN') return next();
+  return res.status(403).json({ error: "Régénération réservée à un administrateur" });
+}
+
+router.post('/:id/regenerate-token', authorize('ADMIN'), adminStrict, async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE vehicles

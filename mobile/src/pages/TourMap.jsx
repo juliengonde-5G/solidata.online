@@ -10,6 +10,7 @@ import UsageModeBanner from '../components/UsageModeBanner';
 import PrimaryActionBar from '../components/PrimaryActionBar';
 import { authedFetch } from '../services/authedFetch';
 import { addGpsPosition } from '../services/db';
+import { lienGuidage } from '../services/geo';
 import { libellePoint } from '../services/pointLabel';
 import InfosPointAssociation from '../components/InfosPointAssociation';
 import CoordonneesPoint from '../components/CoordonneesPoint';
@@ -349,6 +350,14 @@ export default function TourMap() {
         body: JSON.stringify({ motif }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      // Le centre de tri devient la nouvelle destination : on lance le guidage
+      // tout de suite, comme pour un point de collecte, au lieu de laisser
+      // l'équipage chercher le bouton « Naviguer ». Le serveur renvoie les
+      // coordonnées du centre ; si le navigateur bloque l'ouverture, l'étape
+      // affichée garde son bouton « Naviguer vers le centre ».
+      const lien = lienGuidage(data.destination);
+      if (lien) window.open(lien, '_blank');
       await loadTour();
     } catch (err) {
       console.error(err);
@@ -472,9 +481,10 @@ export default function TourMap() {
     // Étape « retour au centre » : on ne collecte rien, on roule puis on
     // annonce son arrivée. En conduite, seule la navigation est proposée.
     if (arretCourant) {
+      const libelleNav = arretCourant.est_retour_centre ? 'Naviguer vers le centre' : 'Naviguer';
       if (mode === USAGE_MODES.DRIVING) {
         return {
-          primaryLabel: 'Naviguer',
+          primaryLabel: libelleNav,
           primaryIcon: NAV_ICON,
           onPrimary: naviguerVersEtape,
           disabled: !hasCoords,
@@ -486,7 +496,7 @@ export default function TourMap() {
         primaryIcon: null,
         onPrimary: () => confirmerArrivee(arretCourant),
         disabled: arretEnCours,
-        secondaryLabel: hasCoords ? 'Naviguer' : null,
+        secondaryLabel: hasCoords ? libelleNav : null,
         secondaryIcon: hasCoords ? NAV_ICON : null,
         onSecondary: hasCoords ? naviguerVersEtape : null,
       };

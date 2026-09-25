@@ -297,6 +297,18 @@ function HistoriqueSection({ cavId }) {
   );
 }
 
+// Date de dernière modification de la fiche, en heure de Paris. Une fiche
+// importée sans date affiche « Inconnue » plutôt qu'une date inventée.
+function formaterDateModif(valeur) {
+  if (!valeur) return 'Inconnue';
+  const d = new Date(valeur);
+  if (Number.isNaN(d.getTime())) return 'Inconnue';
+  return d.toLocaleString('fr-FR', {
+    timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
 export default function AdminCAV() {
   const { confirm, ConfirmDialogElement } = useConfirm();
   const { user } = useAuth();
@@ -479,10 +491,10 @@ export default function AdminCAV() {
     const newStatus = cav.status === 'active' ? 'unavailable' : 'active';
     const reason = newStatus === 'unavailable' ? prompt('Raison de l\'indisponibilité (optionnel) :') : undefined;
     try {
-      await api.put(`/cav/${cav.id}`, { status: newStatus, unavailable_reason: reason || undefined });
+      const res = await api.put(`/cav/${cav.id}`, { status: newStatus, unavailable_reason: reason || undefined });
       showAlert(`CAV ${newStatus === 'active' ? 'activé' : 'désactivé'}`);
       loadCAVs();
-      if (detailCav?.id === cav.id) setDetailCav({ ...detailCav, status: newStatus });
+      if (detailCav?.id === cav.id) setDetailCav({ ...detailCav, status: newStatus, updated_at: res.data?.updated_at || detailCav.updated_at });
     } catch (err) {
       showAlert('Erreur lors du changement de statut', 'error');
     }
@@ -496,7 +508,7 @@ export default function AdminCAV() {
     setSavingRattach(true);
     try {
       const res = await api.patch(`/communes/cav/${detailCav.id}`, { code_insee: code_insee || null });
-      setDetailCav({ ...detailCav, code_insee_commune: res.data.code_insee_commune });
+      setDetailCav({ ...detailCav, code_insee_commune: res.data.code_insee_commune, updated_at: res.data.updated_at || detailCav.updated_at });
       showAlert(code_insee ? 'CAV rattaché à la commune' : 'Rattachement retiré');
       loadCAVs();
     } catch (err) {
@@ -592,8 +604,8 @@ export default function AdminCAV() {
   const deletePhoto = async () => {
     if (!detailCav) return;
     try {
-      await api.delete(`/cav/${detailCav.id}/photo`);
-      setDetailCav({ ...detailCav, photo_path: null, photo_taken_at: null, photo_source: null });
+      const res = await api.delete(`/cav/${detailCav.id}/photo`);
+      setDetailCav({ ...detailCav, photo_path: null, photo_taken_at: null, photo_source: null, updated_at: res.data?.updated_at || detailCav.updated_at });
       showAlert('Photo supprimée');
       loadCAVs();
     } catch (err) {
@@ -850,6 +862,12 @@ export default function AdminCAV() {
                     ) : (
                       <span className="text-gray-400">Aucune tournée modèle</span>
                     )}
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="text-gray-400 w-24 shrink-0">Dernière modif.</span>
+                    <span className="text-gray-700">
+                      {formaterDateModif(detailCav.updated_at || detailCav.created_at)}
+                    </span>
                   </div>
                   <div className="flex gap-2">
                     <span className="text-gray-400 w-24 shrink-0">GPS</span>
