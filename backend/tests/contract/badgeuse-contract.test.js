@@ -903,14 +903,14 @@ describe('exports paie (BO-06) et IAE (BO-07)', () => {
 describe('badges (BO-01) et postes (BO-09)', () => {
   test('POST /badges refuse un UID en clair et n\'accepte qu\'un condensat', async () => {
     expect((await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: '04A23B1C' })).status).toBe(400);
-    expect((await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: 'a'.repeat(64) })).status).toBe(201);
+    expect((await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: 'a'.repeat(64), reference: 'SOLIDATA A1' })).status).toBe(201);
   });
 
   test('QA-12 : POST /badges normalise le condensat en MINUSCULES avant stockage', async () => {
     // Le poste et la base doivent porter la même casse, sans quoi un badge
     // légitime deviendrait « orphelin » à la première présentation.
     const majuscules = 'AB'.repeat(32);
-    const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: majuscules });
+    const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: majuscules, reference: 'SOLIDATA A1' });
     expect(r.status).toBe(201);
     const ins = mockQuery.mock.calls.find((c) => /INSERT INTO badgeuse_badges/.test(String(c[0])));
     expect(ins[1][1]).toBe(majuscules.toLowerCase());
@@ -922,8 +922,106 @@ describe('badges (BO-01) et postes (BO-09)', () => {
       if (/INSERT INTO badgeuse_badges/.test(String(sql))) return Promise.reject(err);
       return Promise.resolve({ rows: [] });
     });
-    const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: 'a'.repeat(64) });
+    const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: 'a'.repeat(64), reference: 'SOLIDATA A1' });
     expect(r.status).toBe(409);
+  });
+
+  // ── Référence propriétaire de la carte (ex. SOLIDATA A1) ────────────────
+  // Elle appartient à la CARTE (empreinte), pas à la période d'attribution.
+  describe('référence de la carte', () => {
+    const UID = 'b'.repeat(64);
+    const supports = (rows, { priseAilleurs = null } = {}) => (sql, params) => {
+      const s = String(sql);
+      if (/SELECT reference FROM badgeuse_supports WHERE uid_hmac/.test(s)) return Promise.resolve({ rows });
+      if (/FROM badgeuse_supports s\s+WHERE UPPER\(s\.reference\)/.test(s)) {
+        return Promise.resolve({ rows: priseAilleurs ? [priseAilleurs] : [] });
+      }
+      if (/INSERT INTO badgeuse_badges/.test(s)) return Promise.resolve({ rows: [{ id: 77, employee_id: 5, uid_hmac: params[1] }] });
+      if (/SELECT id, uid_hmac FROM badgeuse_badges WHERE id/.test(s)) return Promise.resolve({ rows: [{ id: 77, uid_hmac: UID }] });
+      return Promise.resolve({ rows: [] });
+    };
+    const appelsA = (re) => mockQuery.mock.calls.filter((c) => re.test(String(c[0])));
+
+    test('carte neuve sans référence → 400 REFERENCE_REQUISE, aucun badge créé', async () => {
+      mockQuery.mockImplementation(supports([]));
+      const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: UID });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('REFERENCE_REQUISE');
+      expect(appelsA(/INSERT INTO badgeuse_badges/)).toHaveLength(0);
+    });
+
+    test('carte neuve : référence normalisée, posée sur la carte et tracée à l\'attribution', async () => {
+      mockQuery.mockImplementation(supports([]));
+      const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: UID, reference: '  solidata   a1 ' });
+      expect(r.status).toBe(201);
+      expect(r.body.reference).toBe('SOLIDATA A1');
+      const pose = appelsA(/INSERT INTO badgeuse_supports/)[0];
+      expect(pose[1]).toEqual([UID, 'SOLIDATA A1', expect.anything()]);
+      const hist = appelsA(/INSERT INTO badgeuse_badge_historique/)[0];
+      expect(JSON.parse(hist[1][1])).toMatchObject({ reference: 'SOLIDATA A1' });
+    });
+
+    test('carte déjà référencée (réattribution) : la référence est conservée sans ressaisie', async () => {
+      mockQuery.mockImplementation(supports([{ reference: 'SOLIDATA A7' }]));
+      const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: UID });
+      expect(r.status).toBe(201);
+      expect(r.body.reference).toBe('SOLIDATA A7');
+      expect(appelsA(/INSERT INTO badgeuse_supports/)).toHaveLength(0);
+    });
+
+    test('référence déjà portée par une autre carte → 409 nommant le porteur', async () => {
+      mockQuery.mockImplementation(supports([], { priseAilleurs: { uid_hmac: 'c'.repeat(64), porteur: 'DUPONT Marie' } }));
+      const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: UID, reference: 'SOLIDATA A1' });
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('REFERENCE_DEJA_UTILISEE');
+      expect(r.body.error).toContain('DUPONT Marie');
+      expect(appelsA(/INSERT INTO badgeuse_badges/)).toHaveLength(0);
+    });
+
+    test('caractères interdits → 400 REFERENCE_INVALIDE avant toute requête', async () => {
+      mockQuery.mockImplementation(supports([]));
+      const r = await post('/api/badgeuse/badges', 'RH', { employee_id: 5, uid_hmac: UID, reference: 'A1<script>' });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('REFERENCE_INVALIDE');
+      expect(mockQuery.mock.calls.some((c) => /badgeuse_badges|badgeuse_supports/.test(String(c[0])))).toBe(false);
+    });
+
+    test('PATCH /badges/:id/reference : corrige la référence de la carte et trace avant → après', async () => {
+      mockQuery.mockImplementation(supports([{ reference: 'SOLIDATA A1' }]));
+      const r = await patch('/api/badgeuse/badges/77/reference', 'RH', { reference: 'solidata a12' });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ id: 77, reference: 'SOLIDATA A12' });
+      const hist = appelsA(/INSERT INTO badgeuse_badge_historique/)[0];
+      expect(hist[0]).toMatch(/'reference'/);
+      expect(JSON.parse(hist[1][1])).toEqual({ avant: 'SOLIDATA A1', apres: 'SOLIDATA A12' });
+    });
+
+    test('PATCH référence vide → 400 ; badge inconnu → 404 ; encadrant sans droit RH → 403', async () => {
+      mockQuery.mockImplementation(supports([]));
+      expect((await patch('/api/badgeuse/badges/77/reference', 'RH', { reference: '  ' })).status).toBe(400);
+      mockQuery.mockImplementation(() => Promise.resolve({ rows: [] }));
+      expect((await patch('/api/badgeuse/badges/999/reference', 'RH', { reference: 'SOLIDATA A2' })).status).toBe(404);
+      expect((await patch('/api/badgeuse/badges/77/reference', 'COLLABORATEUR', { reference: 'SOLIDATA A2' })).status).toBe(403);
+    });
+
+    test('GET /badges et GET /orphelins exposent la référence de la carte', async () => {
+      mockQuery.mockImplementation((sql) => {
+        const s = String(sql);
+        if (/FROM badgeuse_badges b/.test(s)) {
+          expect(s).toMatch(/LEFT JOIN badgeuse_supports s ON s\.uid_hmac = b\.uid_hmac/);
+          return Promise.resolve({ rows: [{ id: 1, employee_id: 5, uid_hmac: UID, statut: 'actif', last_name: 'X', first_name: 'Y', reference: 'SOLIDATA A1' }] });
+        }
+        if (/FROM badgeuse_pointages p/.test(s)) {
+          expect(s).toMatch(/LEFT JOIN badgeuse_supports s ON s\.uid_hmac = p\.uid_hmac/);
+          return Promise.resolve({ rows: [{ id: 3, uid_hmac: UID, reference: 'SOLIDATA A1' }] });
+        }
+        return Promise.resolve({ rows: [] });
+      });
+      const b = await get('/api/badgeuse/badges', 'RH');
+      expect(b.body[0].reference).toBe('SOLIDATA A1');
+      const o = await get('/api/badgeuse/orphelins', 'RH');
+      expect(o.body[0].reference).toBe('SOLIDATA A1');
+    });
   });
 
   test('PATCH /badges/:id — perte/vol tracés dans l\'historique', async () => {

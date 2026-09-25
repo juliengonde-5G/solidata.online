@@ -9,6 +9,7 @@ import {
   SOURCE_LABELS, STATUT_POINTAGE_LABELS, ORPHELIN_RAISON_LABELS,
   MOTIFS_CORRECTION,
   SensBadge, StatutPointageBadge, ChaineWarning,
+  ChampReferenceCarte, normaliserReferenceCarte,
 } from './badgeuseShared';
 
 const PAGE_SIZE = 30;
@@ -21,22 +22,29 @@ function AffecterBadgeModal({ open, onClose, pointage, employees, onDone }) {
   const toast = useToast();
   const [employeeId, setEmployeeId] = useState('');
   const [commentaire, setCommentaire] = useState('');
+  const [reference, setReference] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // Carte déjà référencée (restituée, puis re-présentée au poste) : sa
+  // référence arrive avec l'orphelin et n'a pas à être ressaisie.
+  const referenceConnue = pointage?.reference || null;
 
   useEffect(() => {
     if (!open) return;
-    setEmployeeId(''); setCommentaire(''); setError(null); setSaving(false);
+    setEmployeeId(''); setCommentaire(''); setReference(''); setError(null); setSaving(false);
   }, [open, pointage]);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!employeeId) { setError('Choisissez un salarié.'); return; }
+    const ref = normaliserReferenceCarte(reference);
+    if (!ref && !referenceConnue) { setError('La référence de la carte est requise (ex. SOLIDATA A1).'); return; }
     setSaving(true); setError(null);
     try {
       const r = await api.post('/badgeuse/badges', {
         employee_id: parseInt(employeeId, 10),
         uid_hmac: pointage.uid_hmac,
+        reference: ref || null,
         commentaire: commentaire.trim() || null,
       });
       const n = r.data?.orphelins_rattaches ?? 0;
@@ -66,6 +74,7 @@ function AffecterBadgeModal({ open, onClose, pointage, employees, onDone }) {
             {employees.map((emp) => <option key={emp.id} value={emp.id}>{formatEmployeeName(emp.last_name, emp.first_name)}</option>)}
           </select>
         </div>
+        <ChampReferenceCarte value={reference} onChange={setReference} dejaConnue={referenceConnue} />
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Commentaire (facultatif)</label>
           <input value={commentaire} onChange={(e) => setCommentaire(e.target.value)} maxLength={300} className="input-modern py-2 text-sm w-full" placeholder="ex. badge attribué à l'accueil du 19/08" />
@@ -480,6 +489,7 @@ export default function JournalPointages({ canCorrect, canWriteRh, externalPrefi
                     <td className="py-2 px-2 font-mono text-xs text-slate-500 whitespace-nowrap">
                       {o.uid_hmac ? (
                         <span className="inline-flex items-center gap-1.5" title={o.uid_hmac}>
+                          {o.reference && <span className="font-sans font-semibold text-slate-700 mr-1">{o.reference}</span>}
                           {o.uid_hmac.slice(0, 12)}…
                           <button type="button" onClick={() => { navigator.clipboard?.writeText(o.uid_hmac).then(() => toast.success('Empreinte copiée.')).catch(() => {}); }}
                             className="text-teal-700 hover:text-teal-900 font-sans font-medium" title="Copier l'empreinte complète (enrôlement d'un badge neuf)">
