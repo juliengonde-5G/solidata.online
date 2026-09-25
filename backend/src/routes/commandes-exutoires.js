@@ -97,6 +97,8 @@ router.get('/', async (req, res) => {
       SELECT c.*, cl.raison_sociale,
              parent.reference AS reference_parent,
              (SELECT COUNT(*)::int FROM commandes_exutoires f WHERE f.commande_parent_id = c.id) AS nb_occurrences,
+             -- Préparation rattachée (suivi logistique unifié : la carte dit où en est le chargement).
+             prep.statut_preparation, prep.date_expedition AS date_expedition_prevue,
              (c.commande_parent_id IS NOT NULL
               AND c.statut IN ('en_attente', 'confirmee')
               AND NOT EXISTS (SELECT 1 FROM preparations_expedition p WHERE p.commande_id = c.id)
@@ -104,6 +106,11 @@ router.get('/', async (req, res) => {
       FROM commandes_exutoires c
       JOIN clients_exutoires cl ON c.client_id = cl.id
       LEFT JOIN commandes_exutoires parent ON parent.id = c.commande_parent_id
+      LEFT JOIN LATERAL (
+        SELECT p.statut_preparation, p.date_expedition
+          FROM preparations_expedition p WHERE p.commande_id = c.id
+         ORDER BY p.id DESC LIMIT 1
+      ) prep ON true
       WHERE 1=1
     `;
     const params = [];
@@ -416,6 +423,21 @@ router.get('/:id', async (req, res) => {
       [req.params.id]
     );
 
+    // Collaborateurs de la préparation : la préparation se gère désormais
+    // DANS la fiche de la commande (la page « Préparation » est retirée).
+    const preparation = preparationResult.rows[0] || null;
+    if (preparation) {
+      const collabs = await pool.query(
+        `SELECT e.id AS employee_id, e.first_name, e.last_name
+           FROM preparation_collaborateurs pc
+           JOIN employees e ON e.id = pc.employee_id
+          WHERE pc.preparation_id = $1
+          ORDER BY e.last_name, e.first_name`,
+        [preparation.id]
+      );
+      preparation.collaborateurs = collabs.rows;
+    }
+
     const controlePeseeResult = await pool.query(
       'SELECT * FROM controles_pesee WHERE commande_id = $1',
       [req.params.id]
@@ -428,7 +450,7 @@ router.get('/:id', async (req, res) => {
 
     res.json({
       ...order,
-      preparation: preparationResult.rows[0] || null,
+      preparation,
       controle_pesee: controlePeseeResult.rows[0] || null,
       facture: factureResult.rows[0] || null
     });

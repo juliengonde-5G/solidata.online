@@ -7,8 +7,9 @@
 // La liste est la plus EXHAUSTIVE possible :
 //   • toutes les combinaisons actives du référentiel d'étiquetage, stock nul compris
 //     (une boutique peut commander ce qui n'est pas encore produit : c'est un besoin) ;
-//   • toutes les catégories réellement présentes en stock, y compris celles du
-//     stock historique qui ne figurent plus au référentiel (« hors référentiel »).
+//   • les catégories du stock historique qui ne figurent plus au référentiel
+//     (« hors référentiel ») — SEULEMENT tant qu'il en reste en stock : l'ancienne
+//     nomenclature disparaît progressivement (2.59.0).
 //
 // Le stock historique porte d'anciens libellés (« BTQ STAND », « Layette Fille »…).
 // Il est regroupé sous la valeur actuelle par la table etiquettes_correspondances
@@ -80,10 +81,14 @@ async function chargerCatalogue(db, { excludeCommandeId = null } = {}) {
       SELECT gamme, produit, genre, saison, SUM(reste)::int AS reserve_cartons
         FROM lignes_ouvertes GROUP BY gamme, produit, genre, saison
     ),
+    -- Nouvelle nomenclature : toujours proposée, stock nul compris (on peut
+    -- commander ce qui n'est pas encore produit). Ancienne nomenclature : seulement
+    -- tant qu'il en reste en stock — elle disparaît d'elle-même à mesure que le
+    -- stock historique s'écoule (demande client 25/09/2026).
     cles AS (
       SELECT gamme, produit, genre, saison FROM referentiel
       UNION
-      SELECT gamme, produit, genre, saison FROM stock
+      SELECT gamme, produit, genre, saison FROM stock WHERE stock_cartons > 0
     )
     SELECT k.gamme, k.produit, k.genre, k.saison,
            COALESCE((SELECT MIN(r.categorie_eco_org) FROM referentiel r

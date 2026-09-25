@@ -102,7 +102,6 @@ export const NAV_TREE = [
             icon: ClipboardList,
             children: [
               { label: 'Commandes', path: '/exutoires-commandes', icon: ClipboardList, roles: ['ADMIN'] },
-              { label: 'Préparation', path: '/exutoires-preparation', icon: Truck, roles: ['ADMIN'] },
               { label: 'Occupation zone de chargement', path: '/exutoires-gantt', icon: BarChart3, roles: ['ADMIN'] },
             ],
           },
@@ -390,7 +389,7 @@ export const NAV_TREE = [
         children: [
           { label: 'Tableau de bord', path: '/boutiques', icon: LayoutDashboard, roles: ['ADMIN', 'RESP_BTQ'] },
           { label: 'Ventes', path: '/boutiques/ventes', icon: ShoppingBag, roles: ['ADMIN', 'RESP_BTQ'] },
-          { label: 'Commandes', path: '/boutiques/commandes', icon: ClipboardList, roles: ['ADMIN', 'RESP_BTQ'] },
+          { label: 'Passer commande', path: '/boutiques/commandes', icon: ClipboardList, roles: ['ADMIN', 'RESP_BTQ'] },
           { label: 'Planning', path: '/boutiques/planning', icon: Calendar, roles: ['ADMIN', 'RESP_BTQ'] },
           {
             label: 'Réglages',
